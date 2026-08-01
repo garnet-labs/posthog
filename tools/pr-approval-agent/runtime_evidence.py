@@ -1,35 +1,45 @@
 """Consume Garnet Runtime Review evidence posted on the PR.
 
 Garnet runs an eBPF sensor (Jibril) inside CI jobs and posts a sticky
-"Garnet Runtime Review" comment on the PR: every recorded outbound
-connection made while the PR's code actually executed, keyed to the head
-commit via an embedded `<!-- garnet:commit <sha> -->` marker. That gives
-stamphog something no static reviewer has: kernel-recorded ground truth
-about what a change *did* when it ran, not what its diff *looks like* it
-would do.
+"Garnet Runtime Review" comment on the PR: the execution tree recorded
+while the PR's code actually ran — process lineage chains with the
+outbound destinations each chain produced — keyed to the head commit via
+an embedded `<!-- garnet:commit <sha> -->` marker. That gives stamphog
+something no static reviewer has: kernel-recorded ground truth about what
+a change *did* when it ran, not what its diff *looks like* it would do.
 
 This module mirrors migration_risk.py's shape: a deterministic CI signal,
 bound to the head commit, interpreted conservatively, feeding a scoped
 deny-list bypass plus a TRUSTED prompt block for the LLM reviewer.
 
-Semantics (all fail toward "no bypass"):
-    missing    → no Garnet comment for the current head, or a comment from
-                 which no recorded destinations could be parsed (waiting
-                 state, or a renderer format this parser doesn't understand);
-                 deny-list applies normally and the reviewer is told no
-                 usable runtime evidence exists.
-    pass       → evidence exists for the head commit and every recorded
-                 destination matches the expected-egress policy. Scoped
-                 bypass: a deps_toolchain-only deny may proceed to LLM
-                 review (never auto-approve) with the evidence in-prompt.
-    unexpected → evidence exists and at least one destination is NOT
-                 expected. No bypass; the reviewer is instructed that this
-                 is a showstopper unless the destination is clearly
-                 explained by the PR's stated intent.
+Grounding model — the execution tree is the evidence. There is no static
+egress allowlist: every destination is judged by the process lineage that
+produced it, in the context of the diff, by the LLM reviewer. The only
+deterministic signals are integrity (trusted author, head-pinned,
+parseable, non-empty) and the renderer's own comparison against the
+previously profiled commit (new `+` chains).
 
-Trust model: only comments authored by the configured Garnet bot logins are
-read, the commit marker must equal the PR head SHA (a stale comment from an
-earlier push is ignored), and the expected-destination patterns live in
+Semantics (all fail toward "no bypass"):
+    missing   → no Garnet comment for the current head, or a comment from
+                which no execution tree could be parsed (waiting state, or
+                a renderer format this parser doesn't understand);
+                deny-list applies normally and the reviewer is told no
+                usable runtime evidence exists.
+    recorded  → an execution tree exists for the head commit (snapshot:
+                no previous profiled commit to compare against). Scoped
+                bypass: a deps_toolchain-only deny may proceed to LLM
+                review (never auto-approve) with the full tree in-prompt.
+    unchanged → an execution tree exists and the renderer's comparison
+                against the previously profiled commit shows no new
+                chains. Same scoped bypass as `recorded`.
+    diverged  → the comparison shows at least one NEW execution chain
+                versus the previously profiled commit. No bypass; the
+                reviewer is instructed that a new chain is a showstopper
+                unless the diff clearly explains it.
+
+Trust model: only comments authored by the configured Garnet bot logins
+are read, the commit marker must equal the PR head SHA (a stale comment
+from an earlier push is ignored), and the configuration lives in
 `.stamphog/runtime-evidence.yml` (trusted, human-reviewed via the
 stamphog_policy deny which covers `.stamphog/**`).
 """
@@ -62,22 +72,31 @@ class RuntimeEvidenceError(Exception):
 @dataclass(frozen=True)
 class RuntimeEvidenceConfig:
     trusted_bots: frozenset[str]
-    expected_destinations: tuple[re.Pattern, ...]
     bypass_categories: frozenset[str]
 
 
 @dataclass
 class RuntimeEvidence:
-    """Parsed evidence for the PR's current head commit."""
+    """Parsed execution tree for the PR's current head commit."""
 
-    status: str  # "missing" | "pass" | "unexpected"
+    status: str  # "missing" | "recorded" | "unchanged" | "diverged"
     commit_sha: str = ""
-    destinations: list[dict] = field(default_factory=list)  # {dest, note, lineage, expected}
+    destinations: list[dict] = field(default_factory=list)  # {dest, note, lineage, new}
     permalinks: list[str] = field(default_factory=list)
 
     @property
-    def unexpected(self) -> list[dict]:
-        return [d for d in self.destinations if not d["expected"]]
+    def new_destinations(self) -> list[dict]:
+        """Destinations on chains new versus the previously profiled commit."""
+        return [d for d in self.destinations if d["new"]]
+
+    @property
+    def chains(self) -> list[str]:
+        """Distinct process lineage chains, in recorded order."""
+        out: list[str] = []
+        for d in self.destinations:
+            if d["lineage"] and d["lineage"] not in out:
+                out.append(d["lineage"])
+        return out
 
 
 def load_config(stamphog_dir: Path) -> RuntimeEvidenceConfig | None:
@@ -91,27 +110,19 @@ def load_config(stamphog_dir: Path) -> RuntimeEvidenceConfig | None:
         raise RuntimeEvidenceError(f"could not read/parse {path}: {exc}") from exc
     if not isinstance(raw, dict):
         raise RuntimeEvidenceError("runtime-evidence config root: must be a mapping")
-    unknown = set(raw) - {"version", "trusted_bots", "expected_destinations", "bypass_categories"}
+    unknown = set(raw) - {"version", "trusted_bots", "bypass_categories"}
     if unknown:
         raise RuntimeEvidenceError(f"runtime-evidence config: unknown keys {sorted(unknown)}")
     if raw.get("version") != 1:
         raise RuntimeEvidenceError(f"runtime-evidence config: unsupported version {raw.get('version')!r}")
     bots = raw.get("trusted_bots") or []
-    patterns = raw.get("expected_destinations") or []
     bypass = raw.get("bypass_categories") or []
     if not bots or not all(isinstance(b, str) for b in bots):
         raise RuntimeEvidenceError("runtime-evidence config: trusted_bots must be a non-empty string list")
-    compiled = []
-    for p in patterns:
-        try:
-            compiled.append(re.compile(p))
-        except re.error as exc:
-            raise RuntimeEvidenceError(f"runtime-evidence config: bad pattern {p!r}: {exc}") from exc
     if not all(isinstance(c, str) for c in bypass):
         raise RuntimeEvidenceError("runtime-evidence config: bypass_categories must be strings")
     return RuntimeEvidenceConfig(
         trusted_bots=frozenset(bots),
-        expected_destinations=tuple(compiled),
         bypass_categories=frozenset(bypass),
     )
 
@@ -124,26 +135,29 @@ def fetch_runtime_evidence(repo: str, pr_number: int, head_sha: str, config: Run
         body = comment.get("body") or ""
         if login not in config.trusted_bots or COMMENT_MARKER not in body:
             continue
-        return parse_comment(body, head_sha, config)
+        return parse_comment(body, head_sha)
     return RuntimeEvidence(status="missing")
 
 
-def parse_comment(body: str, head_sha: str, config: RuntimeEvidenceConfig) -> RuntimeEvidence:
+def parse_comment(body: str, head_sha: str) -> RuntimeEvidence:
     """Parse the Garnet comment body; evidence counts only for the current head."""
     marker = _COMMIT_MARKER_RE.search(body)
     if marker is None or marker.group(1) != head_sha:
         return RuntimeEvidence(status="missing")
 
-    destinations = _extract_destinations(body)
+    destinations, compared = _extract_destinations(body)
     permalinks = _PERMALINK_RE.findall(body)
     if not destinations:
         # Zero parsed destinations means the evidence is unusable — the run is
         # still recording, or the renderer format drifted past this parser.
         # Either way there is no bypass.
         return RuntimeEvidence(status="missing")
-    for d in destinations:
-        d["expected"] = any(p.search(d["dest"]) for p in config.expected_destinations)
-    status = "pass" if all(d["expected"] for d in destinations) else "unexpected"
+    if any(d["new"] for d in destinations):
+        status = "diverged"
+    elif compared:
+        status = "unchanged"
+    else:
+        status = "recorded"
     return RuntimeEvidence(
         status=status,
         commit_sha=marker.group(1),
@@ -157,19 +171,22 @@ def _refang(dest: str) -> str:
     return _DEFANG_RE.sub(r"\1", dest)
 
 
-def _extract_destinations(body: str) -> list[dict]:
-    """Extract `→ destination` leaves plus the process lineage above each.
+def _extract_destinations(body: str) -> tuple[list[dict], bool]:
+    """Extract the execution tree: `→ destination` leaves plus the process
+    lineage above each, and whether the comment compared against a
+    previously profiled commit.
 
     Two evidence containers exist:
     - <pre> trees (snapshot jobs and substrate folds): process nodes wrapped
       in <em>/<strong>, destination leaves as `→ name` (optionally with a
       parenthesised note such as `(dns resolver)`).
     - ```diff fences (changed jobs in comparison comments): the same tree
-      with a leading diff column — `+` (new), space (unchanged), `-` (no
-      longer recorded; not current evidence).
+      with a leading diff column — `+` (new chain vs the previous profiled
+      commit), space (unchanged), `-` (no longer recorded; not current
+      evidence).
 
     Lineage is reconstructed from tree indentation depth. Hostnames are
-    defanged in the comment and refanged here so policy patterns match.
+    defanged in the comment and refanged here.
 
     Explainer exclusion: the current contract wraps its sample tree in the
     “How to read this” details fold, which is removed wholesale before
@@ -184,20 +201,22 @@ def _extract_destinations(body: str) -> list[dict]:
     for pre in pres:
         if legacy_contract and "· job" not in pre:
             continue
-        _walk_tree(pre.splitlines(), results, seen)
-    for fence in re.findall(r"```diff\n(.*?)```", body, flags=re.DOTALL):
-        lines = []
+        _walk_tree([(line, False) for line in pre.splitlines()], results, seen)
+    fences = re.findall(r"```diff\n(.*?)```", body, flags=re.DOTALL)
+    for fence in fences:
+        lines: list[tuple[str, bool]] = []
         for raw in fence.splitlines():
             if raw.startswith("@@") or raw.startswith("-"):
                 continue
-            lines.append(raw[1:] if raw[:1] in "+ " else raw)
+            added = raw.startswith("+")
+            lines.append((raw[1:] if raw[:1] in "+ " else raw, added))
         _walk_tree(lines, results, seen)
-    return results
+    return results, bool(fences)
 
 
-def _walk_tree(lines: list[str], results: list[dict], seen: set[tuple[str, str]]) -> None:
+def _walk_tree(lines: list[tuple[str, bool]], results: list[dict], seen: set[tuple[str, str]]) -> None:
     stack: list[tuple[int, str]] = []  # (depth, process name)
-    for line in lines:
+    for line, added in lines:
         depth = _tree_depth(line)
         text = _TAG_RE.sub("", line)
         text = re.sub(r"^[\s│├└─]+", "", text).strip()
@@ -211,7 +230,7 @@ def _walk_tree(lines: list[str], results: list[dict], seen: set[tuple[str, str]]
             key = (dest, lineage)
             if key not in seen:
                 seen.add(key)
-                results.append({"dest": dest, "note": note, "lineage": lineage, "expected": False})
+                results.append({"dest": dest, "note": note, "lineage": lineage, "new": added})
         else:
             name = html.unescape(re.sub(r"\s*·\s*job$", "", text)).strip()
             while stack and stack[-1][0] >= depth:
@@ -227,17 +246,19 @@ def _tree_depth(line: str) -> int:
 
 
 def bypassable_deny(deny: list[str], evidence: RuntimeEvidence, config: RuntimeEvidenceConfig) -> list[str]:
-    """Return deny categories cleared by passing runtime evidence.
+    """Return deny categories cleared by usable runtime evidence.
 
     Conservative on purpose: only configured categories (deps_toolchain by
-    default) are ever bypassable, only when the evidence status is `pass`
-    for the current head, and only when *every* deny category on the PR is
-    bypassable — a PR that also trips auth or crypto_secrets keeps its full
-    deny even with clean runtime evidence. Like the migration-risk bypass,
-    this never auto-approves: the PR still gets full LLM review with the
-    evidence in the prompt.
+    default) are ever bypassable, only when an execution tree exists for
+    the current head with no new chains versus the previously profiled
+    commit (`recorded` or `unchanged`), and only when *every* deny
+    category on the PR is bypassable — a PR that also trips auth or
+    crypto_secrets keeps its full deny even with clean runtime evidence.
+    Like the migration-risk bypass, this never auto-approves: the PR still
+    gets full LLM review with the execution tree in the prompt, and the
+    reviewer judges each chain against the diff.
     """
-    if evidence.status != "pass":
+    if evidence.status not in ("recorded", "unchanged"):
         return []
     if not deny or not set(deny) <= config.bypass_categories:
         return []
@@ -245,33 +266,37 @@ def bypassable_deny(deny: list[str], evidence: RuntimeEvidence, config: RuntimeE
 
 
 def prompt_block(evidence: RuntimeEvidence) -> str:
-    """Render the TRUSTED prompt block describing the runtime evidence."""
+    """Render the TRUSTED prompt block describing the execution tree."""
     if evidence.status == "missing":
         return (
             "Runtime evidence (Garnet): none recorded for the current head commit. "
             "Judge the PR without runtime evidence; do not assume execution was clean."
         )
     lines = [
-        f"Runtime evidence (Garnet, TRUSTED — kernel-recorded egress while this PR's code ran in CI, head {evidence.commit_sha[:7]}):"
+        f"Runtime evidence (Garnet, TRUSTED — kernel-recorded execution tree while this PR's "
+        f"code ran in CI, head {evidence.commit_sha[:7]}). Each line is a destination and the "
+        f"process lineage chain that produced it:"
     ]
     for d in evidence.destinations:
-        flag = "expected" if d["expected"] else "UNEXPECTED"
+        flag = "NEW CHAIN" if d["new"] else "chain"
         note = f" ({d['note']})" if d["note"] else ""
-        lineage = f" via {d['lineage']}" if d["lineage"] else ""
-        lines.append(f"  - [{flag}] {d['dest']}{note}{lineage}")
-    if not evidence.destinations:
-        lines.append("  - no outbound destinations recorded")
-    if evidence.status == "unexpected":
+        lineage = d["lineage"] or "(no recorded lineage)"
+        lines.append(f"  - [{flag}] {lineage} → {d['dest']}{note}")
+    if evidence.status == "diverged":
         lines.append(
-            "  Verdict guidance: at least one destination is outside the expected-egress policy. "
-            "Unless the PR's stated intent clearly explains that exact destination, this is a "
-            "showstopper — REFUSE and name the destination and its process lineage."
+            "  Verdict guidance: at least one chain is NEW versus the previously profiled "
+            "commit. Unless this diff clearly explains that exact chain and destination, a new "
+            "chain is a showstopper — REFUSE and name the chain."
         )
     else:
         lines.append(
-            "  Verdict guidance: all recorded egress matches the expected-egress policy. For "
-            "dependency/toolchain risky territory, this counts as independent assurance over "
-            "runtime behavior (it does not vouch for logic correctness)."
+            "  Verdict guidance: ground your judgment in this execution tree. For each chain, "
+            "ask whether its lineage explains its destination and whether the diff explains the "
+            "chain (a package install reaching its registry is coherent; a lifecycle script "
+            "spawning a network client the diff never mentions is not). If the recorded workload "
+            "does not exercise the code this diff changes, say so — the tree is then evidence "
+            "about the CI workload only, not assurance about the change. The tree never vouches "
+            "for logic correctness."
         )
     for link in evidence.permalinks[:3]:
         lines.append(f"  Evidence permalink: {link}")
@@ -282,31 +307,40 @@ def citation_block(evidence: RuntimeEvidence) -> str | None:
     """Verifiable Markdown citation for the posted verdict comment.
 
     Whenever runtime evidence existed for the reviewed head, the verdict
-    comment carries the exact commit binding, every destination outside the
-    expected-egress policy (with its process lineage), and the Garnet public
-    run permalinks — so anyone can independently verify the kernel-recorded
-    egress the verdict relied on, without re-running anything.
+    comment carries the exact commit binding, the recorded execution
+    chains (with any chain new versus the previously profiled commit
+    called out), and the Garnet public run permalinks — so anyone can
+    independently verify the kernel-recorded execution tree the verdict
+    relied on, without re-running anything.
     """
     if evidence.status == "missing":
         return None
     lines = [
         "<details>",
-        f"<summary>Runtime evidence (Garnet) — kernel-recorded CI egress for head <code>{evidence.commit_sha[:7]}</code></summary>",
+        f"<summary>Runtime evidence (Garnet) — kernel-recorded execution tree for head <code>{evidence.commit_sha[:7]}</code></summary>",
         "",
-        f"Status: **{evidence.status}** ({len(evidence.destinations)} recorded destination(s)).",
+        f"Status: **{evidence.status}** — {len(evidence.destinations)} destination(s) across "
+        f"{len(evidence.chains)} process chain(s).",
+        "",
+        "Grounding: the execution tree (process lineage → destination) is the evidence. "
+        "There is no static egress allowlist; the reviewer judges each chain against the diff. "
+        "Usable evidence can clear only the configured deny categories to full review — it "
+        "never approves a PR by itself.",
     ]
-    unexpected = evidence.unexpected
-    if unexpected:
+    new = evidence.new_destinations
+    if new:
         lines.append("")
-        lines.append("Destinations outside the expected-egress policy (`.stamphog/runtime-evidence.yml`):")
-        for d in unexpected:
+        lines.append("Chains NEW versus the previously profiled commit:")
+        for d in new:
             note = f" ({d['note']})" if d["note"] else ""
-            lineage = f" — process lineage: `{d['lineage']}`" if d["lineage"] else ""
-            lines.append(f"- `{d['dest']}`{note}{lineage}")
-    elif not evidence.destinations:
-        lines.append("No outbound destinations were recorded while this PR's code ran.")
+            lineage = f"`{d['lineage']}` → " if d["lineage"] else ""
+            lines.append(f"- {lineage}`{d['dest']}`{note}")
+    elif evidence.status == "unchanged":
+        lines.append("")
+        lines.append("No new chains versus the previously profiled commit.")
     else:
-        lines.append("Every recorded destination matches the expected-egress policy.")
+        lines.append("")
+        lines.append("First profiled commit for this PR — snapshot, no comparison baseline.")
     lines.append("")
     lines.append("Verify independently:")
     for link in evidence.permalinks[:3]:

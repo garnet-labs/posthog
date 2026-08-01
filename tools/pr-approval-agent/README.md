@@ -9,18 +9,22 @@ Deterministic safety gates first, then Claude reviews for showstoppers.
 > upstream engine, following the vendoring convention described below:
 >
 > - `runtime_evidence.py` (+ tests) — parses the Garnet sticky PR comment
->   (kernel-recorded CI egress, bound to the head commit) into a
->   deterministic evidence signal, mirroring `migration_risk.py`'s
->   check-run-bypass shape.
-> - `review_pr.py` — clean runtime evidence may clear a
->   `deps_toolchain`-only deny (to LLM review, never auto-approve);
->   evidence status/block land in the classification and evidence bundle.
-> - `reviewer.py` — the evidence renders as a TRUSTED prompt block;
->   `.stamphog/review-guidance.md` gained a "Runtime evidence (Garnet)"
->   section (unexpected egress in risky territory is a showstopper; clean
->   egress counts as independent assurance over runtime behavior).
-> - `.stamphog/runtime-evidence.yml` — trusted bot logins, expected-egress
->   patterns, bypassable categories. Covered by the `stamphog_policy` deny.
+>   (the kernel-recorded execution tree: process lineage chains and the
+>   destinations each chain produced, bound to the head commit), mirroring
+>   `migration_risk.py`'s check-run-bypass shape. Grounding is the tree
+>   itself — there is no static egress allowlist; the deterministic signals
+>   are integrity (trusted author, head-pinned, parseable, non-empty) and
+>   the renderer's comparison against the previously profiled commit.
+> - `review_pr.py` — a usable execution tree (recorded/unchanged) may clear
+>   a `deps_toolchain`-only deny (to LLM review, never auto-approve); a NEW
+>   chain versus the previous profiled commit fails the `runtime evidence`
+>   gate row; evidence status/block land in the classification and bundle.
+> - `reviewer.py` — the full tree renders as a TRUSTED prompt block; the
+>   reviewer judges each chain (lineage → destination) against the diff;
+>   `.stamphog/review-guidance.md` has a "Runtime evidence (Garnet)"
+>   section.
+> - `.stamphog/runtime-evidence.yml` — trusted bot logins and bypassable
+>   categories. Covered by the `stamphog_policy` deny.
 > - `.github/workflows/pr-approval-agent.yml` — runs with `GITHUB_TOKEN` +
 >   `ANTHROPIC_API_KEY` repo secret instead of the Stamphog GitHub App;
 >   the decide-delta/dismiss jobs are kept but post as github-actions[bot].
