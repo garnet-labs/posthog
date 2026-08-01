@@ -320,3 +320,14 @@ def test_load_config_validates(tmp_path):
     cfg = load_config(tmp_path)
     assert cfg.trusted_bots == frozenset({"garnet[bot]"})
     assert cfg.bypass_categories == frozenset({"deps_toolchain"})
+
+
+def test_new_chain_not_masked_by_identical_chain_in_earlier_job():
+    # Two jobs in one comment: job A's snapshot <pre> records the same
+    # (lineage, destination) that job B's comparison fence marks as NEW.
+    # The + occurrence must win — status is diverged, never unchanged.
+    snapshot_job = "<pre>\n<em>Runner.Worker</em>\n└─ <strong>node</strong>\n   └─ → httpbin[.]org\n</pre>\n"
+    body = V66_COMMENT.replace("<details open><summary><b>+1", snapshot_job + "<details open><summary><b>+1")
+    ev = parse_comment(body, HEAD)
+    assert ev.status == "diverged"
+    assert [d["dest"] for d in ev.new_destinations] == ["httpbin.org"]
