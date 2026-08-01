@@ -195,7 +195,7 @@ def _extract_destinations(body: str) -> tuple[list[dict], bool]:
     """
     body = _EXPLAINER_RE.sub("", body)
     results: list[dict] = []
-    seen: set[tuple[str, str]] = set()
+    seen: dict[tuple[str, str], dict] = {}
     pres = re.findall(r"<pre>(.*?)</pre>", body, flags=re.DOTALL)
     legacy_contract = any("· job" in pre for pre in pres)
     for pre in pres:
@@ -214,7 +214,7 @@ def _extract_destinations(body: str) -> tuple[list[dict], bool]:
     return results, bool(fences)
 
 
-def _walk_tree(lines: list[tuple[str, bool]], results: list[dict], seen: set[tuple[str, str]]) -> None:
+def _walk_tree(lines: list[tuple[str, bool]], results: list[dict], seen: dict[tuple[str, str], dict]) -> None:
     stack: list[tuple[int, str]] = []  # (depth, process name)
     for line, added in lines:
         depth = _tree_depth(line)
@@ -228,9 +228,16 @@ def _walk_tree(lines: list[tuple[str, bool]], results: list[dict], seen: set[tup
             note = (dest_match.group(2) or "").strip()
             lineage = " > ".join(name for d, name in stack if d < depth)
             key = (dest, lineage)
-            if key not in seen:
-                seen.add(key)
-                results.append({"dest": dest, "note": note, "lineage": lineage, "new": added})
+            existing = seen.get(key)
+            if existing is None:
+                record = {"dest": dest, "note": note, "lineage": lineage, "new": added}
+                seen[key] = record
+                results.append(record)
+            elif added:
+                # Another job recording the same chain as NEW outranks an
+                # earlier unchanged occurrence — a new chain must never be
+                # masked by a job where it already existed.
+                existing["new"] = True
         else:
             name = html.unescape(re.sub(r"\s*·\s*job$", "", text)).strip()
             while stack and stack[-1][0] >= depth:
