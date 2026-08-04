@@ -69,6 +69,8 @@ jobs:
                   REPO=${{ github.repository }}
                   VERDICT=$(jq -r '.final_verdict // ""' /tmp/review.json 2>/dev/null || echo "")
                   BODY=$(jq -r '.review_body // ""' /tmp/review.json 2>/dev/null || echo "")
+                  HEAD_SHA=$(jq -r '.head_sha // ""' /tmp/review.json 2>/dev/null || echo "")
+                  HEAD_SHA=${HEAD_SHA:-${{ github.event.pull_request.head.sha }}}
                   RUN_URL="${{ github.server_url }}/$REPO/actions/runs/${{ github.run_id }}"
                   echo "verdict: $VERDICT"
 
@@ -77,31 +79,41 @@ jobs:
                       --body "${BODY:-stamphog: no showstoppers found.}" \
                       || gh pr comment "$PR" --repo "$REPO" \
                            --body "🤖 stamphog verdict: APPROVED (could not post a formal approval — see $RUN_URL)"$'\n\n'"$BODY"
+                  fi
+
+                  # Sticky review comment — matches the upstream stamphog[bot]
+                  # shape exactly (marker, review count, head-pinned headline).
+                  # Updated on every outcome so it never goes stale after a
+                  # failed run or across verdict changes.
+                  MARKER="<!-- stamphog-sticky-review -->"
+                  LEGACY_MARKER="<!-- stamphog-sticky-comment -->"
+                  if [ -z "$VERDICT" ]; then
+                    HEADLINE="stamphog review of \`$HEAD_SHA\` failed before producing a verdict"
+                    BODY="Check the [workflow run]($RUN_URL) and re-apply the label to retry."
                   else
-                    MARKER="<!-- stamphog-sticky-comment -->"
-                    if [ -z "$VERDICT" ]; then
-                      HEADLINE="stamphog review failed before producing a verdict"
-                      BODY="Check the [workflow run]($RUN_URL) and re-apply the label to retry."
-                    else
-                      HEADLINE="stamphog verdict: $VERDICT"
-                    fi
-                    COMMENT_ID=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
-                      --jq ".[] | select(.user.login == \"$BOT_LOGIN\" and (.body | startswith(\"$MARKER\"))) | .id" | head -1)
-                    {
-                      echo "$MARKER"
-                      echo "> [!NOTE]"
-                      echo "> 🤖 $HEADLINE"
-                      echo
-                      echo "$BODY"
-                    } > /tmp/stamphog-comment.md
-                    if [ -n "$COMMENT_ID" ]; then
-                      gh api -X PATCH "repos/$REPO/issues/comments/$COMMENT_ID" \
-                        -F "body=@/tmp/stamphog-comment.md" || COMMENT_ID=""
-                    fi
-                    if [ -z "$COMMENT_ID" ]; then
-                      gh api -X POST "repos/$REPO/issues/$PR/comments" \
-                        -F "body=@/tmp/stamphog-comment.md"
-                    fi
+                    HEADLINE="stamphog reviewed \`$HEAD_SHA\` — verdict: **$VERDICT**"
+                  fi
+                  COMMENT_JSON=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+                    --jq "[.[] | select(.user.login == \"$BOT_LOGIN\" and ((.body | startswith(\"$MARKER\")) or (.body | startswith(\"$LEGACY_MARKER\"))))][0] | {id, body}" 2>/dev/null || echo "")
+                  COMMENT_ID=$(echo "$COMMENT_JSON" | jq -r '.id // empty' 2>/dev/null || echo "")
+                  COUNT=$(echo "$COMMENT_JSON" | jq -r '.body // ""' 2>/dev/null \
+                    | sed -n 's/.*<!-- stamphog-review-count:\([0-9]*\) -->.*/\1/p' | head -1)
+                  COUNT=$(( ${COUNT:-0} + 1 ))
+                  {
+                    echo "$MARKER"
+                    echo "<!-- stamphog-review-count:$COUNT -->"
+                    echo "> [!NOTE]"
+                    echo "> 🤖 $HEADLINE"
+                    echo
+                    echo "$BODY"
+                  } > /tmp/stamphog-comment.md
+                  if [ -n "$COMMENT_ID" ]; then
+                    gh api -X PATCH "repos/$REPO/issues/comments/$COMMENT_ID" \
+                      -F "body=@/tmp/stamphog-comment.md" || COMMENT_ID=""
+                  fi
+                  if [ -z "$COMMENT_ID" ]; then
+                    gh api -X POST "repos/$REPO/issues/$PR/comments" \
+                      -F "body=@/tmp/stamphog-comment.md"
                   fi
 
                   # Substantive non-approvals strip the label so the author

@@ -5,24 +5,13 @@ version: 1
 # Only comments authored by these logins are read as runtime evidence.
 trusted_bots:
     - 'garnet-runtime-review[bot]'
-# Destinations expected during this repo's CI (regex, matched against the
-# recorded destination name). Everything else renders as UNEXPECTED to the
-# reviewer and blocks the deny bypass. Tune from real Garnet runs — the
-# evidence itself shows what normal CI egress looks like.
-expected_destinations:
-    - '^registry\.npmjs\.org$'
-    - '^(localhost|127\.0\.0\.1|::1)$'
-    - '\.githubusercontent\.com$'
-    - '^github\.com$'
-    - '^(api|codeload|objects|uploads)\.github\.com$'
-    - '^nodejs\.org$'
-    - '^ip6-all(routers|nodes|hosts)$'
-    - '\.githubapp$'
-    - '\.githubapp\.com$'
-    - '^168\.63\.129\.16$'          # Azure runner platform plumbing
-    - '^169\.254\.\d+\.\d+$'        # link-local / instance metadata
-    - '^\d+\.\d+\.\d+\.\d+$'        # bare IPs from runner infra; tighten after baselining
-# Deny categories that clean runtime evidence may clear (to LLM review,
+# Grounding is the execution tree itself: each destination is judged by the
+# process lineage chain that produced it, in the context of the diff, by the
+# LLM reviewer. There is no static egress allowlist. Deterministic signals
+# are integrity (trusted author, head-pinned, parseable, non-empty) and the
+# renderer's comparison against the previously profiled commit (new chains
+# block the bypass).
+# Deny categories that usable runtime evidence may clear (to LLM review,
 # never auto-approve). Mirrors the Migration risk check bypass.
 bypass_categories:
     - deps_toolchain

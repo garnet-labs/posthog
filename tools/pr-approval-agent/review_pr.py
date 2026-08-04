@@ -65,6 +65,8 @@ from github import (
 )
 from manifest_risk import manifest_script_changes
 from migration_risk import migration_check_pending, safe_migration_files
+from policy import EffectivePolicy, ScopeBudget, _sanitize_untrusted, repo_root, resolve
+from reviewer import Reviewer
 from runtime_evidence import (
     RuntimeEvidence,
     bypassable_deny,
@@ -74,8 +76,6 @@ from runtime_evidence import (
     load_config as load_runtime_evidence_config,
     prompt_block as runtime_evidence_prompt_block,
 )
-from policy import EffectivePolicy, ScopeBudget, _sanitize_untrusted, repo_root, resolve
-from reviewer import Reviewer
 from version import STAMPHOG_VERSION
 
 try:
@@ -401,9 +401,10 @@ class Pipeline:
         safe_migrations = safe_migration_files(pr.check_runs, file_paths)
         deny = detect_deny_categories(file_paths, ignored_files=safe_migrations)
         # Garnet runtime evidence (vendored local extension — see README):
-        # kernel-recorded CI egress bound to the head commit. Clean evidence
-        # may clear a deps_toolchain-only deny (to LLM review, never
-        # auto-approve); unexpected egress is surfaced to the reviewer as a
+        # the kernel-recorded execution tree bound to the head commit. A
+        # usable tree (recorded/unchanged) may clear a deps_toolchain-only
+        # deny (to LLM review, never auto-approve); a new chain versus the
+        # previously profiled commit is surfaced to the reviewer as a
         # showstopper. Config absent → everything below is a no-op.
         runtime_evidence_config = load_runtime_evidence_config(REPO_ROOT / ".stamphog")
         runtime_evidence: RuntimeEvidence | None = None
@@ -418,9 +419,7 @@ class Pipeline:
         if risky_manifests and "deps_toolchain" not in deny:
             deny = sorted([*deny, "deps_toolchain"])
         if runtime_evidence_config is not None:
-            runtime_evidence = fetch_runtime_evidence(
-                self.repo, self.pr_number, pr.head_sha, runtime_evidence_config
-            )
+            runtime_evidence = fetch_runtime_evidence(self.repo, self.pr_number, pr.head_sha, runtime_evidence_config)
             # Manifest script/lifecycle changes keep their deny even with
             # clean evidence: scripts can behave differently outside CI
             # (conditional or time-delayed egress), and _check_deny_list
@@ -481,7 +480,9 @@ class Pipeline:
             "safe_migration_files": sorted(safe_migrations),
             "runtime_evidence_status": runtime_evidence.status if runtime_evidence else None,
             "runtime_evidence_block": runtime_evidence_prompt_block(runtime_evidence) if runtime_evidence else None,
-            "runtime_evidence_citation": runtime_evidence_citation_block(runtime_evidence) if runtime_evidence else None,
+            "runtime_evidence_citation": runtime_evidence_citation_block(runtime_evidence)
+            if runtime_evidence
+            else None,
             "runtime_evidence": runtime_evidence_dict(runtime_evidence),
             "runtime_evidence_bypassed": runtime_evidence_bypassed,
             "allow_listed_only": allow_only,
@@ -591,6 +592,8 @@ class Pipeline:
             ("size", self._check_size),
             ("tier", self._check_tier),
         ]
+        if self.classification.get("runtime_evidence") is not None:
+            gates.insert(2, ("runtime evidence", self._check_runtime_evidence))
         for name, check in gates:
             passed, message = check()
             result = GateResult(name, passed, message)
@@ -632,7 +635,43 @@ class Pipeline:
             return False, f"matches: {', '.join(deny)} (scripts/hooks changed in {', '.join(risky)})"
         if deny:
             return False, f"matches: {', '.join(deny)}"
+        bypassed = self.classification.get("runtime_evidence_bypassed", [])
+        if bypassed:
+            head = (self.classification.get("runtime_evidence") or {}).get("commit_sha", "")[:7]
+            return True, (
+                f"{', '.join(bypassed)} cleared to full review by the runtime evidence gate "
+                f"(execution tree for head `{head}`)"
+            )
         return True, "no deny categories matched"
+
+    def _check_runtime_evidence(self) -> tuple[bool, str]:
+        """How the execution tree feeds this review — rendered as its own gate row.
+
+        Not a static egress check: the tree (process lineage → destination)
+        is handed to the LLM reviewer to judge against the diff. This row
+        fails only when the renderer's comparison against the previously
+        profiled commit shows a NEW chain; missing evidence passes the row
+        but leaves the deny-list untouched (fail-closed on the bypass).
+        """
+        ev = self.classification["runtime_evidence"]
+        head = ev.get("commit_sha", "")[:7]
+        dests = ev.get("destinations", [])
+        chains = {d["lineage"] for d in dests if d["lineage"]}
+        if ev["status"] == "missing":
+            return True, "none recorded for this head — deny-list applies unmodified"
+        if ev["status"] == "diverged":
+            new = [d for d in dests if d["new"]]
+            named = "; ".join(f"{d['lineage']} → {d['dest']}" for d in new[:3])
+            return False, f"{len(new)} NEW chain(s) vs previous profiled commit: {named}"
+        detail = (
+            "no new chains vs previous profiled commit"
+            if ev["status"] == "unchanged"
+            else "first profiled commit (snapshot)"
+        )
+        return True, (
+            f"execution tree recorded for head `{head}` — {len(dests)} destination(s) across "
+            f"{len(chains)} chain(s), {detail}; tree handed to the reviewer"
+        )
 
     def _summarize_ownership(self) -> str:
         """Build ownership context for the LLM (not a hard gate)."""
