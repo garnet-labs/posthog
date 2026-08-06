@@ -40,3 +40,6 @@ the pinned tarball, and records the run under the Garnet sensor. The
 Attack PR bumps only the manifest version from `1.0.0` to `1.0.1`; the
 Garnet Execution Profile diffs the new run against the master baseline
 and renders the new process chain as a delta.
+## Verified
+
+This directory's Attack PR has an active Garnet Execution Profile showing the preinstall → node → child → outbound chain in the delta view. See [Execution Profile (Garnet, head ad55fa3)](https://app.garnet.ai/public/runs/30943456707?profile=019fce41-777e-7c8a-b6af-b95345080ccf).
