@@ -608,7 +608,7 @@ def test_runtime_evidence_gate_diverged_fails_naming_new_chain() -> None:
     }
     passed, message = _pipeline_with_evidence(evidence)._check_runtime_evidence()
     assert not passed
-    assert "1 NEW chain(s) vs previous profiled commit" in message
+    assert "1 NEW destination(s) vs previous profiled commit" in message
     assert "Runner.Worker > node → httpbin.org" in message
 
 

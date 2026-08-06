@@ -39,11 +39,11 @@ def status_payload(evidence: RuntimeEvidence) -> tuple[str, str]:
         return (
             "success",
             f"{evidence.status}: {len(evidence.destinations)} destination(s) across "
-            f"{len(evidence.chains)} process chain(s), head-pinned",
+            f"{len(evidence.chains)} execution chain(s), head-pinned",
         )
     if evidence.status == "diverged":
         named = ", ".join(d["dest"] for d in evidence.new_destinations[:3])
-        return "failure", f"{len(evidence.new_destinations)} new chain(s) vs previous profile: {named}"
+        return "failure", f"{len(evidence.new_destinations)} new destination(s) vs previous profile: {named}"
     return "pending", "no usable runtime evidence for this head yet (fail-closed)"
 
 
