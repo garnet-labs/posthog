@@ -327,7 +327,7 @@ def citation_block(evidence: RuntimeEvidence) -> str | None:
         f"<summary>Runtime evidence (Garnet) — kernel-recorded execution tree for head <code>{evidence.commit_sha[:7]}</code></summary>",
         "",
         f"Status: **{evidence.status}** — {len(evidence.destinations)} destination(s) across "
-        f"{len(evidence.chains)} process chain(s).",
+        f"{len(evidence.chains)} execution chain(s).",
         "",
         "Grounding: the execution tree (process lineage → destination) is the evidence. "
         "There is no static egress allowlist; the reviewer judges each chain against the diff. "
@@ -337,14 +337,14 @@ def citation_block(evidence: RuntimeEvidence) -> str | None:
     new = evidence.new_destinations
     if new:
         lines.append("")
-        lines.append("Chains NEW versus the previously profiled commit:")
+        lines.append("Destinations NEW versus the previously profiled commit:")
         for d in new:
             note = f" ({d['note']})" if d["note"] else ""
             lineage = f"`{d['lineage']}` → " if d["lineage"] else ""
             lines.append(f"- {lineage}`{d['dest']}`{note}")
     elif evidence.status == "unchanged":
         lines.append("")
-        lines.append("No new chains versus the previously profiled commit.")
+        lines.append("No new destinations versus the previously profiled commit.")
     else:
         lines.append("")
         lines.append("First profiled commit for this PR — snapshot, no comparison baseline.")

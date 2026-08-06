@@ -662,9 +662,9 @@ class Pipeline:
         if ev["status"] == "diverged":
             new = [d for d in dests if d["new"]]
             named = "; ".join(f"{d['lineage']} → {d['dest']}" for d in new[:3])
-            return False, f"{len(new)} NEW chain(s) vs previous profiled commit: {named}"
+            return False, f"{len(new)} NEW destination(s) vs previous profiled commit: {named}"
         detail = (
-            "no new chains vs previous profiled commit"
+            "no new destinations vs previous profiled commit"
             if ev["status"] == "unchanged"
             else "first profiled commit (snapshot)"
         )

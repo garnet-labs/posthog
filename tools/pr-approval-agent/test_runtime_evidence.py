@@ -285,7 +285,7 @@ def test_citation_block_grounding_and_missing():
     ev = parse_comment(COMMENT, HEAD)
     block = citation_block(ev)
     assert "**recorded**" in block
-    assert "process chain(s)" in block
+    assert "execution chain(s)" in block
     assert "no static egress allowlist" in block
     assert "never approves a PR by itself" in block
     assert citation_block(RuntimeEvidence(status="missing")) is None
