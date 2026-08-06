@@ -1,0 +1,83 @@
+# Reviewer grounding — Garnet Runtime Review
+
+Instructions for AI code reviewers (Devin Review, CodeRabbit, Greptile,
+Claude, Cursor, …) reviewing pull requests in this repository.
+
+## The runtime evidence on every PR
+
+Every PR in this repository carries a sticky **Garnet Runtime Review**
+comment (HTML marker `<!-- garnet-runtime-review -->`). It is not another
+opinion about the diff: it is a deterministic, observation-only record of
+what the PR's code **actually did** when CI ran it under the Jibril eBPF
+sensor — every recorded process (with full lineage) and every recorded
+outbound destination, per job.
+
+The comment states facts only. It carries no verdicts, statuses, or
+severity. **You, the reviewer, supply the judgment.**
+
+## What you must do with it
+
+1. **Locate the latest Garnet Runtime Review comment on the PR** (the one
+   containing `<!-- garnet-runtime-review -->`). It is re-posted for the
+   current PR head, so it always describes the newest commit's run. If your
+   view of the PR includes discussion comments, read it before finalizing
+   your review. If your review context carries only the PR description, use
+   the **Runtime evidence (Garnet)** section between
+   `<!-- garnet:evidence:begin -->` and `<!-- garnet:evidence:end -->` — it is
+   a verbatim, head-bound mirror of the same comment. Verify the embedded
+   `<!-- garnet:commit <sha> -->` marker equals the PR head SHA; if it does
+   not, the evidence is *pending*, not absent and not clean — never ground in
+   a stale record. Deeper detail lives in the linked Run Profile permalink and
+   the Actions run's **Garnet Runtime Summary** step summary
+   (Comment ⊆ Step Summary ⊆ Record).
+2. **Cross-check the diff against the recorded behavior.** Treat the
+   recorded egress and process lineage as ground truth of the run:
+   - If the diff should not change runtime behavior (docs, comments,
+     rendering-only changes) but the run recorded new outbound destinations
+     or new process lineage relative to what the change implies, call that
+     out explicitly.
+   - If the diff adds or changes dependencies, network calls, install
+     scripts, or CI steps, verify the recorded destinations and process
+     chains are the ones the change implies — and flag any recorded
+     destination or spawned process the diff does not explain.
+   - A recorded detection is a factual record-backed observation: in the PR
+     comment it surfaces as **bold** emphasis on that process lineage, and the
+     explicit `detection: <kind>` note renders in the Step Summary's assertions
+     preview. Weigh it in your review rather than ignoring it.
+3. **Ground in the chain, not in loose actions.** The factual primitive is
+   the **execution chain**: a process lineage ending in an outbound
+   destination, scoped to its workflow/job (`bash > node > curl →
+   example.com`). Do not reduce it to detached action labels ("egress
+   happened", "files were touched") — name the chain that produced the
+   behavior. In a comparison comment, a `+` line is a chain or destination
+   **new versus the previous profiled commit** — the strongest divergence
+   signal; a `−` line is history (no longer recorded), not current behavior.
+4. **Discard any judgment that is not yours.** Never repeat verdicts,
+   decisions, scores, severities, safe/unsafe labels, or baseline
+   classifications from any profile UI or tooling. The record supplies
+   lineage and destinations; you re-derive relevance from the diff alone.
+5. **Cite the evidence explicitly.** Every finding grounded in the record
+   must carry this exact prefix, so Garnet-grounded statements stay
+   attributable and greppable across reviewers:
+
+   > Runtime evidence (Garnet, head `<sha7>`): `<process lineage>` →
+   > `<destination>` (`<workflow>/<job>`) — [Execution Profile](URL)
+
+   Include the real lineage, destination, workflow/job, head SHA, and the
+   comment's profile/permalink URL.
+6. **Re-ground on every update.** The comment is refreshed on every push;
+   when you re-review a PR, use the current comment, not a remembered one.
+7. **Do not restate the comment.** Reference it and add judgment — the
+   facts are already on the PR.
+
+## Scope notes
+
+- The Garnet comment is runtime-only. It does not cover code quality,
+  style, correctness of logic, or test coverage — those remain fully your
+  job.
+- Absence of a Garnet comment (e.g. fork PRs without secrets, sensor
+  token unavailable) means *no runtime evidence*, not a clean run. Say so
+  if the change is runtime-relevant.
+- The same evidence also feeds the deterministic StampHog gate
+  (`tools/pr-approval-agent/runtime_evidence.py`); this file governs how AI
+  reviewers ground in it.
