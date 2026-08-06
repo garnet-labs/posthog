@@ -23,12 +23,22 @@ def test_unchanged_maps_to_success():
     assert description.startswith("unchanged:")
 
 
-def test_diverged_maps_to_failure_naming_new_chains():
+def test_diverged_maps_to_failure_naming_new_destinations():
     evidence = parse_comment(V66_COMMENT, HEAD)
     assert evidence.status == "diverged"
     state, description = status_payload(evidence)
     assert state == "failure"
-    assert description == "1 new chain(s) vs previous profile: httpbin.org"
+    assert description == "1 new destination(s) vs previous profile: httpbin.org"
+
+
+def test_reshaped_chains_stay_success_and_are_counted():
+    body = V66_COMMENT.replace("+    ├─ → httpbin[.]org", "+    ├─ → registry.npmjs[.]org")
+    evidence = parse_comment(body, HEAD)
+    assert evidence.status == "unchanged"
+    state, description = status_payload(evidence)
+    assert state == "success"
+    assert "1 reshaped chain(s)" in description
+    assert len(description) <= 140
 
 
 def test_missing_maps_to_pending():

@@ -16,9 +16,11 @@ Deterministic safety gates first, then Claude reviews for showstoppers.
 >   are integrity (trusted author, head-pinned, parseable, non-empty) and
 >   the renderer's comparison against the previously profiled commit.
 > - `review_pr.py` — a usable execution tree (recorded/unchanged) may clear
->   a `deps_toolchain`-only deny (to LLM review, never auto-approve); a NEW
->   chain versus the previous profiled commit fails the `runtime evidence`
->   gate row; evidence status/block land in the classification and bundle.
+>   a `deps_toolchain`-only deny (to LLM review, never auto-approve); a
+>   genuinely NEW destination versus the previous profiled commit fails the
+>   `runtime evidence` gate row (a `+` chain whose destination the previous
+>   profile already recorded is a reshaped chain — reported, never failing);
+>   evidence status/block land in the classification and bundle.
 > - `reviewer.py` — the full tree renders as a TRUSTED prompt block; the
 >   reviewer judges each chain (lineage → destination) against the diff;
 >   `.stamphog/review-guidance.md` has a "Runtime evidence (Garnet)"

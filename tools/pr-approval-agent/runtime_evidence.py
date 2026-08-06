@@ -30,12 +30,18 @@ Semantics (all fail toward "no bypass"):
                 bypass: a deps_toolchain-only deny may proceed to LLM
                 review (never auto-approve) with the full tree in-prompt.
     unchanged → an execution tree exists and the renderer's comparison
-                against the previously profiled commit shows no new
-                chains. Same scoped bypass as `recorded`.
-    diverged  → the comparison shows at least one NEW execution chain
-                versus the previously profiled commit. No bypass; the
-                reviewer is instructed that a new chain is a showstopper
-                unless the diff clearly explains it.
+                against the previously profiled commit shows no genuinely
+                new destinations. Same scoped bypass as `recorded`. A `+`
+                chain whose destination was already recorded (in the
+                unchanged or removed set of the same comment) is a
+                RESHAPED chain — the same destination under a different
+                process lineage, which installer nondeterminism produces
+                run to run. Reshaped chains never diverge on their own,
+                but they are still reported to the reviewer.
+    diverged  → the comparison shows at least one genuinely NEW
+                destination versus the previously profiled commit. No
+                bypass; the reviewer is instructed that a new destination
+                is a showstopper unless the diff clearly explains it.
 
 Trust model: only comments authored by the configured Garnet bot logins
 are read, the commit marker must equal the PR head SHA (a stale comment
@@ -81,13 +87,18 @@ class RuntimeEvidence:
 
     status: str  # "missing" | "recorded" | "unchanged" | "diverged"
     commit_sha: str = ""
-    destinations: list[dict] = field(default_factory=list)  # {dest, note, lineage, new}
+    destinations: list[dict] = field(default_factory=list)  # {dest, note, lineage, new, reshaped}
     permalinks: list[str] = field(default_factory=list)
 
     @property
     def new_destinations(self) -> list[dict]:
-        """Destinations on chains new versus the previously profiled commit."""
+        """Destinations genuinely new versus the previously profiled commit."""
         return [d for d in self.destinations if d["new"]]
+
+    @property
+    def reshaped_chains(self) -> list[dict]:
+        """`+` chains whose destination the previous profile already recorded."""
+        return [d for d in self.destinations if d.get("reshaped")]
 
     @property
     def chains(self) -> list[str]:
@@ -183,7 +194,9 @@ def _extract_destinations(body: str) -> tuple[list[dict], bool]:
     - ```diff fences (changed jobs in comparison comments): the same tree
       with a leading diff column — `+` (new chain vs the previous profiled
       commit), space (unchanged), `-` (no longer recorded; not current
-      evidence).
+      evidence, but its destination set is collected so `+` chains that
+      merely moved an already-recorded destination classify as reshaped
+      rather than genuinely new).
 
     Lineage is reconstructed from tree indentation depth. Hostnames are
     defanged in the comment and refanged here.
@@ -196,6 +209,7 @@ def _extract_destinations(body: str) -> tuple[list[dict], bool]:
     body = _EXPLAINER_RE.sub("", body)
     results: list[dict] = []
     seen: dict[tuple[str, str], dict] = {}
+    removed_dests: set[str] = set()
     pres = re.findall(r"<pre>(.*?)</pre>", body, flags=re.DOTALL)
     legacy_contract = any("· job" in pre for pre in pres)
     for pre in pres:
@@ -206,12 +220,43 @@ def _extract_destinations(body: str) -> tuple[list[dict], bool]:
     for fence in fences:
         lines: list[tuple[str, bool]] = []
         for raw in fence.splitlines():
-            if raw.startswith("@@") or raw.startswith("-"):
+            if raw.startswith("@@"):
+                continue
+            if raw.startswith("-"):
+                removed = _removed_destination(raw[1:])
+                if removed:
+                    removed_dests.add(removed)
                 continue
             added = raw.startswith("+")
             lines.append((raw[1:] if raw[:1] in "+ " else raw, added))
         _walk_tree(lines, results, seen)
+    _classify_added(results, removed_dests)
     return results, bool(fences)
+
+
+def _removed_destination(line: str) -> str | None:
+    """Destination named on a `-` tree line, or None for process lines."""
+    text = _TAG_RE.sub("", line)
+    text = re.sub(r"^[\s│├└─]+", "", text).strip()
+    match = _DESTINATION_RE.search(text)
+    if text.startswith("→") and match:
+        return _refang(html.unescape(match.group(1)).strip())
+    return None
+
+
+def _classify_added(results: list[dict], removed_dests: set[str]) -> None:
+    """Split `+` chains into genuinely-new destinations vs reshaped chains.
+
+    A destination is genuinely new only when it appears on a `+` chain and
+    the same comment records it nowhere else — neither on an unchanged
+    chain nor on a `-` (removed) chain. Otherwise the `+` chain reshaped
+    the lineage of a destination the previous profile already recorded.
+    """
+    unchanged_dests = {r["dest"] for r in results if not r["new"]}
+    recorded_before = unchanged_dests | removed_dests
+    for r in results:
+        r["reshaped"] = r["new"] and r["dest"] in recorded_before
+        r["new"] = r["new"] and r["dest"] not in recorded_before
 
 
 def _walk_tree(lines: list[tuple[str, bool]], results: list[dict], seen: dict[tuple[str, str], dict]) -> None:
@@ -230,7 +275,7 @@ def _walk_tree(lines: list[tuple[str, bool]], results: list[dict], seen: dict[tu
             key = (dest, lineage)
             existing = seen.get(key)
             if existing is None:
-                record = {"dest": dest, "note": note, "lineage": lineage, "new": added}
+                record = {"dest": dest, "note": note, "lineage": lineage, "new": added, "reshaped": False}
                 seen[key] = record
                 results.append(record)
             elif added:
@@ -285,15 +330,27 @@ def prompt_block(evidence: RuntimeEvidence) -> str:
         f"process lineage chain that produced it:"
     ]
     for d in evidence.destinations:
-        flag = "NEW CHAIN" if d["new"] else "chain"
+        if d["new"]:
+            flag = "NEW DESTINATION"
+        elif d.get("reshaped"):
+            flag = "reshaped chain"
+        else:
+            flag = "chain"
         note = f" ({d['note']})" if d["note"] else ""
         lineage = d["lineage"] or "(no recorded lineage)"
         lines.append(f"  - [{flag}] {lineage} → {d['dest']}{note}")
+    if evidence.reshaped_chains:
+        lines.append(
+            "  Reshaped chains: the same destination was recorded in the previous profile under "
+            "a different process lineage. Installer nondeterminism (npm/pnpm spawn ordering) "
+            "produces this normally — weigh a reshaped chain only if the diff makes the "
+            "reshaping itself suspicious."
+        )
     if evidence.status == "diverged":
         lines.append(
-            "  Verdict guidance: at least one chain is NEW versus the previously profiled "
+            "  Verdict guidance: at least one destination is NEW versus the previously profiled "
             "commit. Unless this diff clearly explains that exact chain and destination, a new "
-            "chain is a showstopper — REFUSE and name the chain."
+            "destination is a showstopper — REFUSE and name the chain."
         )
     else:
         lines.append(
@@ -335,19 +392,30 @@ def citation_block(evidence: RuntimeEvidence) -> str | None:
         "never approves a PR by itself.",
     ]
     new = evidence.new_destinations
+    reshaped = evidence.reshaped_chains
     if new:
         lines.append("")
-        lines.append("Chains NEW versus the previously profiled commit:")
+        lines.append(f"{len(new)} destination(s) NEW versus the previously profiled commit:")
         for d in new:
             note = f" ({d['note']})" if d["note"] else ""
             lineage = f"`{d['lineage']}` → " if d["lineage"] else ""
             lines.append(f"- {lineage}`{d['dest']}`{note}")
     elif evidence.status == "unchanged":
         lines.append("")
-        lines.append("No new chains versus the previously profiled commit.")
+        lines.append("No new destinations versus the previously profiled commit.")
     else:
         lines.append("")
         lines.append("First profiled commit for this PR — snapshot, no comparison baseline.")
+    if reshaped:
+        lines.append("")
+        lines.append(
+            f"{len(reshaped)} reshaped chain(s) — destination already in the previous profile, "
+            "recorded under a different process lineage:"
+        )
+        for d in reshaped:
+            note = f" ({d['note']})" if d["note"] else ""
+            lineage = f"`{d['lineage']}` → " if d["lineage"] else ""
+            lines.append(f"- {lineage}`{d['dest']}`{note}")
     lines.append("")
     lines.append("Verify independently:")
     for link in evidence.permalinks[:3]:
