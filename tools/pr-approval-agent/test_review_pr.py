@@ -563,3 +563,95 @@ def test_capture_review_completed_merges_server_extras_base_wins(monkeypatch: py
     props = fake_posthog.capture.call_args.kwargs["properties"]
     assert props["stamphog_runtime"] == "hosted"
     assert props["stamphog_repo"] == "PostHog/posthog"
+
+
+# ── Runtime evidence gate row ──────────────────────────────────
+
+
+def _pipeline_with_evidence(evidence: dict | None, bypassed: list[str] | None = None) -> Pipeline:
+    pipeline = Pipeline(pr_number=1, repo="PostHog/posthog")
+    pipeline.pr = _fake_pr(head_sha="abc123")
+    pipeline.classification = {
+        "deny_categories": [],
+        "runtime_evidence": evidence,
+        "runtime_evidence_bypassed": bypassed or [],
+    }
+    return pipeline
+
+
+def test_runtime_evidence_gate_recorded_names_tree() -> None:
+    evidence = {
+        "status": "recorded",
+        "commit_sha": "6e5d0d4cf00a92a9e1fe697efe0e41b3ae61533e",
+        "destinations": [
+            {"dest": "registry.npmjs.org", "note": "", "lineage": "Runner.Worker > bash > node", "new": False},
+            {"dest": "localhost", "note": "dns resolver", "lineage": "Runner.Worker > bash > node", "new": False},
+        ],
+        "permalinks": [],
+    }
+    passed, message = _pipeline_with_evidence(evidence)._check_runtime_evidence()
+    assert passed
+    assert "execution tree recorded for head `6e5d0d4`" in message
+    assert "2 destination(s) across 1 chain(s)" in message
+    assert "tree handed to the reviewer" in message
+
+
+def test_runtime_evidence_gate_diverged_fails_naming_new_destination() -> None:
+    evidence = {
+        "status": "diverged",
+        "commit_sha": "6e5d0d4cf00a92a9e1fe697efe0e41b3ae61533e",
+        "destinations": [
+            {"dest": "github.com", "note": "", "lineage": "Runner.Worker > node", "new": False},
+            {"dest": "httpbin.org", "note": "", "lineage": "Runner.Worker > node", "new": True},
+        ],
+        "permalinks": [],
+    }
+    passed, message = _pipeline_with_evidence(evidence)._check_runtime_evidence()
+    assert not passed
+    assert "1 NEW destination(s) vs previous profiled commit" in message
+    assert "Runner.Worker > node → httpbin.org" in message
+
+
+def test_runtime_evidence_gate_unchanged_counts_reshaped_chains() -> None:
+    evidence = {
+        "status": "unchanged",
+        "commit_sha": "6e5d0d4cf00a92a9e1fe697efe0e41b3ae61533e",
+        "destinations": [
+            {"dest": "registry.npmjs.org", "note": "", "lineage": "Runner.Worker > bash", "new": False},
+            {
+                "dest": "registry.npmjs.org",
+                "note": "",
+                "lineage": "Runner.Worker > node",
+                "new": False,
+                "reshaped": True,
+            },
+        ],
+        "permalinks": [],
+    }
+    passed, message = _pipeline_with_evidence(evidence)._check_runtime_evidence()
+    assert passed
+    assert "execution tree recorded for head `6e5d0d4`" in message
+    assert "2 destination(s) across 2 chain(s)" in message
+    assert "1 reshaped chain(s)" in message
+    assert "tree handed to the reviewer" in message
+
+
+def test_runtime_evidence_gate_missing_passes_without_bypass() -> None:
+    evidence = {"status": "missing", "commit_sha": "", "destinations": [], "permalinks": []}
+    passed, message = _pipeline_with_evidence(evidence)._check_runtime_evidence()
+    assert passed
+    assert "deny-list applies unmodified" in message
+
+
+def test_deny_list_gate_names_runtime_evidence_bypass() -> None:
+    evidence = {
+        "status": "recorded",
+        "commit_sha": "6e5d0d4cf00a92a9e1fe697efe0e41b3ae61533e",
+        "destinations": [],
+        "permalinks": [],
+    }
+    pipeline = _pipeline_with_evidence(evidence, bypassed=["deps_toolchain"])
+    passed, message = pipeline._check_deny_list()
+    assert passed
+    assert "deps_toolchain cleared to full review by the runtime evidence gate" in message
+    assert "`6e5d0d4`" in message

@@ -514,8 +514,9 @@ class Reviewer:
             )
             if cl.get("runtime_evidence_bypassed"):
                 runtime_evidence_block += (
-                    "\n  Deny bypass: " + ", ".join(cl["runtime_evidence_bypassed"]) + " was cleared by "
-                    "passing runtime evidence \u2014 the diff still deserves full dependency/toolchain scrutiny."
+                    "\n  Deny bypass: " + ", ".join(cl["runtime_evidence_bypassed"]) + " was cleared to "
+                    "full review because a usable execution tree exists for this head \u2014 the tree and the "
+                    "diff still deserve full dependency/toolchain scrutiny."
                 )
 
         gate_lines = []

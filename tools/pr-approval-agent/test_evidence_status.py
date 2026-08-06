@@ -1,47 +1,55 @@
 """Tests for evidence_status.py, the garnet/runtime-evidence commit-status mirror."""
 
-import re
-
 import evidence_status
 from evidence_status import status_payload
-from runtime_evidence import RuntimeEvidence, RuntimeEvidenceConfig, parse_comment
-from test_runtime_evidence import ALLOW_ALL, COMMENT, HEAD
+from runtime_evidence import RuntimeEvidence, parse_comment
+from test_runtime_evidence import COMMENT, HEAD, V66_COMMENT
 
 
-def _config(patterns: list[str]) -> RuntimeEvidenceConfig:
-    return RuntimeEvidenceConfig(
-        trusted_bots=frozenset({"garnet-runtime-review[bot]"}),
-        expected_destinations=tuple(re.compile(p) for p in patterns),
-        bypass_categories=frozenset({"deps_toolchain"}),
-    )
-
-
-def test_pass_maps_to_success():
-    evidence = parse_comment(COMMENT, HEAD, _config(ALLOW_ALL))
-    assert evidence.status == "pass"
+def test_recorded_maps_to_success():
+    evidence = parse_comment(COMMENT, HEAD)
+    assert evidence.status == "recorded"
     state, description = status_payload(evidence)
     assert state == "success"
-    assert description == "pass: 3 recorded destination(s), all expected"
+    assert description == "recorded: 3 destination(s) across 2 execution chain(s), head-pinned"
 
 
-def test_unexpected_maps_to_failure_naming_destinations():
-    evidence = parse_comment(COMMENT, HEAD, _config([r"^localhost$"]))
-    assert evidence.status == "unexpected"
+def test_unchanged_maps_to_success():
+    body = V66_COMMENT.replace("+    ├─ → httpbin[.]org\n", "")
+    evidence = parse_comment(body, HEAD)
+    assert evidence.status == "unchanged"
+    state, description = status_payload(evidence)
+    assert state == "success"
+    assert description.startswith("unchanged:")
+
+
+def test_diverged_maps_to_failure_naming_new_destinations():
+    evidence = parse_comment(V66_COMMENT, HEAD)
+    assert evidence.status == "diverged"
     state, description = status_payload(evidence)
     assert state == "failure"
-    assert description == "1 unexpected destination(s): registry.npmjs.org"
+    assert description == "1 new destination(s) vs previous profile: httpbin.org"
+
+
+def test_reshaped_chains_stay_success_and_are_counted():
+    body = V66_COMMENT.replace("+    ├─ → httpbin[.]org", "+    ├─ → github[.]com")
+    evidence = parse_comment(body, HEAD)
+    assert evidence.status == "unchanged"
+    state, description = status_payload(evidence)
+    assert state == "success"
+    assert "1 reshaped chain(s)" in description
+    assert len(description) <= 140
 
 
 def test_missing_maps_to_pending():
     for evidence in (
         RuntimeEvidence(status="missing"),
         # Stale comment: marker for an older head.
-        parse_comment(COMMENT, "0" * 40, _config(ALLOW_ALL)),
+        parse_comment(COMMENT, "0" * 40),
         # Head-pinned waiting-state comment with zero parseable destinations.
         parse_comment(
             f"<!-- garnet-runtime-review -->\n<!-- garnet:commit {HEAD} -->\nstill recording",
             HEAD,
-            _config(ALLOW_ALL),
         ),
     ):
         assert evidence.status == "missing"
@@ -64,7 +72,7 @@ def test_main_posts_status_from_live_shapes(monkeypatch, capsys):
     monkeypatch.setattr(
         evidence_status,
         "fetch_runtime_evidence",
-        lambda repo, pr, head, config: parse_comment(COMMENT, head, _config(ALLOW_ALL)),
+        lambda repo, pr, head, config: parse_comment(COMMENT, head),
     )
     monkeypatch.setattr("sys.argv", ["evidence_status.py", "65", "--repo", "o/r"])
 
@@ -73,7 +81,7 @@ def test_main_posts_status_from_live_shapes(monkeypatch, capsys):
     values = posted["args"][2::2]
     assert "state=success" in values
     assert "context=garnet/runtime-evidence" in values
-    assert any(v.startswith("description=pass: 3 recorded") for v in values)
+    assert any(v.startswith("description=recorded: 3 destination(s)") for v in values)
     assert any(v.startswith("target_url=https://app.garnet.ai/public/runs/") for v in values)
     assert "success" in capsys.readouterr().out
 
@@ -91,7 +99,7 @@ def test_main_without_config_posts_nothing(monkeypatch, tmp_path, capsys):
 
 def test_posted_description_fits_github_status_limit(monkeypatch):
     # GitHub rejects status descriptions over 140 chars; main() must slice
-    # before posting. Worst realistic case: several long unexpected hostnames.
+    # before posting. Worst realistic case: several long new-chain hostnames.
     posted = {}
 
     def fake_gh_json(args):
@@ -100,8 +108,8 @@ def test_posted_description_fits_github_status_limit(monkeypatch):
         posted["args"] = args
         return {}
 
-    long = [{"dest": "a" * 60 + f"{i}.evil.example", "note": "", "lineage": [], "expected": False} for i in range(5)]
-    evidence = RuntimeEvidence(status="unexpected", commit_sha=HEAD, destinations=long)
+    long = [{"dest": "a" * 60 + f"{i}.evil.example", "note": "", "lineage": "", "new": True} for i in range(5)]
+    evidence = RuntimeEvidence(status="diverged", commit_sha=HEAD, destinations=long)
     assert len(status_payload(evidence)[1]) > 140
 
     monkeypatch.setattr(evidence_status, "_gh_json", fake_gh_json)

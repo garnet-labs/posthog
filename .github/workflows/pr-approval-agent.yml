@@ -9,24 +9,45 @@ name: PR Approval Agent
 on:
     pull_request:
         types: [labeled, ready_for_review, synchronize]
+    issue_comment:
+        types: [created, edited]
 
 permissions:
     contents: read
     pull-requests: write
 
 concurrency:
-    group: pr-approval-${{ github.event.pull_request.number }}
+    group: pr-approval-${{ github.event.pull_request.number || github.event.issue.number }}
     cancel-in-progress: true
 
 jobs:
     review:
         # Fork demo: upstream also excludes bot authors; relaxed here so the
         # canary PRs (opened by an automation account) can exercise the gate.
+        #
+        # issue_comment arm: re-run automatically once the Garnet bot's sticky
+        # runtime-evidence comment lands or updates on a `stamphog`-labeled PR.
+        # Garnet Runtime Visibility and this workflow both start on the same
+        # `synchronize` event and run concurrently, so the review step can read
+        # runtime_evidence.fetch_runtime_evidence() *before* Garnet's comment
+        # exists for the new head — producing a stale "none recorded" verdict
+        # that never gets corrected without a manual re-label. Mirrors the
+        # same re-trigger arm already on garnet-evidence-status.yml.
         if: >-
-            !github.event.pull_request.draft
-            && (
-              github.event.label.name == 'stamphog'
-              || (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'stamphog'))
+            (
+              github.event_name == 'pull_request'
+              && !github.event.pull_request.draft
+              && (
+                github.event.label.name == 'stamphog'
+                || (github.event.action != 'labeled' && contains(github.event.pull_request.labels.*.name, 'stamphog'))
+              )
+            )
+            || (
+              github.event_name == 'issue_comment'
+              && github.event.issue.pull_request
+              && github.event.comment.user.login == 'garnet-runtime-review[bot]'
+              && contains(github.event.comment.body, 'garnet-runtime-review')
+              && contains(github.event.issue.labels.*.name, 'stamphog')
             )
         runs-on: ubuntu-latest
         timeout-minutes: 20
@@ -37,12 +58,16 @@ jobs:
             - name: Checkout base branch (blobless, full history)
               uses: actions/checkout@v4
               with:
-                  ref: ${{ github.event.pull_request.base.ref }}
+                  ref: ${{ github.event.pull_request.base.ref || github.event.repository.default_branch }}
                   filter: blob:none
                   fetch-depth: 0
 
+            - name: Resolve PR number
+              id: pr
+              run: echo "number=${{ github.event.pull_request.number || github.event.issue.number }}" >> "$GITHUB_OUTPUT"
+
             - name: Fetch PR head ref
-              run: git fetch --filter=blob:none origin pull/${{ github.event.pull_request.number }}/head
+              run: git fetch --filter=blob:none origin pull/${{ steps.pr.outputs.number }}/head
 
             - name: Install uv
               uses: astral-sh/setup-uv@v7
@@ -55,7 +80,7 @@ jobs:
                   GH_TOKEN: ${{ github.token }}
               run: |
                   uv run tools/pr-approval-agent/review_pr.py \
-                    ${{ github.event.pull_request.number }} \
+                    ${{ steps.pr.outputs.number }} \
                     --repo ${{ github.repository }} \
                     --output-json /tmp/review.json
 
@@ -65,10 +90,17 @@ jobs:
                   GH_TOKEN: ${{ github.token }}
                   BOT_LOGIN: github-actions[bot]
               run: |
-                  PR=${{ github.event.pull_request.number }}
+                  PR=${{ steps.pr.outputs.number }}
                   REPO=${{ github.repository }}
                   VERDICT=$(jq -r '.final_verdict // ""' /tmp/review.json 2>/dev/null || echo "")
                   BODY=$(jq -r '.review_body // ""' /tmp/review.json 2>/dev/null || echo "")
+                  HEAD_SHA=$(jq -r '.head_sha // ""' /tmp/review.json 2>/dev/null || echo "")
+                  # issue_comment events carry no pull_request.head.sha; the
+                  # review script always resolves and embeds the true head SHA
+                  # in review.json, so this fallback only matters if that step
+                  # failed entirely (VERDICT empty too, in which case the
+                  # comment already says so explicitly).
+                  HEAD_SHA=${HEAD_SHA:-${{ github.event.pull_request.head.sha }}}
                   RUN_URL="${{ github.server_url }}/$REPO/actions/runs/${{ github.run_id }}"
                   echo "verdict: $VERDICT"
 
@@ -77,31 +109,41 @@ jobs:
                       --body "${BODY:-stamphog: no showstoppers found.}" \
                       || gh pr comment "$PR" --repo "$REPO" \
                            --body "🤖 stamphog verdict: APPROVED (could not post a formal approval — see $RUN_URL)"$'\n\n'"$BODY"
+                  fi
+
+                  # Sticky review comment — matches the upstream stamphog[bot]
+                  # shape exactly (marker, review count, head-pinned headline).
+                  # Updated on every outcome so it never goes stale after a
+                  # failed run or across verdict changes.
+                  MARKER="<!-- stamphog-sticky-review -->"
+                  LEGACY_MARKER="<!-- stamphog-sticky-comment -->"
+                  if [ -z "$VERDICT" ]; then
+                    HEADLINE="stamphog review of \`$HEAD_SHA\` failed before producing a verdict"
+                    BODY="Check the [workflow run]($RUN_URL) and re-apply the label to retry."
                   else
-                    MARKER="<!-- stamphog-sticky-comment -->"
-                    if [ -z "$VERDICT" ]; then
-                      HEADLINE="stamphog review failed before producing a verdict"
-                      BODY="Check the [workflow run]($RUN_URL) and re-apply the label to retry."
-                    else
-                      HEADLINE="stamphog verdict: $VERDICT"
-                    fi
-                    COMMENT_ID=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
-                      --jq ".[] | select(.user.login == \"$BOT_LOGIN\" and (.body | startswith(\"$MARKER\"))) | .id" | head -1)
-                    {
-                      echo "$MARKER"
-                      echo "> [!NOTE]"
-                      echo "> 🤖 $HEADLINE"
-                      echo
-                      echo "$BODY"
-                    } > /tmp/stamphog-comment.md
-                    if [ -n "$COMMENT_ID" ]; then
-                      gh api -X PATCH "repos/$REPO/issues/comments/$COMMENT_ID" \
-                        -F "body=@/tmp/stamphog-comment.md" || COMMENT_ID=""
-                    fi
-                    if [ -z "$COMMENT_ID" ]; then
-                      gh api -X POST "repos/$REPO/issues/$PR/comments" \
-                        -F "body=@/tmp/stamphog-comment.md"
-                    fi
+                    HEADLINE="stamphog reviewed \`$HEAD_SHA\` — verdict: **$VERDICT**"
+                  fi
+                  COMMENT_JSON=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+                    --jq "[.[] | select(.user.login == \"$BOT_LOGIN\" and ((.body | startswith(\"$MARKER\")) or (.body | startswith(\"$LEGACY_MARKER\"))))][0] | {id, body}" 2>/dev/null || echo "")
+                  COMMENT_ID=$(echo "$COMMENT_JSON" | jq -r '.id // empty' 2>/dev/null || echo "")
+                  COUNT=$(echo "$COMMENT_JSON" | jq -r '.body // ""' 2>/dev/null \
+                    | sed -n 's/.*<!-- stamphog-review-count:\([0-9]*\) -->.*/\1/p' | head -1)
+                  COUNT=$(( ${COUNT:-0} + 1 ))
+                  {
+                    echo "$MARKER"
+                    echo "<!-- stamphog-review-count:$COUNT -->"
+                    echo "> [!NOTE]"
+                    echo "> 🤖 $HEADLINE"
+                    echo
+                    echo "$BODY"
+                  } > /tmp/stamphog-comment.md
+                  if [ -n "$COMMENT_ID" ]; then
+                    gh api -X PATCH "repos/$REPO/issues/comments/$COMMENT_ID" \
+                      -F "body=@/tmp/stamphog-comment.md" || COMMENT_ID=""
+                  fi
+                  if [ -z "$COMMENT_ID" ]; then
+                    gh api -X POST "repos/$REPO/issues/$PR/comments" \
+                      -F "body=@/tmp/stamphog-comment.md"
                   fi
 
                   # Substantive non-approvals strip the label so the author

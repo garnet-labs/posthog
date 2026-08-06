@@ -18,7 +18,7 @@ on:
 permissions:
     contents: read
     statuses: write
-    pull-requests: read
+    pull-requests: write
 
 concurrency:
     group: garnet-evidence-status-${{ github.event.pull_request.number || github.event.issue.number }}
@@ -71,5 +71,20 @@ jobs:
                     exit 0
                   fi
                   uv run tools/pr-approval-agent/evidence_status.py \
+                    ${{ github.event.pull_request.number || github.event.issue.number }} \
+                    --repo ${{ github.repository }}
+
+            # Same parse, rendered into the PR description between
+            # garnet:evidence markers, so AI reviewers that read the body
+            # (Greptile) ground in head-pinned recorded evidence.
+            - name: Sync evidence into PR body
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  if [ ! -f tools/pr-approval-agent/evidence_body.py ]; then
+                    echo "evidence_body.py absent on trusted ref; skipping"
+                    exit 0
+                  fi
+                  uv run tools/pr-approval-agent/evidence_body.py \
                     ${{ github.event.pull_request.number || github.event.issue.number }} \
                     --repo ${{ github.repository }}

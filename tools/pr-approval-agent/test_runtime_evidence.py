@@ -1,6 +1,6 @@
-"""Tests for runtime_evidence.py — Garnet comment parsing and bypass scoping."""
+"""Tests for runtime_evidence.py — execution-tree parsing and bypass scoping."""
 
-import re
+from pathlib import Path
 
 import pytest
 
@@ -47,19 +47,15 @@ COMMENT = f"""<!-- garnet-runtime-review -->
 """
 
 
-def _config(patterns: list[str] | None = None) -> RuntimeEvidenceConfig:
+def _config() -> RuntimeEvidenceConfig:
     return RuntimeEvidenceConfig(
         trusted_bots=frozenset({"garnet-runtime-review[bot]"}),
-        expected_destinations=tuple(re.compile(p) for p in (patterns or [])),
         bypass_categories=frozenset({"deps_toolchain"}),
     )
 
 
-ALLOW_ALL = [r"^registry\.npmjs\.org$", r"^localhost$"]
-
-
 def test_parse_extracts_destinations_and_lineage():
-    ev = parse_comment(COMMENT, HEAD, _config(ALLOW_ALL))
+    ev = parse_comment(COMMENT, HEAD)
     dests = {d["dest"] for d in ev.destinations}
     assert dests == {"registry.npmjs.org", "localhost"}
     npm = next(d for d in ev.destinations if d["dest"] == "registry.npmjs.org")
@@ -69,36 +65,31 @@ def test_parse_extracts_destinations_and_lineage():
     assert ev.permalinks == ["https://app.garnet.ai/public/runs/1?profile=abc&utm_source=github&utm_medium=pr_comment"]
 
 
-def test_all_expected_is_pass():
-    ev = parse_comment(COMMENT, HEAD, _config(ALLOW_ALL))
-    assert ev.status == "pass"
-    assert ev.unexpected == []
-
-
-def test_unexpected_destination_flagged():
-    ev = parse_comment(COMMENT, HEAD, _config([r"^localhost$"]))
-    assert ev.status == "unexpected"
-    assert [d["dest"] for d in ev.unexpected] == ["registry.npmjs.org"]
+def test_snapshot_tree_is_recorded():
+    ev = parse_comment(COMMENT, HEAD)
+    assert ev.status == "recorded"
+    assert ev.new_destinations == []
+    assert len(ev.chains) == 2
 
 
 def test_stale_commit_marker_is_missing():
-    ev = parse_comment(COMMENT, "f" * 40, _config(ALLOW_ALL))
+    ev = parse_comment(COMMENT, "f" * 40)
     assert ev.status == "missing"
 
 
 def test_no_commit_marker_is_missing():
     body = COMMENT.replace(f"<!-- garnet:commit {HEAD} -->", "")
-    assert parse_comment(body, HEAD, _config(ALLOW_ALL)).status == "missing"
+    assert parse_comment(body, HEAD).status == "missing"
 
 
 def test_zero_destinations_is_missing():
     # Waiting-state comment, or a renderer format this parser can't read:
     # unusable evidence must never clear a deny.
     body = f"<!-- garnet-runtime-review -->\n<!-- garnet:commit {HEAD} -->\nno record"
-    ev = parse_comment(body, HEAD, _config([]))
+    ev = parse_comment(body, HEAD)
     assert ev.status == "missing"
     assert ev.destinations == []
-    assert bypassable_deny(["deps_toolchain"], ev, _config([])) == []
+    assert bypassable_deny(["deps_toolchain"], ev, _config()) == []
 
 
 # Trimmed from the contract v6.6 goldens: no "· job" tree roots, defanged
@@ -139,42 +130,53 @@ COMMENT_V66 = f"""<!-- garnet-runtime-review -->
 
 
 def test_v66_comment_parses_with_defang_normalized():
-    ev = parse_comment(COMMENT_V66, HEAD, _config(ALLOW_ALL))
+    ev = parse_comment(COMMENT_V66, HEAD)
     dests = {d["dest"] for d in ev.destinations}
     assert dests == {"registry.npmjs.org", "localhost"}
-    assert ev.status == "pass"
+    assert ev.status == "recorded"
     npm = next(d for d in ev.destinations if d["dest"] == "registry.npmjs.org")
     assert npm["lineage"].endswith("bash > node")
 
 
 def test_v66_explainer_sample_tree_ignored():
-    ev = parse_comment(COMMENT_V66, HEAD, _config(ALLOW_ALL))
+    ev = parse_comment(COMMENT_V66, HEAD)
     assert "sample-domain.example" not in {d["dest"] for d in ev.destinations}
 
 
 def test_bypass_only_configured_categories():
-    ev = parse_comment(COMMENT, HEAD, _config(ALLOW_ALL))
-    cfg = _config(ALLOW_ALL)
+    ev = parse_comment(COMMENT, HEAD)
+    cfg = _config()
     assert bypassable_deny(["deps_toolchain"], ev, cfg) == ["deps_toolchain"]
     # A PR that also trips auth keeps its full deny.
     assert bypassable_deny(["auth", "deps_toolchain"], ev, cfg) == []
     assert bypassable_deny([], ev, cfg) == []
 
 
-def test_no_bypass_on_unexpected_or_missing():
-    cfg = _config([r"^localhost$"])
-    unexpected = parse_comment(COMMENT, HEAD, cfg)
-    assert bypassable_deny(["deps_toolchain"], unexpected, cfg) == []
+def test_no_bypass_on_diverged_or_missing():
+    cfg = _config()
+    diverged = parse_comment(V66_COMMENT, HEAD)
+    assert diverged.status == "diverged"
+    assert bypassable_deny(["deps_toolchain"], diverged, cfg) == []
     missing = RuntimeEvidence(status="missing")
     assert bypassable_deny(["deps_toolchain"], missing, cfg) == []
 
 
-def test_prompt_block_names_unexpected():
-    ev = parse_comment(COMMENT, HEAD, _config([r"^localhost$"]))
+def test_prompt_block_names_new_chain():
+    ev = parse_comment(V66_COMMENT, HEAD)
     block = prompt_block(ev)
-    assert "[UNEXPECTED] registry.npmjs.org" in block
+    assert "[NEW DESTINATION] Runner.Worker > node → httpbin.org" in block
     assert "REFUSE" in block
     assert "Evidence permalink: https://app.garnet.ai/public/runs/1" in block
+
+
+def test_prompt_block_grounds_on_lineage_not_allowlist():
+    ev = parse_comment(COMMENT, HEAD)
+    block = prompt_block(ev)
+    assert "Runner.Worker > bash > node → registry.npmjs.org" in block
+    assert "execution tree" in block
+    assert "does not exercise the code this diff changes" in block
+    assert "allowlist" not in block.lower()
+    assert "expected-egress" not in block
 
 
 def test_explainer_sample_tree_ignored():
@@ -184,9 +186,9 @@ def test_explainer_sample_tree_ignored():
         "      └─ → evil-example.com\n</pre>\n</details>\n"
     )
     body = COMMENT.replace("**See what ran**", explainer + "**See what ran**")
-    ev = parse_comment(body, HEAD, _config(ALLOW_ALL))
+    ev = parse_comment(body, HEAD)
     assert "evil-example.com" not in {d["dest"] for d in ev.destinations}
-    assert ev.status == "pass"
+    assert ev.status == "recorded"
 
 
 V66_COMMENT = f"""<!-- garnet-runtime-review -->
@@ -234,65 +236,67 @@ V66_COMMENT = f"""<!-- garnet-runtime-review -->
 """
 
 
-def test_v66_snapshot_trees_parsed_and_refanged():
-    ev = parse_comment(V66_COMMENT, HEAD, _config([*ALLOW_ALL, r"^github\.com$", r"^httpbin\.org$"]))
+def test_v66_comparison_new_chain_is_diverged():
+    ev = parse_comment(V66_COMMENT, HEAD)
     dests = {d["dest"] for d in ev.destinations}
     assert "registry.npmjs.org" in dests
-    assert "localhost" in dests
-    assert "evil-example.com" not in dests
-    assert ev.status == "pass"
-
-
-def test_v66_diff_fence_new_and_unchanged_counted_removed_excluded():
-    ev = parse_comment(V66_COMMENT, HEAD, _config([*ALLOW_ALL, r"^github\.com$"]))
-    dests = {d["dest"] for d in ev.destinations}
     assert "github.com" in dests
     assert "httpbin.org" in dests
     assert "nodejs.org" not in dests
-    assert ev.status == "unexpected"
-    assert [d["dest"] for d in ev.unexpected] == ["httpbin.org"]
+    assert "evil-example.com" not in dests
+    assert ev.status == "diverged"
+    assert [d["dest"] for d in ev.new_destinations] == ["httpbin.org"]
     new = next(d for d in ev.destinations if d["dest"] == "httpbin.org")
     assert new["lineage"].endswith("Runner.Worker > node")
 
 
+def test_v66_comparison_without_new_chains_is_unchanged():
+    body = V66_COMMENT.replace("+    ├─ → httpbin[.]org\n", "")
+    ev = parse_comment(body, HEAD)
+    assert ev.status == "unchanged"
+    assert ev.new_destinations == []
+    assert bypassable_deny(["deps_toolchain"], ev, _config()) == ["deps_toolchain"]
+
+
 def test_v66_real_tree_containing_arrow_still_contributes_evidence():
     body = V66_COMMENT.replace("<strong>npm install</strong>", "<strong>npm install ← run</strong>")
-    ev = parse_comment(body, HEAD, _config([r"^localhost$", r"^github\.com$"]))
+    ev = parse_comment(body, HEAD)
     dests = {d["dest"] for d in ev.destinations}
     assert "registry.npmjs.org" in dests
     assert "evil-example.com" not in dests
-    assert ev.status == "unexpected"
+    assert ev.status == "diverged"
 
 
 def test_legacy_comment_still_parses():
-    ev = parse_comment(COMMENT, HEAD, _config(ALLOW_ALL))
+    ev = parse_comment(COMMENT, HEAD)
     assert {d["dest"] for d in ev.destinations} == {"registry.npmjs.org", "localhost"}
-    assert ev.status == "pass"
+    assert ev.status == "recorded"
 
 
 def test_citation_block_cites_verifiable_evidence():
-    ev = parse_comment(COMMENT, HEAD, _config([r"^localhost$"]))
+    ev = parse_comment(V66_COMMENT, HEAD)
     block = citation_block(ev)
     assert f"<code>{HEAD[:7]}</code>" in block
-    assert "**unexpected**" in block
-    assert "`registry.npmjs.org`" in block
-    assert "process lineage" in block
+    assert "**diverged**" in block
+    assert "`Runner.Worker > node` → `httpbin.org`" in block
     assert "https://app.garnet.ai/public/runs/1" in block
     assert f"must equal `{HEAD[:7]}`" in block
 
 
-def test_citation_block_pass_and_missing():
-    ev = parse_comment(COMMENT, HEAD, _config(ALLOW_ALL))
+def test_citation_block_grounding_and_missing():
+    ev = parse_comment(COMMENT, HEAD)
     block = citation_block(ev)
-    assert "**pass**" in block
-    assert "matches the expected-egress policy" in block
+    assert "**recorded**" in block
+    assert "execution chain(s)" in block
+    assert "no static egress allowlist" in block
+    assert "never approves a PR by itself" in block
     assert citation_block(RuntimeEvidence(status="missing")) is None
 
 
 def test_evidence_dict_round_trip():
-    ev = parse_comment(COMMENT, HEAD, _config(ALLOW_ALL))
+    ev = parse_comment(COMMENT, HEAD)
     d = evidence_dict(ev)
-    assert d["status"] == "pass"
+    assert d["status"] == "recorded"
     assert d["commit_sha"] == HEAD
     assert d["destinations"] == ev.destinations
     assert d["permalinks"] == ev.permalinks
@@ -307,10 +311,98 @@ def test_load_config_validates(tmp_path):
     (tmp_path / "runtime-evidence.yml").write_text("version: 1\ntrusted_bots: [x]\nnope: 1\n")
     with pytest.raises(RuntimeEvidenceError):
         load_config(tmp_path)
+    # The retired static allowlist key must be rejected, not silently read.
+    (tmp_path / "runtime-evidence.yml").write_text("version: 1\ntrusted_bots: [x]\nexpected_destinations: ['^a$']\n")
+    with pytest.raises(RuntimeEvidenceError):
+        load_config(tmp_path)
     assert load_config(tmp_path.parent / "absent") is None
     (tmp_path / "runtime-evidence.yml").write_text(
-        "version: 1\ntrusted_bots: ['garnet[bot]']\nexpected_destinations: ['^a$']\nbypass_categories: [deps_toolchain]\n"
+        "version: 1\ntrusted_bots: ['garnet[bot]']\nbypass_categories: [deps_toolchain]\n"
     )
     cfg = load_config(tmp_path)
     assert cfg.trusted_bots == frozenset({"garnet[bot]"})
     assert cfg.bypass_categories == frozenset({"deps_toolchain"})
+
+
+def test_removed_lines_contribute_to_previous_destination_set():
+    # The `-` httpbin[.]org line records that the previous profile already
+    # reached httpbin.org, so the `+` chain is reshaped, not genuinely new.
+    body = V66_COMMENT.replace("-    └─ → nodejs[.]org", "-    └─ → httpbin[.]org")
+    ev = parse_comment(body, HEAD)
+    assert ev.status == "unchanged"
+    assert ev.new_destinations == []
+    assert [d["dest"] for d in ev.reshaped_chains] == ["httpbin.org"]
+
+
+def test_plus_chain_with_destination_unchanged_elsewhere_is_reshaped():
+    # The PR #77 shape: the same destination sits on unchanged chains in the
+    # fence while a `+` chain reaches it under a different lineage —
+    # installer nondeterminism, not divergence.
+    body = V66_COMMENT.replace("+    ├─ → httpbin[.]org", "+    ├─ → github[.]com")
+    ev = parse_comment(body, HEAD)
+    assert ev.status == "unchanged"
+    assert ev.new_destinations == []
+    reshaped = ev.reshaped_chains
+    assert [(d["dest"], d["lineage"]) for d in reshaped] == [("github.com", "Runner.Worker > node")]
+    assert bypassable_deny(["deps_toolchain"], ev, _config()) == ["deps_toolchain"]
+
+
+def test_plus_destination_known_only_from_snapshot_pre_stays_new():
+    # registry.npmjs.org is recorded only in another job's snapshot <pre>,
+    # which is current-head evidence with no previous-profile comparison —
+    # it must not excuse a `+` chain in the fence.
+    body = V66_COMMENT.replace("+    ├─ → httpbin[.]org", "+    ├─ → registry.npmjs[.]org")
+    ev = parse_comment(body, HEAD)
+    assert ev.status == "diverged"
+    assert [d["dest"] for d in ev.new_destinations] == ["registry.npmjs.org"]
+    assert ev.reshaped_chains == []
+    assert bypassable_deny(["deps_toolchain"], ev, _config()) == []
+
+
+def test_reshaped_chain_labeled_in_prompt_block():
+    body = V66_COMMENT.replace("+    ├─ → httpbin[.]org", "+    ├─ → github[.]com")
+    ev = parse_comment(body, HEAD)
+    block = prompt_block(ev)
+    assert "[reshaped chain]" in block
+    assert "recorded in the previous profile under" in block
+    assert "[NEW DESTINATION]" not in block
+
+
+def test_citation_block_counts_reconcile_with_listed_lines():
+    body = V66_COMMENT.replace("+    ├─ → httpbin[.]org", "+    ├─ → github[.]com")
+    ev = parse_comment(body, HEAD)
+    block = citation_block(ev)
+    assert "1 reshaped chain(s)" in block
+    reshaped_header = next(line for line in block.splitlines() if "reshaped chain(s)" in line)
+    listed = [line for line in block.splitlines() if line.startswith("- `Runner.Worker")]
+    assert reshaped_header.startswith("1 ") and len(listed) == 1
+
+
+def test_citation_block_new_destination_count_matches_lines():
+    ev = parse_comment(V66_COMMENT, HEAD)
+    block = citation_block(ev)
+    assert "1 destination(s) NEW versus the previously profiled commit:" in block
+
+
+def test_real_pr77_comment_is_unchanged_not_diverged():
+    # Regression fixture: the live Garnet comment from garnet-labs/posthog#77
+    # whose `+` chains (registry.npmjs.org under node, github.com under sh)
+    # all reach destinations the previous profile already recorded.
+    body = (Path(__file__).parent / "fixtures" / "garnet_comment_pr77.md").read_text()
+    assert parse_comment(body, "f" * 40).status == "missing"
+    ev = parse_comment(body, "e90ee0b287e714d223cd4a7b4acbca0c176f4004")
+    assert ev.status == "unchanged"
+    assert ev.new_destinations == []
+    reshaped_dests = {d["dest"] for d in ev.reshaped_chains}
+    assert reshaped_dests == {"registry.npmjs.org", "github.com"}
+
+
+def test_new_chain_not_masked_by_identical_chain_in_earlier_job():
+    # Two jobs in one comment: job A's snapshot <pre> records the same
+    # (lineage, destination) that job B's comparison fence marks as NEW.
+    # The + occurrence must win — status is diverged, never unchanged.
+    snapshot_job = "<pre>\n<em>Runner.Worker</em>\n└─ <strong>node</strong>\n   └─ → httpbin[.]org\n</pre>\n"
+    body = V66_COMMENT.replace("<details open><summary><b>+1", snapshot_job + "<details open><summary><b>+1")
+    ev = parse_comment(body, HEAD)
+    assert ev.status == "diverged"
+    assert [d["dest"] for d in ev.new_destinations] == ["httpbin.org"]
