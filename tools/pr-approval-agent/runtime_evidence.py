@@ -384,7 +384,7 @@ def citation_block(evidence: RuntimeEvidence) -> str | None:
         f"<summary>Runtime evidence (Garnet) — kernel-recorded execution tree for head <code>{evidence.commit_sha[:7]}</code></summary>",
         "",
         f"Status: **{evidence.status}** — {len(evidence.destinations)} destination(s) across "
-        f"{len(evidence.chains)} process chain(s).",
+        f"{len(evidence.chains)} execution chain(s).",
         "",
         "Grounding: the execution tree (process lineage → destination) is the evidence. "
         "There is no static egress allowlist; the reviewer judges each chain against the diff. "

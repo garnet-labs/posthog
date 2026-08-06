@@ -43,7 +43,7 @@ def status_payload(evidence: RuntimeEvidence) -> tuple[str, str]:
         return (
             "success",
             f"{evidence.status}: {len(evidence.destinations)} destination(s) across "
-            f"{len(evidence.chains)} process chain(s){suffix}, head-pinned",
+            f"{len(evidence.chains)} execution chain(s){suffix}, head-pinned",
         )
     if evidence.status == "diverged":
         named = ", ".join(d["dest"] for d in evidence.new_destinations[:3])

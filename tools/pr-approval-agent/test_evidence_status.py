@@ -11,7 +11,7 @@ def test_recorded_maps_to_success():
     assert evidence.status == "recorded"
     state, description = status_payload(evidence)
     assert state == "success"
-    assert description == "recorded: 3 destination(s) across 2 process chain(s), head-pinned"
+    assert description == "recorded: 3 destination(s) across 2 execution chain(s), head-pinned"
 
 
 def test_unchanged_maps_to_success():
