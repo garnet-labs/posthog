@@ -1,6 +1,11 @@
 {
     "disabledLabels": ["no-greptile"],
     "customContext": {
-        "files": ["AGENTS.md"]
+        "files": ["AGENTS.md", ".stamphog/greptile-runtime-evidence.md"],
+        "rules": [
+            {
+                "rule": "When a PR carries Garnet runtime evidence (the 'Runtime evidence (Garnet)' block in the description or the Garnet Runtime Review comment) pinned to the current head commit, ground runtime-behavior claims in it: cite the head commit, the execution chain (lineage and destination), and the Garnet public run profile link. Flag any chain marked NEW versus the previously profiled commit that this diff does not explain."
+            }
+        ]
     }
 }

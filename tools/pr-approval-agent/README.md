@@ -23,6 +23,11 @@ Deterministic safety gates first, then Claude reviews for showstoppers.
 >   reviewer judges each chain (lineage → destination) against the diff;
 >   `.stamphog/review-guidance.md` has a "Runtime evidence (Garnet)"
 >   section.
+> - `evidence_body.py` (+ tests) — syncs the same parsed evidence into a
+>   marker-delimited block in the PR description, so surfaces that read the
+>   body (Greptile, per `greptile.json` and
+>   `.stamphog/greptile-runtime-evidence.md`) ground in head-pinned
+>   recorded evidence.
 > - `.stamphog/runtime-evidence.yml` — trusted bot logins and bypassable
 >   categories. Covered by the `stamphog_policy` deny.
 > - `.github/workflows/pr-approval-agent.yml` — runs with `GITHUB_TOKEN` +
