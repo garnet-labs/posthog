@@ -79,27 +79,31 @@ impl BucketedHistogram {
 
     /// Take and reset the interval's aggregate. Returns `None` when no
     /// observations were recorded since the previous drain.
+    ///
+    /// The sum is swapped before the bucket counters, the reverse of the
+    /// update order in `record` (bucket first, then sum), so a value included
+    /// in the drained sum normally has its bucket count included too. A
+    /// concurrent `record` can still split across intervals (count now, value
+    /// next); when that leaves an interval with a sum but no counts, the sum
+    /// is pushed back for the next drain instead of being discarded.
     fn drain(&self) -> Option<(i64, f64, Vec<i64>)> {
+        let sum = f64::from_bits(self.sum_bits.swap(0, Ordering::Relaxed));
         let counts: Vec<i64> = self
             .bucket_counts
             .iter()
             .map(|c| c.swap(0, Ordering::Relaxed) as i64)
             .collect();
         let count: i64 = counts.iter().sum();
-        let sum = f64::from_bits(self.sum_bits.swap(0, Ordering::Relaxed));
         if count == 0 {
+            if sum != 0.0 {
+                self.add_to_sum(sum);
+            }
             return None;
         }
         Some((count, sum, counts))
     }
-}
 
-impl HistogramFn for BucketedHistogram {
-    fn record(&self, value: f64) {
-        // OTel explicit-bounds semantics: bucket i counts values <= bounds[i],
-        // with one overflow bucket past the last bound.
-        let idx = self.bounds.partition_point(|bound| *bound < value);
-        self.bucket_counts[idx].fetch_add(1, Ordering::Relaxed);
+    fn add_to_sum(&self, value: f64) {
         let mut current = self.sum_bits.load(Ordering::Relaxed);
         loop {
             let next = (f64::from_bits(current) + value).to_bits();
@@ -113,6 +117,16 @@ impl HistogramFn for BucketedHistogram {
                 Err(actual) => current = actual,
             }
         }
+    }
+}
+
+impl HistogramFn for BucketedHistogram {
+    fn record(&self, value: f64) {
+        // OTel explicit-bounds semantics: bucket i counts values <= bounds[i],
+        // with one overflow bucket past the last bound.
+        let idx = self.bounds.partition_point(|bound| *bound < value);
+        self.bucket_counts[idx].fetch_add(1, Ordering::Relaxed);
+        self.add_to_sum(value);
     }
 }
 
@@ -282,6 +296,10 @@ pub fn spawn_exporter(
     token: String,
     interval: Duration,
 ) {
+    if interval.is_zero() {
+        error!("internal metrics exporter disabled: export interval must be greater than zero");
+        return;
+    }
     info!(
         "internal metrics exporter enabled, exporting every {}s",
         interval.as_secs()
