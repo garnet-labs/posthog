@@ -9,13 +9,19 @@ import { cn } from './lib/utils'
 import { RadioIndicator } from './radio-group'
 import { Separator } from './separator'
 
-function ItemGroup({ className, ...props }: React.ComponentProps<'div'>): React.ReactElement {
+function ItemGroup({
+    className,
+    combined = false,
+    ...props
+}: React.ComponentProps<'div'> & { combined?: boolean }): React.ReactElement {
     return (
         <div
             role="list"
             data-slot="item-group"
+            data-combined={combined ? '' : undefined}
             className={cn(
-                'quill-item-group group/item-group flex w-full flex-col gap-4 has-data-[size=sm]:gap-2.5 has-data-[size=xs]:gap-2',
+                'quill-item-group group/item-group flex w-full flex-col',
+                combined ? 'gap-0' : 'gap-4 has-data-[size=sm]:gap-2.5 has-data-[size=xs]:gap-2',
                 className
             )}
             {...props}
@@ -45,10 +51,19 @@ const itemVariants = cva(
                 sm: 'quill-item--size-sm',
                 xs: 'quill-item--size-xs',
             },
+            tone: {
+                default: '',
+                info: 'quill-item--tone-info',
+                success: 'quill-item--tone-success',
+                warning: 'quill-item--tone-warning',
+                completed: 'quill-item--tone-completed',
+                destructive: 'quill-item--tone-destructive',
+            },
         },
         defaultVariants: {
             variant: 'default',
             size: 'default',
+            tone: 'default',
         },
     }
 )
@@ -57,6 +72,7 @@ function Item({
     className,
     variant = 'default',
     size = 'default',
+    tone = 'default',
     role,
     render,
     ...props
@@ -66,7 +82,8 @@ function Item({
         props: mergeProps<'div'>(
             {
                 'data-quill': '',
-                className: cn(itemVariants({ variant, size, className })),
+                'data-tone': tone && tone !== 'default' ? tone : undefined,
+                className: cn(itemVariants({ variant, size, tone, className })),
                 role: variant === 'pressable' ? 'link' : undefined,
             } as Omit<React.ComponentProps<'div'>, 'ref'>,
             props
@@ -76,6 +93,7 @@ function Item({
             slot: 'item',
             variant,
             size,
+            tone,
         },
     })
 }
@@ -83,12 +101,13 @@ function Item({
 const ItemMenuItem = React.forwardRef<
     HTMLButtonElement,
     useRender.ComponentProps<'button'> & VariantProps<typeof itemVariants>
->(function ItemMenuItem({ className, variant = 'default', size = 'default', render, ...props }, ref) {
+>(function ItemMenuItem({ className, variant = 'default', size = 'default', tone = 'default', render, ...props }, ref) {
     return useRender({
         defaultTagName: 'button',
         props: mergeProps<'button'>(
             {
-                className: cn(itemVariants({ variant: 'menuItem', size, className })),
+                'data-tone': tone && tone !== 'default' ? tone : undefined,
+                className: cn(itemVariants({ variant: 'menuItem', size, tone, className })),
                 role: 'menuitem',
                 ref,
             } as Omit<React.ComponentProps<'button'>, 'ref'>,
@@ -99,6 +118,7 @@ const ItemMenuItem = React.forwardRef<
             slot: 'item',
             variant,
             size,
+            tone,
         },
     })
 })
@@ -106,13 +126,14 @@ const ItemMenuItem = React.forwardRef<
 const ItemCheckbox = React.forwardRef<
     HTMLButtonElement,
     useRender.ComponentProps<'button'> & VariantProps<typeof itemVariants>
->(function ItemCheckbox({ className, variant = 'default', size = 'default', render, children, ...props }, ref) {
+>(function ItemCheckbox({ className, variant = 'default', size = 'default', tone = 'default', render, children, ...props }, ref) {
     const checked = props['aria-checked'] === true || props['aria-checked'] === 'true'
     const element = useRender({
         defaultTagName: 'button',
         props: mergeProps<'button'>(
             {
-                className: cn(itemVariants({ variant: 'menuItem', size, className })),
+                'data-tone': tone && tone !== 'default' ? tone : undefined,
+                className: cn(itemVariants({ variant: 'menuItem', size, tone, className })),
                 role: 'checkbox',
                 ref,
             } as Omit<React.ComponentProps<'button'>, 'ref'>,
@@ -123,6 +144,7 @@ const ItemCheckbox = React.forwardRef<
             slot: 'item',
             variant,
             size,
+            tone,
         },
     })
     return React.cloneElement(
@@ -138,13 +160,14 @@ const ItemCheckbox = React.forwardRef<
 const ItemRadio = React.forwardRef<
     HTMLButtonElement,
     useRender.ComponentProps<'button'> & VariantProps<typeof itemVariants>
->(function ItemRadio({ className, variant = 'default', size = 'default', render, children, ...props }, ref) {
+>(function ItemRadio({ className, variant = 'default', size = 'default', tone = 'default', render, children, ...props }, ref) {
     const checked = props['aria-checked'] === true || props['aria-checked'] === 'true'
     const element = useRender({
         defaultTagName: 'button',
         props: mergeProps<'button'>(
             {
-                className: cn(itemVariants({ variant: 'menuItem', size, className })),
+                'data-tone': tone && tone !== 'default' ? tone : undefined,
+                className: cn(itemVariants({ variant: 'menuItem', size, tone, className })),
                 role: 'radio',
                 ref,
             } as Omit<React.ComponentProps<'button'>, 'ref'>,
@@ -155,6 +178,7 @@ const ItemRadio = React.forwardRef<
             slot: 'item',
             variant,
             size,
+            tone,
         },
     })
     return React.cloneElement(
@@ -196,7 +220,7 @@ function ItemMedia({
     )
 }
 
-const itemContentVariants = cva('quill-item__content flex flex-1 flex-col gap-1', {
+const itemContentVariants = cva('quill-item__content flex flex-1 flex-col gap-0.5', {
     variants: {
         variant: {
             default: '',
