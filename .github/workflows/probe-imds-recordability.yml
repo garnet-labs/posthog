@@ -1,0 +1,89 @@
+# Probe: does the Garnet sensor record an outbound connection to the
+# link-local cloud metadata address (169.254.169.254) on a GitHub-hosted
+# runner, and does it render as a destination in the PR comment?
+#
+# Benign. Each request is a plain HTTP GET whose response is discarded.
+# Nothing is stored, forwarded, or printed beyond a marker. No secrets,
+# tokens, or environment values are read.
+#
+# Temporary. Delete once the question is settled. Retriggered after the
+# GitHub Actions outage on 2026-08-06.
+name: probe — IMDS recordability
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/probe-imds-recordability.yml"
+  workflow_dispatch: {}
+
+permissions: {}
+
+concurrency:
+  group: probe-imds-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  probe:
+    name: "imds probe (recorded)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Garnet Runtime Visibility
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        uses: garnet-org/action@3d47f4a9004f7356c980a0e8d420ef5984750e3c # v2
+        with:
+          api_token: ${{ secrets.GARNET_API_TOKEN }}
+          api_url: https://api.garnet.ai
+          jibril_version: "v2.12.0"
+
+      - uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: curl the metadata endpoint and a public endpoint
+        continue-on-error: true
+        run: |
+          set +e
+          curl -sS -o /dev/null --max-time 5 -H 'Metadata:true' \
+            'http://169.254.169.254/metadata/instance?api-version=2021-02-01'
+          echo "azure-imds curl exit=$?"
+          curl -sS -o /dev/null --max-time 5 \
+            'http://169.254.169.254/latest/meta-data/'
+          echo "aws-imds curl exit=$?"
+          curl -sS -o /dev/null --max-time 5 'https://example.com/'
+          echo "example.com curl exit=$?"
+
+      - name: node child process performs the same requests
+        continue-on-error: true
+        run: |
+          cat > /tmp/child.mjs <<'EOF'
+          import http from 'node:http';
+          import https from 'node:https';
+
+          function get(mod, url, headers) {
+            return new Promise((resolve) => {
+              const req = mod.get(url, { headers }, (res) => {
+                res.on('data', () => {});
+                res.on('end', () => resolve(`${url} status=${res.statusCode}`));
+              });
+              req.on('error', (e) => resolve(`${url} error=${e.code || e.message}`));
+              req.setTimeout(5000, () => { req.destroy(); resolve(`${url} timeout`); });
+            });
+          }
+
+          console.log(await get(http, 'http://169.254.169.254/metadata/instance?api-version=2021-02-01', { Metadata: 'true' }));
+          console.log(await get(http, 'http://169.254.169.254/latest/meta-data/', {}));
+          console.log(await get(https, 'https://example.com/', {}));
+          EOF
+          cat > /tmp/parent.mjs <<'EOF'
+          import { spawn } from 'node:child_process';
+          const c = spawn(process.execPath, ['/tmp/child.mjs'], { stdio: 'inherit' });
+          c.on('exit', (code) => console.log('child exit', code));
+          EOF
+          node /tmp/parent.mjs
+
+      - name: Let sensor settle
+        if: always()
+        run: sleep 45
