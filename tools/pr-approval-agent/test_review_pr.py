@@ -596,7 +596,7 @@ def test_runtime_evidence_gate_recorded_names_tree() -> None:
     assert "tree handed to the reviewer" in message
 
 
-def test_runtime_evidence_gate_diverged_fails_naming_new_chain() -> None:
+def test_runtime_evidence_gate_diverged_fails_naming_new_destination() -> None:
     evidence = {
         "status": "diverged",
         "commit_sha": "6e5d0d4cf00a92a9e1fe697efe0e41b3ae61533e",
@@ -610,6 +610,30 @@ def test_runtime_evidence_gate_diverged_fails_naming_new_chain() -> None:
     assert not passed
     assert "1 NEW destination(s) vs previous profiled commit" in message
     assert "Runner.Worker > node → httpbin.org" in message
+
+
+def test_runtime_evidence_gate_unchanged_counts_reshaped_chains() -> None:
+    evidence = {
+        "status": "unchanged",
+        "commit_sha": "6e5d0d4cf00a92a9e1fe697efe0e41b3ae61533e",
+        "destinations": [
+            {"dest": "registry.npmjs.org", "note": "", "lineage": "Runner.Worker > bash", "new": False},
+            {
+                "dest": "registry.npmjs.org",
+                "note": "",
+                "lineage": "Runner.Worker > node",
+                "new": False,
+                "reshaped": True,
+            },
+        ],
+        "permalinks": [],
+    }
+    passed, message = _pipeline_with_evidence(evidence)._check_runtime_evidence()
+    assert passed
+    assert "execution tree recorded for head `6e5d0d4`" in message
+    assert "2 destination(s) across 2 chain(s)" in message
+    assert "1 reshaped chain(s)" in message
+    assert "tree handed to the reviewer" in message
 
 
 def test_runtime_evidence_gate_missing_passes_without_bypass() -> None:

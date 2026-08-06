@@ -403,9 +403,10 @@ class Pipeline:
         # Garnet runtime evidence (vendored local extension — see README):
         # the kernel-recorded execution tree bound to the head commit. A
         # usable tree (recorded/unchanged) may clear a deps_toolchain-only
-        # deny (to LLM review, never auto-approve); a new chain versus the
-        # previously profiled commit is surfaced to the reviewer as a
-        # showstopper. Config absent → everything below is a no-op.
+        # deny (to LLM review, never auto-approve); a genuinely new
+        # destination versus the previously profiled commit is surfaced to
+        # the reviewer as a showstopper. Config absent → everything below
+        # is a no-op.
         runtime_evidence_config = load_runtime_evidence_config(REPO_ROOT / ".stamphog")
         runtime_evidence: RuntimeEvidence | None = None
         runtime_evidence_bypassed: list[str] = []
@@ -650,24 +651,28 @@ class Pipeline:
         Not a static egress check: the tree (process lineage → destination)
         is handed to the LLM reviewer to judge against the diff. This row
         fails only when the renderer's comparison against the previously
-        profiled commit shows a NEW chain; missing evidence passes the row
-        but leaves the deny-list untouched (fail-closed on the bypass).
+        profiled commit shows a genuinely NEW destination; a reshaped chain
+        (an already-recorded destination under a different lineage) passes
+        and is counted; missing evidence passes the row but leaves the
+        deny-list untouched (fail-closed on the bypass).
         """
         ev = self.classification["runtime_evidence"]
         head = ev.get("commit_sha", "")[:7]
         dests = ev.get("destinations", [])
         chains = {d["lineage"] for d in dests if d["lineage"]}
+        reshaped = [d for d in dests if d.get("reshaped")]
         if ev["status"] == "missing":
             return True, "none recorded for this head — deny-list applies unmodified"
         if ev["status"] == "diverged":
             new = [d for d in dests if d["new"]]
             named = "; ".join(f"{d['lineage']} → {d['dest']}" for d in new[:3])
             return False, f"{len(new)} NEW destination(s) vs previous profiled commit: {named}"
-        detail = (
-            "no new destinations vs previous profiled commit"
-            if ev["status"] == "unchanged"
-            else "first profiled commit (snapshot)"
-        )
+        if ev["status"] == "unchanged":
+            detail = "no new destinations vs previous profiled commit"
+            if reshaped:
+                detail += f", {len(reshaped)} reshaped chain(s)"
+        else:
+            detail = "first profiled commit (snapshot)"
         return True, (
             f"execution tree recorded for head `{head}` — {len(dests)} destination(s) across "
             f"{len(chains)} chain(s), {detail}; tree handed to the reviewer"

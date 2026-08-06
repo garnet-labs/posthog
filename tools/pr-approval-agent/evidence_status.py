@@ -11,10 +11,12 @@
 Surfaces the same parse `review_pr.py` consumes as a `garnet/runtime-evidence`
 status in the PR checks UI, bound to the head SHA:
 
-    success  → an execution tree is recorded for the head with no new
-               chains versus the previously profiled commit
-    failure  → the tree shows at least one NEW chain versus the previously
-               profiled commit
+    success  → an execution tree is recorded for the head with no
+               genuinely new destinations versus the previously profiled
+               commit (reshaped chains — an already-recorded destination
+               under a different lineage — stay success and are counted)
+    failure  → the tree shows at least one genuinely NEW destination
+               versus the previously profiled commit
     pending  → no usable evidence for the head yet (waiting, stale, or a
                renderer format the parser refuses to trust)
 
@@ -36,10 +38,12 @@ _CONTEXT = "garnet/runtime-evidence"
 def status_payload(evidence: RuntimeEvidence) -> tuple[str, str]:
     """Map parsed evidence to a commit-status (state, description)."""
     if evidence.status in ("recorded", "unchanged"):
+        reshaped = evidence.reshaped_chains
+        suffix = f", {len(reshaped)} reshaped chain(s)" if reshaped else ""
         return (
             "success",
             f"{evidence.status}: {len(evidence.destinations)} destination(s) across "
-            f"{len(evidence.chains)} execution chain(s), head-pinned",
+            f"{len(evidence.chains)} execution chain(s){suffix}, head-pinned",
         )
     if evidence.status == "diverged":
         named = ", ".join(d["dest"] for d in evidence.new_destinations[:3])

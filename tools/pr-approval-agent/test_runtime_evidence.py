@@ -1,5 +1,7 @@
 """Tests for runtime_evidence.py — execution-tree parsing and bypass scoping."""
 
+from pathlib import Path
+
 import pytest
 
 from runtime_evidence import (
@@ -162,7 +164,7 @@ def test_no_bypass_on_diverged_or_missing():
 def test_prompt_block_names_new_chain():
     ev = parse_comment(V66_COMMENT, HEAD)
     block = prompt_block(ev)
-    assert "[NEW CHAIN] Runner.Worker > node → httpbin.org" in block
+    assert "[NEW DESTINATION] Runner.Worker > node → httpbin.org" in block
     assert "REFUSE" in block
     assert "Evidence permalink: https://app.garnet.ai/public/runs/1" in block
 
@@ -320,6 +322,79 @@ def test_load_config_validates(tmp_path):
     cfg = load_config(tmp_path)
     assert cfg.trusted_bots == frozenset({"garnet[bot]"})
     assert cfg.bypass_categories == frozenset({"deps_toolchain"})
+
+
+def test_removed_lines_contribute_to_previous_destination_set():
+    # The `-` httpbin[.]org line records that the previous profile already
+    # reached httpbin.org, so the `+` chain is reshaped, not genuinely new.
+    body = V66_COMMENT.replace("-    └─ → nodejs[.]org", "-    └─ → httpbin[.]org")
+    ev = parse_comment(body, HEAD)
+    assert ev.status == "unchanged"
+    assert ev.new_destinations == []
+    assert [d["dest"] for d in ev.reshaped_chains] == ["httpbin.org"]
+
+
+def test_plus_chain_with_destination_unchanged_elsewhere_is_reshaped():
+    # The PR #77 shape: the same destination sits on unchanged chains in the
+    # fence while a `+` chain reaches it under a different lineage —
+    # installer nondeterminism, not divergence.
+    body = V66_COMMENT.replace("+    ├─ → httpbin[.]org", "+    ├─ → github[.]com")
+    ev = parse_comment(body, HEAD)
+    assert ev.status == "unchanged"
+    assert ev.new_destinations == []
+    reshaped = ev.reshaped_chains
+    assert [(d["dest"], d["lineage"]) for d in reshaped] == [("github.com", "Runner.Worker > node")]
+    assert bypassable_deny(["deps_toolchain"], ev, _config()) == ["deps_toolchain"]
+
+
+def test_plus_destination_known_only_from_snapshot_pre_stays_new():
+    # registry.npmjs.org is recorded only in another job's snapshot <pre>,
+    # which is current-head evidence with no previous-profile comparison —
+    # it must not excuse a `+` chain in the fence.
+    body = V66_COMMENT.replace("+    ├─ → httpbin[.]org", "+    ├─ → registry.npmjs[.]org")
+    ev = parse_comment(body, HEAD)
+    assert ev.status == "diverged"
+    assert [d["dest"] for d in ev.new_destinations] == ["registry.npmjs.org"]
+    assert ev.reshaped_chains == []
+    assert bypassable_deny(["deps_toolchain"], ev, _config()) == []
+
+
+def test_reshaped_chain_labeled_in_prompt_block():
+    body = V66_COMMENT.replace("+    ├─ → httpbin[.]org", "+    ├─ → github[.]com")
+    ev = parse_comment(body, HEAD)
+    block = prompt_block(ev)
+    assert "[reshaped chain]" in block
+    assert "recorded in the previous profile under" in block
+    assert "[NEW DESTINATION]" not in block
+
+
+def test_citation_block_counts_reconcile_with_listed_lines():
+    body = V66_COMMENT.replace("+    ├─ → httpbin[.]org", "+    ├─ → github[.]com")
+    ev = parse_comment(body, HEAD)
+    block = citation_block(ev)
+    assert "1 reshaped chain(s)" in block
+    reshaped_header = next(line for line in block.splitlines() if "reshaped chain(s)" in line)
+    listed = [line for line in block.splitlines() if line.startswith("- `Runner.Worker")]
+    assert reshaped_header.startswith("1 ") and len(listed) == 1
+
+
+def test_citation_block_new_destination_count_matches_lines():
+    ev = parse_comment(V66_COMMENT, HEAD)
+    block = citation_block(ev)
+    assert "1 destination(s) NEW versus the previously profiled commit:" in block
+
+
+def test_real_pr77_comment_is_unchanged_not_diverged():
+    # Regression fixture: the live Garnet comment from garnet-labs/posthog#77
+    # whose `+` chains (registry.npmjs.org under node, github.com under sh)
+    # all reach destinations the previous profile already recorded.
+    body = (Path(__file__).parent / "fixtures" / "garnet_comment_pr77.md").read_text()
+    assert parse_comment(body, "f" * 40).status == "missing"
+    ev = parse_comment(body, "e90ee0b287e714d223cd4a7b4acbca0c176f4004")
+    assert ev.status == "unchanged"
+    assert ev.new_destinations == []
+    reshaped_dests = {d["dest"] for d in ev.reshaped_chains}
+    assert reshaped_dests == {"registry.npmjs.org", "github.com"}
 
 
 def test_new_chain_not_masked_by_identical_chain_in_earlier_job():
