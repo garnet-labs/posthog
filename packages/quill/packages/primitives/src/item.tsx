@@ -101,12 +101,13 @@ function Item({
 const ItemMenuItem = React.forwardRef<
     HTMLButtonElement,
     useRender.ComponentProps<'button'> & VariantProps<typeof itemVariants>
->(function ItemMenuItem({ className, variant = 'default', size = 'default', render, ...props }, ref) {
+>(function ItemMenuItem({ className, variant = 'default', size = 'default', tone = 'default', render, ...props }, ref) {
     return useRender({
         defaultTagName: 'button',
         props: mergeProps<'button'>(
             {
-                className: cn(itemVariants({ variant: 'menuItem', size, className })),
+                'data-tone': tone && tone !== 'default' ? tone : undefined,
+                className: cn(itemVariants({ variant: 'menuItem', size, tone, className })),
                 role: 'menuitem',
                 ref,
             } as Omit<React.ComponentProps<'button'>, 'ref'>,
@@ -117,6 +118,7 @@ const ItemMenuItem = React.forwardRef<
             slot: 'item',
             variant,
             size,
+            tone,
         },
     })
 })
@@ -124,13 +126,14 @@ const ItemMenuItem = React.forwardRef<
 const ItemCheckbox = React.forwardRef<
     HTMLButtonElement,
     useRender.ComponentProps<'button'> & VariantProps<typeof itemVariants>
->(function ItemCheckbox({ className, variant = 'default', size = 'default', render, children, ...props }, ref) {
+>(function ItemCheckbox({ className, variant = 'default', size = 'default', tone = 'default', render, children, ...props }, ref) {
     const checked = props['aria-checked'] === true || props['aria-checked'] === 'true'
     const element = useRender({
         defaultTagName: 'button',
         props: mergeProps<'button'>(
             {
-                className: cn(itemVariants({ variant: 'menuItem', size, className })),
+                'data-tone': tone && tone !== 'default' ? tone : undefined,
+                className: cn(itemVariants({ variant: 'menuItem', size, tone, className })),
                 role: 'checkbox',
                 ref,
             } as Omit<React.ComponentProps<'button'>, 'ref'>,
@@ -141,6 +144,7 @@ const ItemCheckbox = React.forwardRef<
             slot: 'item',
             variant,
             size,
+            tone,
         },
     })
     return React.cloneElement(
@@ -156,13 +160,14 @@ const ItemCheckbox = React.forwardRef<
 const ItemRadio = React.forwardRef<
     HTMLButtonElement,
     useRender.ComponentProps<'button'> & VariantProps<typeof itemVariants>
->(function ItemRadio({ className, variant = 'default', size = 'default', render, children, ...props }, ref) {
+>(function ItemRadio({ className, variant = 'default', size = 'default', tone = 'default', render, children, ...props }, ref) {
     const checked = props['aria-checked'] === true || props['aria-checked'] === 'true'
     const element = useRender({
         defaultTagName: 'button',
         props: mergeProps<'button'>(
             {
-                className: cn(itemVariants({ variant: 'menuItem', size, className })),
+                'data-tone': tone && tone !== 'default' ? tone : undefined,
+                className: cn(itemVariants({ variant: 'menuItem', size, tone, className })),
                 role: 'radio',
                 ref,
             } as Omit<React.ComponentProps<'button'>, 'ref'>,
@@ -173,6 +178,7 @@ const ItemRadio = React.forwardRef<
             slot: 'item',
             variant,
             size,
+            tone,
         },
     })
     return React.cloneElement(
