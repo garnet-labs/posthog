@@ -6,8 +6,7 @@
 # Nothing is stored, forwarded, or printed beyond a marker. No secrets,
 # tokens, or environment values are read.
 #
-# Temporary. Delete once the question is settled. Retriggered after the
-# GitHub Actions outage on 2026-08-06.
+# Temporary. Delete once the question is settled.
 name: probe — IMDS recordability
 
 on:
