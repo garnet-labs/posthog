@@ -32,7 +32,7 @@ def test_diverged_maps_to_failure_naming_new_destinations():
 
 
 def test_reshaped_chains_stay_success_and_are_counted():
-    body = V66_COMMENT.replace("+    ├─ → httpbin[.]org", "+    ├─ → registry.npmjs[.]org")
+    body = V66_COMMENT.replace("+    ├─ → httpbin[.]org", "+    ├─ → github[.]com")
     evidence = parse_comment(body, HEAD)
     assert evidence.status == "unchanged"
     state, description = status_payload(evidence)

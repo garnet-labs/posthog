@@ -338,17 +338,29 @@ def test_plus_chain_with_destination_unchanged_elsewhere_is_reshaped():
     # The PR #77 shape: the same destination sits on unchanged chains in the
     # fence while a `+` chain reaches it under a different lineage —
     # installer nondeterminism, not divergence.
-    body = V66_COMMENT.replace("+    ├─ → httpbin[.]org", "+    ├─ → registry.npmjs[.]org")
+    body = V66_COMMENT.replace("+    ├─ → httpbin[.]org", "+    ├─ → github[.]com")
     ev = parse_comment(body, HEAD)
     assert ev.status == "unchanged"
     assert ev.new_destinations == []
     reshaped = ev.reshaped_chains
-    assert [(d["dest"], d["lineage"]) for d in reshaped] == [("registry.npmjs.org", "Runner.Worker > node")]
+    assert [(d["dest"], d["lineage"]) for d in reshaped] == [("github.com", "Runner.Worker > node")]
     assert bypassable_deny(["deps_toolchain"], ev, _config()) == ["deps_toolchain"]
 
 
-def test_reshaped_chain_labeled_in_prompt_block():
+def test_plus_destination_known_only_from_snapshot_pre_stays_new():
+    # registry.npmjs.org is recorded only in another job's snapshot <pre>,
+    # which is current-head evidence with no previous-profile comparison —
+    # it must not excuse a `+` chain in the fence.
     body = V66_COMMENT.replace("+    ├─ → httpbin[.]org", "+    ├─ → registry.npmjs[.]org")
+    ev = parse_comment(body, HEAD)
+    assert ev.status == "diverged"
+    assert [d["dest"] for d in ev.new_destinations] == ["registry.npmjs.org"]
+    assert ev.reshaped_chains == []
+    assert bypassable_deny(["deps_toolchain"], ev, _config()) == []
+
+
+def test_reshaped_chain_labeled_in_prompt_block():
+    body = V66_COMMENT.replace("+    ├─ → httpbin[.]org", "+    ├─ → github[.]com")
     ev = parse_comment(body, HEAD)
     block = prompt_block(ev)
     assert "[reshaped chain]" in block
@@ -357,7 +369,7 @@ def test_reshaped_chain_labeled_in_prompt_block():
 
 
 def test_citation_block_counts_reconcile_with_listed_lines():
-    body = V66_COMMENT.replace("+    ├─ → httpbin[.]org", "+    ├─ → registry.npmjs[.]org")
+    body = V66_COMMENT.replace("+    ├─ → httpbin[.]org", "+    ├─ → github[.]com")
     ev = parse_comment(body, HEAD)
     block = citation_block(ev)
     assert "1 reshaped chain(s)" in block

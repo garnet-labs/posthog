@@ -194,9 +194,9 @@ def _extract_destinations(body: str) -> tuple[list[dict], bool]:
     - ```diff fences (changed jobs in comparison comments): the same tree
       with a leading diff column — `+` (new chain vs the previous profiled
       commit), space (unchanged), `-` (no longer recorded; not current
-      evidence, but its destination set is collected so `+` chains that
-      merely moved an already-recorded destination classify as reshaped
-      rather than genuinely new).
+      evidence). Space and `-` destinations form the previous profile's
+      destination set, so `+` chains that merely moved an already-recorded
+      destination classify as reshaped rather than genuinely new.
 
     Lineage is reconstructed from tree indentation depth. Hostnames are
     defanged in the comment and refanged here.
@@ -209,7 +209,7 @@ def _extract_destinations(body: str) -> tuple[list[dict], bool]:
     body = _EXPLAINER_RE.sub("", body)
     results: list[dict] = []
     seen: dict[tuple[str, str], dict] = {}
-    removed_dests: set[str] = set()
+    prev_profile_dests: set[str] = set()
     pres = re.findall(r"<pre>(.*?)</pre>", body, flags=re.DOTALL)
     legacy_contract = any("· job" in pre for pre in pres)
     for pre in pres:
@@ -223,19 +223,24 @@ def _extract_destinations(body: str) -> tuple[list[dict], bool]:
             if raw.startswith("@@"):
                 continue
             if raw.startswith("-"):
-                removed = _removed_destination(raw[1:])
+                removed = _fence_destination(raw[1:])
                 if removed:
-                    removed_dests.add(removed)
+                    prev_profile_dests.add(removed)
                 continue
             added = raw.startswith("+")
-            lines.append((raw[1:] if raw[:1] in "+ " else raw, added))
+            text = raw[1:] if raw[:1] in "+ " else raw
+            if not added:
+                unchanged = _fence_destination(text)
+                if unchanged:
+                    prev_profile_dests.add(unchanged)
+            lines.append((text, added))
         _walk_tree(lines, results, seen)
-    _classify_added(results, removed_dests)
+    _classify_added(results, prev_profile_dests)
     return results, bool(fences)
 
 
-def _removed_destination(line: str) -> str | None:
-    """Destination named on a `-` tree line, or None for process lines."""
+def _fence_destination(line: str) -> str | None:
+    """Destination named on a comparison-fence tree line, or None for process lines."""
     text = _TAG_RE.sub("", line)
     text = re.sub(r"^[\s│├└─]+", "", text).strip()
     match = _DESTINATION_RE.search(text)
@@ -244,19 +249,20 @@ def _removed_destination(line: str) -> str | None:
     return None
 
 
-def _classify_added(results: list[dict], removed_dests: set[str]) -> None:
+def _classify_added(results: list[dict], prev_profile_dests: set[str]) -> None:
     """Split `+` chains into genuinely-new destinations vs reshaped chains.
 
-    A destination is genuinely new only when it appears on a `+` chain and
-    the same comment records it nowhere else — neither on an unchanged
-    chain nor on a `-` (removed) chain. Otherwise the `+` chain reshaped
-    the lineage of a destination the previous profile already recorded.
+    Only comparison fences carry evidence about the previous profile: a
+    space-prefixed line means the previous profile recorded the destination
+    too, `-` means it recorded it but the current run did not. A `+` chain
+    whose destination sits in that fence-derived set reshaped the lineage of
+    an already-recorded destination; any other `+` destination is genuinely
+    new. Snapshot `<pre>` trees are current-head evidence only and never
+    qualify a `+` chain as reshaped.
     """
-    unchanged_dests = {r["dest"] for r in results if not r["new"]}
-    recorded_before = unchanged_dests | removed_dests
     for r in results:
-        r["reshaped"] = r["new"] and r["dest"] in recorded_before
-        r["new"] = r["new"] and r["dest"] not in recorded_before
+        r["reshaped"] = r["new"] and r["dest"] in prev_profile_dests
+        r["new"] = r["new"] and r["dest"] not in prev_profile_dests
 
 
 def _walk_tree(lines: list[tuple[str, bool]], results: list[dict], seen: dict[tuple[str, str], dict]) -> None:
