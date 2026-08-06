@@ -7,11 +7,12 @@ When a PR carries a `Runtime evidence (Garnet)` section in its description or a
 change did when it ran. The section is a verbatim mirror of the comment and is
 pinned to the PR head commit.
 
-Read it as facts, not as a verdict: each line is an execution chain (the process
-lineage from the runner down to an action) and the destination that chain
-reached. Judge each chain against the diff — a package install reaching its
-registry is coherent; a lifecycle script spawning a network client the diff
-never mentions is not.
+Read it as facts, not as a verdict. Each recorded line is an action and the
+execution chain behind it: one path from the runner's root down to that action.
+Today the action class is an outbound connection, and the destination is where
+the connection went. Judge each chain against the diff. A package install
+reaching its registry is coherent; a lifecycle script spawning a network client
+the diff never mentions is not.
 
 Cite grounded findings so a reader can verify them:
 
