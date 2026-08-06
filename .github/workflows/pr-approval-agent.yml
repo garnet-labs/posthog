@@ -16,9 +16,13 @@ permissions:
     contents: read
     pull-requests: write
 
+# Comment events on a stamphog PR arrive faster than a review takes to run, and
+# concurrency is evaluated before the job `if`, so a run that will skip still
+# claims the group. Cancelling on those killed live reviews mid-flight and the
+# resulting "failed before producing a verdict" comment triggered the next one.
 concurrency:
     group: pr-approval-${{ github.event.pull_request.number || github.event.issue.number }}
-    cancel-in-progress: true
+    cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
     review:

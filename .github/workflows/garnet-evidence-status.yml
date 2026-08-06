@@ -22,7 +22,7 @@ permissions:
 
 concurrency:
     group: garnet-evidence-status-${{ github.event.pull_request.number || github.event.issue.number }}
-    cancel-in-progress: true
+    cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
     status:
