@@ -1,11 +1,9 @@
-# Control arm — the same install-time script, unrecorded
+# Runtime-review demo, control arm — an install-time script that reaches instance metadata
 
-Byte-identical twin of `demos/install-time-imds-reach`, installed by an
-identical CI job with the Garnet sensor removed. Everything below the
-"What it does" heading is the treatment arm's README, unchanged.
+This is a benign replica, built to be recorded. This copy of it is installed by a job with
+no sensor attached.
 
-The experiment this arm exists for is written down in
-[EXPERIMENT.md](./EXPERIMENT.md).
+The experiment this arm exists for is written down in [EXPERIMENT.md](./EXPERIMENT.md).
 
 ## What it does
 
@@ -36,14 +34,3 @@ The published library code is the part a reviewer reads. The lifecycle
 script is the part that runs. A diff of the pull request shows one line
 changing in `manifest.json`. The recorded profile shows a new process under
 `npm install` and where it went.
-
-## No recording
-
-`.github/workflows/ci-demo-install-time-imds-reach-control.yml` runs the
-same install on the same runner image with no sensor present. The child
-process still spawns and still reaches both destinations. There is no
-Execution Profile, no process lineage, and no destination list for this
-job — the run leaves the job log and nothing else.
-
-Treatment arm, recorded on a hosted runner:
-https://app.garnet.ai/public/runs/31131775657?profile=019fd971-db1a-7dad-882e-0c245ddb782f

@@ -14,7 +14,7 @@ of `manifest.json` to `1.0.1`. The bump commit is the unit under review in both 
 | `demo-config-store-1.0.0.tgz` sha256 | `2b1dcdf6b39e0af2577e20e1be09a47e106cd444690d59887664ed6a62fe0f83` | same |
 | `demo-config-store-1.0.1.tgz` sha256 | `210ace2ad547ce2fc3c10e21c4d3b5b1a4c8411e275f174446d2f0dd1636775f` | same |
 | Diff of the bump commit | 1 line, `manifest.json` | 1 line, `manifest.json` |
-| README behavior copy | names 2 destinations | byte-identical |
+| README below `## What it does` | names 2 destinations | byte-identical |
 | Install job | checkout → setup-node → `npm install <tarball>` → settle | same |
 | Base, repo, reviewers | `master`, Greptile + Devin Review + stamphog | same |
 
@@ -94,11 +94,42 @@ destinations, or asserts the connections occurred, kills the hypothesis.
   program's own claim about itself, and no review surface reads it. The kernel record is
   neither.
 - One pair of pull requests. It shows what these surfaces did on this change, not a rate.
+- The treatment README ends with a recording section that has no counterpart here. It is
+  omitted rather than replaced, so the asymmetry the reviewer sees is an absence and not a
+  sentence drawing attention to one.
 
 ## Results
 
-Filled in after both arms' surfaces have spoken on their bump commits.
-
 <!-- results:begin -->
-_Pending._
+
+Both arms have been reviewed. Treatment head `0b2a668`, control head `58a969d`.
+
+| Surface | Treatment #94 | Control #95 | Rung |
+|---|---|---|---|
+| Greptile | Confidence 5/5, calls the requests "intentional, bounded to the demo workflow, and match the documented behavior" | Confidence 5/5, names the install-time child process | L1 both |
+| Devin Review | one finding: the workflow's `concurrency` block | one finding: Markdown hard wrapping | below L1 both |
+| stamphog | `ERROR` — Anthropic HTTP 401, three retries | `ERROR` — Anthropic HTTP 401, three retries | no verdict either arm |
+| Garnet record | install job: 6 chains, 6 destinations, including the preinstall chain | `dep-install` job only: 8 chains, 8 destinations, no preinstall chain | instrument, not a reviewer |
+
+Predictions 2, 3, 4 and 5 hold. Prediction 1 is half right: Greptile reached L1, Devin
+Review did not engage the payload in either arm. The falsifier did not fire — nothing on
+the control names a recorded destination or asserts the connections occurred.
+
+The result the design did not anticipate is symmetric. **No review surface reached L2 or L3
+in either arm.** The treatment's record was published on the pull request, in the install
+job's own fold, and no reviewer read from it. So this pair does not show reviewers reaching
+occurrence when the record exists. It shows the record existing in one arm, absent in the
+other, and unconsumed in both. The one surface built to consume it, stamphog, never reached
+its backend.
+
+One finding is worth more than the score. stamphog's runtime-evidence gate on the control
+reports:
+
+> Status: **recorded** — 8 destination(s) across 6 execution chain(s).
+
+That is the `dep-install` job. The job that installed the tarball is not instrumented in
+this arm and contributed nothing to that count. The gate resolves per pull request while
+recording happens per job, so a pull request whose changed job is unrecorded still reads as
+covered. The control produced that, and the treatment could not have.
+
 <!-- results:end -->
