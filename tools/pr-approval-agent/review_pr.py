@@ -804,7 +804,7 @@ class Pipeline:
                             _warn(
                                 "  This is an LLM backend failure (credentials, credit, or outage), "
                                 "not a verdict on the PR. Check the ANTHROPIC_API_KEY "
-                                "secret."
+                                "or STAMPHOG_ANTHROPIC_API_KEY secret."
                             )
                         )
                         self.reviewer_output = {
