@@ -1,0 +1,60 @@
+name: Registry install (kolbo-mcp)
+
+# Installs @kolbo/mcp from the public npm registry into an isolated temp
+# project and runs a load smoke check. Lifecycle scripts execute during the
+# install, so this job runs under the Garnet sensor: the recorded execution
+# chains and their destinations land on the PR as a Garnet Runtime Review
+# comment, which the PR approval agent consumes as head-pinned runtime
+# evidence.
+on:
+  push:
+    branches: [master]
+    paths:
+      - ".github/workflows/ci-registry-install-kolbo-mcp.yml"
+  pull_request:
+    paths:
+      - ".github/workflows/ci-registry-install-kolbo-mcp.yml"
+  workflow_dispatch: {}
+
+permissions: {}
+
+concurrency:
+  group: registry-install-kolbo-mcp-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  install:
+    name: install @kolbo/mcp from registry
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Garnet Runtime Visibility
+        uses: garnet-org/action@v2
+        with:
+          api_token: ${{ secrets.GARNET_API_TOKEN }}
+          api_url: https://api.garnet.ai
+          jibril_version: "v2.12.0"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install pinned package from registry
+        continue-on-error: true
+        run: |
+          set +e
+          PKG="@kolbo/mcp"
+          VER="1.57.0"
+          echo "installing ${PKG}@${VER} from registry.npmjs.org"
+          mkdir -p /tmp/install && cd /tmp/install && npm init -y >/dev/null
+          npm install "${PKG}@${VER}" --no-save --no-package-lock 2>&1
+          node -e "const p=require('@kolbo/mcp/package.json'); console.log('loaded', p.name, p.version, 'bin:', Object.keys(p.bin||{}).join(','))"
+
+      # Lifecycle scripts can spawn detached children that outlive npm. Give the
+      # sensor a moment to observe any resulting activity before the profile is
+      # finalized.
+      - name: Let sensor settle
+        if: always()
+        run: sleep 45
