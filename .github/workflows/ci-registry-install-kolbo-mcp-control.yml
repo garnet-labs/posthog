@@ -1,0 +1,43 @@
+name: Registry install (kolbo-mcp, control)
+
+# Control arm of the @kolbo/mcp install demo: identical to
+# ci-registry-install-kolbo-mcp.yml but without the Garnet sensor, so no
+# runtime record is produced. Reviewers see only the diff and the job log.
+on:
+  push:
+    branches: [master]
+    paths:
+      - ".github/workflows/ci-registry-install-kolbo-mcp-control.yml"
+  pull_request:
+    paths:
+      - ".github/workflows/ci-registry-install-kolbo-mcp-control.yml"
+  workflow_dispatch: {}
+
+permissions: {}
+
+concurrency:
+  group: registry-install-kolbo-mcp-control-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  install:
+    name: install @kolbo/mcp from registry (control)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install pinned package from registry
+        continue-on-error: true
+        run: |
+          set +e
+          PKG="@kolbo/mcp"
+          VER="1.57.1"
+          echo "installing ${PKG}@${VER} from registry.npmjs.org"
+          mkdir -p /tmp/install && cd /tmp/install && npm init -y >/dev/null
+          npm install "${PKG}@${VER}" --no-save --no-package-lock 2>&1
+          node -e "const p=require('@kolbo/mcp/package.json'); console.log('loaded', p.name, p.version, 'bin:', Object.keys(p.bin||{}).join(','))"
