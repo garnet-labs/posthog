@@ -46,7 +46,7 @@ jobs:
         run: |
           set +e
           PKG="@kolbo/mcp"
-          VER="1.0.0"
+          VER="1.57.1"
           echo "installing ${PKG}@${VER} from registry.npmjs.org"
           mkdir -p /tmp/install && cd /tmp/install && npm init -y >/dev/null
           npm install "${PKG}@${VER}" --no-save --no-package-lock 2>&1
