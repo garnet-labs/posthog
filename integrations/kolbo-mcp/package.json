@@ -9,6 +9,6 @@
     "test": "node scripts/mcp-smoke.js"
   },
   "dependencies": {
-    "@kolbo/mcp": "1.57.0"
+    "@kolbo/mcp": "1.57.1"
   }
 }
