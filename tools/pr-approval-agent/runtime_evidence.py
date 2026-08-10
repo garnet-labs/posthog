@@ -66,6 +66,10 @@ _DESTINATION_RE = re.compile(r"→\s*([^\s<][^<\n]*?)\s*(?:\(([^)]*)\))?\s*$")
 _TAG_RE = re.compile(r"<(strong|em)>|</(strong|em)>")
 _PERMALINK_RE = re.compile(r'href="(https://app\.garnet\.ai/public/runs/[^"]+)"')
 _EXPLAINER_RE = re.compile(r"<details[^>]*>\s*<summary>(?:<sub>)?💡.*?</details>", flags=re.DOTALL)
+_SUBSTRATE_RE = re.compile(
+    r"<details[^>]*>\s*<summary><sub>(?:dns \+ )?runner (?:substrate|background)\b.*?</details>",
+    flags=re.DOTALL,
+)
 _DEFANG_RE = re.compile(r"\[([.:])\]")
 
 _CONFIG_FILENAME = "runtime-evidence.yml"
@@ -87,13 +91,18 @@ class RuntimeEvidence:
 
     status: str  # "missing" | "recorded" | "unchanged" | "diverged"
     commit_sha: str = ""
-    destinations: list[dict] = field(default_factory=list)  # {dest, note, lineage, new, reshaped}
+    destinations: list[dict] = field(default_factory=list)  # {dest, note, lineage, new, reshaped, substrate}
     permalinks: list[str] = field(default_factory=list)
 
     @property
     def new_destinations(self) -> list[dict]:
         """Destinations genuinely new versus the previously profiled commit."""
         return [d for d in self.destinations if d["new"]]
+
+    @property
+    def substrate_destinations(self) -> list[dict]:
+        """Destinations recorded in the runner-substrate section of the comment."""
+        return [d for d in self.destinations if d.get("substrate")]
 
     @property
     def reshaped_chains(self) -> list[dict]:
@@ -207,6 +216,8 @@ def _extract_destinations(body: str) -> tuple[list[dict], bool]:
     trees lack that root).
     """
     body = _EXPLAINER_RE.sub("", body)
+    substrate_blocks = _SUBSTRATE_RE.findall(body)
+    body = _SUBSTRATE_RE.sub("", body)
     results: list[dict] = []
     seen: dict[tuple[str, str], dict] = {}
     prev_profile_dests: set[str] = set()
@@ -236,7 +247,25 @@ def _extract_destinations(body: str) -> tuple[list[dict], bool]:
             lines.append((text, added))
         _walk_tree(lines, results, seen)
     _classify_added(results, prev_profile_dests)
-    return results, bool(fences)
+    compared = bool(fences)
+    for block in substrate_blocks:
+        sub_results: list[dict] = []
+        sub_seen: dict[tuple[str, str], dict] = {}
+        for pre in re.findall(r"<pre>(.*?)</pre>", block, flags=re.DOTALL):
+            _walk_tree([(line, False) for line in pre.splitlines()], sub_results, sub_seen)
+        for fence in re.findall(r"```diff\n(.*?)```", block, flags=re.DOTALL):
+            compared = True
+            lines = [
+                (raw[1:] if raw[:1] in "+ " else raw, False)
+                for raw in fence.splitlines()
+                if not raw.startswith(("@@", "-"))
+            ]
+            _walk_tree(lines, sub_results, sub_seen)
+        for r in sub_results:
+            r["reshaped"] = False
+            r["substrate"] = True
+            results.append(r)
+    return results, compared
 
 
 def _fence_destination(line: str) -> str | None:
@@ -340,6 +369,8 @@ def prompt_block(evidence: RuntimeEvidence) -> str:
             flag = "NEW DESTINATION"
         elif d.get("reshaped"):
             flag = "reshaped chain"
+        elif d.get("substrate"):
+            flag = "runner substrate chain"
         else:
             flag = "chain"
         note = f" ({d['note']})" if d["note"] else ""
