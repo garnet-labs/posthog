@@ -43,6 +43,7 @@ jobs:
             # Celery worker, migrations, demo data), so the filter mirrors the Dagster
             # approach: trigger on any Python change across the app.
             - uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
+              continue-on-error: true
               id: app-token
               if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
               with:
@@ -639,6 +640,7 @@ jobs:
             - name: Get app token
               id: app-token
               uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
+              continue-on-error: true
               with:
                   client-id: ${{ secrets.GH_APP_POSTHOG_TESTS_APP_ID }}
                   private-key: ${{ secrets.GH_APP_POSTHOG_TESTS_PRIVATE_KEY }}
@@ -648,7 +650,7 @@ jobs:
               with:
                   ref: ${{ github.event.pull_request.head.sha }}
                   repository: ${{ github.event.pull_request.head.repo.full_name }}
-                  token: ${{ steps.app-token.outputs.token }}
+                  token: ${{ steps.app-token.outputs.token || github.token }}
                   fetch-depth: 1
 
             - name: Download snapshot patches
@@ -690,7 +692,7 @@ jobs:
                   repository: ${{ github.repository }}
                   commit-sha: ${{ github.event.pull_request.head.sha }}
                   branch-name: ${{ github.event.pull_request.head.ref }}
-                  github-token: ${{ steps.app-token.outputs.token }}
+                  github-token: ${{ steps.app-token.outputs.token || github.token }}
 
     # Collation job for required status check
     mcp_tests:

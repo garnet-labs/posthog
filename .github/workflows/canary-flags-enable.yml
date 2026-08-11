@@ -81,6 +81,7 @@ jobs:
             - name: Get app token for team membership check
               id: app-token
               uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
+              continue-on-error: true
               with:
                   client-id: ${{ secrets.GH_APP_POSTHOG_ASSIGN_REVIEWERS_APP_ID }}
                   private-key: ${{ secrets.GH_APP_POSTHOG_ASSIGN_REVIEWERS_PRIVATE_KEY }}
@@ -91,7 +92,7 @@ jobs:
               env:
                   ACTOR: ${{ github.actor }}
               with:
-                  github-token: ${{ steps.app-token.outputs.token }}
+                  github-token: ${{ steps.app-token.outputs.token || github.token }}
                   script: |
                       const prNumber = context.payload.issue.number;
                       const body = context.payload.comment.body.trim();
@@ -311,6 +312,7 @@ jobs:
               id: charts_token
               if: github.event_name == 'pull_request' && github.event.action == 'synchronize'
               uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
+              continue-on-error: true
               with:
                   client-id: ${{ secrets.GH_APP_CHARTS_DEPLOYER_APP_ID }}
                   private-key: ${{ secrets.GH_APP_CHARTS_DEPLOYER_PRIVATE_KEY }}
@@ -489,6 +491,7 @@ jobs:
               id: app-token
               if: (github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch') && steps.pr_info.outputs.should_proceed == 'true'
               uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
+              continue-on-error: true
               with:
                   client-id: ${{ secrets.GH_APP_POSTHOG_ASSIGN_REVIEWERS_APP_ID }}
                   private-key: ${{ secrets.GH_APP_POSTHOG_ASSIGN_REVIEWERS_PRIVATE_KEY }}
@@ -499,7 +502,7 @@ jobs:
               env:
                   PR_NUMBER: ${{ steps.pr_info.outputs.pr_number }}
               with:
-                  github-token: ${{ steps.app-token.outputs.token }}
+                  github-token: ${{ steps.app-token.outputs.token || github.token }}
                   script: |
                       const prNumber = parseInt(process.env.PR_NUMBER);
 
@@ -561,7 +564,7 @@ jobs:
               env:
                   PR_AUTHOR: ${{ steps.pr_info.outputs.pr_author }}
               with:
-                  github-token: ${{ steps.app-token.outputs.token }}
+                  github-token: ${{ steps.app-token.outputs.token || github.token }}
                   script: |
                       // pr_author is set by pr_info: from the API for workflow_dispatch,
                       // from the event payload for pull_request.
@@ -594,7 +597,7 @@ jobs:
               env:
                   ACTOR: ${{ github.actor }}
               with:
-                  github-token: ${{ steps.app-token.outputs.token }}
+                  github-token: ${{ steps.app-token.outputs.token || github.token }}
                   script: |
                       const actor = process.env.ACTOR;
                       const allowedTeams = ['team-feature-flags'];
@@ -753,6 +756,7 @@ jobs:
             - name: Get deployer token
               id: deployer
               uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
+              continue-on-error: true
               with:
                   client-id: ${{ secrets.GH_APP_CHARTS_DEPLOYER_APP_ID }}
                   private-key: ${{ secrets.GH_APP_CHARTS_DEPLOYER_PRIVATE_KEY }}
