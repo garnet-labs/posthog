@@ -61,3 +61,4 @@ For posthog.com team setting up the integration, see the PRs in PostHog/posthog.
 - Published pages live under `docs/published/`.
 - Ask in the docs channel before adding a new top-level section.
 - Docs are reviewed weekly by the docs maintainers.
+- Screenshots referenced by docs pages live under `docs/assets/`.
