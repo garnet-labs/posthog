@@ -136,15 +136,18 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await sleep(1000);
 
   let browser;
+  let failure;
   try {
     browser = await chromium.launch({ args: ["--no-sandbox"] });
     const page = await browser.newPage();
     page.on("console", (m) => console.log(`[page] ${m.text()}`));
     await page.goto(url, { waitUntil: "load" });
-    // Wait for the client script to finish the handshake (or time out).
-    await page.waitForFunction(() => window.__kolboDone === true, null, { timeout: 30000 }).catch(() => {});
+    // The handshake must complete: a browser session that never finishes it
+    // has not exercised the MCP server and must not pass.
+    await page.waitForFunction(() => window.__kolboDone === true, null, { timeout: 30000 });
   } catch (err) {
-    console.log(`browser error: ${err.message}`);
+    failure = err;
+    console.error(`browser error: ${err.message}`);
   }
 
   // Let any async or background work finish before we tear things down.
@@ -157,6 +160,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   } catch {}
   bridge.close();
   await sleep(1500);
+  if (failure) {
+    console.error("e2e failed: the browser never completed an MCP session");
+    process.exit(1);
+  }
   console.log("e2e complete");
   process.exit(0);
 })();
