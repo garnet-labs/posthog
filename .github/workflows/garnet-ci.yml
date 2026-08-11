@@ -20,17 +20,16 @@ concurrency:
 jobs:
     dep-install:
         name: Dependency install (recorded)
+        # Fork `pull_request` runs get no org secrets, so the sensor has no token
+        # to authenticate with. Skip the whole job there: an unrecorded install
+        # is not a cheaper version of this job, it is the absence of it.
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         runs-on: ubuntu-latest
         timeout-minutes: 30
         steps:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-            # Fork `pull_request` runs get no org secrets, so the sensor has no
-            # token to authenticate with. Skip the step there and let the install
-            # run unrecorded, rather than failing a contributor's check over a
-            # secret they were never going to have.
             - name: Garnet Runtime Visibility
-              if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
               uses: garnet-org/action@3d47f4a9004f7356c980a0e8d420ef5984750e3c # v2.2.0
               with:
                   api_token: ${{ secrets.GARNET_API_TOKEN }}
@@ -45,5 +44,10 @@ jobs:
             # That composite restores the pnpm store, and a warm store means the
             # lifecycle scripts this workflow exists to observe never execute.
             # The cold install is the measurement, not an oversight.
+            #
+            # `--no-frozen-lockfile` is load-bearing too: pnpm defaults to frozen
+            # under CI=true and aborts on lockfile drift before fetching anything,
+            # which records nothing for exactly the dependency-changing PRs this
+            # job exists to observe.
             - name: Install dependencies (lifecycle scripts execute here)
-              run: pnpm install --frozen-lockfile
+              run: pnpm install --no-frozen-lockfile

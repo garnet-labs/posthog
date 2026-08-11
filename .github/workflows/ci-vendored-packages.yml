@@ -26,16 +26,16 @@ concurrency:
 jobs:
     install:
         name: install vendored package
+        # Fork `pull_request` runs get no org secrets, so the sensor has no token
+        # to authenticate with. Skip the whole job there rather than executing a
+        # fork-supplied tarball's lifecycle scripts on the runner unrecorded.
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         runs-on: ubuntu-latest
         timeout-minutes: 15
         steps:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-            # Fork `pull_request` runs get no org secrets, so the sensor has no
-            # token to authenticate with. Skip the step there rather than
-            # failing a contributor's check over a secret they never had.
             - name: Garnet Runtime Visibility
-              if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
               uses: garnet-org/action@3d47f4a9004f7356c980a0e8d420ef5984750e3c # v2.2.0
               with:
                   api_token: ${{ secrets.GARNET_API_TOKEN }}
