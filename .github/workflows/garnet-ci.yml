@@ -8,6 +8,12 @@ name: Garnet Runtime Visibility
 # (see tools/pr-approval-agent/runtime_evidence.py).
 on:
     pull_request:
+        paths:
+            - package.json
+            - pnpm-lock.yaml
+            - pnpm-workspace.yaml
+            - .nvmrc
+            - .github/workflows/garnet-ci.yml
     workflow_dispatch:
 
 permissions:
