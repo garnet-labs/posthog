@@ -62,7 +62,7 @@ import yaml
 COMMENT_MARKER = "<!-- garnet-runtime-review -->"
 
 _COMMIT_MARKER_RE = re.compile(r"<!--\s*garnet:commit\s+([0-9a-f]{40})\s*-->")
-_DESTINATION_RE = re.compile(r"→\s*([^\s<][^<\n]*?)\s*(?:\(([^)]*)\))?\s*$")
+_DESTINATION_RE = re.compile(r"[→○]\s*([^\s<][^<\n]*?)\s*(?:\(([^)]*)\))?\s*$")
 _TAG_RE = re.compile(r"<(strong|em)>|</(strong|em)>")
 _PERMALINK_RE = re.compile(r'href="(https://app\.garnet\.ai/public/runs/[^"]+)"')
 _EXPLAINER_RE = re.compile(r"<details[^>]*>\s*<summary>(?:<sub>)?💡.*?</details>", flags=re.DOTALL)
@@ -73,6 +73,14 @@ _SUBSTRATE_RE = re.compile(
 _DEFANG_RE = re.compile(r"\[([.:])\]")
 
 _CONFIG_FILENAME = "runtime-evidence.yml"
+
+# Roots of the runner-substrate process tree. Contract v6.9 comments render
+# the substrate inline in the same comparison fence as the workload (older
+# contracts used a separate fold, handled by _SUBSTRATE_RE), so substrate
+# chains are also recognized structurally by their process names. Runner
+# infrastructure destinations (e.g. rotating hosted-compute IPs) never count
+# toward divergence.
+_SUBSTRATE_PROCESSES = ("systemd", "systemd-network")
 
 
 class RuntimeEvidenceError(Exception):
@@ -273,9 +281,28 @@ def _fence_destination(line: str) -> str | None:
     text = _TAG_RE.sub("", line)
     text = re.sub(r"^[\s│├└─]+", "", text).strip()
     match = _DESTINATION_RE.search(text)
-    if text.startswith("→") and match:
+    if text.startswith(("→", "○")) and match:
         return _refang(html.unescape(match.group(1)).strip())
     return None
+
+
+def _is_substrate_lineage(lineage: str) -> bool:
+    """Whether a chain belongs to the runner substrate.
+
+    A bare `systemd` root is not enough: a real workload can run as a systemd
+    service (`systemd > deploy.service > ○ somewhere`) and must still count
+    toward divergence. Only the hosted-runner shapes classify as substrate --
+    `systemd-network`, `hosted-compute-*`, and `systemd` whose descendants are
+    themselves runner infrastructure.
+    """
+    parts = [p for p in lineage.split(" > ") if p]
+    if not parts:
+        return False
+    if parts[0].startswith("hosted-compute-") or parts[0] == "systemd-network":
+        return True
+    if parts[0] != "systemd":
+        return False
+    return all(p in _SUBSTRATE_PROCESSES or p.startswith("hosted-compute-") for p in parts[1:])
 
 
 def _classify_added(results: list[dict], prev_profile_dests: set[str]) -> None:
@@ -290,6 +317,11 @@ def _classify_added(results: list[dict], prev_profile_dests: set[str]) -> None:
     qualify a `+` chain as reshaped.
     """
     for r in results:
+        if _is_substrate_lineage(r["lineage"]):
+            r["substrate"] = True
+            r["new"] = False
+            r["reshaped"] = False
+            continue
         r["reshaped"] = r["new"] and r["dest"] in prev_profile_dests
         r["new"] = r["new"] and r["dest"] not in prev_profile_dests
 
@@ -303,7 +335,7 @@ def _walk_tree(lines: list[tuple[str, bool]], results: list[dict], seen: dict[tu
         if not text:
             continue
         dest_match = _DESTINATION_RE.search(text)
-        if text.startswith("→") and dest_match:
+        if text.startswith(("→", "○")) and dest_match:
             dest = _refang(html.unescape(dest_match.group(1)).strip())
             note = (dest_match.group(2) or "").strip()
             lineage = " > ".join(name for d, name in stack if d < depth)
