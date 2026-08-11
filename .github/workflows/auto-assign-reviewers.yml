@@ -65,10 +65,14 @@ jobs:
             - name: Install resolver dependency
               run: python -I -m pip install --quiet 'pyyaml==6.0.2'
 
-            # Script runs from master branch (protected), but can diff against PR branch
+            # Script runs from master branch (protected), but can diff against PR branch.
+            # Assigning team reviewers needs the app token's org-level permission, which
+            # `github.token` does not carry — skip rather than fail the run on forks and
+            # in repos without the app credentials.
             - name: Run reviewer assignment script
+              if: steps.app-token.outputs.token != ''
               env:
-                  GITHUB_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
+                  GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
                   PR_NUMBER: ${{ github.event.pull_request.number }}
                   GITHUB_REPOSITORY: ${{ github.repository }}
                   BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -76,3 +80,7 @@ jobs:
                   IS_FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
               run: |
                   node .github/scripts/assign-reviewers.js
+
+            - name: Report skipped reviewer assignment
+              if: steps.app-token.outputs.token == ''
+              run: echo "::notice::Reviewer assignment skipped — GitHub App credentials are not available to this run."
