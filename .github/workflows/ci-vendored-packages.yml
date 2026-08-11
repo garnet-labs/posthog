@@ -29,18 +29,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
+      # Fork `pull_request` runs get no org secrets, so the sensor has no token
+      # to authenticate with. Skip the step there rather than failing the check.
       - name: Garnet Runtime Visibility
-        uses: garnet-org/action@v2
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        uses: garnet-org/action@3d47f4a9004f7356c980a0e8d420ef5984750e3c # v2.2.0
         with:
           api_token: ${{ secrets.GARNET_API_TOKEN }}
           api_url: https://api.garnet.ai
           jibril_version: "v2.12.0"
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
         with:
-          node-version: "20"
+          node-version-file: .nvmrc
 
       - name: Install pinned tarball
         continue-on-error: true
