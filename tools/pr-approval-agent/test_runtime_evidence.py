@@ -455,3 +455,22 @@ def test_real_pr112_contract_v69_circle_leaves_parse_and_diverge():
     assert "140.82.114.23" in {d["dest"] for d in ev.substrate_destinations}
     assert not any(d["new"] for d in ev.substrate_destinations)
     assert len(ev.destinations) == 11
+
+
+def test_systemd_service_workload_is_not_treated_as_runner_substrate():
+    # A workload can legitimately run as a systemd service. Only the hosted
+    # runner shapes (systemd-network, hosted-compute-*) are substrate, so a
+    # `systemd > deploy.service` chain must still count toward divergence.
+    workload = (
+        "```diff\n"
+        "@@ prev vs cur @@\n"
+        "  systemd\n"
+        "+ └─ deploy.service\n"
+        "+    └─ ○ shipping.example\n"
+        "```\n"
+    )
+    body = V66_COMMENT.replace("<details open><summary><b>+1", workload + "<details open><summary><b>+1")
+    ev = parse_comment(body, HEAD)
+    assert ev.status == "diverged"
+    assert "shipping.example" in {d["dest"] for d in ev.new_destinations}
+    assert "shipping.example" not in {d["dest"] for d in ev.substrate_destinations}

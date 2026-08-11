@@ -77,10 +77,10 @@ _CONFIG_FILENAME = "runtime-evidence.yml"
 # Roots of the runner-substrate process tree. Contract v6.9 comments render
 # the substrate inline in the same comparison fence as the workload (older
 # contracts used a separate fold, handled by _SUBSTRATE_RE), so substrate
-# chains are also recognized structurally by their root process. Runner
+# chains are also recognized structurally by their process names. Runner
 # infrastructure destinations (e.g. rotating hosted-compute IPs) never count
 # toward divergence.
-_SUBSTRATE_ROOTS = ("systemd", "systemd-network")
+_SUBSTRATE_PROCESSES = ("systemd", "systemd-network")
 
 
 class RuntimeEvidenceError(Exception):
@@ -287,9 +287,22 @@ def _fence_destination(line: str) -> str | None:
 
 
 def _is_substrate_lineage(lineage: str) -> bool:
-    """Whether a chain's root process belongs to the runner substrate."""
-    root = lineage.split(" > ", 1)[0]
-    return root in _SUBSTRATE_ROOTS or root.startswith("hosted-compute-")
+    """Whether a chain belongs to the runner substrate.
+
+    A bare `systemd` root is not enough: a real workload can run as a systemd
+    service (`systemd > deploy.service > ○ somewhere`) and must still count
+    toward divergence. Only the hosted-runner shapes classify as substrate --
+    `systemd-network`, `hosted-compute-*`, and `systemd` whose descendants are
+    themselves runner infrastructure.
+    """
+    parts = [p for p in lineage.split(" > ") if p]
+    if not parts:
+        return False
+    if parts[0].startswith("hosted-compute-") or parts[0] == "systemd-network":
+        return True
+    if parts[0] != "systemd":
+        return False
+    return all(p in _SUBSTRATE_PROCESSES or p.startswith("hosted-compute-") for p in parts[1:])
 
 
 def _classify_added(results: list[dict], prev_profile_dests: set[str]) -> None:
