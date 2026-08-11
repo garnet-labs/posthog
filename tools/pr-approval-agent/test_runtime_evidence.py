@@ -438,3 +438,15 @@ def test_new_chain_not_masked_by_identical_chain_in_earlier_job():
     ev = parse_comment(body, HEAD)
     assert ev.status == "diverged"
     assert [d["dest"] for d in ev.new_destinations] == ["httpbin.org"]
+
+
+def test_real_pr112_contract_v69_circle_leaves_parse_and_diverge():
+    # Regression fixture: the live Garnet comment from garnet-labs/posthog#112
+    # (contract v6.9.x). Destination leaves render as `○ name` instead of the
+    # older `→ name`; a parser that only knows `→` extracts zero destinations
+    # and fails closed to `missing` even though head-pinned evidence exists.
+    body = (Path(__file__).parent / "fixtures" / "garnet_comment_pr112.md").read_text()
+    ev = parse_comment(body, "7ff9aba949227f126da3c7c8aaa3a9c40ca0ab82")
+    assert ev.status == "diverged"
+    assert "storage.googleapis.com" in {d["dest"] for d in ev.new_destinations}
+    assert len(ev.destinations) == 11

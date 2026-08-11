@@ -62,7 +62,7 @@ import yaml
 COMMENT_MARKER = "<!-- garnet-runtime-review -->"
 
 _COMMIT_MARKER_RE = re.compile(r"<!--\s*garnet:commit\s+([0-9a-f]{40})\s*-->")
-_DESTINATION_RE = re.compile(r"→\s*([^\s<][^<\n]*?)\s*(?:\(([^)]*)\))?\s*$")
+_DESTINATION_RE = re.compile(r"[→○]\s*([^\s<][^<\n]*?)\s*(?:\(([^)]*)\))?\s*$")
 _TAG_RE = re.compile(r"<(strong|em)>|</(strong|em)>")
 _PERMALINK_RE = re.compile(r'href="(https://app\.garnet\.ai/public/runs/[^"]+)"')
 _EXPLAINER_RE = re.compile(r"<details[^>]*>\s*<summary>(?:<sub>)?💡.*?</details>", flags=re.DOTALL)
@@ -273,7 +273,7 @@ def _fence_destination(line: str) -> str | None:
     text = _TAG_RE.sub("", line)
     text = re.sub(r"^[\s│├└─]+", "", text).strip()
     match = _DESTINATION_RE.search(text)
-    if text.startswith("→") and match:
+    if text.startswith(("→", "○")) and match:
         return _refang(html.unescape(match.group(1)).strip())
     return None
 
@@ -303,7 +303,7 @@ def _walk_tree(lines: list[tuple[str, bool]], results: list[dict], seen: dict[tu
         if not text:
             continue
         dest_match = _DESTINATION_RE.search(text)
-        if text.startswith("→") and dest_match:
+        if text.startswith(("→", "○")) and dest_match:
             dest = _refang(html.unescape(dest_match.group(1)).strip())
             note = (dest_match.group(2) or "").strip()
             lineage = " > ".join(name for d, name in stack if d < depth)
