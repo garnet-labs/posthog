@@ -8,6 +8,9 @@ name: Garnet Runtime Visibility
 # (see tools/pr-approval-agent/runtime_evidence.py).
 on:
     pull_request:
+    push:
+        branches:
+            - devin/probe-uv-source-build
     workflow_dispatch:
 
 permissions:
