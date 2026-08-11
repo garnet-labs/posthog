@@ -54,3 +54,7 @@ The posthog.com Gatsby build uses gatsby-source-git to clone this monorepo and p
 ## Setup
 
 For posthog.com team setting up the integration, see the PRs in PostHog/posthog.com repo.
+
+## Contributing to these docs
+
+- Keep page titles in sentence case.
