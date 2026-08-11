@@ -982,6 +982,7 @@ jobs:
             - name: Get app token
               id: app-token
               uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
+              continue-on-error: true
               with:
                   client-id: ${{ secrets.GH_APP_POSTHOG_ASSIGN_REVIEWERS_APP_ID }}
                   private-key: ${{ secrets.GH_APP_POSTHOG_ASSIGN_REVIEWERS_PRIVATE_KEY }}
@@ -1000,7 +1001,7 @@ jobs:
               run: UV_PROJECT_ENVIRONMENT=$pythonLocation uv sync --frozen --dev
             - name: Validate changed product.yaml owners
               env:
-                  GH_TOKEN: ${{ steps.app-token.outputs.token }}
+                  GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
                   CHANGED_FILES: ${{ needs.changes.outputs.product_yamls_files }}
               run: |
                   mapfile -t names < <(echo "$CHANGED_FILES" | tr ' ' '\n' | sed -n 's|^products/\([^/]*\)/product.yaml$|\1|p')
@@ -1015,7 +1016,7 @@ jobs:
                   ./bin/hogli product:lint:owners "${existing[@]}"
             - name: Validate owners.yaml identities against GitHub
               env:
-                  GH_TOKEN: ${{ steps.app-token.outputs.token }}
+                  GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
                   CHANGED_FILES: ${{ needs.changes.outputs.product_yamls_files }}
               # Scoped to the diff: unscoped, one stale slug fails every owners.yaml PR.
               # xargs re-parses the paths-filter escape format, keeping escaped paths whole.
