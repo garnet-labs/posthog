@@ -62,4 +62,4 @@ jobs:
 
             - name: Type check
               continue-on-error: true
-              run: pnpm --filter @posthog/mcp exec tsc --noEmit
+              run: pnpm --filter @posthog/mcp exec tsgo --noEmit
