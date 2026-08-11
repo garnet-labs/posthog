@@ -448,5 +448,10 @@ def test_real_pr112_contract_v69_circle_leaves_parse_and_diverge():
     body = (Path(__file__).parent / "fixtures" / "garnet_comment_pr112.md").read_text()
     ev = parse_comment(body, "7ff9aba949227f126da3c7c8aaa3a9c40ca0ab82")
     assert ev.status == "diverged"
-    assert "storage.googleapis.com" in {d["dest"] for d in ev.new_destinations}
+    # v6.9 inlines the systemd-rooted runner substrate in the same diff fence
+    # as the workload: rotating hosted-compute IPs classify as substrate, so
+    # the only genuinely new destination is the one the PR itself caused.
+    assert {d["dest"] for d in ev.new_destinations} == {"storage.googleapis.com"}
+    assert "140.82.114.23" in {d["dest"] for d in ev.substrate_destinations}
+    assert not any(d["new"] for d in ev.substrate_destinations)
     assert len(ev.destinations) == 11

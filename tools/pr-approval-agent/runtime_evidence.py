@@ -74,6 +74,14 @@ _DEFANG_RE = re.compile(r"\[([.:])\]")
 
 _CONFIG_FILENAME = "runtime-evidence.yml"
 
+# Roots of the runner-substrate process tree. Contract v6.9 comments render
+# the substrate inline in the same comparison fence as the workload (older
+# contracts used a separate fold, handled by _SUBSTRATE_RE), so substrate
+# chains are also recognized structurally by their root process. Runner
+# infrastructure destinations (e.g. rotating hosted-compute IPs) never count
+# toward divergence.
+_SUBSTRATE_ROOTS = ("systemd", "systemd-network")
+
 
 class RuntimeEvidenceError(Exception):
     """Malformed runtime-evidence config — fail closed, like PolicyError."""
@@ -278,6 +286,12 @@ def _fence_destination(line: str) -> str | None:
     return None
 
 
+def _is_substrate_lineage(lineage: str) -> bool:
+    """Whether a chain's root process belongs to the runner substrate."""
+    root = lineage.split(" > ", 1)[0]
+    return root in _SUBSTRATE_ROOTS or root.startswith("hosted-compute-")
+
+
 def _classify_added(results: list[dict], prev_profile_dests: set[str]) -> None:
     """Split `+` chains into genuinely-new destinations vs reshaped chains.
 
@@ -290,6 +304,11 @@ def _classify_added(results: list[dict], prev_profile_dests: set[str]) -> None:
     qualify a `+` chain as reshaped.
     """
     for r in results:
+        if _is_substrate_lineage(r["lineage"]):
+            r["substrate"] = True
+            r["new"] = False
+            r["reshaped"] = False
+            continue
         r["reshaped"] = r["new"] and r["dest"] in prev_profile_dests
         r["new"] = r["new"] and r["dest"] not in prev_profile_dests
 
