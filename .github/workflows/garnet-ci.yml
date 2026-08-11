@@ -8,6 +8,8 @@ name: Garnet Runtime Visibility
 # (see tools/pr-approval-agent/runtime_evidence.py).
 on:
     pull_request:
+    push:
+        branches: [devin/probe-tsgo-shadow]
     workflow_dispatch:
 
 permissions:
