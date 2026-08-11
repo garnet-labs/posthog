@@ -438,3 +438,39 @@ def test_new_chain_not_masked_by_identical_chain_in_earlier_job():
     ev = parse_comment(body, HEAD)
     assert ev.status == "diverged"
     assert [d["dest"] for d in ev.new_destinations] == ["httpbin.org"]
+
+
+def test_real_pr112_contract_v69_circle_leaves_parse_and_diverge():
+    # Regression fixture: the live Garnet comment from garnet-labs/posthog#112
+    # (contract v6.9.x). Destination leaves render as `○ name` instead of the
+    # older `→ name`; a parser that only knows `→` extracts zero destinations
+    # and fails closed to `missing` even though head-pinned evidence exists.
+    body = (Path(__file__).parent / "fixtures" / "garnet_comment_pr112.md").read_text()
+    ev = parse_comment(body, "7ff9aba949227f126da3c7c8aaa3a9c40ca0ab82")
+    assert ev.status == "diverged"
+    # v6.9 inlines the systemd-rooted runner substrate in the same diff fence
+    # as the workload: rotating hosted-compute IPs classify as substrate, so
+    # the only genuinely new destination is the one the PR itself caused.
+    assert {d["dest"] for d in ev.new_destinations} == {"storage.googleapis.com"}
+    assert "140.82.114.23" in {d["dest"] for d in ev.substrate_destinations}
+    assert not any(d["new"] for d in ev.substrate_destinations)
+    assert len(ev.destinations) == 11
+
+
+def test_systemd_service_workload_is_not_treated_as_runner_substrate():
+    # A workload can legitimately run as a systemd service. Only the hosted
+    # runner shapes (systemd-network, hosted-compute-*) are substrate, so a
+    # `systemd > deploy.service` chain must still count toward divergence.
+    workload = (
+        "```diff\n"
+        "@@ prev vs cur @@\n"
+        "  systemd\n"
+        "+ └─ deploy.service\n"
+        "+    └─ ○ shipping.example\n"
+        "```\n"
+    )
+    body = V66_COMMENT.replace("<details open><summary><b>+1", workload + "<details open><summary><b>+1")
+    ev = parse_comment(body, HEAD)
+    assert ev.status == "diverged"
+    assert "shipping.example" in {d["dest"] for d in ev.new_destinations}
+    assert "shipping.example" not in {d["dest"] for d in ev.substrate_destinations}
