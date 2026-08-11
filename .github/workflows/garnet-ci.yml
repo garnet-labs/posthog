@@ -38,3 +38,28 @@ jobs:
 
             - name: Install dependencies (lifecycle scripts execute here)
               run: pnpm install --no-frozen-lockfile
+
+    type-check:
+        name: Type check (recorded)
+        runs-on: ubuntu-latest
+        timeout-minutes: 30
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Garnet Runtime Visibility
+              uses: garnet-org/action@v2
+              with:
+                  api_token: ${{ secrets.GARNET_API_TOKEN }}
+
+            - uses: pnpm/action-setup@v4
+
+            - uses: actions/setup-node@v4
+              with:
+                  node-version-file: .nvmrc
+
+            - name: Install dependencies
+              run: pnpm install --no-frozen-lockfile
+
+            - name: Type check
+              continue-on-error: true
+              run: pnpm --filter @posthog/mcp exec tsc --noEmit
