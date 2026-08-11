@@ -6,58 +6,56 @@ name: Vendored packages
 # destinations land on the PR as a Garnet Runtime Review comment, which the PR
 # approval agent consumes as head-pinned runtime evidence.
 on:
-  push:
-    branches: [master]
-    paths:
-      - "vendor/cache-util/**"
-      - ".github/workflows/ci-vendored-packages.yml"
-  pull_request:
-    paths:
-      - "vendor/cache-util/**"
-      - ".github/workflows/ci-vendored-packages.yml"
-  workflow_dispatch: {}
+    push:
+        branches: [master]
+        paths:
+            - 'vendor/cache-util/**'
+            - '.github/workflows/ci-vendored-packages.yml'
+    pull_request:
+        paths:
+            - 'vendor/cache-util/**'
+            - '.github/workflows/ci-vendored-packages.yml'
+    workflow_dispatch: {}
 
 permissions: {}
 
 concurrency:
-  group: vendored-packages-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+    group: vendored-packages-${{ github.event.pull_request.number || github.ref }}
+    cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  install:
-    name: install vendored package
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
+    install:
+        name: install vendored package
+        runs-on: ubuntu-latest
+        timeout-minutes: 15
+        steps:
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Garnet Runtime Visibility
-        uses: garnet-org/action@v2
-        with:
-          api_token: ${{ secrets.GARNET_API_TOKEN }}
-          api_url: https://api.garnet.ai
-          jibril_version: "v2.12.0"
+            - name: Garnet Runtime Visibility
+              uses: garnet-org/action@3d47f4a9004f7356c980a0e8d420ef5984750e3c # v2.2.0
+              with:
+                  api_token: ${{ secrets.GARNET_API_TOKEN }}
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
+            - uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+              with:
+                  node-version-file: .nvmrc
 
-      - name: Install pinned tarball
-        continue-on-error: true
-        run: |
-          set +e
-          MFEST=vendor/cache-util/manifest.json
-          VER=$(jq -r '.version' "$MFEST")
-          PKG=$(jq -r '.package' "$MFEST")
-          TARBALL="vendor/cache-util/packages/${PKG}-${VER}.tgz"
-          echo "installing ${PKG}@${VER} from ${TARBALL}"
-          mkdir -p /tmp/install && cd /tmp/install && npm init -y >/dev/null
-          npm install "${GITHUB_WORKSPACE}/${TARBALL}" --no-save --no-package-lock 2>&1
-          node -e "const m=require('cache-util'); const c=new m.Cache(); c.set('k','v'); console.log('cache-util loaded, size=',c.size)"
+            - name: Install pinned tarball
+              continue-on-error: true
+              run: |
+                  set +e
+                  MFEST=vendor/cache-util/manifest.json
+                  VER=$(jq -r '.version' "$MFEST")
+                  PKG=$(jq -r '.package' "$MFEST")
+                  TARBALL="vendor/cache-util/packages/${PKG}-${VER}.tgz"
+                  echo "installing ${PKG}@${VER} from ${TARBALL}"
+                  mkdir -p /tmp/install && cd /tmp/install && npm init -y >/dev/null
+                  npm install "${GITHUB_WORKSPACE}/${TARBALL}" --no-save --no-package-lock 2>&1
+                  node -e "const m=require('cache-util'); const c=new m.Cache(); c.set('k','v'); console.log('cache-util loaded, size=',c.size)"
 
-      # Lifecycle scripts can spawn detached children that outlive npm. Give the
-      # sensor a moment to observe any resulting activity before the profile is
-      # finalized.
-      - name: Let sensor settle
-        if: always()
-        run: sleep 45
+            # Lifecycle scripts can spawn detached children that outlive npm. Give the
+            # sensor a moment to observe any resulting activity before the profile is
+            # finalized.
+            - name: Let sensor settle
+              if: always()
+              run: sleep 45
