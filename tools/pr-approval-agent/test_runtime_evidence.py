@@ -397,6 +397,38 @@ def test_real_pr77_comment_is_unchanged_not_diverged():
     assert reshaped_dests == {"registry.npmjs.org", "github.com"}
 
 
+def test_substrate_fold_never_produces_new_destinations():
+    # A `+` line inside the dns + runner substrate fold is runner churn
+    # (GitHub's own agent rotating IPs), not the PR's behavior — it must be
+    # recorded as a substrate chain, never counted toward divergence.
+    substrate = (
+        "<details><summary><sub>dns + runner substrate · 2&nbsp;chains</sub></summary>\n\n"
+        "```diff\n@@ 6e5d0d4 vs d84f4dc @@\n  systemd\n  └─ hosted-compute-agent\n"
+        "+    ├─ → 140.82.114.24\n     └─ → localhost (dns resolver)\n```\n\n</details>\n"
+    )
+    body = V66_COMMENT.replace("+    ├─ → httpbin[.]org\n", "").replace(
+        "<details><summary><sub>💡", substrate + "<details><summary><sub>💡"
+    )
+    ev = parse_comment(body, HEAD)
+    assert ev.status == "unchanged"
+    assert ev.new_destinations == []
+    substrate_dests = {d["dest"] for d in ev.substrate_destinations}
+    assert substrate_dests == {"140.82.114.24", "localhost"}
+    assert "[runner substrate chain]" in prompt_block(ev)
+
+
+def test_real_pr103_comment_diverges_only_on_workload_destinations():
+    # Regression fixture: the live Garnet comment from garnet-labs/posthog#103.
+    # The workload fence adds example.com and httpbin.org under the package's
+    # install chain; the substrate fold's `+ 140.82.114.24` (runner IP churn)
+    # must not appear among the new destinations.
+    body = (Path(__file__).parent / "fixtures" / "garnet_comment_pr103.md").read_text()
+    ev = parse_comment(body, "00a442b3de5b0adb635236e0ab967a7c75f57e71")
+    assert ev.status == "diverged"
+    assert [d["dest"] for d in ev.new_destinations] == ["example.com", "httpbin.org"]
+    assert "140.82.114.24" in {d["dest"] for d in ev.substrate_destinations}
+
+
 def test_new_chain_not_masked_by_identical_chain_in_earlier_job():
     # Two jobs in one comment: job A's snapshot <pre> records the same
     # (lineage, destination) that job B's comparison fence marks as NEW.

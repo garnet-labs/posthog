@@ -85,8 +85,10 @@ def evidence_section(comment: dict, head_sha: str, repo: str, remaining_budget: 
         [
             f"Kernel-recorded execution record for head `{head_sha}`, mirrored verbatim from",
             "the sticky Garnet Runtime Review comment on this PR so reviewers that read only",
-            "the description ground in the same bytes. Facts only — process chains and the",
-            "destinations each chain reached; judgment stays with the reviewer (see",
+            "the description ground in the same bytes. Facts only: each action and the",
+            "execution chain behind it. An execution chain is one path from the runner's",
+            "root to an action, today an outbound connection; a destination is where that",
+            "connection went. Judgment stays with the reviewer (see",
             f"[REVIEW.md](https://github.com/{repo}/blob/HEAD/REVIEW.md)). Cite grounded findings as:",
             "",
             f"> Runtime evidence (Garnet, head `{sha7}`): `<process lineage>` → `<destination>` "

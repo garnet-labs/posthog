@@ -60,8 +60,9 @@ next push, or re-apply the label once the backend recovers.
 review in flight (👀 reaction) after the polling budget — not a verdict on the
 PR, so the next push retries automatically. When the whole
 fleet of stamphog reviews suddenly returns `ERROR`, suspect the
-`STAMPHOG_ANTHROPIC_API_KEY` org secret first (stamphog uses its own dedicated
-Anthropic key, separate from the shared `ANTHROPIC_API_KEY`).
+`ANTHROPIC_API_KEY` secret first. Upstream runs stamphog on a dedicated
+`STAMPHOG_ANTHROPIC_API_KEY`; this fork reads `ANTHROPIC_API_KEY` and falls
+back to the upstream name.
 
 ### Local testing
 
