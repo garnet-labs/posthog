@@ -58,3 +58,4 @@ For posthog.com team setting up the integration, see the PRs in PostHog/posthog.
 ## Contributing to these docs
 
 - Keep page titles in sentence case.
+- Published pages live under `docs/published/`.
