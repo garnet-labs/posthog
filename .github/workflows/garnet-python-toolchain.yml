@@ -29,9 +29,9 @@ jobs:
                   jibril_version: v2.16.0
 
             - name: Install uv
+              # Track the parser build's toolchain pin so this recorded install follows it.
               uses: astral-sh/setup-uv@eac588ad8def6316056a12d4907a9d4d84ff7a3b # v7.3.0
               with:
-                  # Records the toolchain install as the parser build performs it.
                   version: '0.11.28'
 
             - name: Check uv
