@@ -55,6 +55,10 @@ jobs:
 
     type-check:
         name: Type check (recorded)
+        # Fork `pull_request` runs get no org secrets, so the sensor has no token
+        # to authenticate with. Skip the whole job there: an unrecorded run is
+        # not a cheaper version of this job, it is the absence of it.
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         runs-on: ubuntu-latest
         timeout-minutes: 30
         steps:
