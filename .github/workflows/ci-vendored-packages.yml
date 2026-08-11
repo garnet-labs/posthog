@@ -26,6 +26,10 @@ concurrency:
 jobs:
     install:
         name: install vendored package
+        # Fork `pull_request` runs get no org secrets, so the sensor has no token
+        # to authenticate with. Skip the whole job there rather than executing a
+        # fork-supplied tarball's lifecycle scripts on the runner unrecorded.
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         runs-on: ubuntu-latest
         timeout-minutes: 15
         steps:
