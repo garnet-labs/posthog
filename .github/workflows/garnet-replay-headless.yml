@@ -4,8 +4,6 @@ on:
     pull_request:
         paths:
             - common/replay-headless/**
-            - package.json
-            - pnpm-lock.yaml
             - .github/workflows/garnet-replay-headless.yml
 
 permissions:
