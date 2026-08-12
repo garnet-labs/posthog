@@ -26,22 +26,31 @@ Semantics (all fail toward "no bypass"):
                 deny-list applies normally and the reviewer is told no
                 usable runtime evidence exists.
     recorded  → an execution tree exists for the head commit (snapshot:
-                no previous profiled commit to compare against). Scoped
-                bypass: a deps_toolchain-only deny may proceed to LLM
-                review (never auto-approve) with the full tree in-prompt.
+                no previous profiled commit to compare against). No
+                bypass — with no comparison baseline the tree cannot
+                attest that the change left the workload unchanged; the
+                full tree still reaches the LLM reviewer in-prompt.
     unchanged → an execution tree exists and the renderer's comparison
                 against the previously profiled commit shows no genuinely
-                new destinations. Same scoped bypass as `recorded`. A `+`
-                chain whose destination was already recorded (in the
-                unchanged or removed set of the same comment) is a
-                RESHAPED chain — the same destination under a different
-                process lineage, which installer nondeterminism produces
-                run to run. Reshaped chains never diverge on their own,
-                but they are still reported to the reviewer.
-    diverged  → the comparison shows at least one genuinely NEW
+                new workload destinations. Scoped bypass: a
+                deps_toolchain-only deny may proceed to LLM review (never
+                auto-approve). A `+` chain whose destination was already
+                recorded (in the unchanged or removed set of the same
+                comment) is a RESHAPED chain — the same destination under
+                a different process lineage, which installer
+                nondeterminism produces run to run. Reshaped chains never
+                diverge on their own. `+` chains rooted in the runner
+                substrate (systemd-rooted provisioning, no recorded
+                workflow step) are runner churn, not workload divergence —
+                they never diverge either, but both are still reported to
+                the reviewer.
+    diverged  → the comparison shows at least one genuinely NEW workload
                 destination versus the previously profiled commit. No
-                bypass; the reviewer is instructed that a new destination
-                is a showstopper unless the diff clearly explains it.
+                bypass. "New" is an observation; "unexpected" is the
+                reviewer's judgment against the diff — the new chains are
+                handed to the LLM reviewer as advisory context with
+                showstopper guidance, not turned into a deterministic
+                refusal.
 
 Trust model: only comments authored by the configured Garnet bot logins
 are read, the commit marker must equal the PR head SHA (a stale comment
@@ -106,6 +115,11 @@ class RuntimeEvidence:
     def new_destinations(self) -> list[dict]:
         """Destinations genuinely new versus the previously profiled commit."""
         return [d for d in self.destinations if d["new"]]
+
+    @property
+    def new_workload_destinations(self) -> list[dict]:
+        """New destinations attributable to the workload (runner substrate excluded)."""
+        return [d for d in self.destinations if d["new"] and not d.get("substrate")]
 
     @property
     def substrate_destinations(self) -> list[dict]:
@@ -180,7 +194,7 @@ def parse_comment(body: str, head_sha: str) -> RuntimeEvidence:
         # still recording, or the renderer format drifted past this parser.
         # Either way there is no bypass.
         return RuntimeEvidence(status="missing")
-    if any(d["new"] for d in destinations):
+    if any(d["new"] and not d.get("substrate") for d in destinations):
         status = "diverged"
     elif compared:
         status = "unchanged"
@@ -292,8 +306,9 @@ def _is_substrate_lineage(lineage: str) -> bool:
     A bare `systemd` root is not enough: a real workload can run as a systemd
     service (`systemd > deploy.service > ○ somewhere`) and must still count
     toward divergence. Only the hosted-runner shapes classify as substrate --
-    `systemd-network`, `hosted-compute-*`, and `systemd` whose descendants are
-    themselves runner infrastructure.
+    `systemd-network`, `hosted-compute-*`, and `systemd` chains that either
+    consist of runner infrastructure processes or descend through the
+    hosted-compute provisioning agent without ever reaching Runner.Worker.
     """
     parts = [p for p in lineage.split(" > ") if p]
     if not parts:
@@ -302,6 +317,12 @@ def _is_substrate_lineage(lineage: str) -> bool:
         return True
     if parts[0] != "systemd":
         return False
+    # Attribution is structural: on a hosted runner, workload always descends
+    # through Runner.Worker. A chain under the hosted-compute provisioning
+    # agent that never reaches Runner.Worker (e.g. `sudo > provjobd`) is the
+    # runner provisioning itself, whatever the process names are.
+    if any(p.startswith("hosted-compute-") for p in parts[1:]) and "Runner.Worker" not in parts:
+        return True
     return all(p in _SUBSTRATE_PROCESSES or p.startswith("hosted-compute-") for p in parts[1:])
 
 
@@ -368,16 +389,17 @@ def bypassable_deny(deny: list[str], evidence: RuntimeEvidence, config: RuntimeE
     """Return deny categories cleared by usable runtime evidence.
 
     Conservative on purpose: only configured categories (deps_toolchain by
-    default) are ever bypassable, only when an execution tree exists for
-    the current head with no new chains versus the previously profiled
-    commit (`recorded` or `unchanged`), and only when *every* deny
-    category on the PR is bypassable — a PR that also trips auth or
-    crypto_secrets keeps its full deny even with clean runtime evidence.
+    default) are ever bypassable, only on a matched `unchanged` comparison
+    against the previously profiled commit — a first snapshot (`recorded`)
+    has no baseline and cannot attest that the change left the workload
+    unchanged — and only when *every* deny category on the PR is
+    bypassable — a PR that also trips auth or crypto_secrets keeps its
+    full deny even with clean runtime evidence.
     Like the migration-risk bypass, this never auto-approves: the PR still
     gets full LLM review with the execution tree in the prompt, and the
     reviewer judges each chain against the diff.
     """
-    if evidence.status not in ("recorded", "unchanged"):
+    if evidence.status != "unchanged":
         return []
     if not deny or not set(deny) <= config.bypass_categories:
         return []
@@ -417,9 +439,13 @@ def prompt_block(evidence: RuntimeEvidence) -> str:
         )
     if evidence.status == "diverged":
         lines.append(
-            "  Verdict guidance: at least one destination is NEW versus the previously profiled "
-            "commit. Unless this diff clearly explains that exact chain and destination, a new "
-            "destination is a showstopper — REFUSE and name the chain."
+            "  Verdict guidance: at least one workload destination is NEW versus the previously "
+            "profiled commit. \"New\" is an observation, not a verdict: judge each new chain "
+            "against the diff. If the diff clearly explains that exact chain and destination "
+            "(a declared dependency source, an allowlisted lifecycle script's documented fetch), "
+            "the recording is confirmation. If the diff does not explain it, or the chain "
+            "represents a trust decision (a lifecycle script granted execution, a new script in "
+            "a manifest), it is a showstopper — REFUSE and name the chain."
         )
     else:
         lines.append(

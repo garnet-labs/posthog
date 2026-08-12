@@ -596,20 +596,31 @@ def test_runtime_evidence_gate_recorded_names_tree() -> None:
     assert "tree handed to the reviewer" in message
 
 
-def test_runtime_evidence_gate_diverged_fails_naming_new_destination() -> None:
+def test_runtime_evidence_gate_diverged_is_advisory_naming_new_destination() -> None:
     evidence = {
         "status": "diverged",
         "commit_sha": "6e5d0d4cf00a92a9e1fe697efe0e41b3ae61533e",
         "destinations": [
             {"dest": "github.com", "note": "", "lineage": "Runner.Worker > node", "new": False},
             {"dest": "httpbin.org", "note": "", "lineage": "Runner.Worker > node", "new": True},
+            {
+                "dest": "140.82.112.24",
+                "note": "",
+                "lineage": "systemd > hosted-compute- > sudo > provjobd",
+                "new": True,
+                "substrate": True,
+            },
         ],
         "permalinks": [],
     }
     passed, message = _pipeline_with_evidence(evidence)._check_runtime_evidence()
-    assert not passed
-    assert "1 NEW destination(s) vs previous profiled commit" in message
+    # "New" is an observation, not a verdict — the row passes and hands the
+    # workload chains to the reviewer; substrate churn never counts.
+    assert passed
+    assert "1 NEW workload destination(s) vs previous profiled commit" in message
+    assert "handed to the reviewer" in message
     assert "Runner.Worker > node → httpbin.org" in message
+    assert "provjobd" not in message
 
 
 def test_runtime_evidence_gate_unchanged_counts_reshaped_chains() -> None:

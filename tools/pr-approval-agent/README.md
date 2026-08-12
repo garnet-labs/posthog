@@ -15,12 +15,17 @@ Deterministic safety gates first, then Claude reviews for showstoppers.
 >   itself — there is no static egress allowlist; the deterministic signals
 >   are integrity (trusted author, head-pinned, parseable, non-empty) and
 >   the renderer's comparison against the previously profiled commit.
-> - `review_pr.py` — a usable execution tree (recorded/unchanged) may clear
->   a `deps_toolchain`-only deny (to LLM review, never auto-approve); a
->   genuinely NEW destination versus the previous profiled commit fails the
->   `runtime evidence` gate row (a `+` chain whose destination the previous
->   profile already recorded is a reshaped chain — reported, never failing);
->   evidence status/block land in the classification and bundle.
+> - `review_pr.py` — a matched `unchanged` comparison against the previously
+>   profiled commit may clear a `deps_toolchain`-only deny (to LLM review,
+>   never auto-approve; a first snapshot has no baseline and never clears).
+>   "New" is an observation, "unexpected" is a judgment against the diff: a
+>   genuinely NEW workload destination is advisory — named on the
+>   `runtime evidence` gate row and handed to the reviewer with showstopper
+>   guidance, never a deterministic refusal. Runner-substrate chains
+>   (systemd-rooted provisioning with no Runner.Worker descent) and reshaped
+>   chains (an already-recorded destination under a different lineage) never
+>   count toward divergence — reported, never failing; evidence status/block
+>   land in the classification and bundle.
 > - `reviewer.py` — the full tree renders as a TRUSTED prompt block; the
 >   reviewer judges each chain (lineage → destination) against the diff;
 >   `.stamphog/review-guidance.md` has a "Runtime evidence (Garnet)"

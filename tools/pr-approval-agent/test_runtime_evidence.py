@@ -146,19 +146,25 @@ def test_v66_explainer_sample_tree_ignored():
 def test_bypass_only_configured_categories():
     ev = parse_comment(COMMENT, HEAD)
     cfg = _config()
-    assert bypassable_deny(["deps_toolchain"], ev, cfg) == ["deps_toolchain"]
+    # A first snapshot has no comparison baseline — no bypass.
+    assert ev.status == "recorded"
+    assert bypassable_deny(["deps_toolchain"], ev, cfg) == []
+    unchanged = RuntimeEvidence(status="unchanged", commit_sha=HEAD, destinations=ev.destinations)
+    assert bypassable_deny(["deps_toolchain"], unchanged, cfg) == ["deps_toolchain"]
     # A PR that also trips auth keeps its full deny.
-    assert bypassable_deny(["auth", "deps_toolchain"], ev, cfg) == []
-    assert bypassable_deny([], ev, cfg) == []
+    assert bypassable_deny(["auth", "deps_toolchain"], unchanged, cfg) == []
+    assert bypassable_deny([], unchanged, cfg) == []
 
 
-def test_no_bypass_on_diverged_or_missing():
+def test_no_bypass_on_diverged_missing_or_snapshot():
     cfg = _config()
     diverged = parse_comment(V66_COMMENT, HEAD)
     assert diverged.status == "diverged"
     assert bypassable_deny(["deps_toolchain"], diverged, cfg) == []
     missing = RuntimeEvidence(status="missing")
     assert bypassable_deny(["deps_toolchain"], missing, cfg) == []
+    snapshot = RuntimeEvidence(status="recorded", commit_sha=HEAD)
+    assert bypassable_deny(["deps_toolchain"], snapshot, cfg) == []
 
 
 def test_prompt_block_names_new_chain():
@@ -474,3 +480,17 @@ def test_systemd_service_workload_is_not_treated_as_runner_substrate():
     assert ev.status == "diverged"
     assert "shipping.example" in {d["dest"] for d in ev.new_destinations}
     assert "shipping.example" not in {d["dest"] for d in ev.substrate_destinations}
+
+
+def test_real_pr130_substrate_only_churn_is_unchanged():
+    # Regression fixture: the live Garnet comment from garnet-labs/posthog#130
+    # (a manifest-only pnpm pin bump). Every `+` line sits under the
+    # systemd-rooted runner tree (provisioning churn); the workload chain is
+    # identical to the previous profile — so the comparison is unchanged, the
+    # deps bypass stays available, and no workload destination is new.
+    body = (Path(__file__).parent / "fixtures" / "garnet_comment_pr130.md").read_text()
+    ev = parse_comment(body, "eb0d3f112a57265e92e744ca62ee0a1c0cd6a1ef")
+    assert ev.status == "unchanged"
+    assert ev.new_workload_destinations == []
+    assert ev.new_destinations == []
+    assert "140.82.112.24" in {d["dest"] for d in ev.substrate_destinations}

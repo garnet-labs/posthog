@@ -649,12 +649,13 @@ class Pipeline:
         """How the execution tree feeds this review — rendered as its own gate row.
 
         Not a static egress check: the tree (process lineage → destination)
-        is handed to the LLM reviewer to judge against the diff. This row
-        fails only when the renderer's comparison against the previously
-        profiled commit shows a genuinely NEW destination; a reshaped chain
-        (an already-recorded destination under a different lineage) passes
-        and is counted; missing evidence passes the row but leaves the
-        deny-list untouched (fail-closed on the bypass).
+        is handed to the LLM reviewer to judge against the diff. "New" is an
+        observation; "unexpected" is a judgment against the diff — so a
+        diverged comparison never fails this row deterministically. The new
+        workload chains are named here and carried to the reviewer with
+        showstopper guidance; runner-substrate churn never counts toward
+        divergence; missing evidence passes the row but leaves the deny-list
+        untouched (fail-closed on the bypass).
         """
         ev = self.classification["runtime_evidence"]
         head = ev.get("commit_sha", "")[:7]
@@ -664,9 +665,12 @@ class Pipeline:
         if ev["status"] == "missing":
             return True, "none recorded for this head — deny-list applies unmodified"
         if ev["status"] == "diverged":
-            new = [d for d in dests if d["new"]]
+            new = [d for d in dests if d["new"] and not d.get("substrate")]
             named = "; ".join(f"{d['lineage']} → {d['dest']}" for d in new[:3])
-            return False, f"{len(new)} NEW destination(s) vs previous profiled commit: {named}"
+            return True, (
+                f"{len(new)} NEW workload destination(s) vs previous profiled commit — "
+                f"handed to the reviewer to judge against the diff: {named}"
+            )
         if ev["status"] == "unchanged":
             detail = "no new destinations vs previous profiled commit"
             if reshaped:
