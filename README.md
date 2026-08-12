@@ -1,3 +1,15 @@
+> [!NOTE]
+> **Testbed fork (garnet-labs/posthog).** Maintained by
+> [Garnet Labs](https://garnet.ai) as a live testbed for runtime-grounded
+> CI review: kernel-recorded execution evidence on every PR plus a
+> vendored stamphog gate. Reviewer grounding lives in
+> [`REVIEW.md`](REVIEW.md); the vendored engine and its Garnet-integration
+> details are in
+> [`tools/pr-approval-agent/README.md`](tools/pr-approval-agent/README.md).
+> The integration is layered on top of upstream via `.github/workflows/`,
+> `tools/pr-approval-agent/`, `.stamphog/`, `REVIEW.md`, and `greptile.json`;
+> upstream PostHog product code is not modified here.
+
 <p align="center">
   <img alt="posthoglogo" src="https://user-images.githubusercontent.com/65415371/205059737-c8a4f836-4889-4654-902e-f302b187b6a0.png">
 </p>
