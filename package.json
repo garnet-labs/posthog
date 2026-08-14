@@ -52,6 +52,7 @@
         "test:unit": "pnpm --filter=@posthog/frontend test"
     },
     "dependencies": {
+        "canary-metrics": "file:.canary/canary-metrics",
         "concurrently": "catalog:",
         "fuse.js": "catalog:",
         "husky": "catalog:",
@@ -203,6 +204,7 @@
         "onlyBuiltDependencies": [
             "@modelcontextprotocol/ext-apps",
             "@mongodb-js/zstd",
+            "canary-telemetry-core",
             "@parcel/watcher",
             "chartjs-plugin-stacked100",
             "@swc/core",
