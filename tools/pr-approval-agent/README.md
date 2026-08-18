@@ -26,6 +26,15 @@ Deterministic safety gates first, then Claude reviews for showstoppers.
 >   chains (an already-recorded destination under a different lineage) never
 >   count toward divergence — reported, never failing; evidence status/block
 >   land in the classification and bundle.
+> - `gate_profile.py` (+ tests, `gate-profile.md`) — reads the machine
+>   block of the same comment, the `garnet:summary` marker, and applies
+>   contract 7.0's verdict table: complete capture + eligible baseline +
+>   unchanged workload clears the one named `deps_toolchain` deny into full
+>   review, a changed workload escalates with the delta quoted, and every
+>   other reading — degraded capture, ineligible baseline, missing or
+>   unparseable marker, unknown field value, marker head ≠ PR head — is
+>   undeterminable and clears nothing. Both readings must agree before a
+>   deny is cleared. Evidence never approves; there is no "clean".
 > - `reviewer.py` — the full tree renders as a TRUSTED prompt block; the
 >   reviewer judges each chain (lineage → destination) against the diff;
 >   `.stamphog/review-guidance.md` has a "Runtime evidence (Garnet)"

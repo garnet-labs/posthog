@@ -152,7 +152,8 @@ def load_config(stamphog_dir: Path) -> RuntimeEvidenceConfig | None:
         raise RuntimeEvidenceError(f"could not read/parse {path}: {exc}") from exc
     if not isinstance(raw, dict):
         raise RuntimeEvidenceError("runtime-evidence config root: must be a mapping")
-    unknown = set(raw) - {"version", "trusted_bots", "bypass_categories"}
+    # `gate_profile` is read by gate_profile.py, which validates it there.
+    unknown = set(raw) - {"version", "trusted_bots", "bypass_categories", "gate_profile"}
     if unknown:
         raise RuntimeEvidenceError(f"runtime-evidence config: unknown keys {sorted(unknown)}")
     if raw.get("version") != 1:
@@ -169,16 +170,22 @@ def load_config(stamphog_dir: Path) -> RuntimeEvidenceConfig | None:
     )
 
 
-def fetch_runtime_evidence(repo: str, pr_number: int, head_sha: str, config: RuntimeEvidenceConfig) -> RuntimeEvidence:
-    """Find the Garnet sticky comment on the PR and parse it for the head commit."""
-    comments = _issue_comments(repo, pr_number)
-    for comment in comments:
+def fetch_evidence_comment(repo: str, pr_number: int, config: RuntimeEvidenceConfig) -> str | None:
+    """Body of the Garnet sticky comment authored by a trusted bot, if any."""
+    for comment in _issue_comments(repo, pr_number):
         login = (comment.get("user") or {}).get("login", "")
         body = comment.get("body") or ""
-        if login not in config.trusted_bots or COMMENT_MARKER not in body:
-            continue
-        return parse_comment(body, head_sha)
-    return RuntimeEvidence(status="missing")
+        if login in config.trusted_bots and COMMENT_MARKER in body:
+            return body
+    return None
+
+
+def fetch_runtime_evidence(repo: str, pr_number: int, head_sha: str, config: RuntimeEvidenceConfig) -> RuntimeEvidence:
+    """Find the Garnet sticky comment on the PR and parse it for the head commit."""
+    body = fetch_evidence_comment(repo, pr_number, config)
+    if body is None:
+        return RuntimeEvidence(status="missing")
+    return parse_comment(body, head_sha)
 
 
 def parse_comment(body: str, head_sha: str) -> RuntimeEvidence:

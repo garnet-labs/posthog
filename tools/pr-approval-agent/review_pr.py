@@ -31,6 +31,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from familiarity import AuthorFamiliarity, compute_familiarity, familiarity_evidence
+from gate_profile import (
+    CLEAR as GATE_CLEAR,
+    ESCALATE as GATE_ESCALATE,
+    GateDecision,
+    evaluate as evaluate_gate_profile,
+    load_config as load_gate_profile_config,
+    prompt_block as gate_profile_prompt_block,
+)
 from gates import (
     MAX_FILES,
     MAX_LINES,
@@ -72,8 +80,9 @@ from runtime_evidence import (
     bypassable_deny,
     citation_block as runtime_evidence_citation_block,
     evidence_dict as runtime_evidence_dict,
-    fetch_runtime_evidence,
+    fetch_evidence_comment,
     load_config as load_runtime_evidence_config,
+    parse_comment as parse_runtime_evidence_comment,
     prompt_block as runtime_evidence_prompt_block,
 )
 from version import STAMPHOG_VERSION
@@ -408,7 +417,9 @@ class Pipeline:
         # the reviewer as a showstopper. Config absent → everything below
         # is a no-op.
         runtime_evidence_config = load_runtime_evidence_config(REPO_ROOT / ".stamphog")
+        gate_profile_config = load_gate_profile_config(REPO_ROOT / ".stamphog")
         runtime_evidence: RuntimeEvidence | None = None
+        gate_decision: GateDecision | None = None
         runtime_evidence_bypassed: list[str] = []
         dep_manifests = dependency_manifests_without_lockfile(file_paths)
         # Deterministic first line for the manifest scripts risk: an edit to
@@ -420,7 +431,17 @@ class Pipeline:
         if risky_manifests and "deps_toolchain" not in deny:
             deny = sorted([*deny, "deps_toolchain"])
         if runtime_evidence_config is not None:
-            runtime_evidence = fetch_runtime_evidence(self.repo, self.pr_number, pr.head_sha, runtime_evidence_config)
+            evidence_body = fetch_evidence_comment(self.repo, self.pr_number, runtime_evidence_config)
+            runtime_evidence = (
+                parse_runtime_evidence_comment(evidence_body, pr.head_sha)
+                if evidence_body
+                else RuntimeEvidence(status="missing")
+            )
+            # Contract 7.0 machine block: the same comment's garnet:summary
+            # marker, read structurally. It gates the bypass alongside the
+            # tree parser — a deny clears only when both agree.
+            if gate_profile_config is not None:
+                gate_decision = evaluate_gate_profile(evidence_body, pr.head_sha, deny, gate_profile_config)
             # Manifest script/lifecycle changes keep their deny even with
             # clean evidence: scripts can behave differently outside CI
             # (conditional or time-delayed egress), and _check_deny_list
@@ -428,6 +449,18 @@ class Pipeline:
             # here would record a bypass that had no effect.
             if not risky_manifests:
                 runtime_evidence_bypassed = bypassable_deny(deny, runtime_evidence, runtime_evidence_config)
+            if gate_profile_config is not None:
+                # Both readings of the same comment must agree. The marker is
+                # the contract surface, so an escalating or undeterminable
+                # machine verdict withholds a bypass the tree parser would
+                # otherwise grant.
+                cleared_by_marker = set(gate_decision.cleared_denies) if gate_decision else set()
+                withheld = [c for c in runtime_evidence_bypassed if c not in cleared_by_marker]
+                if withheld:
+                    verdict = gate_decision.outcome if gate_decision else "undeterminable"
+                    note = "workload changed" if verdict == GATE_ESCALATE else verdict
+                    print(_warn(f"gate profile withholds the {', '.join(withheld)} bypass ({note})"))
+                    runtime_evidence_bypassed = [c for c in runtime_evidence_bypassed if c in cleared_by_marker]
             if runtime_evidence_bypassed:
                 deny = [c for c in deny if c not in runtime_evidence_bypassed]
         title_flags = [
@@ -486,6 +519,8 @@ class Pipeline:
             else None,
             "runtime_evidence": runtime_evidence_dict(runtime_evidence),
             "runtime_evidence_bypassed": runtime_evidence_bypassed,
+            "gate_profile": gate_decision.as_dict() if gate_decision else None,
+            "gate_profile_block": gate_profile_prompt_block(gate_decision) if gate_decision else None,
             "allow_listed_only": allow_only,
             "is_test_only": is_test,
             "has_dep_changes": has_dependency_changes(file_paths),
@@ -595,6 +630,8 @@ class Pipeline:
         ]
         if self.classification.get("runtime_evidence") is not None:
             gates.insert(2, ("runtime evidence", self._check_runtime_evidence))
+        if self.classification.get("gate_profile") is not None:
+            gates.insert(3, ("gate profile", self._check_gate_profile))
         for name, check in gates:
             passed, message = check()
             result = GateResult(name, passed, message)
@@ -681,6 +718,23 @@ class Pipeline:
             f"execution tree recorded for head `{head}` — {len(dests)} destination(s) across "
             f"{len(chains)} chain(s), {detail}; tree handed to the reviewer"
         )
+
+    def _check_gate_profile(self) -> tuple[bool, str]:
+        """What the comment's machine block says — contract 7.0's verdict table.
+
+        Structural, not prose: the marker states the capture, the baseline
+        and the delta, and every missing or unknown field lands on
+        `undeterminable`. Like the tree row this never fails the review
+        deterministically — an escalation is handed to the reviewer with the
+        workload delta quoted, and an undeterminable outcome simply leaves
+        the deny-list untouched.
+        """
+        gate = self.classification["gate_profile"]
+        cleared = gate["cleared_denies"]
+        detail = f"{gate['outcome']} — {gate['reason']}"
+        if gate["outcome"] == GATE_CLEAR and cleared:
+            detail += f" (cleared: {', '.join(cleared)})"
+        return True, detail
 
     def _summarize_ownership(self) -> str:
         """Build ownership context for the LLM (not a hard gate)."""
@@ -1005,6 +1059,7 @@ class Pipeline:
                 "runtime_evidence_status": self.classification.get("runtime_evidence_status"),
                 "runtime_evidence": self.classification.get("runtime_evidence"),
                 "runtime_evidence_bypassed": self.classification.get("runtime_evidence_bypassed", []),
+                "gate_profile": self.classification.get("gate_profile"),
                 "ownership": self.classification.get("ownership", {}),
                 "familiarity": familiarity_evidence(self.familiarity),
             },
