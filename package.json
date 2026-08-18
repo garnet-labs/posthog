@@ -199,6 +199,10 @@
             "chartjs-plugin-crosshair@2.0.0": "patches/chartjs-plugin-crosshair@2.0.0.patch",
             "kea@4.0.0-pre.6": "patches/kea@4.0.0-pre.6.patch"
         },
+        "// Dependencies whose install scripts stay blocked on purpose": "",
+        "ignoredBuiltDependencies": [
+            "puppeteer"
+        ],
         "// Known dependencies that we need preinstall scripts for, add new ones with caution": "",
         "onlyBuiltDependencies": [
             "@modelcontextprotocol/ext-apps",
