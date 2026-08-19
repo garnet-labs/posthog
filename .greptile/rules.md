@@ -23,6 +23,10 @@ action, never the definition of the chain. The headline, when quoted, is
 coverage. Never repeat Garnet verdicts, scores, severities, or baseline
 judgments.
 
+Judge each execution chain against the diff. A package install reaching its
+registry is coherent; a lifecycle script spawning a network client the diff
+never mentions is not.
+
 Prefix every runtime-grounded statement exactly with:
 
 `Runtime evidence (Garnet, head <sha7>): `

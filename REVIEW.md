@@ -68,8 +68,8 @@ severity. **You, the reviewer, supply the judgment.**
    > Runtime evidence (Garnet, head `<sha7>`): `<execution chain>` →
    > `<destination>` (`<workflow>/<job>`) — [Execution Profile](URL)
 
-   Include the real execution chain, destination, workflow/job, head SHA, and the
-   comment's profile/permalink URL.
+   Include the real execution chain, destination, workflow/job, head SHA, and
+   the comment's profile/permalink URL.
 6. **Re-ground on every update.** The comment is refreshed on every push;
    when you re-review a PR, use the current comment, not a remembered one.
 7. **Do not restate the comment.** Reference it and add judgment — the

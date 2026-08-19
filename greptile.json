@@ -12,6 +12,11 @@
                 "path": ".greptile/rules.md",
                 "description": "Authoritative Greptile rules for consuming head-bound Garnet Runtime Review evidence.",
                 "scope": ["**/*"]
+            },
+            {
+                "path": "AGENTS.md",
+                "description": "Repository conventions and development guidance for reviewing changes.",
+                "scope": ["**/*"]
             }
         ],
         "other": [
