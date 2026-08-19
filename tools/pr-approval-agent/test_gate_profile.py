@@ -134,6 +134,20 @@ def test_unavailable_capture_is_undeterminable() -> None:
     assert decision.outcome == UNDETERMINABLE
 
 
+def test_contract7_marker_without_capture_quality_is_undeterminable() -> None:
+    decision = evaluate(marker_body(capture_quality=None), HEAD, ["deps_toolchain"], CONFIG)
+    assert decision.outcome == UNDETERMINABLE
+    assert "states no capture_quality" in decision.reason
+    assert decision.cleared_denies == []
+
+
+def test_contract7_marker_without_status_is_undeterminable() -> None:
+    decision = evaluate(marker_body(status=None), HEAD, ["deps_toolchain"], CONFIG)
+    assert decision.outcome == UNDETERMINABLE
+    assert "states no status" in decision.reason
+    assert decision.cleared_denies == []
+
+
 def test_unknown_capture_value_is_undeterminable() -> None:
     decision = evaluate(marker_body(capture_quality="mostly-fine"), HEAD, [], CONFIG)
     assert decision.outcome == UNDETERMINABLE
