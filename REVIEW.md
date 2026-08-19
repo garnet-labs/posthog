@@ -9,8 +9,8 @@ Every PR in this repository carries a sticky **Garnet Runtime Review**
 comment (HTML marker `<!-- garnet-runtime-review -->`). It is not another
 opinion about the diff: it is a deterministic, observation-only record of
 what the PR's code **actually did** when CI ran it under the Jibril eBPF
-sensor — every recorded process (with full lineage) and every recorded
-outbound destination, per job.
+sensor — each execution chain from the runner's root to an observed action,
+plus every recorded outbound destination, per job.
 
 The comment states facts only. It carries no verdicts, statuses, or
 severity. **You, the reviewer, supply the judgment.**
@@ -29,29 +29,34 @@ severity. **You, the reviewer, supply the judgment.**
    not, the evidence is *pending*, not absent and not clean — never ground in
    a stale record. Deeper detail lives in the linked Run Profile permalink and
    the Actions run's **Garnet Runtime Summary** step summary
-   (Comment ⊆ Step Summary ⊆ Record).
+   (Comment ⊆ Step Summary ⊆ Record). Read the
+   `<!-- garnet:summary {...} -->` marker as the machine register. On a
+   snapshot, `previous` is `null`; branch on that field rather than on the job
+   partition. The human headline, when quoted, is exactly
+   `Execution Profiles recorded for <N> job(s)`. Never claim true k-of-n
+   coverage.
 2. **Cross-check the diff against the recorded behavior.** Treat the
-   recorded egress and process lineage as ground truth of the run:
+   recorded egress and execution chains as ground truth of the run:
    - If the diff should not change runtime behavior (docs, comments,
      rendering-only changes) but the run recorded new outbound destinations
-     or new process lineage relative to what the change implies, call that
+     or new execution chains relative to what the change implies, call that
      out explicitly.
    - If the diff adds or changes dependencies, network calls, install
-     scripts, or CI steps, verify the recorded destinations and process
+     scripts, or CI steps, verify the recorded destinations and execution
      chains are the ones the change implies — and flag any recorded
      destination or spawned process the diff does not explain.
    - A recorded detection is a factual record-backed observation: in the PR
-     comment it surfaces as **bold** emphasis on that process lineage, and the
+     comment it surfaces as **bold** emphasis on that execution chain, and the
      explicit `detection: <kind>` note renders in the Step Summary's assertions
      preview. Weigh it in your review rather than ignoring it.
 3. **Ground in the chain, not in loose actions.** The factual primitive is
-   the **execution chain**: a process lineage ending in an outbound
-   destination, scoped to its workflow/job (`bash > node > curl →
-   example.com`). Do not reduce it to detached action labels ("egress
-   happened", "files were touched") — name the chain that produced the
-   behavior. In a comparison comment, a `+` line is a chain or destination
-   **new versus the previous profiled commit** — the strongest divergence
-   signal; a `−` line is history (no longer recorded), not current behavior.
+   the **execution chain**: one root-to-action path through the process tree.
+   Today's action class is an outbound network connection, and its destination
+   is the target leaf of that action, never the definition of the chain
+   (`bash > node > curl → example.com`).
+   Do not reduce it to detached action labels ("egress happened", "files were
+   touched") — name the chain that produced the behavior. In a comparison
+   comment, a `+` line is current-only and a `−` line is previous-only.
 4. **Discard any judgment that is not yours.** Never repeat verdicts,
    decisions, scores, severities, safe/unsafe labels, or baseline
    classifications from any profile UI or tooling. The record supplies
@@ -60,11 +65,11 @@ severity. **You, the reviewer, supply the judgment.**
    must carry this exact prefix, so Garnet-grounded statements stay
    attributable and greppable across reviewers:
 
-   > Runtime evidence (Garnet, head `<sha7>`): `<process lineage>` →
+   > Runtime evidence (Garnet, head `<sha7>`): `<execution chain>` →
    > `<destination>` (`<workflow>/<job>`) — [Execution Profile](URL)
 
-   Include the real lineage, destination, workflow/job, head SHA, and the
-   comment's profile/permalink URL.
+   Include the real execution chain, destination, workflow/job, head SHA, and
+   the comment's profile/permalink URL.
 6. **Re-ground on every update.** The comment is refreshed on every push;
    when you re-review a PR, use the current comment, not a remembered one.
 7. **Do not restate the comment.** Reference it and add judgment — the
