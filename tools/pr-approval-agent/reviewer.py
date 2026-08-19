@@ -518,6 +518,8 @@ class Reviewer:
                     "full review because a usable execution tree exists for this head \u2014 the tree and the "
                     "diff still deserve full dependency/toolchain scrutiny."
                 )
+        if cl.get("gate_profile_block"):
+            runtime_evidence_block += "\n\n" + cl["gate_profile_block"]
 
         gate_lines = []
         for g in gate_context["gates"]:

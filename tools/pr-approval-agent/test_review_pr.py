@@ -666,3 +666,34 @@ def test_deny_list_gate_names_runtime_evidence_bypass() -> None:
     assert passed
     assert "deps_toolchain cleared to full review by the runtime evidence gate" in message
     assert "`6e5d0d4`" in message
+
+
+# ── Gate profile row (contract 7.0 machine block) ──────────────
+
+
+def _pipeline_with_gate(outcome: str, reason: str, cleared: list[str] | None = None) -> Pipeline:
+    pipeline = Pipeline(pr_number=1, repo="PostHog/posthog")
+    pipeline.pr = _fake_pr(head_sha="abc123")
+    pipeline.classification = {
+        "deny_categories": [],
+        "gate_profile": {"outcome": outcome, "reason": reason, "cleared_denies": cleared or []},
+    }
+    return pipeline
+
+
+def test_gate_profile_row_names_the_cleared_deny() -> None:
+    passed, message = _pipeline_with_gate(
+        "clear", "complete capture, eligible baseline, workload unchanged", ["deps_toolchain"]
+    )._check_gate_profile()
+    assert passed
+    assert message.startswith("clear —")
+    assert "cleared: deps_toolchain" in message
+
+
+def test_gate_profile_row_reports_undeterminable_without_clearing() -> None:
+    passed, message = _pipeline_with_gate(
+        "undeterminable", "marker head 1111111 is not the PR head abc123"
+    )._check_gate_profile()
+    assert passed
+    assert "cleared:" not in message
+    assert "is not the PR head" in message
