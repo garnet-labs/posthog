@@ -1,7 +1,24 @@
 {
     "disabledLabels": ["no-greptile"],
-    "instructions": "Every PR description in this repository carries a 'Runtime evidence (Garnet)' section between <!-- garnet:evidence:begin --> and <!-- garnet:evidence:end -->: a verbatim, head-bound mirror of the kernel-recorded execution record (process chains and the outbound destinations each chain reached) for the PR head. Follow REVIEW.md at the repo root. In short: (1) only use the record if its <!-- garnet:commit <sha> --> marker equals the PR head SHA — otherwise treat evidence as pending, never stale-ground; (2) the factual primitive is the execution chain (process lineage → destination, per workflow/job) — do not reduce it to loose action labels; (3) in a diff-fenced comparison, '+' lines are chains/destinations new versus the previous profiled commit — the strongest divergence signal — and '-' lines are history; (4) never repeat verdicts, scores, severities, or baseline judgments from any tool — re-derive relevance from the code diff; (5) cite every record-grounded finding exactly as: Runtime evidence (Garnet, head <sha7>): <process lineage> → <destination> (<workflow>/<job>) — <Execution Profile URL>; (6) a missing or pending record means no runtime evidence, not a clean run.",
+    "instructions": "Read REVIEW.md and .greptile/rules.md before reviewing. The PR description's Runtime evidence (Garnet) region is a verbatim mirror of the trusted head-bound Garnet Runtime Review comment. Use it only when <!-- garnet:commit <sha> --> equals the PR head; branch on previous: null for snapshots; in comparisons, '+' is current-only and '-' is previous-only. Treat missing or pending evidence as no runtime evidence, not a clean run. An execution chain is one root-to-action path; today's action is an outbound network connection and its destination is the target leaf. Never repeat Garnet verdicts, scores, severities, or baseline judgments. Prefix grounded findings with: Runtime evidence (Garnet, head <sha7>): .",
     "customContext": {
-        "files": ["AGENTS.md", "REVIEW.md"]
+        "files": [
+            {
+                "path": "REVIEW.md",
+                "description": "Long-form reviewer grounding contract for Garnet Runtime Review evidence.",
+                "scope": ["**/*"]
+            },
+            {
+                "path": ".greptile/rules.md",
+                "description": "Authoritative Greptile rules for consuming head-bound Garnet Runtime Review evidence.",
+                "scope": ["**/*"]
+            }
+        ],
+        "other": [
+            {
+                "content": "The PR description's Runtime evidence (Garnet) region is the verbatim mirror of the trusted Garnet Runtime Review comment. Verify its garnet:commit marker against the PR head, read garnet:summary as the machine register, branch on previous: null for snapshots, and cite grounded findings with Runtime evidence (Garnet, head <sha7>): .",
+                "scope": ["**/*"]
+            }
+        ]
     }
 }
