@@ -15,6 +15,24 @@ plus every recorded outbound destination, per job.
 The comment states facts only. It carries no verdicts, statuses, or
 severity. **You, the reviewer, supply the judgment.**
 
+## Open with a grounding verdict
+
+Start the review body with one line stating the grounding conclusion for this
+PR:
+
+> **Runtime grounding** (head `<sha7>`): <what the recorded run showed against
+> what this diff should do>
+
+When the record is stale, pending, or absent, the verdict says that instead
+and the review proceeds from the diff alone:
+
+> **Runtime grounding**: record bound to `<old7>`, head is `<sha7>` — stale,
+> not used
+> **Runtime grounding**: no runtime evidence for this head
+
+One or two sentences. State whether the recorded behavior matches what this
+diff should do — the conclusion, not a restatement of the record.
+
 ## What you must do with it
 
 1. **Locate the latest Garnet Runtime Review comment on the PR** (the one
@@ -26,7 +44,7 @@ severity. **You, the reviewer, supply the judgment.**
    `<!-- garnet:evidence:begin -->` and `<!-- garnet:evidence:end -->` — it is
    a verbatim, head-bound mirror of the same comment. Verify the embedded
    `<!-- garnet:commit <sha> -->` marker equals the PR head SHA; if it does
-   not, the evidence is *pending*, not absent and not clean — never ground in
+   not, the evidence is _pending_, not absent and not clean — never ground in
    a stale record. Deeper detail lives in the linked Run Profile permalink and
    the Actions run's **Garnet Runtime Summary** step summary
    (Comment ⊆ Step Summary ⊆ Record). Read the
@@ -70,6 +88,7 @@ severity. **You, the reviewer, supply the judgment.**
 
    Include the real execution chain, destination, workflow/job, head SHA, and
    the comment's profile/permalink URL.
+
 6. **Re-ground on every update.** The comment is refreshed on every push;
    when you re-review a PR, use the current comment, not a remembered one.
 7. **Do not restate the comment.** Reference it and add judgment — the
@@ -81,7 +100,7 @@ severity. **You, the reviewer, supply the judgment.**
   style, correctness of logic, or test coverage — those remain fully your
   job.
 - Absence of a Garnet comment (e.g. fork PRs without secrets, sensor
-  token unavailable) means *no runtime evidence*, not a clean run. Say so
+  token unavailable) means _no runtime evidence_, not a clean run. Say so
   if the change is runtime-relevant.
 - The same evidence also feeds the deterministic StampHog gate
   (`tools/pr-approval-agent/runtime_evidence.py`); this file governs how AI
