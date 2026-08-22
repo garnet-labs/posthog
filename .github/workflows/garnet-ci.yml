@@ -1,0 +1,54 @@
+name: Garnet Runtime Visibility
+
+# Runs the riskiest representative CI surface — dependency install, where
+# lifecycle scripts execute — under the Garnet eBPF sensor. Garnet posts a
+# sticky "Garnet Runtime Review" comment on the PR (every recorded outbound
+# connection with its process lineage, bound to the head commit), which the
+# stamphog PR approval agent consumes as deterministic runtime evidence
+# (see tools/pr-approval-agent/runtime_evidence.py).
+on:
+    pull_request:
+    workflow_dispatch:
+
+permissions:
+    contents: read
+
+concurrency:
+    group: garnet-ci-${{ github.event.pull_request.number || github.ref }}
+    cancel-in-progress: true
+
+jobs:
+    dep-install:
+        name: Dependency install (recorded)
+        # Fork `pull_request` runs get no org secrets, so the sensor has no token
+        # to authenticate with. Skip the whole job there: an unrecorded install
+        # is not a cheaper version of this job, it is the absence of it.
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        runs-on: ubuntu-latest
+        timeout-minutes: 30
+        steps:
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+            - name: Garnet Runtime Visibility
+              uses: garnet-org/action@3d47f4a9004f7356c980a0e8d420ef5984750e3c # v2.2.0
+              with:
+                  api_token: ${{ secrets.GARNET_API_TOKEN }}
+                  jibril_version: v2.16.0
+
+            - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+
+            - uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+              with:
+                  node-version-file: .nvmrc
+
+            # Deliberately not routed through ./.github/actions/pnpm-install.
+            # That composite restores the pnpm store, and a warm store means the
+            # lifecycle scripts this workflow exists to observe never execute.
+            # The cold install is the measurement, not an oversight.
+            #
+            # `--no-frozen-lockfile` is load-bearing too: pnpm defaults to frozen
+            # under CI=true and aborts on lockfile drift before fetching anything,
+            # which records nothing for exactly the dependency-changing PRs this
+            # job exists to observe.
+            - name: Install dependencies (lifecycle scripts execute here)
+              run: pnpm install --no-frozen-lockfile
