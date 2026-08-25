@@ -494,3 +494,17 @@ def test_real_pr130_substrate_only_churn_is_unchanged():
     assert ev.new_workload_destinations == []
     assert ev.new_destinations == []
     assert "140.82.112.24" in {d["dest"] for d in ev.substrate_destinations}
+
+
+def test_v610_inline_background_label_root_is_substrate():
+    # Regression fixture: the live Garnet comment from garnet-labs/posthog#139
+    # (a posthog-js catalog bump). Contract v6.10 labels the background
+    # section root inline — `systemd (runner background · +3 −1)` — so the
+    # root must classify on the process name, not the labelled string.
+    # Background churn (rotating hosted-compute IPs) never diverges.
+    body = (Path(__file__).parent / "fixtures" / "garnet_comment_pr139.md").read_text()
+    ev = parse_comment(body, "5aba3c461a4872f7ca3d6a07ce739f2cb883e0cf")
+    assert ev.status == "unchanged"
+    assert ev.new_workload_destinations == []
+    assert {d["dest"] for d in ev.new_destinations} <= {d["dest"] for d in ev.substrate_destinations}
+    assert "140.82.112.24" in {d["dest"] for d in ev.substrate_destinations}
