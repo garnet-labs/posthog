@@ -317,7 +317,9 @@ def _is_substrate_lineage(lineage: str) -> bool:
     consist of runner infrastructure processes or descend through the
     hosted-compute provisioning agent without ever reaching Runner.Worker.
     """
-    parts = [p for p in lineage.split(" > ") if p]
+    # Contract v6.10 labels the section root inline, e.g.
+    # `systemd (runner background · +3 −1)` — classify on the process name.
+    parts = [re.sub(r"\s*\([^)]*\)$", "", p).strip() for p in lineage.split(" > ") if p]
     if not parts:
         return False
     if parts[0].startswith("hosted-compute-") or parts[0] == "systemd-network":
