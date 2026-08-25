@@ -503,6 +503,23 @@ class Reviewer:
         ownership = self._format_ownership(cl)
         assurance_block = self._format_assurance(cl)
         familiarity_block = self._format_familiarity(cl)
+        runtime_evidence_block = ""
+        if cl.get("runtime_evidence_block"):
+            runtime_evidence_block = "\n" + cl["runtime_evidence_block"]
+            runtime_evidence_block += (
+                "\n  Citation requirement: when runtime evidence factors into your verdict "
+                "(either direction), cite it explicitly in your reasoning — name the exact "
+                "destination(s) and process lineage and reference the Garnet run profile "
+                "permalink — so the verdict is independently verifiable from the evidence."
+            )
+            if cl.get("runtime_evidence_bypassed"):
+                runtime_evidence_block += (
+                    "\n  Deny bypass: " + ", ".join(cl["runtime_evidence_bypassed"]) + " was cleared to "
+                    "full review because a usable execution tree exists for this head \u2014 the tree and the "
+                    "diff still deserve full dependency/toolchain scrutiny."
+                )
+        if cl.get("gate_profile_block"):
+            runtime_evidence_block += "\n\n" + cl["gate_profile_block"]
 
         gate_lines = []
         for g in gate_context["gates"]:
@@ -559,7 +576,7 @@ class Reviewer:
             Reviews: {len(pr.reviews)} top-level, {len(pr.review_comments)} inline, {len(pr.pr_reactions)} PR reactions
 
             {ownership}
-            {assurance_block}
+            {assurance_block}{runtime_evidence_block}
 
             Gate results:
             {chr(10).join(gate_lines)}
