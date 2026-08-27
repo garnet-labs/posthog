@@ -35,8 +35,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: ${{ github.event_name == 'workflow_dispatch' && 1 || 0 }}
           ref: ${{ inputs.checkout_ref || github.event.pull_request.head.sha }}
+          sparse-checkout: livestream
 
       - name: Garnet Runtime Visibility
         uses: garnet-org/action@3d47f4a9004f7356c980a0e8d420ef5984750e3c # v2.2.0
