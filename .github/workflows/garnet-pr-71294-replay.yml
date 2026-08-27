@@ -1,0 +1,106 @@
+name: Garnet PR 71294 replay
+
+on:
+    pull_request:
+        paths:
+            - posthog/hogql/property.py
+            - posthog/hogql/test/test_property.py
+            - tools/garnet-replays/pr-71294/**
+            - .github/workflows/garnet-pr-71294-replay.yml
+    workflow_dispatch:
+        inputs:
+            revision:
+                description: Exact upstream revision to replay
+                required: true
+                type: choice
+                default: base
+                options:
+                    - base
+                    - head
+
+permissions:
+    contents: read
+
+concurrency:
+    group: garnet-pr-71294-replay-${{ github.event.pull_request.number || github.ref }}
+    cancel-in-progress: false
+
+jobs:
+    orm-selection-replay:
+        name: PR 71294 ORM selection replay (recorded)
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        runs-on: ubuntu-latest
+        timeout-minutes: 15
+        steps:
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+              with:
+                  fetch-depth: 0
+
+            - name: Garnet Runtime Visibility
+              uses: garnet-org/action@3d47f4a9004f7356c980a0e8d420ef5984750e3c # v2.2.0
+              with:
+                  api_token: ${{ secrets.GARNET_API_TOKEN }}
+                  jibril_version: v2.16.0
+
+            - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+              with:
+                  python-version: "3.12"
+
+            - name: Select exact subject revision
+              id: subject
+              env:
+                  EVENT_NAME: ${{ github.event_name }}
+                  DISPATCH_REVISION: ${{ inputs.revision }}
+              run: |
+                  if [ "$EVENT_NAME" = "pull_request" ]; then
+                      revision=head
+                  else
+                      revision="$DISPATCH_REVISION"
+                  fi
+                  echo "revision=$revision" >> "$GITHUB_OUTPUT"
+
+            - name: Install isolated replay dependency
+              run: python -m pip install --disable-pip-version-check "Django==5.2.17"
+
+            - name: Execute deterministic ORM replay
+              env:
+                  REPLAY_REVISION: ${{ steps.subject.outputs.revision }}
+              run: |
+                  output="tools/garnet-replays/pr-71294/result-${REPLAY_REVISION}.json"
+                  python tools/garnet-replays/pr-71294/replay_probe.py \
+                      --revision "$REPLAY_REVISION" | tee "$output"
+                  python - "$output" <<'PY'
+                  import json
+                  import sys
+
+                  payload = json.load(open(sys.argv[1], encoding="utf-8"))
+                  results = payload["results"]
+                  if len(results) != 2:
+                      raise SystemExit("expected both insertion-order cases")
+                  if any(not result["compatible"] for result in results):
+                      raise SystemExit("RHS/LHS type mismatch reproduced")
+                  queries = [query for result in results for query in result["observed_queries"]]
+                  if not any('"type" IN (1)' in query for query in queries):
+                      raise SystemExit("expected Django to exclude NULL from the IN lookup")
+                  print("VERDICT: suspected NULL/EVENT precedence mismatch not reproduced")
+                  print("CLAIM LIMIT: isolated Django ORM replay, not full PostHog or PostgreSQL")
+                  PY
+                  sleep 15
+
+            - name: Write replay summary
+              env:
+                  REPLAY_REVISION: ${{ steps.subject.outputs.revision }}
+              run: |
+                  {
+                      echo "## PostHog PR #71294 fork-only replay"
+                      echo
+                      echo "- Subject: \`PostHog/posthog#71294\`"
+                      echo "- Revision: \`$REPLAY_REVISION\`"
+                      echo "- Upstream base: \`507f13ecc15a2e4ed314ba73612b302da6f2d3b8\`"
+                      echo "- Upstream head: \`88eb5feb56242ff2eb7f6a3d907bb38f62966e93\`"
+                      echo "- Mutation target: \`garnet-labs/posthog\` only"
+                      echo "- Result: both insertion orders kept RHS and LHS numeric."
+                      echo "- Key observation: Django emitted \`type IN (1)\`; the NULL row was excluded."
+                      echo "- Limit: isolated Django 5.2 ORM replay on SQLite, not full PostHog/PostgreSQL."
+                  } >> "$GITHUB_STEP_SUMMARY"
+
