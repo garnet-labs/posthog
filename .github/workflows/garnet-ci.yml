@@ -15,6 +15,11 @@ on:
             - .nvmrc
             - .github/workflows/garnet-ci.yml
     workflow_dispatch:
+        inputs:
+            checkout_ref:
+                description: Exact PR head SHA to cold-read
+                required: false
+                type: string
 
 permissions:
     contents: read
@@ -34,6 +39,8 @@ jobs:
         timeout-minutes: 30
         steps:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+              with:
+                  ref: ${{ inputs.checkout_ref || github.event.pull_request.head.sha || github.sha }}
 
             - name: Garnet Runtime Visibility
               uses: garnet-org/action@3d47f4a9004f7356c980a0e8d420ef5984750e3c # v2.2.0

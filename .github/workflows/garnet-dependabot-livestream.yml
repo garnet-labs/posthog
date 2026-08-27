@@ -6,25 +6,37 @@ on:
     paths:
       - "livestream/**/go.mod"
       - "livestream/**/go.sum"
+  workflow_dispatch:
+    inputs:
+      checkout_ref:
+        description: Exact PR head SHA to cold-read
+        required: true
+        type: string
+      module_dirs:
+        description: Space-separated module directories to download
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: garnet-dependabot-livestream-${{ github.event.pull_request.number }}
+  group: garnet-dependabot-livestream-${{ github.event.pull_request.number || inputs.checkout_ref || github.ref }}
   cancel-in-progress: true
 
 jobs:
   dependency-runtime-review:
     if: >-
-      github.event.pull_request.user.login == 'dependabot[bot]' &&
-      github.event.pull_request.head.repo.full_name == github.repository
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          ref: ${{ inputs.checkout_ref || github.event.pull_request.head.sha }}
 
       - name: Garnet Runtime Visibility
         uses: garnet-org/action@3d47f4a9004f7356c980a0e8d420ef5984750e3c # v2.2.0
@@ -40,16 +52,21 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          MODULE_DIRS: ${{ inputs.module_dirs }}
         shell: bash
         run: |
           set -euo pipefail
 
-          mapfile -t module_dirs < <(
-            git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- 'livestream/**/go.mod' 'livestream/**/go.sum' |
-              grep -E '/go\.(mod|sum)$' |
-              xargs -r -n1 dirname |
-              sort -u
-          )
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            read -r -a module_dirs <<< "$MODULE_DIRS"
+          else
+            mapfile -t module_dirs < <(
+              git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- 'livestream/**/go.mod' 'livestream/**/go.sum' |
+                grep -E '/go\.(mod|sum)$' |
+                xargs -r -n1 dirname |
+                sort -u
+            )
+          fi
 
           if (( ${#module_dirs[@]} == 0 )); then
             echo "No changed Go module manifests found."
