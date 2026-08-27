@@ -1,0 +1,67 @@
+name: Garnet Dependabot Livestream Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - "livestream/**/go.mod"
+      - "livestream/**/go.sum"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: garnet-dependabot-livestream-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  dependency-runtime-review:
+    if: >-
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Garnet Runtime Visibility
+        uses: garnet-org/action@3d47f4a9004f7356c980a0e8d420ef5984750e3c # v2.2.0
+        with:
+          api_token: ${{ secrets.GARNET_API_TOKEN }}
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: false
+
+      - name: Download changed module dependencies
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -t module_dirs < <(
+            git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- 'livestream/**/go.mod' 'livestream/**/go.sum' |
+              grep -E '/go\.(mod|sum)$' |
+              xargs -r -n1 dirname |
+              sort -u
+          )
+
+          if (( ${#module_dirs[@]} == 0 )); then
+            echo "No changed Go module manifests found."
+            exit 1
+          fi
+
+          for module_dir in "${module_dirs[@]}"; do
+            if [[ ! -f "$module_dir/go.mod" ]]; then
+              echo "Skipping ${module_dir}: no go.mod"
+              continue
+            fi
+            echo "::group::Downloading modules in ${module_dir}"
+            (cd "$module_dir" && go mod download)
+            echo "::endgroup::"
+          done
