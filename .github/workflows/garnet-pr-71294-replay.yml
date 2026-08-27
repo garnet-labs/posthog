@@ -50,10 +50,15 @@ jobs:
               id: subject
               env:
                   EVENT_NAME: ${{ github.event_name }}
+                  HEAD_REF: ${{ github.head_ref }}
                   DISPATCH_REVISION: ${{ inputs.revision }}
               run: |
                   if [ "$EVENT_NAME" = "pull_request" ]; then
-                      revision=head
+                      case "$HEAD_REF" in
+                          exp/pr-71294-replay-control) revision=base ;;
+                          exp/pr-71294-replay-head) revision=head ;;
+                          *) echo "unapproved replay branch: $HEAD_REF" >&2; exit 1 ;;
+                      esac
                   else
                       revision="$DISPATCH_REVISION"
                   fi
@@ -103,4 +108,3 @@ jobs:
                       echo "- Key observation: Django emitted \`type IN (1)\`; the NULL row was excluded."
                       echo "- Limit: isolated Django 5.2 ORM replay on SQLite, not full PostHog/PostgreSQL."
                   } >> "$GITHUB_STEP_SUMMARY"
-
