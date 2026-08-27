@@ -61,7 +61,13 @@ jobs:
               run: |
                   if [ "$EVENT_NAME" = "pull_request" ]; then
                       case "$HEAD_REF" in
-                          exp/pr-71294-replay-control) revision=base ;;
+                          exp/pr-71294-replay-control)
+                              if [ -f tools/garnet-replays/pr-71294/SUBJECT_HEAD ]; then
+                                  revision=head
+                              else
+                                  revision=base
+                              fi
+                              ;;
                           exp/pr-71294-replay-head) revision=head ;;
                           *) echo "unapproved replay branch: $HEAD_REF" >&2; exit 1 ;;
                       esac
