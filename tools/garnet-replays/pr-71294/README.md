@@ -17,3 +17,4 @@ PostgreSQL integration test.
 
 The `exp/pr-71294-replay-control` branch changes only this note. Its PR runs the
 base subject, establishing a control before the exact two-file head patch runs.
+The control is then promoted in place, preserving the PR identity for comparison.
