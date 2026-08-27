@@ -14,3 +14,7 @@ String row and a current `type=EVENT` Numeric row.
 The output is deliberately narrow. It can show the ORM selection and query
 count under the isolated fixture, but it is not a full PostHog, HogQL, or
 PostgreSQL integration test.
+
+The `exp/pr-71294-replay-control` branch changes only this note. Its PR runs the
+base subject, establishing a control before the exact two-file head patch runs.
+The control is then promoted in place, preserving the PR identity for comparison.
