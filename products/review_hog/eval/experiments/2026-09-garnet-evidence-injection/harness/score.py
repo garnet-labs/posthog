@@ -14,6 +14,7 @@ Reads runs/pr<N>-<arm>.json and emits per-arm and per-PR:
 Usage: python3 score.py [--runs runs/] [--adjudicated adjudicated.json] [--out results.md]
 """
 
+import sys
 import json
 import argparse
 from collections import defaultdict
@@ -23,12 +24,22 @@ SEVERITY_ORDER = {"must_fix": 3, "should_fix": 2, "consider": 1}
 EVIDENCE_TERMS = ("garnet", "runtime evidence", "recorded network", "execution chain", "receipt_id", "recorded run")
 
 
-def load_runs(runs_dir: Path) -> dict:
-    runs: dict = defaultdict(dict)
+def load_runs(runs_dir: Path) -> dict[int, dict[str, dict]]:
+    runs: dict[int, dict[str, dict]] = defaultdict(dict)
     for f in sorted(runs_dir.glob("pr*-*.json")):
         r = json.loads(f.read_text())
         runs[r["pr_number"]][r["arm"]] = r
     return runs
+
+
+def check_pair_consistency(runs: dict[int, dict[str, dict]]) -> None:
+    """Refuse to aggregate arm pairs produced from different heads or model configurations."""
+    for pr, arms in sorted(runs.items()):
+        rows = list(arms.values())
+        for key in ("head_sha", "review_model", "validation_model"):
+            values = {r.get(key) for r in rows}
+            if len(values) > 1:
+                sys.exit(f"pr{pr}: arms disagree on {key} ({sorted(str(v) for v in values)}) — rerun before scoring")
 
 
 def _final_severity(issue: dict, verdict: dict) -> str | None:
@@ -46,9 +57,11 @@ def summarize_arm(r: dict) -> dict:
         if sev:
             validated += 1
             severities.append(sev)
-        text = json.dumps(issue).lower() + json.dumps(v["verdict"]).lower()
-        if any(t in text for t in EVIDENCE_TERMS):
-            evidence_grounded += 1
+            # Only validated (retained) findings count as evidence-grounded — a dismissed
+            # finding that merely mentions the evidence is not a grounded outcome.
+            text = json.dumps(issue).lower() + json.dumps(v["verdict"]).lower()
+            if any(t in text for t in EVIDENCE_TERMS):
+                evidence_grounded += 1
     top = max(severities, key=lambda s: SEVERITY_ORDER.get(s, 0)) if severities else None
     drills = {k: len(v) for k, v in r["drilldown_invocations"].items()}
     return {
@@ -78,6 +91,7 @@ def main() -> None:
     args = ap.parse_args()
 
     runs = load_runs(Path(args.runs))
+    check_pair_consistency(runs)
     adj_path = Path(args.adjudicated)
     adjudicated = json.loads(adj_path.read_text()) if adj_path.exists() else {}
 

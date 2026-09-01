@@ -33,7 +33,8 @@ from pathlib import Path
 
 import skills
 import anthropic
-from jinja2 import Environment, FileSystemLoader, select_autoescape
+import jsonschema
+from jinja2 import Environment, FileSystemLoader, Template, select_autoescape
 
 REPO_ROOT = Path(__file__).resolve().parents[6]
 PROMPTS_DIR = REPO_ROOT / "products/review_hog/backend/reviewer/prompts"
@@ -75,16 +76,20 @@ at its head commit, if any was recorded. Use it if runtime behavior is relevant.
 """
 
 
-def _env() -> Environment:
-    return Environment(loader=FileSystemLoader(PROMPTS_DIR), autoescape=select_autoescape())
-
-
-def _load(subdir: str) -> tuple[object, str]:
+def _load(subdir: str) -> tuple[Template, str]:
     env = Environment(loader=FileSystemLoader(PROMPTS_DIR / subdir), autoescape=select_autoescape())
     return env.get_template("prompt.jinja"), (PROMPTS_DIR / subdir / "schema.json").read_text()
 
 
-def build_review_prompt(pr: dict, arm: str, rendered_block: str | None) -> str:
+def _injection(arm: str, rendered_block: str | None) -> str:
+    if arm != "treatment":
+        return DRILLDOWN_NOTE
+    if not rendered_block:
+        raise ValueError("treatment arm requires an evidence block; refusing to fall back to the control prompt")
+    return GARNET_SECTION.format(block=rendered_block)
+
+
+def build_review_prompt(pr: dict, arm: str, rendered_block: str | None) -> tuple[str, str]:
     template, schema = _load("issues_review")
     chunk = {
         "chunk_id": 1,
@@ -109,27 +114,28 @@ def build_review_prompt(pr: dict, arm: str, rendered_block: str | None) -> str:
         PERSPECTIVE_SKILL_NAME=skills.PERSPECTIVE_SKILL_NAME,
         PERSPECTIVE_SKILL_VERSION=skills.PERSPECTIVE_SKILL_VERSION,
     )
-    injection = GARNET_SECTION.format(block=rendered_block) if arm == "treatment" and rendered_block else DRILLDOWN_NOTE
     # Insert right after the PR intent section — evidence sits beside intent, before the diff.
-    return prompt.replace("</pr_intent>", "</pr_intent>\n" + injection, 1)
+    return prompt.replace("</pr_intent>", "</pr_intent>\n" + _injection(arm, rendered_block), 1), schema
 
 
-def build_validation_prompt(pr: dict, issue: dict, arm: str, rendered_block: str | None) -> str:
+def build_validation_prompt(pr: dict, issue: dict, arm: str, rendered_block: str | None) -> tuple[str, str]:
     template, schema = _load("issue_validation")
     pr_context = f"Title: {pr['title']}\n\nDescription:\n{(pr['body'] or '').strip() or '(no description provided)'}"
-    injection = GARNET_SECTION.format(block=rendered_block) if arm == "treatment" and rendered_block else DRILLDOWN_NOTE
-    return template.render(
+    prompt = template.render(
         CLAUDE_CODE_CONTEXT=(
             "NOTE: No repository checkout is available in this run. The authoritative record of the "
             "change is the chunk context below; every changed file's full patch is included."
         ),
         ISSUE=json.dumps(issue, indent=2),
-        PR_CONTEXT=pr_context + "\n" + injection,
+        PR_CONTEXT=pr_context,
         CHUNK_CONTEXT=json.dumps(pr["files"], indent=2),
         VALIDATION_SKILL_NAME=skills.VALIDATION_SKILL_NAME,
         VALIDATION_SKILL_VERSION=skills.VALIDATION_SKILL_VERSION,
         VALIDATION_SCHEMA=schema,
     )
+    # Insert after the untrusted <pr_context> section so the trusted evidence is not
+    # covered by the template's PR-author-controlled disclaimer.
+    return prompt.replace("</pr_context>", "</pr_context>\n" + _injection(arm, rendered_block), 1), schema
 
 
 TOOLS = [
@@ -167,7 +173,7 @@ TOOLS = [
 ]
 
 
-def _tool_result(name: str, tool_input: dict, pr: dict, drill_log: list) -> str:
+def _tool_result(name: str, tool_input: dict, pr: dict, drill_log: list[dict]) -> str:
     if name == "skill-get":
         wanted = tool_input.get("skill_name", "")
         if wanted == skills.PERSPECTIVE_SKILL_NAME:
@@ -185,7 +191,7 @@ def _tool_result(name: str, tool_input: dict, pr: dict, drill_log: list) -> str:
     return f"unknown tool {name}"
 
 
-def _extract_json(text: str) -> dict:
+def _extract_json(text: str, schema: str) -> dict:
     text = text.strip()
     m = re.search(r"```(?:json)?\s*(\{.*\})\s*```", text, re.DOTALL)
     if m:
@@ -193,10 +199,14 @@ def _extract_json(text: str) -> dict:
     start = text.find("{")
     if start >= 0:
         text = text[start:]
-    return json.loads(text)
+    parsed = json.loads(text)
+    jsonschema.validate(parsed, json.loads(schema))
+    return parsed
 
 
-def run_stage(client, model: str, system: str, prompt: str, pr: dict, drill_log: list) -> dict:
+def run_stage(
+    client: anthropic.Anthropic, model: str, system: str, prompt: str, schema: str, pr: dict, drill_log: list[dict]
+) -> dict:
     messages = [{"role": "user", "content": prompt}]
     for _ in range(MAX_TOOL_TURNS):
         resp = client.messages.create(model=model, max_tokens=MAX_TOKENS, system=system, messages=messages, tools=TOOLS)
@@ -215,20 +225,20 @@ def run_stage(client, model: str, system: str, prompt: str, pr: dict, drill_log:
             messages.append({"role": "user", "content": results})
             continue
         text = "".join(b.text for b in resp.content if b.type == "text")
-        return _extract_json(text)
+        return _extract_json(text, schema)
     raise RuntimeError("tool loop did not terminate")
 
 
-def run_pr_arm(client, pr: dict, arm: str, rendered_block: str | None, out_dir: Path) -> dict:
-    drill_log_review: list = []
-    drill_log_validate: list = []
-    review_prompt = build_review_prompt(pr, arm, rendered_block)
-    review = run_stage(client, REVIEW_MODEL, REVIEW_SYSTEM_PROMPT, review_prompt, pr, drill_log_review)
+def run_pr_arm(client: anthropic.Anthropic, pr: dict, arm: str, rendered_block: str | None, out_dir: Path) -> dict:
+    drill_log_review: list[dict] = []
+    drill_log_validate: list[dict] = []
+    review_prompt, review_schema = build_review_prompt(pr, arm, rendered_block)
+    review = run_stage(client, REVIEW_MODEL, REVIEW_SYSTEM_PROMPT, review_prompt, review_schema, pr, drill_log_review)
     issues = review.get("issues", [])
-    verdicts = []
+    verdicts: list[dict] = []
     for issue in issues:
-        vprompt = build_validation_prompt(pr, issue, arm, rendered_block)
-        verdict = run_stage(client, VALIDATION_MODEL, "", vprompt, pr, drill_log_validate)
+        vprompt, vschema = build_validation_prompt(pr, issue, arm, rendered_block)
+        verdict = run_stage(client, VALIDATION_MODEL, "", vprompt, vschema, pr, drill_log_validate)
         verdicts.append({"issue_id": issue.get("id"), "verdict": verdict})
     result = {
         "pr_number": pr["pr_number"],
@@ -264,12 +274,37 @@ def main() -> None:
 
     for n in [int(x) for x in args.prs.split(",")]:
         pr = corpus[n]
-        rendered = blocks.get(str(n), {}).get("rendered")
+        entry = blocks.get(str(n)) or {}
+        rendered = entry.get("rendered")
+        block_head = (entry.get("block") or {}).get("head_sha")
+        if rendered and block_head != pr["head_sha"]:
+            sys.exit(
+                f"pr{n}: evidence block is bound to {block_head}, but the corpus head is "
+                f"{pr['head_sha']} — regenerate blocks.json before running"
+            )
         for arm in args.arms.split(","):
+            if arm == "treatment" and not rendered:
+                print(  # noqa: T201 — eval harness CLI, stdout is the intended output channel
+                    f"pr{n}-treatment: no exact-head evidence block, skipping (not a treatment row)"
+                )
+                continue
             dest = out_dir / f"pr{n}-{arm}.json"
             if dest.exists():
+                prev = json.loads(dest.read_text())
+                stale = (
+                    prev.get("pr_number") != n
+                    or prev.get("arm") != arm
+                    or prev.get("head_sha") != pr["head_sha"]
+                    or prev.get("review_model") != REVIEW_MODEL
+                    or prev.get("validation_model") != VALIDATION_MODEL
+                )
+                if stale:
+                    sys.exit(
+                        f"pr{n}-{arm}: existing result was produced from a different head or model "
+                        f"configuration — delete {dest} to rerun it"
+                    )
                 print(  # noqa: T201 — eval harness CLI, stdout is the intended output channel
-                    f"pr{n}-{arm}: exists, skipping"
+                    f"pr{n}-{arm}: exists (same head + models), skipping"
                 )
                 continue
             t0 = time.time()
