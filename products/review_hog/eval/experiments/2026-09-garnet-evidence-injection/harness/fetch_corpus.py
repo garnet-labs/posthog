@@ -23,6 +23,12 @@ import subprocess
 MARKER_COMMIT = re.compile(r"<!-- garnet:commit ([0-9a-f]{40}) -->")
 MARKER_SUMMARY = re.compile(r"<!-- garnet:summary (\{.*?\}) -->", re.DOTALL)
 STICKY = "<!-- garnet-runtime-review -->"
+GARNET_BOT_LOGIN = "garnet-runtime-review[bot]"
+
+
+def _is_garnet_bot_comment(c: dict) -> bool:
+    user = c.get("user") or {}
+    return STICKY in (c.get("body") or "") and user.get("type") == "Bot" and user.get("login") == GARNET_BOT_LOGIN
 
 
 def gh_api(path: str, paginate: bool = False) -> object:
@@ -51,7 +57,7 @@ def fetch_pr(repo: str, number: int) -> dict | None:
     )
 
     head_sha = pr["head"]["sha"]
-    garnet = next((c for c in comments if STICKY in (c.get("body") or "")), None)
+    garnet = next((c for c in comments if _is_garnet_bot_comment(c)), None)
     garnet_body = garnet["body"] if garnet else None
     marker = MARKER_COMMIT.search(garnet_body) if garnet_body else None
     summary_m = MARKER_SUMMARY.search(garnet_body) if garnet_body else None
@@ -77,13 +83,16 @@ def fetch_pr(repo: str, number: int) -> dict | None:
             for f in files
         ],
         "garnet_comment_present": garnet_body is not None,
+        "garnet_comment_author": garnet["user"]["login"] if garnet else None,
         "garnet_exact_head": exact_head,
         "garnet_marker_commit": marker.group(1) if marker else None,
         "garnet_summary": summary,
         "garnet_comment_body": garnet_body,
         # Non-garnet PR comments both arms see identically (quoted verbatim, untrusted).
         "other_comments": [
-            {"user": c["user"]["login"], "body": c["body"]} for c in comments if STICKY not in (c.get("body") or "")
+            {"user": c["user"]["login"], "body": c["body"]}
+            for c in comments
+            if garnet is None or c["id"] != garnet["id"]
         ],
     }
 
