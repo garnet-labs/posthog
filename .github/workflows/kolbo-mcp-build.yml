@@ -1,0 +1,47 @@
+name: Kolbo integration build
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "integrations/kolbo-mcp/**"
+      - ".github/workflows/kolbo-mcp-build.yml"
+  pull_request:
+    paths:
+      - "integrations/kolbo-mcp/**"
+      - ".github/workflows/kolbo-mcp-build.yml"
+  workflow_dispatch: {}
+
+permissions: {}
+
+env:
+  KOLBO_MCP_VERSION: "1.57.0"
+
+concurrency:
+  group: kolbo-mcp-build-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Runtime visibility
+        uses: garnet-org/action@3d47f4a9004f7356c980a0e8d420ef5984750e3c # v2.2.0
+        with:
+          api_token: ${{ secrets.GARNET_API_TOKEN }}
+
+      - uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install pinned @kolbo/mcp
+        working-directory: integrations/kolbo-mcp
+        run: npm install --save-exact "@kolbo/mcp@${KOLBO_MCP_VERSION}"
+
+      - name: Build
+        working-directory: integrations/kolbo-mcp
+        run: npm run build

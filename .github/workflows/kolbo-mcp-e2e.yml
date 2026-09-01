@@ -1,0 +1,49 @@
+name: Kolbo integration e2e
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "integrations/kolbo-mcp/**"
+      - ".github/workflows/kolbo-mcp-e2e.yml"
+  pull_request:
+    paths:
+      - "integrations/kolbo-mcp/**"
+      - ".github/workflows/kolbo-mcp-e2e.yml"
+  workflow_dispatch: {}
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  e2e:
+    name: e2e
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Runtime visibility
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        uses: garnet-org/action@3d47f4a9004f7356c980a0e8d420ef5984750e3c # v2.2.0
+        with:
+          api_token: ${{ secrets.GARNET_API_TOKEN }}
+
+      - uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Install
+        working-directory: integrations/kolbo-mcp
+        run: npm install
+
+      - name: Install Chromium
+        working-directory: integrations/kolbo-mcp
+        run: npx playwright install --with-deps chromium
+
+      - name: Browser e2e (MCP client in Chromium)
+        working-directory: integrations/kolbo-mcp
+        run: npm run e2e
