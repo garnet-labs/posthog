@@ -1,0 +1,61 @@
+# Control arm of the install-time metadata reach demo.
+#
+# Byte-identical fixture to demos/install-time-imds-reach, installed by an
+# identical job, with one step removed: the Garnet sensor. The same
+# preinstall child runs on this runner and reaches the same destinations;
+# this arm is what the review pipeline produces when nothing recorded it.
+#
+# See demos/install-time-imds-reach-control/EXPERIMENT.md.
+name: demo — install-time metadata reach (control, unrecorded)
+
+on:
+    push:
+        branches: [master]
+        paths:
+            - "demos/install-time-imds-reach-control/**"
+            - ".github/workflows/ci-demo-install-time-imds-reach-control.yml"
+    pull_request:
+        paths:
+            - "demos/install-time-imds-reach-control/**"
+            - ".github/workflows/ci-demo-install-time-imds-reach-control.yml"
+    workflow_dispatch: {}
+
+permissions: {}
+
+concurrency:
+    group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+    cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+    install:
+        name: "install demo-config-store (unrecorded)"
+        runs-on: ubuntu-latest
+        timeout-minutes: 15
+        steps:
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+            # The treatment arm runs `garnet-org/action` here. That step is the
+            # experiment's single independent variable and is absent by design.
+
+            - uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+              with:
+                  node-version-file: .nvmrc
+
+            - name: Read manifest and install pinned tarball
+              continue-on-error: true
+              run: |
+                  set +e
+                  MFEST=demos/install-time-imds-reach-control/manifest.json
+                  VER=$(jq -r '.version' "$MFEST")
+                  PKG=$(jq -r '.package' "$MFEST")
+                  TARBALL="demos/install-time-imds-reach-control/packages/${PKG}-${VER}.tgz"
+                  echo "installing ${PKG}@${VER} from ${TARBALL}"
+                  mkdir -p /tmp/install && cd /tmp/install && npm init -y >/dev/null
+                  npm install "${GITHUB_WORKSPACE}/${TARBALL}" --no-save --no-package-lock 2>&1
+                  node -e "const m=require('demo-config-store'); const s=new m.Store(); s.set('k','v'); console.log('demo-config-store loaded, size=',s.size)"
+
+            # Held identical to the treatment job so the two runs differ only in
+            # whether a sensor was present.
+            - name: Let the install settle
+              if: always()
+              run: sleep 45
