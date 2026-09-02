@@ -160,7 +160,7 @@ jobs:
                   ref: master
                   fetch-depth: 0
                   filter: blob:none
-                  token: ${{ steps.app-token.outputs.token }}
+                  token: ${{ steps.app-token.outputs.token || github.token }}
 
             - name: Update to latest master before preparing release
               run: git pull --ff-only origin master
@@ -186,7 +186,7 @@ jobs:
               id: prepare-release
               working-directory: cli
               env:
-                  GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+                  GITHUB_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
               run: |
                   sampo release
                   new_version=$(grep '^version = ' Cargo.toml | head -1 | sed 's/version = "\(.*\)"/\1/')
@@ -249,7 +249,7 @@ jobs:
                   repo: ${{ github.repository }}
                   branch: master
               env:
-                  GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+                  GITHUB_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
 
             - name: Sync checkout to release commit
               if: steps.commit-release.outputs.commit-hash != ''
@@ -585,7 +585,7 @@ jobs:
               with:
                   ref: ${{ needs.release.outputs.release-commit }}
                   submodules: recursive
-                  token: ${{ steps.app-token.outputs.token }}
+                  token: ${{ steps.app-token.outputs.token || github.token }}
             - name: Install cached dist
               uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
               with:
@@ -631,7 +631,7 @@ jobs:
                   ANNOUNCEMENT_BODY: '${{ fromJson(steps.host.outputs.manifest).announcement_github_body }}'
                   RELEASE_COMMIT: '${{ needs.release.outputs.release-commit }}'
                   LATEST_RELEASE_TAG: posthog-cli-latest
-                  GH_TOKEN: ${{ steps.app-token.outputs.token }}
+                  GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
               run: |
                   # Write and read notes from a file to avoid quoting breaking things
                   echo "$ANNOUNCEMENT_BODY" > "$RUNNER_TEMP/notes.txt"

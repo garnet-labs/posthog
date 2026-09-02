@@ -122,7 +122,7 @@ jobs:
               if: github.event_name == 'workflow_dispatch'
               with:
                   repository: PostHog/homebrew-tap
-                  token: ${{ steps.app-token.outputs.token }}
+                  token: ${{ steps.app-token.outputs.token || github.token }}
 
             - name: Update Homebrew formula
               if: github.event_name == 'workflow_dispatch'
@@ -136,4 +136,4 @@ jobs:
                   repo: PostHog/homebrew-tap
                   branch: main
               env:
-                  GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+                  GITHUB_TOKEN: ${{ steps.app-token.outputs.token || github.token }}

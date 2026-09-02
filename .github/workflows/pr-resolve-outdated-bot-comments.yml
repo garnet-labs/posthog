@@ -24,6 +24,7 @@ jobs:
         steps:
             - name: Get app token
               id: app-token
+              continue-on-error: true
               uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
               with:
                   client-id: ${{ secrets.GH_APP_POSTHOG_REVIEW_COMMENT_RESOLVER_APP_ID }}
@@ -44,7 +45,7 @@ jobs:
 
             - name: Resolve outdated bot threads
               env:
-                  GH_TOKEN: ${{ steps.app-token.outputs.token }}
+                  GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
                   PR_NUMBER: ${{ github.event.pull_request.number }}
                   REPO: ${{ github.repository }}
                   BOTS: copilot-pull-request-reviewer greptile-apps chatgpt-codex-connector graphite-app cursor claude claude-code-action claude-review
@@ -111,7 +112,7 @@ jobs:
             # conversation. Collapse all but the newest of each kind as outdated.
             - name: Minimize superseded bot comments
               env:
-                  GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+                  GITHUB_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
                   PR_NUMBER: ${{ github.event.pull_request.number }}
               run: |
                   if [ -f .github/scripts/minimize-superseded-comments.mjs ]; then

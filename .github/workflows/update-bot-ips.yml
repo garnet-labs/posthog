@@ -25,7 +25,7 @@ jobs:
             - name: Checkout repository
               uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
               with:
-                  token: ${{ steps.app-token.outputs.token }}
+                  token: ${{ steps.app-token.outputs.token || github.token }}
 
             - name: Run update script
               run: |
@@ -46,7 +46,7 @@ jobs:
             - name: Clean up stale branch
               if: steps.check-changes.outputs.changes == 'false'
               env:
-                  GH_TOKEN: ${{ steps.app-token.outputs.token }}
+                  GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
               run: |
                   existing_pr=$(gh pr list --head "chore/update-bot-ips" --json number --jq '.[0].number' 2>/dev/null || true)
                   if [ -n "$existing_pr" ]; then
@@ -63,7 +63,7 @@ jobs:
               # "Expected branch to point to X but it did not" failure mode.
               if: steps.check-changes.outputs.changes == 'true'
               env:
-                  GH_TOKEN: ${{ steps.app-token.outputs.token }}
+                  GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
                   TARGET_SHA: ${{ github.sha }}
               run: |
                   if gh api repos/${{ github.repository }}/git/ref/heads/chore/update-bot-ips >/dev/null 2>&1; then
@@ -83,12 +83,12 @@ jobs:
                   repo: ${{ github.repository }}
                   branch: chore/update-bot-ips
               env:
-                  GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+                  GITHUB_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
 
             - name: Create pull request
               if: steps.check-changes.outputs.changes == 'true'
               env:
-                  GH_TOKEN: ${{ steps.app-token.outputs.token }}
+                  GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
               run: |
                   existing_pr=$(gh pr list --head "chore/update-bot-ips" --json number --jq '.[0].number' 2>/dev/null || true)
                   if [ -n "$existing_pr" ]; then
