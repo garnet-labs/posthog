@@ -65,3 +65,24 @@ jobs:
             # job exists to observe.
             - name: Install dependencies (lifecycle scripts execute here)
               run: pnpm install --no-frozen-lockfile
+
+    ml-dep-install:
+        name: ML dependency install (recorded)
+        # Fork `pull_request` runs get no org secrets, so the sensor has no token
+        # to authenticate with. Skip the whole job there: an unrecorded run is
+        # not a cheaper version of this job, it is the absence of it.
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        runs-on: ubuntu-latest
+        timeout-minutes: 30
+        steps:
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+            - name: Garnet Runtime Visibility
+              uses: garnet-org/action@3d47f4a9004f7356c980a0e8d420ef5984750e3c # v2.2.0
+              with:
+                  api_token: ${{ secrets.GARNET_API_TOKEN }}
+
+            - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+
+            - name: Install sentiment ML dependencies
+              run: uv sync --locked --only-group sentiment
