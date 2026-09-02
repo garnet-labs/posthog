@@ -1,0 +1,72 @@
+# Runtime-review demo: an install-time lifecycle script that reaches cloud
+# instance metadata.
+#
+# Benign replica. The job installs a vendored in-house tarball,
+# `demo-config-store`, pinned by demos/install-time-imds-reach/manifest.json:
+#   1.0.0  preinstall prints a marker
+#   1.0.1  identical library code; preinstall spawns a child node process
+#          that makes one HTTP GET to 169.254.169.254 and one to
+#          example.com, discarding both responses
+#
+# No credential is read, nothing is transmitted, nothing is written outside
+# /tmp. The demo exists so the Garnet comment on the version bump renders the
+# new install-time execution chain and its destinations as a delta.
+name: demo — install-time metadata reach
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "demos/install-time-imds-reach/**"
+      - ".github/workflows/ci-demo-install-time-imds-reach.yml"
+  pull_request:
+    paths:
+      - "demos/install-time-imds-reach/**"
+      - ".github/workflows/ci-demo-install-time-imds-reach.yml"
+  workflow_dispatch: {}
+
+permissions: {}
+
+concurrency:
+  group: demo-install-time-imds-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  install:
+    name: "install demo-config-store (recorded)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Garnet Runtime Visibility
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        uses: garnet-org/action@3d47f4a9004f7356c980a0e8d420ef5984750e3c # v2
+        with:
+          api_token: ${{ secrets.GARNET_API_TOKEN }}
+          api_url: https://api.garnet.ai
+          jibril_version: "v2.12.0"
+
+      - uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+        with:
+          node-version-file: .nvmrc
+
+      - name: Read manifest and install pinned tarball
+        continue-on-error: true
+        run: |
+          set +e
+          MFEST=demos/install-time-imds-reach/manifest.json
+          VER=$(jq -r '.version' "$MFEST")
+          PKG=$(jq -r '.package' "$MFEST")
+          TARBALL="demos/install-time-imds-reach/packages/${PKG}-${VER}.tgz"
+          echo "installing ${PKG}@${VER} from ${TARBALL}"
+          mkdir -p /tmp/install && cd /tmp/install && npm init -y >/dev/null
+          npm install "${GITHUB_WORKSPACE}/${TARBALL}" --no-save --no-package-lock 2>&1
+          node -e "const m=require('demo-config-store'); const s=new m.Store(); s.set('k','v'); console.log('demo-config-store loaded, size=',s.size)"
+
+      # Preinstall lifecycle scripts can spawn children that outlive the npm
+      # process. Give the sensor a moment to observe them before the profile
+      # is finalized.
+      - name: Let sensor settle
+        if: always()
+        run: sleep 45
