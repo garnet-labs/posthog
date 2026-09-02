@@ -31,6 +31,34 @@ packages:
 blockExoticSubdeps: true
 trustPolicy: no-downgrade
 
+# Known dependencies that we need preinstall scripts for, add new ones with caution.
+# pnpm 10.x reads onlyBuiltDependencies from pnpm-workspace.yaml (pnpm approve-builds
+# writes here since 10.7); the equivalent block in root package.json's `pnpm` field
+# is not the source of truth and is removed in pnpm 11.
+onlyBuiltDependencies:
+    - '@modelcontextprotocol/ext-apps'
+    - '@mongodb-js/zstd'
+    - '@parcel/watcher'
+    - '@swc/core'
+    - chartjs-plugin-stacked100
+    - core-js
+    - core-js-pure
+    - cpu-features
+    - esbuild
+    - lmdb
+    - lz4
+    - msgpackr-extract
+    - msw
+    - node-gyp
+    - node-rdkafka
+    - protobufjs
+    - puppeteer
+    - re2
+    - sharp
+    - ssh2
+    - unrs-resolver
+    - workerd
+
 catalog:
     # Kea ecosystem - state management
     kea: ^4.0.0-pre.6
