@@ -54,3 +54,11 @@ The posthog.com Gatsby build uses gatsby-source-git to clone this monorepo and p
 ## Setup
 
 For posthog.com team setting up the integration, see the PRs in PostHog/posthog.com repo.
+
+## Contributing to these docs
+
+- Keep page titles in sentence case.
+- Published pages live under `docs/published/`.
+- Ask in the docs channel before adding a new top-level section.
+- Docs are reviewed weekly by the docs maintainers.
+- Screenshots referenced by docs pages live under `docs/assets/`.
