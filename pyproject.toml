@@ -299,6 +299,9 @@ exclude-newer-package = { hogql-parser = false, hogql-parser-rs = false, posthog
 members = ["tools/hogli", "tools/owners"]
 
 [tool.uv.sources]
+# Build the parser from the in-tree crate so parser changes are exercised in CI
+# without waiting for a PyPI release of `rust/hogql/parser`.
+hogql-parser-rs = { path = "rust/hogql/parser" }
 hogli = { workspace = true }
 posthog-owners = { workspace = true }
 infi-clickhouse-orm = { git = "https://github.com/PostHog/infi.clickhouse_orm", rev = "4e3996becf66bf5c26580aff12a80425d9d56fe5" }
