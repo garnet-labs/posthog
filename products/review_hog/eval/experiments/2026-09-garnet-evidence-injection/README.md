@@ -20,8 +20,8 @@ trusted reviewer context change ReviewHog-style review outcomes on dependency/to
     by design.
 - **Drill-down parity**: both arms get the same read-only `garnet_drilldown` tool returning
   the full recorded evidence for the head. Every invocation is logged per (PR, arm, stage)
-  and reported separately — drill-down is never the verdict source. Control can reach the
-  same evidence through the tool; that is the design: the experiment measures automatic
+  and reported separately; drill-down is never the verdict source. Control can reach the
+  same evidence through the tool. That is the design: the experiment measures automatic
   injection versus optional discovery, not evidence access versus none.
 - **Stages**: review (issues_review template + schema) then per-finding validation
   (issue_validation template + schema), mirroring the production funnel.

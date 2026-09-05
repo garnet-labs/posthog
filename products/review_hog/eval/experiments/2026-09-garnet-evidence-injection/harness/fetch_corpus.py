@@ -57,7 +57,7 @@ def fetch_pr(repo: str, number: int) -> dict | None:
     )
 
     head_sha = pr["head"]["sha"]
-    garnet = next((c for c in comments if _is_garnet_bot_comment(c)), None)
+    garnet = next((c for c in reversed(comments) if _is_garnet_bot_comment(c)), None)
     garnet_body = garnet["body"] if garnet else None
     marker = MARKER_COMMIT.search(garnet_body) if garnet_body else None
     summary_m = MARKER_SUMMARY.search(garnet_body) if garnet_body else None

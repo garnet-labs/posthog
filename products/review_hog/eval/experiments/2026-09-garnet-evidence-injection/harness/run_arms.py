@@ -28,6 +28,7 @@ import re
 import sys
 import json
 import time
+import hashlib
 import argparse
 from pathlib import Path
 
@@ -87,6 +88,29 @@ def _injection(arm: str, rendered_block: str | None) -> str:
     if not rendered_block:
         raise ValueError("treatment arm requires an evidence block; refusing to fall back to the control prompt")
     return GARNET_SECTION.format(block=rendered_block)
+
+
+def input_fingerprint(pr: dict, arm: str, rendered_block: str | None) -> str:
+    """Deterministic digest of every input that can affect a stored result."""
+    parts = [
+        json.dumps(pr, sort_keys=True),
+        arm,
+        rendered_block or "",
+        REVIEW_MODEL,
+        VALIDATION_MODEL,
+        REVIEW_SYSTEM_PROMPT,
+        GARNET_SECTION,
+        DRILLDOWN_NOTE,
+        str(MAX_TOKENS),
+        str(MAX_TOOL_TURNS),
+        json.dumps(TOOLS, sort_keys=True),
+        skills.PERSPECTIVE_SKILL_BODY,
+        skills.VALIDATION_SKILL_BODY,
+    ]
+    for subdir in ("issues_review", "issue_validation"):
+        parts.append((PROMPTS_DIR / subdir / "prompt.jinja").read_text())
+        parts.append((PROMPTS_DIR / subdir / "schema.json").read_text())
+    return hashlib.sha256("\x00".join(parts).encode()).hexdigest()
 
 
 def build_review_prompt(pr: dict, arm: str, rendered_block: str | None) -> tuple[str, str]:
@@ -229,7 +253,9 @@ def run_stage(
     raise RuntimeError("tool loop did not terminate")
 
 
-def run_pr_arm(client: anthropic.Anthropic, pr: dict, arm: str, rendered_block: str | None, out_dir: Path) -> dict:
+def run_pr_arm(
+    client: anthropic.Anthropic, pr: dict, arm: str, rendered_block: str | None, out_dir: Path, fingerprint: str
+) -> dict:
     drill_log_review: list[dict] = []
     drill_log_validate: list[dict] = []
     review_prompt, review_schema = build_review_prompt(pr, arm, rendered_block)
@@ -246,6 +272,7 @@ def run_pr_arm(client: anthropic.Anthropic, pr: dict, arm: str, rendered_block: 
         "head_sha": pr["head_sha"],
         "review_model": REVIEW_MODEL,
         "validation_model": VALIDATION_MODEL,
+        "input_fingerprint": fingerprint,
         "issues": issues,
         "verdicts": verdicts,
         "drilldown_invocations": {"review": drill_log_review, "validation": drill_log_validate},
@@ -283,33 +310,32 @@ def main() -> None:
                 f"{pr['head_sha']} — regenerate blocks.json before running"
             )
         for arm in args.arms.split(","):
+            dest = out_dir / f"pr{n}-{arm}.json"
             if arm == "treatment" and not rendered:
+                if dest.exists():
+                    sys.exit(
+                        f"pr{n}-treatment: {dest} exists but no exact-head evidence block is available now; "
+                        f"delete it so score.py cannot load a row this configuration would not produce"
+                    )
                 print(  # noqa: T201 — eval harness CLI, stdout is the intended output channel
                     f"pr{n}-treatment: no exact-head evidence block, skipping (not a treatment row)"
                 )
                 continue
-            dest = out_dir / f"pr{n}-{arm}.json"
+            fingerprint = input_fingerprint(pr, arm, rendered)
             if dest.exists():
                 prev = json.loads(dest.read_text())
-                stale = (
-                    prev.get("pr_number") != n
-                    or prev.get("arm") != arm
-                    or prev.get("head_sha") != pr["head_sha"]
-                    or prev.get("review_model") != REVIEW_MODEL
-                    or prev.get("validation_model") != VALIDATION_MODEL
-                )
-                if stale:
+                if prev.get("input_fingerprint") != fingerprint:
                     sys.exit(
-                        f"pr{n}-{arm}: existing result was produced from a different head or model "
-                        f"configuration — delete {dest} to rerun it"
+                        f"pr{n}-{arm}: existing result was produced from different inputs "
+                        f"(corpus row, evidence, prompts, schemas, or models); delete {dest} to rerun it"
                     )
                 print(  # noqa: T201 — eval harness CLI, stdout is the intended output channel
-                    f"pr{n}-{arm}: exists (same head + models), skipping"
+                    f"pr{n}-{arm}: exists (same input fingerprint), skipping"
                 )
                 continue
             t0 = time.time()
             try:
-                r = run_pr_arm(client, pr, arm, rendered, out_dir)
+                r = run_pr_arm(client, pr, arm, rendered, out_dir, fingerprint)
             except Exception as e:  # keep the sweep going; the row is rerunnable
                 print(  # noqa: T201 — eval harness CLI, stdout is the intended output channel
                     f"pr{n}-{arm}: FAILED {type(e).__name__}: {e}"
