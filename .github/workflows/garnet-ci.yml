@@ -7,6 +7,9 @@ name: Garnet Runtime Visibility
 # stamphog PR approval agent consumes as deterministic runtime evidence
 # (see tools/pr-approval-agent/runtime_evidence.py).
 on:
+    push:
+        branches:
+            - 'devin/**'
     pull_request:
         paths:
             - package.json
