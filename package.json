@@ -200,6 +200,9 @@
             "kea@4.0.0-pre.6": "patches/kea@4.0.0-pre.6.patch"
         },
         "// Known dependencies that we need preinstall scripts for, add new ones with caution": "",
+        "ignoredBuiltDependencies": [
+            "puppeteer"
+        ],
         "onlyBuiltDependencies": [
             "@modelcontextprotocol/ext-apps",
             "@mongodb-js/zstd",
