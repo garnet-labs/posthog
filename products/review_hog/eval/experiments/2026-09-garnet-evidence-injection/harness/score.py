@@ -33,13 +33,16 @@ def load_runs(runs_dir: Path) -> dict[int, dict[str, dict]]:
 
 
 def check_pair_consistency(runs: dict[int, dict[str, dict]]) -> None:
-    """Refuse to aggregate arm pairs produced from different heads or model configurations."""
+    """Refuse to aggregate incomplete arm pairs or pairs from different heads or model configurations."""
     for pr, arms in sorted(runs.items()):
+        missing_arms = {"control", "treatment"} - arms.keys()
+        if missing_arms:
+            sys.exit(f"pr{pr}: missing arm(s) {sorted(missing_arms)}; complete the pair before scoring")
         rows = list(arms.values())
-        for key in ("head_sha", "review_model", "validation_model"):
+        for key in ("head_sha", "review_model", "validation_model", "input_fingerprint"):
             values = {r.get(key) for r in rows}
             if len(values) > 1:
-                sys.exit(f"pr{pr}: arms disagree on {key} ({sorted(str(v) for v in values)}) — rerun before scoring")
+                sys.exit(f"pr{pr}: arms disagree on {key} ({sorted(str(v) for v in values)}); rerun before scoring")
 
 
 def _final_severity(issue: dict, verdict: dict) -> str | None:
@@ -57,8 +60,7 @@ def summarize_arm(r: dict) -> dict:
         if sev:
             validated += 1
             severities.append(sev)
-            # Only validated (retained) findings count as evidence-grounded — a dismissed
-            # finding that merely mentions the evidence is not a grounded outcome.
+            # A dismissed finding that merely mentions the evidence is not a grounded outcome.
             text = json.dumps(issue).lower() + json.dumps(v["verdict"]).lower()
             if any(t in text for t in EVIDENCE_TERMS):
                 evidence_grounded += 1
