@@ -388,9 +388,10 @@ def _check_capture(marker: dict, pre_contract7: bool, inferred: list[str]) -> st
     """Empty string when the capture is complete; otherwise why it is not."""
     quality = marker.get("capture_quality")
     status = marker.get("status")
+    if not pre_contract7 and (quality is None or status is None):
+        missing = "status" if status is None else "capture_quality"
+        return f"contract 7.0 marker states no {missing}"
     if quality is None and status is None:
-        if not pre_contract7:
-            return "marker states neither status nor capture_quality"
         derived = _derive_capture(marker)
         if derived != _CAPTURE_COMPLETE:
             return derived
