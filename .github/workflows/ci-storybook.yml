@@ -64,6 +64,7 @@ jobs:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
             - uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
+              continue-on-error: true
               id: app-token
               if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
               with:
@@ -738,6 +739,7 @@ jobs:
               id: telemetry-app-token
               if: github.run_attempt == '1'
               uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
+              continue-on-error: true
               with:
                   client-id: ${{ secrets.GH_APP_TELEMETRY_APP_ID }}
                   private-key: ${{ secrets.GH_APP_TELEMETRY_PRIVATE_KEY }}
@@ -750,7 +752,7 @@ jobs:
                   event: 'posthog-ci-running-time'
                   capture-run-duration: true
                   capture-job-durations: true
-                  github-token: ${{ steps.telemetry-app-token.outputs.token }}
+                  github-token: ${{ steps.telemetry-app-token.outputs.token || github.token }}
                   status-job: 'Visual regression tests pass'
             - name: Capture running time to DevEx PostHog
               if: github.run_attempt == '1'
@@ -761,7 +763,7 @@ jobs:
                   event: 'posthog-ci-running-time'
                   capture-run-duration: true
                   capture-job-durations: true
-                  github-token: ${{ steps.telemetry-app-token.outputs.token }}
+                  github-token: ${{ steps.telemetry-app-token.outputs.token || github.token }}
                   status-job: 'Visual regression tests pass'
 
     capture-story-selection:

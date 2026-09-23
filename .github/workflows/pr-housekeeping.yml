@@ -41,7 +41,9 @@ jobs:
         # No synchronize: board status only transitions on reviewer/draft
         # changes, and pushes change neither. Re-asserting the same status on
         # every push wasted the run and fought manual card moves.
-        if: contains(fromJSON('["opened", "reopened", "ready_for_review", "review_requested", "converted_to_draft"]'), github.event.action) && github.event.pull_request.head.repo.full_name == github.repository
+        # repository_owner guard: the flags project board and its bot App live in the
+        # PostHog org only; forks have neither, so the job would always fail there.
+        if: github.repository_owner == 'PostHog' && contains(fromJSON('["opened", "reopened", "ready_for_review", "review_requested", "converted_to_draft"]'), github.event.action) && github.event.pull_request.head.repo.full_name == github.repository
         uses: PostHog/.github/.github/workflows/flags-project-board.yml@2db3d3b946aeb9e479ce9f0078139a67f8ef38ce
         permissions:
             contents: read

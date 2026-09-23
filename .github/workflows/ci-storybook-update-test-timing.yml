@@ -51,12 +51,12 @@ jobs:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
               with:
                   ref: ${{ github.ref_name }}
-                  token: ${{ steps.app-token.outputs.token }}
+                  token: ${{ steps.app-token.outputs.token || github.token }}
 
             - name: Find Storybook CI run to use
               id: find-run
               env:
-                  GH_TOKEN: ${{ steps.app-token.outputs.token }}
+                  GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
                   INPUT_RUN_ID: ${{ inputs.storybook_run_id }}
               run: |
                   validate_run() {
@@ -120,7 +120,7 @@ jobs:
 
             - name: Regenerate storybook-timings.json
               env:
-                  GH_TOKEN: ${{ steps.app-token.outputs.token }}
+                  GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
                   RUN_ID: ${{ steps.find-run.outputs.run_id }}
               # The script downloads the run's junit-results-storybook-* artifacts and rewrites
               # common/storybook/storybook-timings.json in place (seconds per story file, per browser).
@@ -142,7 +142,7 @@ jobs:
             - name: Clean up stale branch
               if: steps.check-changes.outputs.changed == 'false'
               env:
-                  GH_TOKEN: ${{ steps.app-token.outputs.token }}
+                  GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
               run: |
                   existing_pr=$(gh pr list --head "chore/update-storybook-timings" --json number --jq '.[0].number' 2>/dev/null || true)
                   if [ -n "$existing_pr" ]; then
@@ -157,7 +157,7 @@ jobs:
               # ghcommit-action with a parent mismatch ("Expected branch to point to X").
               if: steps.check-changes.outputs.changed == 'true'
               env:
-                  GH_TOKEN: ${{ steps.app-token.outputs.token }}
+                  GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
                   TARGET_SHA: ${{ github.sha }}
               run: |
                   if gh api repos/${{ github.repository }}/git/ref/heads/chore/update-storybook-timings >/dev/null 2>&1; then
@@ -178,12 +178,12 @@ jobs:
                   branch: chore/update-storybook-timings
                   file_pattern: common/storybook/storybook-timings.json
               env:
-                  GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+                  GITHUB_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
 
             - name: Create pull request
               if: steps.check-changes.outputs.changed == 'true'
               env:
-                  GH_TOKEN: ${{ steps.app-token.outputs.token }}
+                  GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
                   RUN_ID: ${{ steps.find-run.outputs.run_id }}
                   REPO: ${{ github.repository }}
               run: |

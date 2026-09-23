@@ -30,7 +30,7 @@ jobs:
             - name: Checkout repository
               uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
               with:
-                  token: ${{ steps.app-token.outputs.token }}
+                  token: ${{ steps.app-token.outputs.token || github.token }}
 
             - name: Install pnpm dependencies
               uses: ./.github/actions/pnpm-install
@@ -64,7 +64,7 @@ jobs:
             - name: Clean up stale branch
               if: steps.check-changes.outputs.changes == 'false'
               env:
-                  GH_TOKEN: ${{ steps.app-token.outputs.token }}
+                  GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
               run: |
                   existing_pr=$(gh pr list --head "chore/llma-update-ai-costs" --json number --jq '.[0].number' 2>/dev/null || true)
                   if [ -n "$existing_pr" ]; then
@@ -81,7 +81,7 @@ jobs:
               id: previous-pr
               if: steps.check-changes.outputs.changes == 'true'
               env:
-                  GH_TOKEN: ${{ steps.app-token.outputs.token }}
+                  GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
               run: |
                   pr=$(gh pr list --head "chore/llma-update-ai-costs" --state open --json number --jq '.[0].number' 2>/dev/null || true)
                   echo "number=$pr" >> "$GITHUB_OUTPUT"
@@ -98,7 +98,7 @@ jobs:
               # "Expected branch to point to X but it did not" failure mode.
               if: steps.check-changes.outputs.changes == 'true'
               env:
-                  GH_TOKEN: ${{ steps.app-token.outputs.token }}
+                  GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
                   TARGET_SHA: ${{ github.sha }}
               run: |
                   if gh api repos/${{ github.repository }}/git/ref/heads/chore/llma-update-ai-costs >/dev/null 2>&1; then
@@ -118,12 +118,12 @@ jobs:
                   repo: ${{ github.repository }}
                   branch: chore/llma-update-ai-costs
               env:
-                  GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+                  GITHUB_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
 
             - name: Create pull request
               if: steps.check-changes.outputs.changes == 'true'
               env:
-                  GH_TOKEN: ${{ steps.app-token.outputs.token }}
+                  GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
                   PREVIOUS_PR: ${{ steps.previous-pr.outputs.number }}
               run: |
                   existing_pr=$(gh pr list --head "chore/llma-update-ai-costs" --json number --jq '.[0].number' 2>/dev/null || true)

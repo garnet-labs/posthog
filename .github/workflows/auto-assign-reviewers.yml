@@ -29,6 +29,7 @@ jobs:
             - name: Get app token
               id: app-token
               uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
+              continue-on-error: true
               with:
                   client-id: ${{ secrets.GH_APP_POSTHOG_ASSIGN_REVIEWERS_APP_ID }}
                   private-key: ${{ secrets.GH_APP_POSTHOG_ASSIGN_REVIEWERS_PRIVATE_KEY }}
@@ -36,7 +37,7 @@ jobs:
             - name: Checkout master branch
               uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
               with:
-                  token: ${{ steps.app-token.outputs.token }}
+                  token: ${{ steps.app-token.outputs.token || github.token }}
                   # this value MUST be set to `master` to avoid executing untrusted code.
                   # we execute assign-reviewers.js below from whatever branch is checked out
                   ref: master
@@ -64,8 +65,12 @@ jobs:
             - name: Install resolver dependency
               run: python -I -m pip install --quiet 'pyyaml==6.0.2'
 
-            # Script runs from master branch (protected), but can diff against PR branch
+            # Script runs from master branch (protected), but can diff against PR branch.
+            # Assigning team reviewers needs the app token's org-level permission, which
+            # `github.token` does not carry — skip rather than fail the run on forks and
+            # in repos without the app credentials.
             - name: Run reviewer assignment script
+              if: steps.app-token.outputs.token != ''
               env:
                   GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
                   PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -75,3 +80,7 @@ jobs:
                   IS_FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
               run: |
                   node .github/scripts/assign-reviewers.js
+
+            - name: Report skipped reviewer assignment
+              if: steps.app-token.outputs.token == ''
+              run: echo "::notice::Reviewer assignment skipped — GitHub App credentials are not available to this run."

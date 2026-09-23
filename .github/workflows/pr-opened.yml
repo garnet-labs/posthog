@@ -89,7 +89,7 @@ jobs:
               env:
                   PR_AUTHOR: ${{ github.event.pull_request.user.login }}
               with:
-                  github-token: ${{ steps.app-token.outputs.token }}
+                  github-token: ${{ steps.app-token.outputs.token || github.token }}
                   script: |
                       const author = process.env.PR_AUTHOR;
                       try {
@@ -128,7 +128,7 @@ jobs:
                   PR_AUTHOR: ${{ github.event.pull_request.user.login }}
                   PR_NUMBER: ${{ github.event.pull_request.number }}
               with:
-                  github-token: ${{ steps.app-token.outputs.token }}
+                  github-token: ${{ steps.app-token.outputs.token || github.token }}
                   script: |
                       await github.rest.issues.addAssignees({
                           owner: context.repo.owner,

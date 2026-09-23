@@ -25,7 +25,7 @@ jobs:
             - name: Checkout repository
               uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
               with:
-                  token: ${{ steps.app-token.outputs.token }}
+                  token: ${{ steps.app-token.outputs.token || github.token }}
 
             - name: Install pnpm dependencies
               uses: ./.github/actions/pnpm-install
@@ -62,7 +62,7 @@ jobs:
             - name: Reset branch to checked-out SHA
               if: steps.check-changes.outputs.changes == 'true'
               env:
-                  GH_TOKEN: ${{ steps.app-token.outputs.token }}
+                  GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
                   TARGET_SHA: ${{ github.sha }}
               run: |
                   if gh api repos/${{ github.repository }}/git/ref/heads/browserslist-update >/dev/null 2>&1; then
@@ -81,13 +81,13 @@ jobs:
                   branch: browserslist-update
                   file_pattern: 'pnpm-lock.yaml'
               env:
-                  GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+                  GITHUB_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
 
             - name: Create or update pull request
               id: pr
               if: steps.check-changes.outputs.changes == 'true'
               env:
-                  GH_TOKEN: ${{ steps.app-token.outputs.token }}
+                  GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
               run: |
                   existing_pr=$(gh pr list --head "browserslist-update" --json number --jq '.[0].number' 2>/dev/null || true)
                   if [ -n "$existing_pr" ]; then
@@ -106,7 +106,7 @@ jobs:
             - name: Enable automerge
               if: steps.check-changes.outputs.changes == 'true'
               env:
-                  GH_TOKEN: ${{ steps.app-token.outputs.token }}
+                  GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
                   PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
               run: |
                   gh pr merge "$PR_NUMBER" --auto --squash

@@ -481,7 +481,7 @@ jobs:
             - name: Commit resolution or mark for a human
               if: steps.dl.outcome == 'success'
               env:
-                  GH_TOKEN: ${{ steps.app-token.outputs.token }}
+                  GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
                   REPO: ${{ github.repository }}
                   RESULT_JSON: result.json
               run: node .github/scripts/autoresolve/commit-resolved.mjs

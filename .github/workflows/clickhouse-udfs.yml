@@ -31,7 +31,7 @@ jobs:
             - name: Trigger UDFs Workflow
               shell: bash
               env:
-                  GH_TOKEN: ${{ steps.app-token.outputs.token }}
+                  GH_TOKEN: ${{ steps.app-token.outputs.token || github.token }}
               run: |
                   gh workflow run clickhouse-udfs.yml \
                     -R posthog/posthog-cloud-infra \
