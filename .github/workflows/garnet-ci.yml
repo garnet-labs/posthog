@@ -1,7 +1,8 @@
 name: Garnet Runtime Visibility
 
 # Runs the riskiest representative CI surface — dependency install, where
-# lifecycle scripts execute — under the Garnet eBPF sensor. Garnet posts a
+# lifecycle scripts execute — under the Garnet eBPF sensor. The sensor runs
+# as a systemd service on the runner for the duration of the job. Garnet posts a
 # sticky "Garnet Runtime Review" comment on the PR (every recorded outbound
 # connection with its process lineage, bound to the head commit), which the
 # stamphog PR approval agent consumes as deterministic runtime evidence
