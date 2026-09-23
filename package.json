@@ -217,6 +217,7 @@
             "node-gyp",
             "node-rdkafka",
             "protobufjs",
+            "puppeteer",
             "re2",
             "sharp",
             "ssh2",
