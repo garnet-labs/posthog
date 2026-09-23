@@ -10,6 +10,10 @@ description: |
     one namespace (`pnpm-<os>-<lockfile-hash>`), so the store is cached once
     instead of fragmenting across runner-arch casings or per-workflow keys.
 
+    Also pre-seeds the Node tool cache (`node-toolcache-<os>-<arch>-<version>`,
+    save still gated to default branch) so setup-node becomes a filesystem
+    lookup on cache hits.
+
     Deliberately does NOT use setup-node's `cache: pnpm`: that auto-saves on
     every run (PRs included, and the post-save can't be gated) and keys on
     `os.arch()` (lowercase `x64`), which never matches a hand-written
@@ -41,11 +45,37 @@ runs:
           # Locate it across pnpm/action-setup layouts and never fail if it is absent.
           run: find ~/setup-pnpm -name gyp_main.py -path '*/node-gyp/*' -exec chmod +x {} + 2>/dev/null || true
 
+        - name: Resolve Node version
+          id: node-version
+          shell: bash
+          env:
+              NODE_VERSION_FILE: ${{ inputs.node-version-file }}
+          run: |
+              version=""
+              [[ -f "$NODE_VERSION_FILE" ]] && version=$(tr -d 'v[:space:]' < "$NODE_VERSION_FILE")
+              [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || version=""
+              echo "version=$version" >> "$GITHUB_OUTPUT"
+
+        - name: Restore Node tool cache
+          id: node-toolcache
+          if: steps.node-version.outputs.version != ''
+          uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+          with:
+              path: ${{ runner.tool_cache }}/node/${{ steps.node-version.outputs.version }}
+              key: node-toolcache-${{ runner.os }}-${{ runner.arch }}-${{ steps.node-version.outputs.version }}
+
         - name: Set up Node.js
           uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
           with:
               node-version-file: ${{ inputs.node-version-file }}
               token: ${{ github.token }}
+
+        - name: Save Node tool cache
+          if: github.ref == 'refs/heads/master' && steps.node-version.outputs.version != '' && steps.node-toolcache.outputs.cache-hit != 'true'
+          uses: actions/cache/save@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
+          with:
+              path: ${{ runner.tool_cache }}/node/${{ steps.node-version.outputs.version }}
+              key: node-toolcache-${{ runner.os }}-${{ runner.arch }}-${{ steps.node-version.outputs.version }}
 
         - name: Get pnpm store path
           id: pnpm-store
