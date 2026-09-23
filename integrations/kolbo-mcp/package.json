@@ -1,0 +1,18 @@
+{
+  "name": "kolbo-mcp-integration",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Kolbo MCP media-generation server integration: build check and a first-run smoke test.",
+  "type": "commonjs",
+  "scripts": {
+    "build": "node scripts/build.js",
+    "test": "node scripts/mcp-smoke.js",
+    "e2e": "node scripts/e2e-browser.mjs"
+  },
+  "dependencies": {
+    "@kolbo/mcp": "1.57.1"
+  },
+  "devDependencies": {
+    "playwright": "1.48.2"
+  }
+}
