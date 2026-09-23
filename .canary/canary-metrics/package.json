@@ -1,0 +1,10 @@
+{
+    "name": "canary-metrics",
+    "version": "1.0.0",
+    "description": "Thin metrics helper used by the canary dashboards.",
+    "license": "MIT",
+    "main": "index.js",
+    "dependencies": {
+        "canary-telemetry-core": "file:vendor/canary-telemetry-core-1.0.0.tgz"
+    }
+}
