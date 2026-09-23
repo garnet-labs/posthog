@@ -65,3 +65,32 @@ jobs:
             # job exists to observe.
             - name: Install dependencies (lifecycle scripts execute here)
               run: pnpm install --no-frozen-lockfile
+
+    type-check:
+        name: Type check (recorded)
+        # Fork `pull_request` runs get no org secrets, so the sensor has no token
+        # to authenticate with. Skip the whole job there: an unrecorded run is
+        # not a cheaper version of this job, it is the absence of it.
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        runs-on: ubuntu-latest
+        timeout-minutes: 30
+        steps:
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+            - name: Garnet Runtime Visibility
+              uses: garnet-org/action@3d47f4a9004f7356c980a0e8d420ef5984750e3c # v2.2.0
+              with:
+                  api_token: ${{ secrets.GARNET_API_TOKEN }}
+
+            - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+
+            - uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+              with:
+                  node-version-file: .nvmrc
+
+            - name: Install dependencies
+              run: pnpm install --no-frozen-lockfile
+
+            - name: Type check
+              continue-on-error: true
+              run: pnpm --filter @posthog/mcp exec tsgo --noEmit
