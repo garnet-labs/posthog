@@ -1,0 +1,41 @@
+# Merge gate (POC)
+# Runs the merge-gate POC when a Garnet Runtime Review comment lands on a PR:
+# it evaluates the execution profile and posts a MERGE / HOLD / AUDIT decision.
+# Proof of concept only. Garnet reports; the reviewer decides.
+name: Merge gate (POC)
+
+on:
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "PR number to gate"
+        required: true
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  gate:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.comment.user.login == 'garnet-runtime-review[bot]' &&
+       github.event.issue.pull_request)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/merge-gate
+          sparse-checkout-cone-mode: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run merge gate
+        run: |
+          PR="${{ inputs.pr || github.event.issue.number }}"
+          python3 .github/merge-gate/gate.py "${{ github.repository }}" "$PR"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
