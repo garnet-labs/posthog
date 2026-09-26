@@ -22,6 +22,8 @@ BOT = "garnet-runtime-review[bot]"
 
 DEST_RULES = [
     (r"^registry\.npmjs\.org$", "package registry", "ok"),
+    (r"^npmjs\.org$", "package registry", "ok"),
+    (r".*\.npmjs\.org$", "package registry", "ok"),
     (r"^registry\.yarnpkg\.com$", "package registry", "ok"),
     (r"^nodejs\.org$", "toolchain download", "ok"),
     (r"^github\.com$", "source host", "ok"),
