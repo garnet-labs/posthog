@@ -33,6 +33,10 @@ partition, the run `profile` URL, and the `digest`. The partition matters for th
 a hosted runner rotating its own egress IPs is background churn and does not escalate; a new
 destination under a workflow step is workload and does.
 
+A contract 7.0 marker must state both completeness fields. `status` reports whether the run
+finished, `capture_quality` whether the sensor saw all of it, and neither substitutes for the
+other — a marker carrying only one of them is undeterminable rather than complete.
+
 ## Pre-7.0 markers
 
 Production (`api.garnet.ai` v1.32.0, probed 2026-08-18) renders contract `6.9.8`, which states
