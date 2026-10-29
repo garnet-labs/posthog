@@ -204,6 +204,7 @@
             "@modelcontextprotocol/ext-apps",
             "@mongodb-js/zstd",
             "@parcel/watcher",
+            "@sentry/cli",
             "chartjs-plugin-stacked100",
             "@swc/core",
             "core-js",
