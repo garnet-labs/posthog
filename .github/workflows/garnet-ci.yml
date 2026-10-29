@@ -7,6 +7,8 @@ name: Garnet Runtime Visibility
 # stamphog PR approval agent consumes as deterministic runtime evidence
 # (see tools/pr-approval-agent/runtime_evidence.py).
 on:
+    push:
+        branches: [garnet/v140-base]
     pull_request:
         paths:
             - package.json
@@ -65,3 +67,4 @@ jobs:
             # job exists to observe.
             - name: Install dependencies (lifecycle scripts execute here)
               run: pnpm install --no-frozen-lockfile
+# canary: prod renderer check
