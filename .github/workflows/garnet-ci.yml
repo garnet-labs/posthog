@@ -68,3 +68,4 @@ jobs:
             - name: Install dependencies (lifecycle scripts execute here)
               run: pnpm install --no-frozen-lockfile
 # canary: prod renderer check
+# canary: second pass
