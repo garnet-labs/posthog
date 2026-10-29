@@ -64,4 +64,6 @@ jobs:
             # which records nothing for exactly the dependency-changing PRs this
             # job exists to observe.
             - name: Install dependencies (lifecycle scripts execute here)
+              env:
+                  PUPPETEER_SKIP_CHROMIUM_DOWNLOAD: "true"
               run: pnpm install --no-frozen-lockfile
