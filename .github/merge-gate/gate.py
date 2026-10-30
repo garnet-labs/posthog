@@ -6,7 +6,9 @@ Runtime Review comment on a PR (or manually via workflow_dispatch).
 
 Reads the execution profile from the Runtime Review comment, infers PR type
 from changed files, evaluates v1 merge-safety assertions, posts MERGE / HOLD /
-AUDIT as a PR comment. Idempotent: skips if a gate comment already exists.
+AUDIT / UNDETERMINABLE as one PR comment, updated in place on every new record.
+Fails closed: a record that is not finalized, not bound to the PR head, or not
+declared complete is UNDETERMINABLE, never MERGE.
 
 v1 policy scope: dependency PRs (manifest/lockfile-only changes).
 """
@@ -15,7 +17,6 @@ import os
 import re
 import subprocess
 import sys
-import time
 
 MARKER = "<!-- merge-gate-poc -->"
 BOT = "garnet-runtime-review[bot]"
@@ -132,21 +133,46 @@ def evaluate(profile, ptype):
     return findings
 
 
-def decide(findings, ptype):
+def evidence_gaps(summary, head):
+    gaps = []
+    if summary.get("status") != "finalized":
+        gaps.append(f"record status is `{summary.get('status', 'missing')}`, not finalized")
+    if summary.get("commit") != head:
+        gaps.append(f"record is bound to `{str(summary.get('commit', 'missing'))[:12]}`, not the PR head `{head[:12]}`")
+    if summary.get("capture_quality") != "complete":
+        gaps.append(f"capture is `{summary.get('capture_quality', 'undeclared')}`, not declared complete")
+    incomplete = summary.get("incomplete")
+    if not isinstance(incomplete, int) or incomplete > 0:
+        gaps.append(f"{incomplete if isinstance(incomplete, int) else 'unknown'} job(s) recorded incompletely")
+    return gaps
+
+
+def decide(findings, ptype, gaps=()):
     holds = [t for s, t in findings if s == "hold"]
+    if holds:
+        return ("HOLD" if ptype == "dependency" else "AUDIT"), holds, list(gaps)
+    if gaps:
+        return "UNDETERMINABLE", [], list(gaps)
     if ptype != "dependency":
         return "AUDIT", holds, []
     return ("HOLD", holds, []) if holds else ("MERGE", [], [])
 
 
-def render(profile, ptype, decision, holds, elapsed):
+def render(profile, ptype, decision, holds, gaps, head):
     s = profile["summary"]
-    lines = [MARKER, f"## Merge gate (POC): **{decision}**", "",
-        f"Evaluated the Garnet execution profile for this PR "
-        f"({s.get('chains', '?')} chains, {s.get('destinations', '?')} destinations, "
-        f"recorded {s.get('recorded', '?')}) in {elapsed:.1f}s.",
+    jobs = s.get("jobs")
+    dests = s.get("destinations")
+    lines = [MARKER, f"## Merge gate: **{decision}**", "",
+        f"Head `{head[:12]}` · {jobs if isinstance(jobs, int) else 'unknown'} jobs · "
+        f"{dests if isinstance(dests, int) else len(profile['destinations'])} destinations · "
+        f"recorded {s.get('recorded', 'time unknown')}.",
         f"PR type inferred from changed files: **{ptype}**.", ""]
-    if decision == "MERGE":
+    if gaps:
+        lines += ["Evidence gaps (no MERGE until these clear):", ""]
+        lines += [f"- {g}" for g in gaps] + [""]
+    if decision == "UNDETERMINABLE":
+        lines += ["No destination needs review, but the record is not complete enough to call this safe.", ""]
+    elif decision == "MERGE":
         lines += ["Every observed destination classifies as expected package/CI "
                   "infrastructure. Nothing in the execution behavior contradicts the diff.", ""]
     elif decision == "AUDIT":
@@ -156,29 +182,33 @@ def render(profile, ptype, decision, holds, elapsed):
     else:
         lines += ["### Findings requiring review", ""]
         lines += [f"- {h}" for h in holds] + [""]
-    lines += ["_This is a proof-of-concept gate, not a product verdict. "
-              "Garnet reports; the reviewer decides._"]
+    lines += ["_Garnet reports; the reviewer decides._"]
     return "\n".join(lines)
 
 
 def main():
     owner_repo, pr = sys.argv[1], sys.argv[2]
     owner, repo = owner_repo.split("/")
-    t0 = time.time()
-    comments = gh("GET", f"/repos/{owner}/{repo}/issues/{pr}/comments?per_page=30")
-    if any(MARKER in c["body"] for c in comments):
-        print("gate comment already exists; skipping")
-        return
-    reviews = [c["body"] for c in comments if c["user"]["login"] == BOT]
+    head = gh("GET", f"/repos/{owner}/{repo}/pulls/{pr}")["head"]["sha"]
+    comments = gh("GET", f"/repos/{owner}/{repo}/issues/{pr}/comments?per_page=100")
+    reviews = [c["body"] for c in comments if c["user"]["login"] == BOT and "garnet:summary" in c["body"]]
     if not reviews:
         print("no Runtime Review comment found; skipping")
         return
     profile = parse_profile(reviews[-1])
     ptype = pr_type(owner, repo, pr)
-    decision, holds, _ = decide(evaluate(profile, ptype), ptype)
-    body = render(profile, ptype, decision, holds, time.time() - t0)
-    gh("POST", f"/repos/{owner}/{repo}/issues/{pr}/comments", {"body": body})
-    print(f"posted {decision} for {owner_repo}#{pr}")
+    gaps = evidence_gaps(profile["summary"], head)
+    decision, holds, gaps = decide(evaluate(profile, ptype), ptype, gaps)
+    body = render(profile, ptype, decision, holds, gaps, head)
+    mine = [c for c in comments if MARKER in c["body"]]
+    if mine:
+        if mine[-1]["body"] == body:
+            print("gate comment already current")
+            return
+        gh("PATCH", f"/repos/{owner}/{repo}/issues/comments/{mine[-1]['id']}", {"body": body})
+    else:
+        gh("POST", f"/repos/{owner}/{repo}/issues/{pr}/comments", {"body": body})
+    print(f"{decision} for {owner_repo}#{pr} at {head[:12]}")
 
 
 if __name__ == "__main__":
