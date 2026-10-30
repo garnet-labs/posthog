@@ -32,6 +32,8 @@ blockExoticSubdeps: true
 trustPolicy: no-downgrade
 
 catalog:
+    # gRPC codegen toolchain (protoc + Node plugin)
+    grpc-tools: 1.13.1
     # Kea ecosystem - state management
     kea: ^4.0.0-pre.6
     kea-forms: ^3.2.0
