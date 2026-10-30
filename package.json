@@ -208,6 +208,7 @@
             "@swc/core",
             "core-js",
             "core-js-pure",
+            "cypress",
             "cpu-features",
             "esbuild",
             "lmdb",
