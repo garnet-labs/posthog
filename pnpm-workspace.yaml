@@ -49,9 +49,6 @@ verifyDepsBeforeRun: false
 confirmModulesPurge: false
 # A cold install fetches every package, so retry past brief registry errors.
 fetchRetries: 3
-# Build scripts pnpm has skipped so far; `pnpm approve-builds` records the decision here.
-ignoredBuiltDependencies:
-    - puppeteer
 
 # Fix React versions across the monorepo.
 overrides:
@@ -174,7 +171,7 @@ allowBuilds:
     free-email-domains: false
     # Optional dependency of code-inspector-plugin, used only by its AI terminal, which we do not enable.
     node-pty: false
-    puppeteer: false
+    puppeteer: true
 
 catalog:
     # Kea ecosystem - state management
