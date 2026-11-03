@@ -1,13 +1,29 @@
 name: Garnet Runtime Visibility
 
-# Runs the riskiest representative CI surface — dependency install, where
-# lifecycle scripts execute — under the Garnet eBPF sensor. Garnet posts a
-# sticky "Garnet Runtime Review" comment on the PR (every recorded outbound
-# connection with its process lineage, bound to the head commit), which the
-# stamphog PR approval agent consumes as deterministic runtime evidence
-# (see tools/pr-approval-agent/runtime_evidence.py).
+# Runs the dependency install, where lifecycle scripts execute, under the Garnet
+# eBPF sensor: on every pull request that changes the manifests, and on every
+# push to master so a pull request record has a recorded master run to compare
+# against. Garnet posts a sticky comment on the PR: every recorded outbound
+# connection with the execution chain that reached it, bound to the head
+# commit, compared with the last recorded master run.
+#
+# The second job is the dependency proof. It reads the finalized record for this
+# head and, only when nothing new was recorded against master, lists the
+# dependency files it judged in one notice annotation titled
+# `stamphog attestation: <base ref>`, the shape stamphog reads to lift the
+# `dependencies` deny category for exactly those files (products/stamphog/AGENTS.md,
+# "Attestations"). A changed record, an incomplete capture, a pending record, or a
+# pull request that edits this workflow emits nothing, so the PR stays in review.
 on:
     pull_request:
+        paths:
+            - package.json
+            - pnpm-lock.yaml
+            - pnpm-workspace.yaml
+            - .nvmrc
+            - .github/workflows/garnet-ci.yml
+    push:
+        branches: [master]
         paths:
             - package.json
             - pnpm-lock.yaml
@@ -65,3 +81,115 @@ jobs:
             # job exists to observe.
             - name: Install dependencies (lifecycle scripts execute here)
               run: pnpm install --no-frozen-lockfile
+
+    dependency-proof:
+        name: Dependency proof
+        # The record finalizes in the sensor's post step, after the install job's
+        # last step, so the proof reads it from a second job. No checkout: the
+        # only files this job trusts are this workflow and the record.
+        needs: dep-install
+        if: github.event_name == 'pull_request'
+        runs-on: ubuntu-latest
+        timeout-minutes: 30
+        permissions:
+            contents: read
+            pull-requests: read
+        env:
+            GH_TOKEN: ${{ github.token }}
+            PR_NUMBER: ${{ github.event.pull_request.number }}
+            HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+            BASE_REF: ${{ github.event.pull_request.base.ref }}
+            RUNTIME_REVIEW_MCP: https://garnet-runtime-review-mcp.vercel.app/mcp
+        steps:
+            - name: Wait for the finalized record bound to this head
+              id: record
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  request=$(jq -cn --arg repo "$GITHUB_REPOSITORY" --argjson pr "$PR_NUMBER" \
+                      '{jsonrpc:"2.0",id:1,method:"tools/call",params:{name:"get_runtime_review",arguments:{repo:$repo,pr:$pr}}}')
+                  for attempt in $(seq 1 40); do
+                      text=$(curl -sS --max-time 60 -X POST "$RUNTIME_REVIEW_MCP" \
+                          -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' \
+                          -d "$request" | jq -r '.result.content[0].text // empty' || true)
+                      record=$(printf '%s\n' "$text" | awk '/^```json$/{f=1;next} /^```$/{f=0} f' | jq -c '.record // empty' 2>/dev/null || true)
+                      if [ -n "$record" ]; then
+                          bound=$(jq -r '.bound_to_head' <<<"$record")
+                          pending=$(jq -r '.pending' <<<"$record")
+                          marker=$(jq -r '.marker_commit // ""' <<<"$record")
+                          if [ "$bound" = "true" ] && [ "$pending" = "false" ] && [ "$marker" = "$HEAD_SHA" ]; then
+                              outcome=$(jq -r '.outcome // "unknown"' <<<"$record")
+                              echo "record for $HEAD_SHA: $(jq -r '.heading // ""' <<<"$record") (outcome: $outcome; compared with: $(jq -r '.compared_with // "nothing"' <<<"$record"))"
+                              echo "outcome=$outcome" >> "$GITHUB_OUTPUT"
+                              exit 0
+                          fi
+                      fi
+                      echo "attempt $attempt: no finalized record bound to $HEAD_SHA yet"
+                      sleep 30
+                  done
+                  echo "no finalized record for $HEAD_SHA within the wait; nothing to attest"
+                  echo "outcome=pending" >> "$GITHUB_OUTPUT"
+
+            - name: List the dependency files this job judged
+              id: files
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  changed=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files" --jq '.[].filename')
+                  workflow_changed=false
+                  if grep -qx '.github/workflows/garnet-ci.yml' <<<"$changed"; then workflow_changed=true; fi
+                  # The install resolves the root workspace: its lockfile, pnpm-workspace.yaml,
+                  # .nvmrc and every package.json under it. A directory with its own
+                  # pnpm-lock.yaml is a separate workspace this job never installs.
+                  other_lockfile_dirs=$(grep -E '^.+/pnpm-lock\.yaml$' <<<"$changed" | sed 's#/pnpm-lock\.yaml$#/#' || true)
+                  judged=""
+                  nl=$'\n'
+                  while IFS= read -r file; do
+                      [ -n "$file" ] || continue
+                      case "$file" in
+                          pnpm-lock.yaml|pnpm-workspace.yaml|.nvmrc|package.json) ;;
+                          */package.json) ;;
+                          *) continue ;;
+                      esac
+                      skip=false
+                      while IFS= read -r dir; do
+                          [ -n "$dir" ] || continue
+                          case "$file" in "$dir"*) skip=true ;; esac
+                      done <<<"$other_lockfile_dirs"
+                      [ "$skip" = true ] && continue
+                      judged="${judged:+$judged$nl}$file"
+                  done <<<"$changed"
+                  echo "workflow_changed=$workflow_changed" >> "$GITHUB_OUTPUT"
+                  {
+                      echo 'judged<<EOF_JUDGED'
+                      printf '%s\n' "$judged"
+                      echo 'EOF_JUDGED'
+                  } >> "$GITHUB_OUTPUT"
+                  echo "judged files:"; printf '%s\n' "$judged"
+
+            - name: Attest the unchanged install
+              if: steps.record.outputs.outcome == 'unchanged' && steps.files.outputs.workflow_changed == 'false' && steps.files.outputs.judged != ''
+              shell: bash
+              env:
+                  JUDGED: ${{ steps.files.outputs.judged }}
+              run: |
+                  set -euo pipefail
+                  message=$(printf '%s' "$JUDGED" | awk 'NR>1{printf "%%0A"} {printf "%s", $0}')
+                  echo "::notice title=stamphog attestation: ${BASE_REF}::${message}"
+
+            - name: Explain a missing attestation
+              if: steps.record.outputs.outcome != 'unchanged' || steps.files.outputs.workflow_changed == 'true' || steps.files.outputs.judged == ''
+              shell: bash
+              env:
+                  OUTCOME: ${{ steps.record.outputs.outcome }}
+                  WORKFLOW_CHANGED: ${{ steps.files.outputs.workflow_changed }}
+              run: |
+                  case "$OUTCOME" in
+                      unchanged) reason="the record is unchanged" ;;
+                      changed) reason="the record shows new or changed runtime behavior; the pull request stays in review" ;;
+                      recorded) reason="the record has no recorded master run to compare with" ;;
+                      pending) reason="the record did not finalize within the wait" ;;
+                      *) reason="the record declares outcome '$OUTCOME', which is not an unchanged install" ;;
+                  esac
+                  if [ "$WORKFLOW_CHANGED" = true ]; then reason="this pull request edits the workflow that produces the proof"; fi
+                  echo "no attestation: $reason"
