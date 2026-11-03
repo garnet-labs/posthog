@@ -1,5 +1,6 @@
 import json
 import hashlib
+import dataclasses
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -7,14 +8,20 @@ from django.core.cache import cache
 from django.db.models import QuerySet
 from django.utils import timezone
 
-from posthog.schema import DateRange
+from posthog.schema import AnyPropertyFilterDiscriminated, DateRange, EventPropertyFilter
 
 from posthog.hogql import ast
+from posthog.hogql.context import HogQLContext
+from posthog.hogql.database.database import Database
+from posthog.hogql.modifiers import create_default_modifiers_for_team
 from posthog.hogql.parser import parse_select
+from posthog.hogql.property_access_types import RestrictedProperty
 from posthog.hogql.query import execute_hogql_query
 
 from posthog.clickhouse.query_tagging import Feature, Product, tags_context
+from posthog.hogql_queries.utils.caller_context import map_in_caller_context
 from posthog.hogql_queries.utils.query_date_range import QueryDateRange
+from posthog.models.instance_setting import get_instance_setting
 from posthog.models.person import Person
 from posthog.models.person.util import get_persons_mapped_by_distinct_id
 from posthog.models.team.team import Team
@@ -22,15 +29,24 @@ from posthog.models.user import User
 from posthog.personhog_client.caller_tag import personhog_caller_tag
 from posthog.utils import generate_cache_key
 
-from products.mcp_analytics.backend import intent_generation
-from products.mcp_analytics.backend.constants import MCP_MISSING_CAPABILITY_EVENT, MCP_TOOL_CALL_EVENT
+from products.access_control.backend.facade.api import get_restricted_properties_with_group_type_index_for_team
+from products.access_control.backend.facade.property_access import restriction_fingerprint
+from products.mcp_analytics.backend import intent_generation, mcp_harness
+from products.mcp_analytics.backend.constants import (
+    MAX_SNAPSHOT_CLUSTERS,
+    MCP_MISSING_CAPABILITY_EVENT,
+    MCP_TOOL_CALL_EVENT,
+)
 from products.mcp_analytics.backend.facade import contracts, enums
+from products.mcp_analytics.backend.hogql_queries.base import shared_filter_exprs
 from products.mcp_analytics.backend.models import MCPAnalyticsSubmission, MCPIntentClusterSnapshot, MCPSession
 
-# How long a snapshot may sit in COMPUTING before we assume the task died and
-# auto-recover. Generous because a real recompute completes in well under a
-# minute even at the top_n=500 cap; anything past 10 minutes is a dead task.
-STALE_COMPUTING_THRESHOLD = timedelta(minutes=10)
+# How long a snapshot may sit in COMPUTING before we assume the run died and
+# auto-recover. Must exceed the compute activity's schedule_to_close budget
+# (400s, covering queue wait + both attempts — see intent_clustering
+# constants); past that, nothing can still legitimately write a final status,
+# so the row is a dead run whose worker never reached _mark_error.
+STALE_COMPUTING_THRESHOLD = timedelta(minutes=8)
 
 _MCP_TOOL_CALLS_SQL = """
 SELECT
@@ -45,6 +61,7 @@ FROM events
 WHERE event = {event}
     AND timestamp >= {date_from}
     AND $session_id = {session_id}
+    AND {shared_filters}
 ORDER BY timestamp ASC, event_id ASC
 LIMIT {limit}
 OFFSET {offset}
@@ -53,6 +70,28 @@ OFFSET {offset}
 
 def list_submissions(team: Team, kind: enums.SubmissionKind) -> QuerySet[MCPAnalyticsSubmission]:
     return MCPAnalyticsSubmission.objects.filter(team=team, kind=kind).order_by("-created_at")
+
+
+def shared_filters_expr(
+    team: Team,
+    properties: list[AnyPropertyFilterDiscriminated] | None,
+    filter_test_accounts: bool,
+) -> ast.Expr:
+    """The MCP analytics tabs' shared property filters as one event-level HogQL expression.
+
+    The raw SQL here ANDs a single placeholder into its WHERE, so the runners' list form is folded
+    into one expression, with ``true`` when nothing is selected.
+    """
+    exprs = shared_filter_exprs(team, properties, filter_test_accounts)
+    return ast.And(exprs=exprs) if exprs else ast.Constant(value=True)
+
+
+def _filters_cache_fragment(
+    team: Team, properties: list[AnyPropertyFilterDiscriminated] | None, filter_test_accounts: bool
+) -> str:
+    dumped = [prop.model_dump(mode="json", exclude_none=True) for prop in (properties or [])]
+    test_account_filters = team.test_account_filters if filter_test_accounts else []
+    return json.dumps([dumped, test_account_filters], sort_keys=True)
 
 
 SESSION_SORT_FIELDS: frozenset[str] = frozenset(
@@ -72,20 +111,18 @@ DEFAULT_SESSION_SORT_COLUMN = "session_start"
 # default so both tabs show the same set of sessions out of the box. The UI always
 # sends an explicit range; this only covers param-less API/token callers.
 DEFAULT_SESSIONS_DATE_FROM = "-7d"
-
-# A session that overlaps the window must be reported with its *full* stats (true
-# session_start/end/duration/tool count), not just its in-window slice. We get that
-# by scanning a window padded by this buffer on each side, then keeping only sessions
-# with at least one event actually inside the window. The buffer bounds the extra scan
-# while capturing the whole span of any realistically-long MCP session; a session whose
-# span exceeds it would have its stats clipped at the buffer edge (rare — agent
-# sessions are minutes-to-hours; a multi-day span usually means a reused session_id).
-SESSION_OVERLAP_BUFFER = timedelta(days=1)
+SESSION_OVERLAP_BUFFER = timedelta(days=7)
 
 # Short TTL so concurrent dashboard tabs / auto-refreshes share one ClickHouse
 # aggregation instead of each re-running it — long enough to absorb a burst,
 # short enough that "Reload" still feels live.
 SESSIONS_CACHE_TTL_SECONDS = 30
+
+# The activity view polls every 60 s. Restricted members each get their own entry, so it
+# expires before their next poll. Unrestricted members share one entry, so it can live longer;
+# empty overviews skip the cache, so a new team still sees its first call on the next poll.
+ACTIVITY_OVERVIEW_CACHE_TTL_SECONDS = 20
+UNRESTRICTED_ACTIVITY_OVERVIEW_CACHE_TTL_SECONDS = 5 * 60
 
 # One row per $session_id, aggregated straight from events. The column shape
 # (min/max/count/groupUniqArray/argMax) maps 1:1 onto a future AggregatingMergeTree
@@ -93,11 +130,16 @@ SESSIONS_CACHE_TTL_SECONDS = 30
 # validated structural fragments injected before parsing; {placeholders} are HogQL
 # value placeholders.
 #
-# Session-level windowing: aggregate over the buffered range [scan_from, scan_to] so
-# each session's stats span its *whole* set of events, then keep only sessions with an
-# event inside the requested [window_from, window_to] via the HAVING countIf. This is
-# why a session straddling the window boundary reports full (not clipped) start/end/
-# duration/count, and why its detail view (bounded by session_start) shows every event.
+# Session-level windowing: find sessions with a matching event inside the selected
+# window, then aggregate within a bounded overlap. The timestamp bound lets the
+# events sort key prune the scan. Longer sessions need a session-indexed source
+# for complete stats without reading the team's full event history.
+#
+# The shared filters are a per-event `matches` flag rather than a WHERE clause, so they
+# narrow *what the session did* (tool_call_count, tools_used, and which client and user
+# the row names) without moving *when it ran* within the scan. session_start must stay
+# the first scanned event, not the first matching call: it bounds the detail scan and
+# intent generation. A session with no matching event is dropped by the HAVING.
 #
 # NB: the session id reads from the `$session_id` field, NOT `properties.$session_id`.
 # `$session_id` is a materialised events column; the `properties.` accessor renders it
@@ -106,27 +148,46 @@ SESSIONS_CACHE_TTL_SECONDS = 30
 # column consistently across SELECT/GROUP/HAVING/ORDER.
 _MCP_SESSIONS_SQL = """
 SELECT
-    $session_id AS session_id,
+    session_id,
     min(timestamp) AS session_start,
     max(timestamp) AS session_end,
     dateDiff('second', min(timestamp), max(timestamp)) AS duration_seconds,
-    count() AS tool_call_count,
-    groupUniqArray(properties.$mcp_tool_name) AS tools_used,
-    argMax(distinct_id, timestamp) AS distinct_id,
-    argMax(properties.$mcp_client_name, timestamp) AS mcp_client_name
-FROM events
-WHERE event = {event}
-    -- Buffered range so an overlapping session's events outside the window still
-    -- aggregate into its full stats; the timestamp bounds keep the sort key pruning.
-    AND timestamp >= {scan_from}
-    AND timestamp <= {scan_to}
-    -- $session_id is a materialised String column — '' (not NULL) for sessionless
-    -- events — so a bare `!= ''` drops them without a coalesce.
-    AND $session_id != ''
+    countIf(matches) AS tool_call_count,
+    groupUniqArrayIf(tool_name, matches) AS tools_used,
+    argMaxIf(event_distinct_id, timestamp, matches) AS distinct_id,
+    argMaxIf(client_name, timestamp, matches) AS mcp_client_name,
+    countIf(matches AND is_error) AS error_calls
+FROM (
+    SELECT
+        $session_id AS session_id,
+        timestamp,
+        distinct_id AS event_distinct_id,
+        properties.$mcp_tool_name AS tool_name,
+        properties.$mcp_client_name AS client_name,
+        toString(properties.$mcp_is_error) IN ('true', '1') AS is_error,
+        {shared_filters} AS matches
+    FROM events
+    WHERE event = {event}
+        AND timestamp >= {scan_from}
+        AND timestamp <= {scan_to}
+        -- $session_id is a materialised String column — '' (not NULL) for sessionless
+        -- events — so a bare `!= ''` drops them without a coalesce.
+        AND $session_id != ''
+        AND $session_id IN (
+            SELECT $session_id
+            FROM events
+            WHERE event = {event}
+                AND timestamp >= {window_from}
+                AND timestamp <= {window_to}
+                AND $session_id != ''
+                AND {shared_filters}
+        )
+)
 GROUP BY session_id
--- Session-level inclusion: at least one event inside the requested window.
-HAVING countIf(timestamp >= {window_from} AND timestamp <= {window_to}) > 0
+-- Session-level inclusion: at least one *matching* event inside the requested window.
+HAVING countIf(matches AND timestamp >= {window_from} AND timestamp <= {window_to}) > 0
     __SEARCH__
+    __HAS_ERRORS__
 ORDER BY __ORDER__
 LIMIT {limit}
 OFFSET {offset}
@@ -141,6 +202,8 @@ _SESSION_SEARCH_FILTER = (
     "OR mcp_client_name ILIKE {search} "
     "OR arrayExists(t -> t ILIKE {search}, tools_used))"
 )
+
+_SESSION_HAS_ERRORS_FILTER = {True: "AND error_calls > 0", False: "AND error_calls = 0"}
 
 
 def _normalise_order_by(order_by: str) -> tuple[str, bool]:
@@ -161,9 +224,20 @@ def _normalise_order_by(order_by: str) -> tuple[str, bool]:
 
 
 def _sessions_cache_key(
-    team_id: int, limit: int, offset: int, search: str, order_by: str, date_from: str, date_to: str
+    team_id: int,
+    limit: int,
+    offset: int,
+    search: str,
+    order_by: str,
+    date_from: str,
+    date_to: str,
+    has_errors: bool | None,
+    filters: str,
+    user_id: int | None,
 ) -> str:
-    payload = f"mcp_sessions_{date_from}_{date_to}_{limit}_{offset}_{search}_{order_by}"
+    payload = (
+        f"mcp_sessions_{date_from}_{date_to}_{limit}_{offset}_{search}_{order_by}_{has_errors}_{filters}_{user_id}"
+    )
     return generate_cache_key(team_id, payload)
 
 
@@ -175,13 +249,16 @@ def list_mcp_sessions(
     order_by: str = "",
     date_from: str | None = None,
     date_to: str | None = None,
+    has_errors: bool | None = None,
+    properties: list[AnyPropertyFilterDiscriminated] | None = None,
+    filter_test_accounts: bool = False,
+    user: User | None = None,
 ) -> contracts.MCPSessionsPage:
     """List a page of MCP sessions for a team, aggregated on the fly from $mcp_tool_call events.
 
     One row per $session_id whose session overlaps the selected window, grouped in ClickHouse and
-    scoped to the team so the events sort key prunes the scan. Stats are full-session: a session
-    that straddles the window boundary reports its true start/end/duration/tool count, not just the
-    in-window slice (see ``_MCP_SESSIONS_SQL`` for the buffered-scan + ``countIf`` mechanism).
+    scoped to the team. Stats include calls up to ``SESSION_OVERLAP_BUFFER`` outside the window;
+    longer sessions are clipped so the events sort key can prune the scan.
     Over-fetches one row to report ``has_next`` (replay-style) without a separate count query.
     Results are cached briefly so concurrent dashboard refreshes share a single aggregation.
 
@@ -193,11 +270,36 @@ def list_mcp_sessions(
     distinct_id, mcp_client_name, and any element of tools_used. ``order_by`` is a
     whitelisted column name; prefix with '-' for descending.
 
+    ``has_errors`` keeps only sessions with at least one errored call (``True``) or none
+    (``False``); ``None`` keeps both. It counts the same matching calls as ``tool_call_count``.
+
+    ``properties`` and ``filter_test_accounts`` are the tabs' shared filters. A session with no
+    matching event is dropped; a session that keeps some reports how many of *its* calls matched
+    (``tool_call_count``, ``tools_used``) while ``session_start`` / ``session_end`` describe the
+    scanned session span, because those bound the detail and intent scans.
+
+    ``user`` is the caller. It carries through to ``execute_hogql_query`` so property-level access
+    control is evaluated for that member, not with the project defaults, because ``properties`` is
+    caller-supplied and would otherwise read restricted properties.
+
     Person email/name are resolved from distinct_id via personhog. ``intent`` is
     empty until the ad-hoc summary endpoint (separate PR) fills the intent seam.
     """
     effective_date_from = date_from or DEFAULT_SESSIONS_DATE_FROM
-    cache_key = _sessions_cache_key(team.id, limit, offset, search, order_by, effective_date_from, date_to or "")
+    cache_key = _sessions_cache_key(
+        team.id,
+        limit,
+        offset,
+        search,
+        order_by,
+        effective_date_from,
+        date_to or "",
+        has_errors,
+        _filters_cache_fragment(team, properties, filter_test_accounts),
+        # Property-level access control is evaluated per member, so two members can get different
+        # rows from the same filters. Key the cache by the caller to keep them apart.
+        user.pk if user is not None else None,
+    )
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
@@ -210,6 +312,10 @@ def list_mcp_sessions(
         order_by=order_by,
         date_from=effective_date_from,
         date_to=date_to,
+        has_errors=has_errors,
+        properties=properties,
+        filter_test_accounts=filter_test_accounts,
+        user=user,
     )
     # Don't cache empty results: a newly set-up team's first sessions would
     # otherwise stay hidden for the full TTL.
@@ -226,6 +332,10 @@ def _query_mcp_sessions(
     order_by: str,
     date_from: str,
     date_to: str | None,
+    has_errors: bool | None,
+    properties: list[AnyPropertyFilterDiscriminated] | None,
+    filter_test_accounts: bool,
+    user: User | None,
 ) -> contracts.MCPSessionsPage:
     column, descending = _normalise_order_by(order_by)
     # Append the unique session_id as a tiebreaker so the sort is a *total* order.
@@ -235,8 +345,8 @@ def _query_mcp_sessions(
     order_text = f"{column} {direction}" if column == "session_id" else f"{column} {direction}, session_id ASC"
 
     # Resolve the date strings (relative like '-7d' or absolute ISO) to concrete bounds,
-    # the same path the dashboard uses. We need both the window and a buffered scan range,
-    # so resolve here rather than via the HogQL {filters} placeholder (which only yields one).
+    # the same path the dashboard uses. Resolve both bounds here rather than via the
+    # HogQL {filters} placeholder (which only yields one).
     query_date_range = QueryDateRange(
         date_range=DateRange(date_from=date_from, date_to=date_to),
         team=team,
@@ -255,6 +365,7 @@ def _query_mcp_sessions(
         "window_to": ast.Constant(value=window_to),
         "limit": ast.Constant(value=limit + 1),
         "offset": ast.Constant(value=offset),
+        "shared_filters": shared_filters_expr(team, properties, filter_test_accounts),
     }
 
     search_text = ""
@@ -263,7 +374,12 @@ def _query_mcp_sessions(
         search_text = _SESSION_SEARCH_FILTER
         placeholders["search"] = ast.Constant(value=f"%{term}%")
 
-    sql = _MCP_SESSIONS_SQL.replace("__SEARCH__", search_text).replace("__ORDER__", order_text)
+    has_errors_text = "" if has_errors is None else _SESSION_HAS_ERRORS_FILTER[has_errors]
+    sql = (
+        _MCP_SESSIONS_SQL.replace("__SEARCH__", search_text)
+        .replace("__HAS_ERRORS__", has_errors_text)
+        .replace("__ORDER__", order_text)
+    )
     query = parse_select(sql, placeholders=placeholders)
 
     # name matches the endpoint operation_id so the query is traceable in query_log
@@ -271,7 +387,7 @@ def _query_mcp_sessions(
     with tags_context(
         product=Product.MCP_ANALYTICS, feature=Feature.QUERY, team_id=team.id, name="mcp_analytics_sessions_list"
     ):
-        response = execute_hogql_query(query=query, team=team)
+        response = execute_hogql_query(query=query, team=team, user=user)
 
     rows = [_row_to_session_dict(row) for row in (response.results or [])]
     has_next = len(rows) > limit
@@ -292,6 +408,7 @@ def _row_to_session_dict(row: tuple[Any, ...]) -> dict[str, Any]:
         "tools_used": [tool for tool in (row[5] or []) if tool],
         "distinct_id": row[6] or "",
         "mcp_client_name": row[7] or "",
+        "error_calls": int(row[8] or 0),
     }
 
 
@@ -335,30 +452,74 @@ def generate_session_intent(team: Team, session_id: str, date_from: datetime | N
 
 
 INTENT_DIGEST_CACHE_TTL = 60 * 60
+# Floor on how often a project can trigger a fresh generation. The corpus hash alone cannot bound
+# this: a busy server cycles its hundred most recent intents in well under a minute, so every
+# dashboard refresh would miss the content-addressed key and call the LLM again. Serving the
+# previous digest for a few minutes costs nothing: the card answers "what are agents working on
+# lately", not "what happened in the last thirty seconds".
+INTENT_DIGEST_MIN_REGENERATE_SECONDS = 10 * 60
+
+
+def _cached_digest(cached: object) -> contracts.IntentDigest | None:
+    """Rehydrate a cached digest, or None when the payload is absent or predates the current shape.
+
+    Returning None sends the caller back to the LLM rather than raising, so a shape change that
+    outlives its cache key degrades into one extra generation instead of a 500.
+    """
+    if not isinstance(cached, dict) or not isinstance(cached.get("themes"), list):
+        return None
+    try:
+        themes = [contracts.IntentTheme(**theme) for theme in cached["themes"]]
+    except TypeError:
+        return None
+    # Frozen dataclasses don't validate, so a payload with the right keys and wrong value types
+    # would construct here and only fail later in the serializer, past the 503 handler.
+    if any(not isinstance(theme.intent_count, int) or not isinstance(theme.tools, list) for theme in themes):
+        return None
+    return contracts.IntentDigest(
+        digest=cached.get("summary"), intent_count=cached.get("intent_count", 0), themes=themes
+    )
 
 
 def generate_intent_digest(team: Team) -> contracts.IntentDigest:
-    """Return a project-level LLM digest of what agents are trying to do, for the activity stage.
+    """Return a project-level LLM digest of what agents are trying to do, for the activity tab.
 
-    Content-addressed cache: the digest is keyed by the current intent corpus, so it only
-    regenerates when new intents arrive (and at most refreshes hourly via the TTL). A project
-    with no recorded intents returns a null digest without an LLM call, so the frontend can
-    fall back to its verbatim list. Raises ``contracts.IntentGenerationUnavailable`` if the
-    LLM is unreachable.
+    A one-sentence summary plus up to five semantic themes. The LLM only groups the intents and
+    names each group; counts, tools, and the verbatim example are resolved from the corpus by
+    ``intent_generation.resolve_themes``, so nothing countable on the card is model-generated.
+
+    Two cache layers, because the two ends of the volume range want opposite things. The
+    content-addressed key means a quiet project never pays for a regeneration while its intents sit
+    unchanged. The recency key bounds a busy project, whose corpus is different on every request, to
+    one generation per ``INTENT_DIGEST_MIN_REGENERATE_SECONDS``. ``intent_count`` travels in the
+    payload so a served digest always reports the corpus it was actually derived from, keeping the
+    theme shares consistent with the total the card displays.
+
+    A project with no recorded intents returns a null digest without an LLM call. Raises
+    ``contracts.IntentGenerationUnavailable`` if the LLM is unreachable.
     """
     intents = intent_generation.fetch_recent_project_intents(team)
     if not intents:
         return contracts.IntentDigest(digest=None, intent_count=0)
 
-    corpus_hash = hashlib.sha256("\n".join(intents).encode()).hexdigest()
-    cache_key = generate_cache_key(team.pk, f"mcp_intent_digest/{corpus_hash}")
-    cached = cache.get(cache_key)
-    if cached:
-        return contracts.IntentDigest(digest=cached, intent_count=len(intents))
+    corpus_hash = hashlib.sha256("\x00".join(f"{intent}\x01{tool}" for intent, tool in intents).encode()).hexdigest()
+    corpus_key = generate_cache_key(team.pk, f"mcp_intent_digest_v3/{corpus_hash}")
+    recent_key = generate_cache_key(team.pk, "mcp_intent_digest_v3/recent")
+    for key in (corpus_key, recent_key):
+        cached = _cached_digest(cache.get(key))
+        if cached is not None:
+            return cached
 
-    digest = intent_generation.summarize_project_intents(intents, team)
-    cache.set(cache_key, digest, INTENT_DIGEST_CACHE_TTL)
-    return contracts.IntentDigest(digest=digest, intent_count=len(intents))
+    parsed = intent_generation.summarize_project_intents(intents, team)
+    themes = intent_generation.resolve_themes(parsed, intents)
+    payload = {
+        "summary": parsed.summary,
+        "intent_count": len(intents),
+        "themes": [dataclasses.asdict(theme) for theme in themes],
+    }
+    cache.set(corpus_key, payload, INTENT_DIGEST_CACHE_TTL)
+    cache.set(recent_key, payload, INTENT_DIGEST_MIN_REGENERATE_SECONDS)
+    return contracts.IntentDigest(digest=parsed.summary, intent_count=len(intents), themes=themes)
 
 
 # The activity queries read `properties.*`, which decompresses the properties column for
@@ -370,17 +531,38 @@ ACTIVITY_TOP_TOOLS_LIMIT = 5
 ACTIVITY_CLIENTS_LIMIT = 6
 ACTIVITY_RECENT_CALLS_LIMIT = 20
 
-_ACTIVITY_STATS_SQL = """
+_ACTIVITY_STATS_SQL = f"""
 SELECT
-    countIf(event = {tool_call_event}) AS total_calls,
-    uniqIf(properties.$mcp_tool_name, event = {tool_call_event}) AS distinct_tools,
-    uniqIf($session_id, event = {tool_call_event} AND $session_id != '') AS distinct_sessions,
-    uniqIf(properties.$mcp_client_name, event = {tool_call_event} AND coalesce(properties.$mcp_client_name, '') != '') AS distinct_clients,
-    countIf(event = {tool_call_event} AND coalesce(properties.$mcp_intent, '') != '') AS calls_with_intent,
-    countIf(event = {tool_call_event} AND toString(properties.$mcp_is_error) IN ('true', '1')) AS error_calls,
-    countIf(event = {missing_capability_event}) AS missing_capability_reports
+    count() AS total_calls,
+    uniq(tool) AS distinct_tools,
+    uniqIf(session_id, session_id != '') AS distinct_sessions,
+    -- Counted over the resolved *label*, not the token: one client can arrive under
+    -- several tokens (`codex-mcp-client` and the `openai-mcp … (Codex)` user-agent both
+    -- mean Codex), which the Clients card folds into one row, so counting tokens would
+    -- put "2 clients" next to a one-row card. The raw `$mcp_client_name` is absent from
+    -- every non-initialize call and cannot be counted here at all.
+    uniqIf({mcp_harness.harness_label_or_token_sql("h")}, h != '') AS distinct_clients,
+    countIf(has_intent) AS calls_with_intent,
+    countIf(is_error) AS error_calls
+FROM (
+    SELECT
+        properties.$mcp_tool_name AS tool,
+        $session_id AS session_id,
+        coalesce(properties.$mcp_intent, '') != '' AS has_intent,
+        toString(properties.$mcp_is_error) IN ('true', '1') AS is_error,
+        {mcp_harness.HARNESS_TOKEN_SQL} AS h,
+        {mcp_harness.HARNESS_DISPLAY_NAME_SQL} AS client_display
+    FROM events
+    WHERE event = {{tool_call_event}} AND timestamp >= {{date_from}}
+        AND {{shared_filters}}
+)
+"""
+
+_ACTIVITY_MISSING_CAPABILITY_SQL = """
+SELECT count()
 FROM events
-WHERE event IN ({tool_call_event}, {missing_capability_event}) AND timestamp >= {date_from}
+WHERE event = {missing_capability_event} AND timestamp >= {date_from}
+    AND {missing_capability_filters}
 """
 
 _ACTIVITY_TOP_TOOLS_SQL = """
@@ -390,37 +572,66 @@ SELECT
     countIf(toString(properties.$mcp_is_error) IN ('true', '1')) AS errors
 FROM events
 WHERE event = {tool_call_event} AND properties.$mcp_tool_name IS NOT NULL AND timestamp >= {date_from}
+    AND {shared_filters}
 GROUP BY tool
 ORDER BY calls DESC
 LIMIT {limit}
 """
 
-_ACTIVITY_CLIENTS_SQL = """
+# Resolved through the canonical classifier rather than the raw `$mcp_client_name`,
+# which is absent on any call that isn't the session's `initialize` — reading it alone
+# left the large majority of calls unattributed and lumped whole clients under one
+# "unknown" row. `HARNESS_TOKEN_SQL` falls back through the other identity signals the
+# same event already carries, and the label bucketing folds one client's variant spellings
+# (differing case, or a name carrying mcp-remote's proxy signature) into a single row.
+# Unrecognized clients are named verbatim: this is a ranked top-N list, so a
+# self-reported name is more use than collapsing it into "Other".
+_ACTIVITY_CLIENTS_SQL = f"""
 SELECT
-    properties.$mcp_client_name AS client,
+    {mcp_harness.harness_label_or_token_sql("h")} AS client,
     count() AS calls
-FROM events
-WHERE event = {tool_call_event} AND timestamp >= {date_from}
+FROM (
+    SELECT
+        {mcp_harness.HARNESS_TOKEN_SQL} AS h,
+        {mcp_harness.HARNESS_DISPLAY_NAME_SQL} AS client_display
+    FROM events
+    WHERE event = {{tool_call_event}} AND timestamp >= {{date_from}}
+        AND {{shared_filters}}
+)
 GROUP BY client
 ORDER BY calls DESC
-LIMIT {limit}
+LIMIT {{limit}}
 """
 
-_ACTIVITY_RECENT_CALLS_SQL = """
+_ACTIVITY_RECENT_CALLS_SQL = f"""
 SELECT
     timestamp,
-    properties.$mcp_tool_name AS tool,
-    properties.$mcp_intent AS intent,
-    toString(properties.$mcp_is_error) IN ('true', '1') AS is_error,
-    if(toString(properties.$mcp_is_error) IN ('true', '1'),
-       coalesce(nullIf(toString(properties.$mcp_error_message), ''), toString(properties.$mcp_response)),
-       NULL) AS error_raw,
-    toFloat(properties.$mcp_duration_ms) AS duration_ms,
-    properties.$mcp_client_name AS client_name
-FROM events
-WHERE event = {tool_call_event} AND timestamp >= {date_from}
+    tool,
+    intent,
+    is_error,
+    error_raw,
+    duration_ms,
+    -- Resolved, not raw: the live feed showed a blank caller on most rows otherwise.
+    {mcp_harness.harness_label_or_token_sql("h")} AS client_name
+FROM (
+    SELECT
+        timestamp,
+        properties.$mcp_tool_name AS tool,
+        properties.$mcp_intent AS intent,
+        toString(properties.$mcp_is_error) IN ('true', '1') AS is_error,
+        if(toString(properties.$mcp_is_error) IN ('true', '1'),
+           coalesce(nullIf(toString(properties.$mcp_error_message), ''), toString(properties.$mcp_response)),
+           NULL) AS error_raw,
+        toFloat(properties.$mcp_duration_ms) AS duration_ms,
+        {mcp_harness.HARNESS_TOKEN_SQL} AS h,
+        {mcp_harness.HARNESS_DISPLAY_NAME_SQL} AS client_display
+    FROM events
+    WHERE event = {{tool_call_event}} AND timestamp >= {{date_from}}
+        AND {{shared_filters}}
+    ORDER BY timestamp DESC
+    LIMIT {{limit}}
+)
 ORDER BY timestamp DESC
-LIMIT {limit}
 """
 
 
@@ -454,33 +665,190 @@ def _extract_error_message(raw: Any) -> str | None:
     return value
 
 
-def _run_activity_query(team: Team, sql: str, name: str, placeholders: dict[str, ast.Constant]) -> list[Any]:
+def _run_activity_query(
+    team: Team,
+    sql: str,
+    name: str,
+    placeholders: dict[str, ast.Expr],
+    user: User | None,
+    database: Database | None,
+) -> list[Any]:
     query = parse_select(sql, placeholders={**placeholders})
+    # Each thread needs its own context, because the executor writes to it while it runs.
+    context = HogQLContext(team_id=team.pk, user=user, database=database)
     with tags_context(product=Product.MCP_ANALYTICS, feature=Feature.QUERY, team_id=team.id, name=name):
-        response = execute_hogql_query(query=query, team=team)
+        response = execute_hogql_query(query=query, team=team, user=user, context=context)
     return response.results or []
 
 
-def get_activity_overview(team: Team) -> contracts.ActivityOverview:
+def _shared_activity_database(team: Team, user: User | None) -> Database | None:
+    if not get_instance_setting("HOGQL_SHARED_INSIGHT_DATABASE_ENABLED"):
+        return None
+    return Database.create_for(
+        team=team,
+        user=user,
+        modifiers=create_default_modifiers_for_team(team),
+        trigger="mcp_activity_overview",
+    )
+
+
+_MEMBER_INDEPENDENT_FILTER_TYPES = frozenset({"event", "person"})
+
+
+def _filters_read_the_same_for_every_member(
+    team: Team, properties: list[AnyPropertyFilterDiscriminated] | None, filter_test_accounts: bool
+) -> bool:
+    # Other filter types (session, HogQL, cohort, warehouse) and $virt_* keys can read tables or fields
+    # that the query database adds per member, so property restrictions alone don't decide
+    # what the member sees.
+    filters = [prop.model_dump(mode="json") for prop in (properties or [])]
+    if filter_test_accounts:
+        filters += team.test_account_filters or []
+    return all(
+        isinstance(f, dict)
+        and f.get("type") in _MEMBER_INDEPENDENT_FILTER_TYPES
+        and not str(f.get("key", "")).startswith("$virt")
+        for f in filters
+    )
+
+
+def _activity_overview_cache_key(
+    team: Team,
+    properties: list[AnyPropertyFilterDiscriminated] | None,
+    filter_test_accounts: bool,
+    restrictions: set[RestrictedProperty],
+    user: User | None,
+) -> str:
+    filters = _filters_cache_fragment(team, properties, filter_test_accounts)
+    shared = _filters_read_the_same_for_every_member(team, properties, filter_test_accounts)
+    member = None if shared or user is None else user.pk
+    return generate_cache_key(
+        team.pk, f"mcp_activity_overview_{filters}_{restriction_fingerprint(restrictions)}_{member}"
+    )
+
+
+def get_activity_overview(
+    team: Team,
+    properties: list[AnyPropertyFilterDiscriminated] | None = None,
+    filter_test_accounts: bool = False,
+    user: User | None = None,
+) -> contracts.ActivityOverview:
+    """Return everything the activity view renders, bounded to ``ACTIVITY_WINDOW``.
+
+    Members without property restrictions share one cache entry, so it lives for minutes.
+    Restricted members each have their own entry, which lives for less than one poll interval.
+    """
+    restrictions = get_restricted_properties_with_group_type_index_for_team(user=user, team_id=team.pk)
+    cache_key = _activity_overview_cache_key(team, properties, filter_test_accounts, restrictions, user)
+    cached = cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    overview = _query_activity_overview(team, properties, filter_test_accounts, user)
+    # Don't cache an empty overview: a newly set-up team waits on this view for its first call.
+    if overview.stats.total_calls:
+        ttl = ACTIVITY_OVERVIEW_CACHE_TTL_SECONDS if restrictions else UNRESTRICTED_ACTIVITY_OVERVIEW_CACHE_TTL_SECONDS
+        cache.set(cache_key, overview, ttl)
+    return overview
+
+
+def _query_activity_overview(
+    team: Team,
+    properties: list[AnyPropertyFilterDiscriminated] | None,
+    filter_test_accounts: bool,
+    user: User | None,
+) -> contracts.ActivityOverview:
     """Compute everything the activity view renders, bounded to ``ACTIVITY_WINDOW``.
 
-    Always computed fresh: the view's whole point is watching data arrive, so callers
-    poll this endpoint rather than a stale cache.
+    The four queries are independent, so they run concurrently. Served serially their
+    latency summed, which left the summary sentence landing long after the live feed
+    below it had rendered — the feed's own total is an index-only ``count()``, while
+    every query here reads properties across the whole window.
+
+    ``properties`` and ``filter_test_accounts`` are the tabs' shared filters. Event-property
+    filters narrow the tool-call sections. Person/session filters and test-account exclusions also
+    narrow missing-capability reports, whose events do not carry tool-call properties.
+
+    ``user`` is the caller. It carries through to ``execute_hogql_query`` so property-level access
+    control is evaluated for that member, not with the project defaults, because ``properties`` is
+    caller-supplied and would otherwise read restricted properties.
     """
     date_from = ast.Constant(value=timezone.now() - ACTIVITY_WINDOW)
     tool_call_event = ast.Constant(value=MCP_TOOL_CALL_EVENT)
-
-    stats_rows = _run_activity_query(
+    shared_filters = shared_filters_expr(team, properties, filter_test_accounts)
+    missing_capability_filters = shared_filters_expr(
         team,
-        _ACTIVITY_STATS_SQL,
-        "mcp_analytics_activity_stats",
-        {
-            "tool_call_event": tool_call_event,
-            "missing_capability_event": ast.Constant(value=MCP_MISSING_CAPABILITY_EVENT),
-            "date_from": date_from,
-        },
+        [
+            property_filter
+            for property_filter in properties or []
+            if not isinstance(property_filter, EventPropertyFilter)
+        ],
+        filter_test_accounts,
     )
-    stats_row = stats_rows[0] if stats_rows else [0] * 7
+
+    # Building the database costs more Python time than most of these queries spend in
+    # ClickHouse, and the threads share the GIL, so build it once for all five.
+    database = _shared_activity_database(team, user)
+
+    def run_query(spec: tuple[str, str, object]) -> list[Any]:
+        assert isinstance(spec[2], dict)
+        return _run_activity_query(
+            team, spec[0], spec[1], {**spec[2], "shared_filters": shared_filters}, user, database
+        )
+
+    stats_rows, missing_capability_rows, top_tools_rows, clients_rows, recent_calls_rows = map_in_caller_context(
+        run_query,
+        [
+            (
+                _ACTIVITY_STATS_SQL,
+                "mcp_analytics_activity_stats",
+                {
+                    "tool_call_event": tool_call_event,
+                    "date_from": date_from,
+                },
+            ),
+            (
+                _ACTIVITY_MISSING_CAPABILITY_SQL,
+                "mcp_analytics_activity_missing_capabilities",
+                {
+                    "missing_capability_event": ast.Constant(value=MCP_MISSING_CAPABILITY_EVENT),
+                    "missing_capability_filters": missing_capability_filters,
+                    "date_from": date_from,
+                },
+            ),
+            (
+                _ACTIVITY_TOP_TOOLS_SQL,
+                "mcp_analytics_activity_top_tools",
+                {
+                    "tool_call_event": tool_call_event,
+                    "date_from": date_from,
+                    "limit": ast.Constant(value=ACTIVITY_TOP_TOOLS_LIMIT),
+                },
+            ),
+            (
+                _ACTIVITY_CLIENTS_SQL,
+                "mcp_analytics_activity_clients",
+                {
+                    "tool_call_event": tool_call_event,
+                    "date_from": date_from,
+                    "limit": ast.Constant(value=ACTIVITY_CLIENTS_LIMIT),
+                },
+            ),
+            (
+                _ACTIVITY_RECENT_CALLS_SQL,
+                "mcp_analytics_activity_recent_calls",
+                {
+                    "tool_call_event": tool_call_event,
+                    "date_from": date_from,
+                    "limit": ast.Constant(value=ACTIVITY_RECENT_CALLS_LIMIT),
+                },
+            ),
+        ],
+        thread_name_prefix="mcp_activity",
+    )
+
+    stats_row = stats_rows[0] if stats_rows else [0] * 6
+    missing_capability_row = missing_capability_rows[0] if missing_capability_rows else [0]
     stats = contracts.ActivityStats(
         total_calls=_parse_int(stats_row[0]) or 0,
         distinct_tools=_parse_int(stats_row[1]) or 0,
@@ -488,35 +856,17 @@ def get_activity_overview(team: Team) -> contracts.ActivityOverview:
         distinct_clients=_parse_int(stats_row[3]) or 0,
         calls_with_intent=_parse_int(stats_row[4]) or 0,
         error_calls=_parse_int(stats_row[5]) or 0,
-        missing_capability_reports=_parse_int(stats_row[6]) or 0,
+        missing_capability_reports=_parse_int(missing_capability_row[0]) or 0,
     )
 
     top_tools = [
         contracts.ActivityToolRow(tool=str(row[0] or ""), calls=_parse_int(row[1]) or 0, errors=_parse_int(row[2]) or 0)
-        for row in _run_activity_query(
-            team,
-            _ACTIVITY_TOP_TOOLS_SQL,
-            "mcp_analytics_activity_top_tools",
-            {
-                "tool_call_event": tool_call_event,
-                "date_from": date_from,
-                "limit": ast.Constant(value=ACTIVITY_TOP_TOOLS_LIMIT),
-            },
-        )
+        for row in top_tools_rows
     ]
 
     clients = [
         contracts.ActivityClientRow(client=str(row[0]) if row[0] else "", calls=_parse_int(row[1]) or 0)
-        for row in _run_activity_query(
-            team,
-            _ACTIVITY_CLIENTS_SQL,
-            "mcp_analytics_activity_clients",
-            {
-                "tool_call_event": tool_call_event,
-                "date_from": date_from,
-                "limit": ast.Constant(value=ACTIVITY_CLIENTS_LIMIT),
-            },
-        )
+        for row in clients_rows
     ]
 
     recent_calls = [
@@ -529,16 +879,7 @@ def get_activity_overview(team: Team) -> contracts.ActivityOverview:
             duration_ms=float(row[5]) if row[5] is not None else None,
             client_name=str(row[6]) if row[6] else None,
         )
-        for row in _run_activity_query(
-            team,
-            _ACTIVITY_RECENT_CALLS_SQL,
-            "mcp_analytics_activity_recent_calls",
-            {
-                "tool_call_event": tool_call_event,
-                "date_from": date_from,
-                "limit": ast.Constant(value=ACTIVITY_RECENT_CALLS_LIMIT),
-            },
-        )
+        for row in recent_calls_rows
     ]
 
     return contracts.ActivityOverview(stats=stats, top_tools=top_tools, clients=clients, recent_calls=recent_calls)
@@ -571,6 +912,7 @@ def _to_session_contract(
     return contracts.MCPSession(
         session_id=row["session_id"],
         tool_calls=row["tool_call_count"],
+        error_calls=row["error_calls"],
         session_start=row["session_start"],
         session_end=row["session_end"],
         distinct_id_count=0,
@@ -589,6 +931,9 @@ def list_mcp_tool_calls(
     limit: int,
     offset: int,
     date_from: datetime | None = None,
+    properties: list[AnyPropertyFilterDiscriminated] | None = None,
+    filter_test_accounts: bool = False,
+    user: User | None = None,
 ) -> contracts.MCPToolCallsPage:
     """List a page of a session's $mcp_tool_call events in chronological order.
 
@@ -599,6 +944,13 @@ def list_mcp_tool_calls(
 
     ``limit`` / ``offset`` page through the session's calls; over-fetch one row to report
     ``has_next`` without a separate count query.
+
+    ``properties`` and ``filter_test_accounts`` are the tabs' shared filters, so the detail view
+    shows the same calls the session list counted.
+
+    ``user`` is the caller. It carries through to ``execute_hogql_query`` so property-level access
+    control is evaluated for that member, not with the project defaults, because ``properties`` is
+    caller-supplied and would otherwise read restricted properties.
     """
     query = parse_select(
         _MCP_TOOL_CALLS_SQL,
@@ -608,12 +960,13 @@ def list_mcp_tool_calls(
             "session_id": ast.Constant(value=session_id),
             "limit": ast.Constant(value=limit + 1),
             "offset": ast.Constant(value=offset),
+            "shared_filters": shared_filters_expr(team, properties, filter_test_accounts),
         },
     )
     with tags_context(
         product=Product.MCP_ANALYTICS, feature=Feature.QUERY, team_id=team.id, name="mcp_analytics_sessions_tool_calls"
     ):
-        response = execute_hogql_query(query=query, team=team)
+        response = execute_hogql_query(query=query, team=team, user=user)
     rows = response.results or []
     has_next = len(rows) > limit
     results = [
@@ -640,17 +993,53 @@ def _parse_int(value: str | int | None) -> int | None:
         return None
 
 
-def get_intent_cluster_snapshot(team: Team) -> contracts.IntentClusterSnapshot:
+def _scope_blob_to_tool(
+    clusters_raw: list[Any], tools_raw: list[Any], overlaps_raw: list[Any], tool: str
+) -> tuple[list[Any], list[Any], list[Any]]:
+    """Narrow a snapshot blob to one tool's slice of it.
+
+    Keeps the tool's pivot entry, the clusters that entry references, the clusters
+    whose error switches name the tool (the detail panel lists those), and the
+    overlap pairs it belongs to. Everything else is other tools' data that a
+    single-tool view would download and discard.
+    """
+    tools = [item for item in tools_raw if isinstance(item, dict) and item.get("tool") == tool]
+    wanted_cluster_ids = {
+        entry.get("cluster_id") for item in tools for entry in item.get("clusters", []) if isinstance(entry, dict)
+    }
+    clusters = [
+        item
+        for item in clusters_raw
+        if isinstance(item, dict)
+        and (
+            item.get("id") in wanted_cluster_ids
+            or any(
+                isinstance(switch, dict) and tool in (switch.get("from_tool"), switch.get("to_tool"))
+                for switch in item.get("switches", [])
+            )
+        )
+    ]
+    overlaps = [
+        item for item in overlaps_raw if isinstance(item, dict) and tool in (item.get("tool_a"), item.get("tool_b"))
+    ]
+    return clusters, tools, overlaps
+
+
+def get_intent_cluster_snapshot(team: Team, tool: str | None = None) -> contracts.IntentClusterSnapshot:
     """Return the current intent cluster snapshot for a team.
+
+    ``tool`` narrows clusters, pivot, and overlaps to that tool's slice; the
+    coverage meta stays whole-snapshot because it describes the run. Surfaces
+    that render one tool use it so they don't download the full blob.
 
     When no snapshot exists yet, returns an empty IDLE one so callers can
     render the "compute" CTA without distinguishing "missing" from "empty".
 
     Defensive side effect: any row stuck in COMPUTING past
     STALE_COMPUTING_THRESHOLD is auto-flipped to ERROR so the UI can offer
-    a retry. The Celery task may have died between writing COMPUTING and
-    writing its final status (worker restart, OOM, etc.) and otherwise has
-    no path back to a usable state.
+    a retry. The Temporal activity may have died between writing COMPUTING
+    and writing its final status (no worker on the queue, worker OOM, etc.)
+    and otherwise has no path back to a usable state.
     """
     MCPIntentClusterSnapshot.objects.filter(
         team=team,
@@ -658,7 +1047,7 @@ def get_intent_cluster_snapshot(team: Team) -> contracts.IntentClusterSnapshot:
         updated_at__lt=timezone.now() - STALE_COMPUTING_THRESHOLD,
     ).update(
         status=MCPIntentClusterSnapshot.Status.ERROR,
-        error_message="Recompute task did not complete within the expected window. Retry to try again.",
+        error_message="Clustering didn't finish in time. Retry to start a new run.",
     )
 
     snapshot = MCPIntentClusterSnapshot.objects.filter(team=team).select_related("last_computed_by").first()
@@ -674,7 +1063,22 @@ def get_intent_cluster_snapshot(team: Team) -> contracts.IntentClusterSnapshot:
 
     blob = snapshot.clusters or {}
     clusters_raw = blob.get("clusters", []) if isinstance(blob, dict) else []
+    tools_raw = blob.get("tools", []) if isinstance(blob, dict) else []
+    overlaps_raw = blob.get("tool_overlaps", []) if isinstance(blob, dict) else []
     meta_raw = blob.get("computed_with") if isinstance(blob, dict) else None
+
+    # Snapshots persisted before build_snapshot capped its output can hold
+    # hundreds of clusters — cap at read time too, keeping the highest-volume
+    # ones (the same ranking build_snapshot persists).
+    if len(clusters_raw) > MAX_SNAPSHOT_CLUSTERS:
+        clusters_raw = sorted(
+            (item for item in clusters_raw if isinstance(item, dict)),
+            key=lambda item: int(item.get("call_count", 0) or 0),
+            reverse=True,
+        )[:MAX_SNAPSHOT_CLUSTERS]
+
+    if tool is not None:
+        clusters_raw, tools_raw, overlaps_raw = _scope_blob_to_tool(clusters_raw, tools_raw, overlaps_raw, tool)
 
     return contracts.IntentClusterSnapshot(
         status=snapshot.status,
@@ -683,7 +1087,19 @@ def get_intent_cluster_snapshot(team: Team) -> contracts.IntentClusterSnapshot:
         last_computed_by_email=snapshot.last_computed_by.email if snapshot.last_computed_by else "",
         clusters=[_to_cluster_dto(item) for item in clusters_raw if isinstance(item, dict)],
         computed_with=_to_meta_dto(meta_raw) if isinstance(meta_raw, dict) else None,
+        tools=[_to_tool_pivot_dto(item) for item in tools_raw if isinstance(item, dict)],
+        tool_overlaps=[_to_overlap_dto(item) for item in overlaps_raw if isinstance(item, dict)],
     )
+
+
+# bool is a subclass of int, so the isinstance check has to exclude it explicitly —
+# otherwise a boolean in the blob silently coerces to 1.0 / 1 instead of being rejected.
+def _opt_float(value: Any) -> float | None:
+    return float(value) if isinstance(value, int | float) and not isinstance(value, bool) else None
+
+
+def _opt_int(value: Any) -> int | None:
+    return int(value) if isinstance(value, int | float) and not isinstance(value, bool) else None
 
 
 def _to_cluster_dto(item: dict[str, Any]) -> contracts.IntentCluster:
@@ -710,6 +1126,67 @@ def _to_cluster_dto(item: dict[str, Any]) -> contracts.IntentCluster:
         ],
         sample_intents=[str(s) for s in item.get("sample_intents", []) if isinstance(s, str)],
         journey=_to_journey_dto(journey_raw) if isinstance(journey_raw, dict) else None,
+        switches=[
+            contracts.ClusterSwitch(
+                from_tool=str(entry.get("from_tool", "")),
+                to_tool=str(entry.get("to_tool", "")),
+                count=int(entry.get("count", 0)),
+            )
+            for entry in item.get("switches", [])
+            if isinstance(entry, dict)
+        ],
+        self_retries=[
+            contracts.ClusterSelfRetry(tool=str(entry.get("tool", "")), count=int(entry.get("count", 0)))
+            for entry in item.get("self_retries", [])
+            if isinstance(entry, dict)
+        ],
+    )
+
+
+def _to_tool_pivot_dto(item: dict[str, Any]) -> contracts.ToolPivot:
+    return contracts.ToolPivot(
+        tool=str(item.get("tool", "")),
+        call_count=int(item.get("call_count", 0)),
+        error_count=int(item.get("error_count", 0)),
+        session_count=int(item.get("session_count", 0)),
+        contested_score=_opt_float(item.get("contested_score")),
+        advertised_sessions=int(item.get("advertised_sessions", 0)),
+        called_when_advertised=int(item.get("called_when_advertised", 0)),
+        discovery_rate_pct=_opt_float(item.get("discovery_rate_pct")),
+        description=str(item["description"]) if item.get("description") else None,
+        # Pre-cap count, so the UI never presents a capped entry list as the whole
+        # story. Blobs written before it existed fall back to the entries they have.
+        n_clusters_served=_opt_int(item.get("n_clusters_served")) or len(item.get("clusters", [])),
+        clusters=[_to_tool_pivot_cluster_dto(entry) for entry in item.get("clusters", []) if isinstance(entry, dict)],
+    )
+
+
+def _to_tool_pivot_cluster_dto(entry: dict[str, Any]) -> contracts.ToolPivotClusterEntry:
+    competitor_raw = entry.get("top_competitor")
+    return contracts.ToolPivotClusterEntry(
+        cluster_id=int(entry.get("cluster_id", 0)),
+        calls=int(entry.get("calls", 0)),
+        capture_pct=float(entry.get("capture_pct", 0.0)),
+        rank=int(entry.get("rank", 0)),
+        description_fit=_opt_float(entry.get("description_fit")),
+        top_competitor=(
+            contracts.ToolPivotCompetitor(
+                tool=str(competitor_raw.get("tool", "")), pct=float(competitor_raw.get("pct", 0.0))
+            )
+            if isinstance(competitor_raw, dict)
+            else None
+        ),
+    )
+
+
+def _to_overlap_dto(item: dict[str, Any]) -> contracts.ToolOverlap:
+    return contracts.ToolOverlap(
+        tool_a=str(item.get("tool_a", "")),
+        tool_b=str(item.get("tool_b", "")),
+        contested_calls=int(item.get("contested_calls", 0)),
+        sessions_with_both=int(item.get("sessions_with_both", 0)),
+        sessions_with_either=int(item.get("sessions_with_either", 0)),
+        top_cluster_id=int(item.get("top_cluster_id", 0)),
     )
 
 
@@ -735,6 +1212,19 @@ def _to_meta_dto(meta: dict[str, Any]) -> contracts.IntentClusterSnapshotMeta:
         embedding_model=str(meta.get("embedding_model", "")),
         n_intents=int(meta.get("n_intents", 0)),
         n_clusters=int(meta.get("n_clusters", 0)),
+        corpus=str(meta["corpus"]) if meta.get("corpus") else None,
+        sampled_sessions=_opt_int(meta.get("sampled_sessions")),
+        window_sessions=_opt_int(meta.get("window_sessions")),
+        session_coverage_pct=_opt_float(meta.get("session_coverage_pct")),
+        intent_coverage_pct=_opt_float(meta.get("intent_coverage_pct")),
+        imputed_call_pct=_opt_float(meta.get("imputed_call_pct")),
+        unattributed_call_pct=_opt_float(meta.get("unattributed_call_pct")),
+        corpus_call_coverage_pct=_opt_float(meta.get("corpus_call_coverage_pct")),
+        advertisement_coverage_pct=_opt_float(meta.get("advertisement_coverage_pct")),
+        n_tools=_opt_int(meta.get("n_tools")),
+        dropped_tools=_opt_int(meta.get("dropped_tools")),
+        dropped_overlap_pairs=_opt_int(meta.get("dropped_overlap_pairs")),
+        description_coverage_pct=_opt_float(meta.get("description_coverage_pct")),
     )
 
 

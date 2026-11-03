@@ -1,3 +1,11 @@
+import { context, propagation, trace } from '@opentelemetry/api'
+import {
+    InMemorySpanExporter,
+    NodeTracerProvider,
+    ReadableSpan,
+    SimpleSpanProcessor,
+} from '@opentelemetry/sdk-trace-node'
+
 import { LazyLoader } from './lazy-loader'
 import { delay } from './utils'
 
@@ -106,6 +114,51 @@ describe('LazyLoader', () => {
             expect(result2).toBe('value2')
             expect(loader).toHaveBeenCalledTimes(1)
         })
+
+        it('treats a key naming an Object.prototype member as a normal miss', async () => {
+            // Ingest tokens become cache keys verbatim, so a token of `__proto__` must miss rather
+            // than resolve up the prototype chain and let a write land on a shared builtin.
+            loader.mockResolvedValue({})
+            const builtinFields = new Set(Object.getOwnPropertyNames(Object.prototype))
+
+            try {
+                expect(await lazyLoader.get('__proto__')).toBeNull()
+                expect(loader).toHaveBeenCalledWith(['__proto__'])
+                expect(Object.getOwnPropertyNames(Object.prototype)).not.toContain('lastUsed')
+
+                // And it caches like any other null rather than reloading on every lookup.
+                expect(await lazyLoader.get('__proto__')).toBeNull()
+                expect(loader).toHaveBeenCalledTimes(1)
+            } finally {
+                // On regression the assertions above fail; strip whatever leaked so the rest of the
+                // file isn't debugging a mutated builtin instead of the real failure.
+                for (const field of Object.getOwnPropertyNames(Object.prototype)) {
+                    if (!builtinFields.has(field)) {
+                        delete (Object.prototype as Record<string, unknown>)[field]
+                    }
+                }
+            }
+        })
+    })
+
+    describe('getMany with flush', () => {
+        it('issues the buffered load at once, carrying keys already buffered, and later gets join it', async () => {
+            const slowBufferLoader = new LazyLoader<string>({ name: 'test', loader, bufferMs: 5000 })
+            loader.mockImplementation(async (keys: string[]) => {
+                await delay(20)
+                return Object.fromEntries(keys.map((key) => [key, { val: key }]))
+            })
+
+            const buffered = slowBufferLoader.get('key1')
+            const flushed = slowBufferLoader.getMany(['key2'], { flush: true })
+            const joined = slowBufferLoader.get('key1')
+
+            const results = await Promise.all([buffered, flushed, joined])
+
+            expect(loader).toHaveBeenCalledTimes(1)
+            expect(loader).toHaveBeenCalledWith(['key1', 'key2'])
+            expect(results).toEqual([{ val: 'key1' }, { key2: { val: 'key2' } }, { val: 'key1' }])
+        })
     })
 
     describe('getMany', () => {
@@ -147,6 +200,50 @@ describe('LazyLoader', () => {
                   ],
                 ]
             `)
+        })
+    })
+
+    describe('spans', () => {
+        let exporter: InMemorySpanExporter
+        let provider: NodeTracerProvider
+
+        beforeEach(() => {
+            exporter = new InMemorySpanExporter()
+            provider = new NodeTracerProvider({ spanProcessors: [new SimpleSpanProcessor(exporter)] })
+            provider.register()
+        })
+
+        afterEach(async () => {
+            await provider.shutdown()
+            trace.disable()
+            context.disable()
+            propagation.disable()
+        })
+
+        const loadSpans = (): ReadableSpan[] =>
+            exporter.getFinishedSpans().filter((span) => span.name === 'lazyLoader.loadViaCache')
+
+        it('spans loads and in-flight waits, and skips the span on a full cache hit', async () => {
+            loader.mockResolvedValue({ key1: 'value1' })
+
+            const first = lazyLoader.get('key1')
+            const second = lazyLoader.get('key1')
+            await Promise.all([first, second])
+
+            expect(loadSpans().map((span) => span.attributes['lazyloader.outcome'])).toEqual([
+                'loaded',
+                'waited_pending',
+            ])
+            expect(loadSpans()[1].attributes).toMatchObject({
+                'lazyloader.name': 'test',
+                'lazyloader.keys': 1,
+                'lazyloader.misses': 1,
+                'lazyloader.outcome': 'waited_pending',
+            })
+
+            await lazyLoader.get('key1')
+
+            expect(loadSpans()).toHaveLength(2)
         })
     })
 
@@ -334,6 +431,57 @@ describe('LazyLoader', () => {
             expect(loadSpy).toHaveBeenCalledTimes(0)
             expect(loader).toHaveBeenCalledTimes(1)
         })
+
+        it('does not background-refresh a key whose value has become null', async () => {
+            loader.mockResolvedValueOnce({ key1: 'value1' })
+            expect(await lazyLoader.get('key1')).toBe('value1')
+
+            // Past refreshAgeMs, so this get reloads. The loader omits key1, caching it as null.
+            jest.spyOn(Date, 'now').mockReturnValue(start + 1000 * 60 * 2.5)
+            loader.mockResolvedValue({})
+            expect(await lazyLoader.get('key1')).toBeNull()
+            loader.mockClear()
+            loadSpy.mockClear()
+
+            // Still inside refreshNullAgeMs, so the null is served from cache. The background
+            // deadline from when key1 held a real value is long past, so one left behind on the
+            // entry would reload the key on every lookup until the null expires.
+            jest.spyOn(Date, 'now').mockReturnValue(start + 1000 * 60 * 3)
+            expect(await lazyLoader.get('key1')).toBeNull()
+            // loadSpy, not loader: a background refresh calls load() synchronously during the get,
+            // so this observes a scheduled reload without waiting out the buffer for it to surface.
+            expect(loadSpy).toHaveBeenCalledTimes(0)
+            expect(loader).toHaveBeenCalledTimes(0)
+
+            // Past where the background deadline would sit if the null were stamped with
+            // refreshBackgroundAgeMs (start+3.5min), still inside the null TTL that runs to
+            // start+4.5min.
+            jest.spyOn(Date, 'now').mockReturnValue(start + 1000 * 60 * 4)
+            expect(await lazyLoader.get('key1')).toBeNull()
+            expect(loadSpy).toHaveBeenCalledTimes(0)
+            expect(loader).toHaveBeenCalledTimes(0)
+        })
+
+        it('re-caches a key that reloads from null to null', async () => {
+            loader.mockResolvedValueOnce({ key1: 'value1' })
+            expect(await lazyLoader.get('key1')).toBe('value1')
+
+            // Past refreshAgeMs, so this get reloads. The loader omits key1, caching it as null.
+            jest.spyOn(Date, 'now').mockReturnValue(start + 1000 * 60 * 2.5)
+            loader.mockResolvedValue({})
+            expect(await lazyLoader.get('key1')).toBeNull()
+
+            // Past the null TTL, so this get reloads and the loader omits key1 again. The reload
+            // has to stamp a fresh null TTL, otherwise the entry stays expired forever.
+            jest.spyOn(Date, 'now').mockReturnValue(start + 1000 * 60 * 5)
+            expect(await lazyLoader.get('key1')).toBeNull()
+            loader.mockClear()
+
+            // Inside the new null TTL, so this is a cache hit rather than another blocking load.
+            jest.spyOn(Date, 'now').mockReturnValue(start + 1000 * 60 * 5.5)
+            expect(await lazyLoader.get('key1')).toBeNull()
+            expect(loader).toHaveBeenCalledTimes(0)
+        })
     })
 
     describe('LRU eviction with maxSize', () => {
@@ -366,6 +514,30 @@ describe('LazyLoader', () => {
             expect(cache).toEqual({ key1: 'value1', key2: 'value2', key4: 'value4' })
         })
 
+        it('does not evict when refreshing a key already in the cache', async () => {
+            const customLoader = new LazyLoader({
+                name: 'test',
+                loader,
+                maxSize: 3,
+                refreshJitterMs: 0,
+            })
+
+            loader.mockResolvedValueOnce({ key1: 'value1', key2: 'value2', key3: 'value3' })
+            await customLoader.getMany(['key1', 'key2', 'key3'])
+
+            // Reloading an expired key replaces its entry rather than adding one, so the cache is
+            // still at maxSize and nothing live gets evicted.
+            jest.spyOn(Date, 'now').mockReturnValue(start + 1000 * 60 * 6)
+            loader.mockResolvedValueOnce({ key1: 'value1-refreshed' })
+            await customLoader.get('key1')
+
+            expect(customLoader.getCache()).toEqual({
+                key1: 'value1-refreshed',
+                key2: 'value2',
+                key3: 'value3',
+            })
+        })
+
         it('should handle bulk additions that exceed maxSize', async () => {
             const customLoader = new LazyLoader({
                 name: 'test',
@@ -389,6 +561,21 @@ describe('LazyLoader', () => {
             expect(Object.keys(cache).length).toBe(2)
             // When all have the same lastUsed time, eviction order depends on iteration order
             // Just verify we have exactly 2 entries
+        })
+
+        it('evicts down to maxSize when the loader omits every requested key', async () => {
+            const customLoader = new LazyLoader({
+                name: 'test',
+                loader,
+                maxSize: 2,
+                refreshJitterMs: 0,
+            })
+
+            // Nulls for omitted keys are cached like any other value, so they count against maxSize.
+            loader.mockResolvedValueOnce({})
+            await customLoader.getMany(['key1', 'key2', 'key3'])
+
+            expect(Object.keys(customLoader.getCache()).length).toBe(2)
         })
     })
 

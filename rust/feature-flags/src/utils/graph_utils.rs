@@ -12,11 +12,11 @@ use crate::metrics::consts::{
     FLAG_EVALUATION_ERROR_COUNTER, FLAG_MISSING_REQUESTED_FLAG_KEY,
 };
 use common_metrics::{inc, timing_guard};
-use tracing::warn;
+use tracing::debug;
 
-/// Logs a warning and increments the error counter when a requested flag key is not found.
+/// Increments the error counter (and logs at debug) when a requested flag key is not found.
 fn warn_missing_flag_key(key: &str) {
-    warn!("Requested flag key not found: {}", key);
+    debug!("Requested flag key not found: {}", key);
     inc(
         FLAG_EVALUATION_ERROR_COUNTER,
         &[(
@@ -593,9 +593,8 @@ impl PrecomputedDependencyGraph {
         let id_to_flag: HashMap<i32, &FeatureFlag> = flags.iter().map(|f| (f.id, f)).collect();
 
         // When flag_keys is specified, compute the set of needed flag IDs upfront so we
-        // only clone flags that will actually be evaluated. On the PG fallback path,
-        // single_stage() populates per-flag empty dep sets so independent-flag filtering
-        // still works. If transitive_deps is truly empty, we can't filter at all.
+        // only clone flags that will actually be evaluated. If transitive_deps is truly empty,
+        // we can't filter at all.
         let needed_ids: Option<HashSet<i32>> = if evaluation_metadata.transitive_deps.is_empty() {
             None
         } else {

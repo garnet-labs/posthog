@@ -4,6 +4,7 @@ import {
     actions,
     beforeUnmount,
     connect,
+    isBreakpoint,
     kea,
     key,
     listeners,
@@ -22,10 +23,10 @@ import api from 'lib/api'
 import { Dayjs, dayjs } from 'lib/dayjs'
 import { chainToElements } from 'lib/utils/elements-chain'
 import { getEventsWithPrimaryProperty } from 'lib/utils/events'
+import { HogQLQueryString, hogql } from 'lib/utils/hogql'
 import { TimeTree } from 'lib/utils/time-tree'
 
 import { primaryEventPropertiesModel } from '~/models/primaryEventPropertiesModel'
-import { HogQLQueryString, hogql } from '~/queries/utils'
 import { RecordingEventType } from '~/types'
 
 import type { SessionRecordingType } from '../../../types'
@@ -325,7 +326,10 @@ AND properties.$lib != 'web'`
                                 event.fullyLoaded = true
                             }
                         }
-                    } catch (e) {
+                    } catch (e: any) {
+                        if (isBreakpoint(e)) {
+                            throw e
+                        }
                         // NOTE: This is not ideal but should happen so rarely that it is tolerable.
                         existingEvents.forEach((e) => (e.fullyLoaded = true))
                         posthog.captureException(e, { feature: 'session-recording-load-full-event-data' })

@@ -8,9 +8,10 @@ from uuid import UUID
 
 from django.conf import settings
 from django.core.cache import cache
-from django.db import transaction
-from django.db.models import Min, QuerySet
+from django.db import models, transaction
+from django.db.models import QuerySet
 from django.http import HttpRequest, HttpResponse
+from django.http.request import split_domain_port
 from django.shortcuts import render
 from django.utils.text import slugify
 from django.views.decorators.csrf import csrf_exempt
@@ -40,10 +41,10 @@ from rest_framework.response import Response
 from posthog.schema import ProductKey
 
 from posthog.api.documentation import FeatureFlagFiltersSchemaSerializer
+from posthog.api.pagination import PageLinksSerializer, offset_page_links
 from posthog.api.routing import TeamAndOrgViewSetMixin
 from posthog.api.shared import SearchMatchTypeSerializerMixin, UserBasicSerializer
 from posthog.api.utils import action
-from posthog.clickhouse.client import sync_execute
 from posthog.clickhouse.query_tagging import Feature, tag_queries
 from posthog.cloud_utils import is_cloud
 from posthog.constants import SURVEY_TARGETING_FLAG_PREFIX, AvailableFeature
@@ -57,45 +58,57 @@ from posthog.helpers.trigram_search import (
     drop_similar_when_exact_exists,
 )
 from posthog.models.activity_logging.activity_log import Change, Detail, changes_between, load_activity, log_activity
-from posthog.models.activity_logging.activity_page import activity_page_response
+from posthog.models.activity_logging.activity_page import activity_page_response, parse_activity_page_params
+from posthog.models.proxy_record import ProxyRecord
 from posthog.models.team.team import Team
 from posthog.models.user import User
 from posthog.models.utils import UUIDT
-from posthog.rbac.access_control_api_mixin import AccessControlViewSetMixin
-from posthog.rbac.user_access_control import UserAccessControlSerializerMixin
+from posthog.permissions import get_authenticator_scoped_team_ids
 from posthog.utils_cors import cors_response
 
+from products.access_control.backend.facade.user_access_control import UserAccessControl
+from products.access_control.backend.presentation.access_control import (
+    AccessControlViewSetMixin,
+    UserAccessControlSerializerMixin,
+)
 from products.actions.backend.api.action import ActionSerializer, ActionStepJSONSerializer
 from products.actions.backend.models.action import Action
+from products.approvals.backend.exceptions import ApprovalRequired
+from products.approvals.backend.presentation.mixins import ApprovalHandlingMixin
+from products.approvals.backend.transactions import gated_atomic
 from products.feature_flags.backend.api.feature_flag import (
     BEHAVIOURAL_COHORT_FOUND_ERROR_CODE,
-    FeatureFlagSerializer,
     MinimalFeatureFlagSerializer,
     assert_feature_flag_write_scope,
 )
+from products.feature_flags.backend.facade.api import create_flag, update_flag
+from products.feature_flags.backend.facade.config import ConfigFormatError
 from products.feature_flags.backend.models.feature_flag import FeatureFlag
-from products.product_analytics.backend.models.insight import Insight
-from products.surveys.backend.models import MAX_ITERATION_COUNT, Survey, SurveyResponseArchive, ensure_question_ids
+from products.feature_flags.backend.ownership import FLAG_OWNER_SURVEY, assert_flag_available_for
+from products.product_analytics.backend.facade.models import Insight
+from products.surveys.backend.llm import gemini_configured
+from products.surveys.backend.models import (
+    MAX_ITERATION_COUNT,
+    MAX_ITERATION_FREQUENCY_DAYS,
+    Survey,
+    SurveyResponseArchive,
+    ensure_question_ids,
+)
 from products.surveys.backend.responses import (
     SurveyRates,
     SurveyStats,
-    archived_responses_filter,
+    build_choice_translation_map,
     calculate_rates,
     fetch_per_question_stats,
     fetch_response_rows,
+    get_survey_responses_count,
     get_survey_stats,
-    partial_responses_filter,
     process_survey_results,
     validate_and_parse_dates,
 )
 from products.surveys.backend.summarization import fetch_responses, format_as_markdown, summarize_responses
 from products.surveys.backend.translation import generate_survey_translation
-from products.surveys.backend.util import (
-    SurveyEventName,
-    SurveyEventProperties,
-    get_archived_response_uuids,
-    get_survey_property_string_expr,
-)
+from products.surveys.backend.util import SurveyEventProperties, get_archived_response_uuids
 
 from ee.surveys.summaries.headline_summary import generate_survey_headline
 
@@ -117,6 +130,28 @@ DEFAULT_BASE_LANGUAGE = "en"
 # Sentinel keys we explicitly reject — these used to appear in customer data and never
 # resolved to anything in the SDK. Block them at the API so they don't keep accumulating.
 REJECTED_TRANSLATION_KEYS = frozenset({"default", "original", "base"})
+SURVEY_APPEARANCE_HTML_FIELDS = (
+    "thankYouMessageHeader",
+    "thankYouMessageDescription",
+    "thankYouMessageCloseButtonText",
+    "introScreenHeader",
+    "introScreenDescription",
+    "introScreenButtonText",
+    "backButtonText",
+)
+SURVEY_QUESTION_HTML_FIELDS = (
+    "question",
+    "description",
+    "buttonText",
+    "lowerBoundLabel",
+    "upperBoundLabel",
+)
+SURVEY_TRANSLATION_HTML_FIELDS = (
+    "name",
+    "description",
+    *SURVEY_APPEARANCE_HTML_FIELDS,
+    *SURVEY_QUESTION_HTML_FIELDS,
+)
 
 
 def _normalize_language_code(raw: str) -> str:
@@ -124,14 +159,84 @@ def _normalize_language_code(raw: str) -> str:
     return raw.strip().lower().replace("_", "-")
 
 
+def sanitize_survey_appearance(appearance: dict[str, Any]) -> dict[str, Any]:
+    sanitized_appearance = dict(appearance)
+    for field in SURVEY_APPEARANCE_HTML_FIELDS:
+        field_value = sanitized_appearance.get(field)
+        if isinstance(field_value, str) and nh3.is_html(field_value):
+            sanitized_appearance[field] = nh3_clean_with_allow_list(field_value)
+    return sanitized_appearance
+
+
+def _sanitize_survey_html(value: str) -> str:
+    return nh3_clean_with_allow_list(value) if nh3.is_html(value) else value
+
+
+def _sanitize_survey_link(link: str) -> str | None:
+    parsed_url = urlparse(link)
+    if parsed_url.scheme == "https" and parsed_url.netloc:
+        return _sanitize_survey_html(link)
+    if parsed_url.scheme == "mailto" and re.match(EMAIL_REGEX, link):
+        return _sanitize_survey_html(link)
+    return None
+
+
+def sanitize_survey_translations(translations: dict[str, Any]) -> dict[str, Any]:
+    sanitized_translations = dict(translations)
+    for language, translation in translations.items():
+        if not isinstance(translation, dict):
+            continue
+        sanitized_translation = dict(translation)
+        for field in SURVEY_TRANSLATION_HTML_FIELDS:
+            value = sanitized_translation.get(field)
+            if isinstance(value, str):
+                sanitized_translation[field] = _sanitize_survey_html(value)
+        choices = sanitized_translation.get("choices")
+        if isinstance(choices, list):
+            sanitized_translation["choices"] = [
+                _sanitize_survey_html(choice) if isinstance(choice, str) else choice for choice in choices
+            ]
+        if "link" in sanitized_translation:
+            link = sanitized_translation["link"]
+            sanitized_link = _sanitize_survey_link(link) if isinstance(link, str) else None
+            if sanitized_link is None:
+                sanitized_translation.pop("link")
+            else:
+                sanitized_translation["link"] = sanitized_link
+        sanitized_translations[language] = sanitized_translation
+    return sanitized_translations
+
+
+def sanitize_survey_question(question: dict[str, Any]) -> dict[str, Any]:
+    sanitized_question = dict(question)
+    for field in SURVEY_QUESTION_HTML_FIELDS:
+        value = sanitized_question.get(field)
+        if isinstance(value, str):
+            sanitized_question[field] = _sanitize_survey_html(value)
+    choices = sanitized_question.get("choices")
+    if isinstance(choices, list):
+        sanitized_question["choices"] = [
+            _sanitize_survey_html(choice) if isinstance(choice, str) else choice for choice in choices
+        ]
+    if "link" in sanitized_question:
+        link = sanitized_question["link"]
+        sanitized_link = _sanitize_survey_link(link) if isinstance(link, str) else None
+        if sanitized_link is None:
+            sanitized_question.pop("link")
+        else:
+            sanitized_question["link"] = sanitized_link
+    translations = sanitized_question.get("translations")
+    if isinstance(translations, dict):
+        sanitized_question["translations"] = sanitize_survey_translations(translations)
+    return sanitized_question
+
+
 # Keep this in sync with SurveyAPISerializer's public runtime contract.
 # Root survey description is intentionally excluded because customers have used it for internal notes.
 SURVEY_API_TRANSLATION_FIELDS = frozenset(
     [
         "name",
-        "thankYouMessageHeader",
-        "thankYouMessageDescription",
-        "thankYouMessageCloseButtonText",
+        *SURVEY_APPEARANCE_HTML_FIELDS,
     ]
 )
 FIELDS_NOT_APPLICABLE_TO_EXTERNAL_SURVEYS = [
@@ -139,11 +244,6 @@ FIELDS_NOT_APPLICABLE_TO_EXTERNAL_SURVEYS = [
     "targeting_flag_filters",
 ]
 SURVEY_TRANSLATION_DRAFT_FIELDS = ("name", "description", "type", "appearance", "questions", "translations")
-SURVEY_TRANSLATION_DRAFT_APPEARANCE_FIELDS = (
-    "thankYouMessageHeader",
-    "thankYouMessageDescription",
-    "thankYouMessageCloseButtonText",
-)
 SURVEY_TRANSLATION_DRAFT_QUESTION_FIELDS = (
     "id",
     "type",
@@ -183,7 +283,7 @@ class GenerateSurveyTranslationsRequestSerializer(serializers.Serializer):
         appearance = draft.get("appearance")
         if isinstance(appearance, dict):
             draft["appearance"] = {
-                field: appearance[field] for field in SURVEY_TRANSLATION_DRAFT_APPEARANCE_FIELDS if field in appearance
+                field: appearance[field] for field in SURVEY_APPEARANCE_HTML_FIELDS if field in appearance
             }
 
         questions = draft.get("questions")
@@ -208,6 +308,16 @@ class GeneratedSurveyRootTranslationSerializer(serializers.Serializer):
     thankYouMessageCloseButtonText = serializers.CharField(
         required=False, allow_blank=True, help_text="Translated thank-you close button text."
     )
+    introScreenHeader = serializers.CharField(
+        required=False, allow_blank=True, help_text="Translated intro screen header."
+    )
+    introScreenDescription = serializers.CharField(
+        required=False, allow_blank=True, help_text="Translated intro screen description."
+    )
+    introScreenButtonText = serializers.CharField(
+        required=False, allow_blank=True, help_text="Translated intro screen button text."
+    )
+    backButtonText = serializers.CharField(required=False, allow_blank=True, help_text="Translated back button text.")
 
 
 class GeneratedSurveyQuestionTranslationSerializer(serializers.Serializer):
@@ -404,6 +514,29 @@ class SurveyQuestionValidationRuleSerializer(serializers.Serializer):
     )
 
 
+class SurveyQuestionTranslationSchemaSerializer(serializers.Serializer):
+    question = serializers.CharField(required=False, allow_blank=True, help_text="Translated question text.")
+    description = serializers.CharField(required=False, allow_blank=True, help_text="Translated helper text.")
+    buttonText = serializers.CharField(required=False, allow_blank=True, help_text="Translated button label.")
+    lowerBoundLabel = serializers.CharField(
+        required=False, allow_blank=True, help_text="Translated lowest rating label. Rating questions only."
+    )
+    upperBoundLabel = serializers.CharField(
+        required=False, allow_blank=True, help_text="Translated highest rating label. Rating questions only."
+    )
+    choices = serializers.ListField(
+        child=serializers.CharField(),
+        required=False,
+        help_text="Translated choices. Must have the same length as the question choices. Choice questions only.",
+    )
+    link = serializers.CharField(required=False, allow_blank=True, help_text="Translated URL. Link questions only.")
+
+
+class DescriptionContentType(models.TextChoices):
+    TEXT = "text", "text"
+    HTML = "html", "html"
+
+
 class SurveyBaseQuestionSchemaSerializer(serializers.Serializer):
     id = serializers.CharField(
         required=False,
@@ -421,21 +554,37 @@ class SurveyBaseQuestionSchemaSerializer(serializers.Serializer):
     question = serializers.CharField(required=True, help_text="Question text shown to respondents.")
     description = serializers.CharField(required=False, allow_blank=True, help_text="Optional helper text.")
     descriptionContentType = serializers.ChoiceField(
-        choices=["text", "html"],
+        choices=DescriptionContentType.choices,
         required=False,
         help_text="Format for the description field.",
     )
     optional = serializers.BooleanField(required=False, help_text="Whether respondents may skip this question.")
     buttonText = serializers.CharField(required=False, allow_blank=True, help_text="Custom button label.")
+    translations = serializers.DictField(
+        child=SurveyQuestionTranslationSchemaSerializer(),
+        required=False,
+        help_text=(
+            "Inline translations keyed by language code (for example 'es' or 'pt-BR'). "
+            "Send back the current value when editing other question fields, or the translations are lost."
+        ),
+    )
 
 
 class SurveyOpenQuestionSchemaSerializer(SurveyBaseQuestionSchemaSerializer):
     type = serializers.ChoiceField(choices=["open"], required=True)
+    validation = SurveyQuestionValidationRuleSerializer(
+        many=True,
+        required=False,
+        allow_null=True,
+        help_text="Validation rules for the response text, for example a minimum length.",
+    )
+    branching = SurveyBranchingSchemaField(required=False, allow_null=True)
 
 
 class SurveyLinkQuestionSchemaSerializer(SurveyBaseQuestionSchemaSerializer):
     type = serializers.ChoiceField(choices=["link"], required=True)
     link = serializers.CharField(required=True, help_text="HTTPS or mailto URL for link questions.")
+    branching = SurveyBranchingSchemaField(required=False, allow_null=True)
 
 
 class SurveyRatingQuestionSchemaSerializer(SurveyBaseQuestionSchemaSerializer):
@@ -459,6 +608,10 @@ class SurveyRatingQuestionSchemaSerializer(SurveyBaseQuestionSchemaSerializer):
         required=False,
         allow_blank=True,
         help_text="Label for the highest rating (e.g., 'Excellent')",
+    )
+    isNpsQuestion = serializers.BooleanField(
+        required=False,
+        help_text="Whether a rating question with a scale of 10 shows NPS scoring. A missing value counts as true.",
     )
     branching = SurveyBranchingSchemaField(required=False, allow_null=True)
 
@@ -520,7 +673,51 @@ class SurveyQuestionsSchemaField(serializers.ListField):
     pass
 
 
-SURVEY_MATCH_TYPE_CHOICES = ["regex", "not_regex", "exact", "is_not", "icontains", "not_icontains"]
+class SurveyMatchType(models.TextChoices):
+    REGEX = "regex", "regex"
+    NOT_REGEX = "not_regex", "not_regex"
+    EXACT = "exact", "exact"
+    IS_NOT = "is_not", "is_not"
+    ICONTAINS = "icontains", "icontains"
+    NOT_ICONTAINS = "not_icontains", "not_icontains"
+
+
+SURVEY_MATCH_TYPE_CHOICES = list(SurveyMatchType.values)
+
+
+class SurveyPosition(models.TextChoices):
+    TOP_LEFT = "top_left", "top_left"
+    TOP_CENTER = "top_center", "top_center"
+    TOP_RIGHT = "top_right", "top_right"
+    MIDDLE_LEFT = "middle_left", "middle_left"
+    MIDDLE_CENTER = "middle_center", "middle_center"
+    MIDDLE_RIGHT = "middle_right", "middle_right"
+    LEFT = "left", "left"
+    CENTER = "center", "center"
+    RIGHT = "right", "right"
+    NEXT_TO_TRIGGER = "next_to_trigger", "next_to_trigger"
+
+
+class SurveyTabPosition(models.TextChoices):
+    TOP = "top", "top"
+    LEFT = "left", "left"
+    RIGHT = "right", "right"
+    BOTTOM = "bottom", "bottom"
+
+
+# `bottom-right` is an old name for `right` that the create-survey tool wrote on every survey it
+# made, because it was the default appearance position. Both the web and the React Native SDK
+# render it as `right`. The API replaces it so a response always validates against the position
+# enum the API documents, which generated clients turn into a strict validator.
+LEGACY_SURVEY_POSITIONS = {"bottom-right": SurveyPosition.RIGHT.value}
+
+
+def normalize_survey_appearance(appearance: dict[str, Any]) -> dict[str, Any]:
+    position = appearance.get("position")
+    replacement = LEGACY_SURVEY_POSITIONS.get(position) if isinstance(position, str) else None
+    if replacement is None:
+        return appearance
+    return {**appearance, "position": replacement}
 
 
 class SurveyAppearanceSchemaSerializer(serializers.Serializer):
@@ -533,6 +730,18 @@ class SurveyAppearanceSchemaSerializer(serializers.Serializer):
     ratingButtonColor = serializers.CharField(required=False)
     ratingButtonActiveColor = serializers.CharField(required=False)
     ratingButtonHoverColor = serializers.CharField(required=False)
+    textSubtleColor = serializers.CharField(
+        required=False,
+        help_text="Color of secondary text, such as question descriptions.",
+    )
+    inputBackground = serializers.CharField(
+        required=False,
+        help_text="Background color of open text inputs and rating buttons.",
+    )
+    inputTextColor = serializers.CharField(
+        required=False,
+        help_text="Text color of open text inputs and rating buttons. Calculated from inputBackground when not set.",
+    )
     whiteLabel = serializers.BooleanField(required=False)
     autoDisappear = serializers.BooleanField(required=False)
     displayThankYouMessage = serializers.BooleanField(required=False)
@@ -543,10 +752,40 @@ class SurveyAppearanceSchemaSerializer(serializers.Serializer):
         required=False,
     )
     thankYouMessageCloseButtonText = serializers.CharField(required=False)
+    displayIntroScreen = serializers.BooleanField(
+        required=False,
+        help_text="Whether to show an intro screen before the first question. The intro screen shows only when introScreenHeader or introScreenDescription is set.",
+    )
+    introScreenHeader = serializers.CharField(
+        required=False,
+        help_text="Heading of the intro screen.",
+    )
+    introScreenDescription = serializers.CharField(
+        required=False,
+        help_text="Body text of the intro screen.",
+    )
+    introScreenDescriptionContentType = serializers.ChoiceField(
+        choices=DescriptionContentType.choices,
+        required=False,
+        help_text="Content type of introScreenDescription.",
+    )
+    introScreenButtonText = serializers.CharField(
+        required=False,
+        help_text="Label of the button that closes the intro screen and starts the survey.",
+    )
     borderColor = serializers.CharField(required=False)
     placeholder = serializers.CharField(required=False)
+    position = serializers.ChoiceField(
+        choices=SurveyPosition.choices,
+        required=False,
+        help_text="Where a popover survey appears on the page. Defaults to 'right'.",
+    )
     shuffleQuestions = serializers.BooleanField(required=False)
-    surveyPopupDelaySeconds = serializers.IntegerField(required=False)
+    surveyPopupDelaySeconds = serializers.IntegerField(
+        required=False,
+        allow_null=True,
+        help_text="Seconds to wait before a popover survey appears. Null shows it without a delay.",
+    )
     allowGoBack = serializers.BooleanField(
         required=False,
         help_text="Whether to show a 'Back' button on web surveys after the first question, letting respondents return to a previously visited question. Defaults to false.",
@@ -559,11 +798,24 @@ class SurveyAppearanceSchemaSerializer(serializers.Serializer):
     widgetSelector = serializers.CharField(required=False)
     widgetLabel = serializers.CharField(required=False)
     widgetColor = serializers.CharField(required=False)
+    tabPosition = serializers.ChoiceField(
+        choices=SurveyTabPosition.choices,
+        required=False,
+        help_text="Which edge of the page holds the tab of a widget survey with widgetType 'tab'.",
+    )
     fontFamily = serializers.CharField(required=False)
     maxWidth = serializers.CharField(required=False)
     zIndex = serializers.CharField(required=False)
     disabledButtonOpacity = serializers.CharField(required=False)
     boxPadding = serializers.CharField(required=False)
+    boxShadow = serializers.CharField(
+        required=False,
+        help_text="CSS box-shadow value of the survey box.",
+    )
+    borderRadius = serializers.CharField(
+        required=False,
+        help_text="CSS border-radius value of the survey box.",
+    )
 
 
 SURVEY_DEVICE_TYPE_CHOICES = ["Desktop", "Mobile", "Tablet"]
@@ -757,7 +1009,7 @@ class SurveyResponsesQuerySerializer(serializers.Serializer):
     )
 
 
-class SurveyResponsesListSerializer(serializers.Serializer):
+class SurveyResponsesListSerializer(PageLinksSerializer):
     results = SurveyResponseRowSerializer(many=True, help_text="Survey response rows for the requested page.")
     has_more = serializers.BooleanField(
         help_text="True if more rows exist beyond the current page — fetch the next page with offset + limit."
@@ -857,6 +1109,28 @@ class SurveySerializer(SearchMatchTypeSerializerMixin, UserAccessControlSerializ
     @extend_schema_field(serializers.DictField(allow_null=True))
     def get_conditions(self, survey: Survey):
         return get_survey_conditions_with_actions(survey)
+
+    def validate_appearance(self, value: dict[str, Any] | None) -> dict[str, Any] | None:
+        if value is None:
+            return value
+        if not isinstance(value, dict):
+            raise serializers.ValidationError("Appearance must be an object")
+        return sanitize_survey_appearance(normalize_survey_appearance(value))
+
+    def to_representation(self, instance: Survey) -> dict[str, Any]:
+        data = super().to_representation(instance)
+        appearance = data.get("appearance")
+        if isinstance(appearance, dict):
+            data["appearance"] = sanitize_survey_appearance(normalize_survey_appearance(appearance))
+        questions = data.get("questions")
+        if isinstance(questions, list):
+            data["questions"] = [
+                sanitize_survey_question(question) if isinstance(question, dict) else question for question in questions
+            ]
+        translations = data.get("translations")
+        if isinstance(translations, dict):
+            data["translations"] = sanitize_survey_translations(translations)
+        return data
 
 
 class SurveySerializerCreateUpdateOnly(serializers.ModelSerializer):
@@ -975,6 +1249,9 @@ class SurveySerializerCreateUpdateOnly(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
+        appearance = data.get("appearance")
+        if isinstance(appearance, dict):
+            data["appearance"] = sanitize_survey_appearance(normalize_survey_appearance(appearance))
         data["conditions"] = get_survey_conditions_with_actions(instance)
         return data
 
@@ -985,21 +1262,15 @@ class SurveySerializerCreateUpdateOnly(serializers.ModelSerializer):
         if not isinstance(value, dict):
             raise serializers.ValidationError("Appearance must be an object")
 
-        thank_you_message = value.get("thankYouMessageHeader")
-        if thank_you_message and nh3.is_html(thank_you_message):
-            value["thankYouMessageHeader"] = nh3_clean_with_allow_list(thank_you_message)
-
-        thank_you_description = value.get("thankYouMessageDescription")
-        if thank_you_description and nh3.is_html(thank_you_description):
-            value["thankYouMessageDescription"] = nh3_clean_with_allow_list(thank_you_description)
-
-        thank_you_close_button = value.get("thankYouMessageCloseButtonText")
-        if thank_you_close_button and nh3.is_html(thank_you_close_button):
-            value["thankYouMessageCloseButtonText"] = nh3_clean_with_allow_list(thank_you_close_button)
+        value = sanitize_survey_appearance(normalize_survey_appearance(value))
 
         thank_you_description_content_type = value.get("thankYouMessageDescriptionContentType")
         if thank_you_description_content_type and thank_you_description_content_type not in ["text", "html"]:
             raise serializers.ValidationError("thankYouMessageDescriptionContentType must be one of ['text', 'html']")
+
+        intro_screen_description_content_type = value.get("introScreenDescriptionContentType")
+        if intro_screen_description_content_type and intro_screen_description_content_type not in ["text", "html"]:
+            raise serializers.ValidationError("introScreenDescriptionContentType must be one of ['text', 'html']")
 
         survey_popup_delay_seconds = value.get("surveyPopupDelaySeconds")
         if survey_popup_delay_seconds and survey_popup_delay_seconds < 0:
@@ -1025,6 +1296,55 @@ class SurveySerializerCreateUpdateOnly(serializers.ModelSerializer):
 
         if not isinstance(value, dict):
             raise serializers.ValidationError("Conditions must be an object")
+
+        self._require_viewer_access_to_added_actions(value)
+        return value
+
+    def _require_viewer_access_to_added_actions(self, conditions: dict) -> None:
+        actions_condition = conditions.get("actions")
+        if not isinstance(actions_condition, dict) or not isinstance(self.context["request"].user, User):
+            return
+
+        action_ids: set[int] | None
+        try:
+            action_ids = {
+                int(value["id"])
+                for value in actions_condition.get("values") or []
+                if isinstance(value, dict) and value.get("id") is not None
+            }
+        except (TypeError, ValueError, OverflowError):
+            action_ids = None
+        # Postgres rejects an id outside the bigint range in a query, so check the range before the lookup.
+        if action_ids is None or not all(0 < action_id < 2**63 for action_id in action_ids):
+            raise serializers.ValidationError("Each action in the survey conditions needs a valid id.")
+
+        added_actions = Action.objects.filter(team__project_id=self.context["project_id"], id__in=action_ids)
+        if self.instance is not None:
+            added_actions = added_actions.exclude(id__in=self.instance.actions.values("id"))
+        denied_ids = self.context["view"].user_access_control.denied_object_ids(
+            "action", [(str(action.id), action.team_id, action.created_by_id) for action in added_actions], "viewer"
+        )
+        if denied_ids:
+            raise serializers.ValidationError(
+                f"You don't have viewer access to action(s) {', '.join(denied_ids)}. "
+                "Remove them from the survey conditions, or ask for access."
+            )
+
+    def validate_targeting_flag_filters(self, value):
+        if value is None:
+            return value
+
+        if not isinstance(value, dict):
+            raise serializers.ValidationError("targeting_flag_filters must be an object")
+
+        return value
+
+    def validate_form_content(self, value):
+        if value is None:
+            return value
+
+        if not isinstance(value, dict):
+            raise serializers.ValidationError("form_content must be an object")
 
         return value
 
@@ -1107,13 +1427,7 @@ class SurveySerializerCreateUpdateOnly(serializers.ModelSerializer):
                 raise serializers.ValidationError(f"Translation for '{raw_lang_code}' must be an object")
 
             cleaned_translation: dict[str, str] = {}
-            for field in [
-                "name",
-                "description",
-                "thankYouMessageHeader",
-                "thankYouMessageDescription",
-                "thankYouMessageCloseButtonText",
-            ]:
+            for field in ["name", "description", *SURVEY_APPEARANCE_HTML_FIELDS]:
                 if field in translation_data:
                     if not isinstance(translation_data[field], str):
                         raise serializers.ValidationError(
@@ -1390,9 +1704,12 @@ class SurveySerializerCreateUpdateOnly(serializers.ModelSerializer):
         targeting_flag_id = data.get("targeting_flag_id")
         if targeting_flag_id:
             try:
-                FeatureFlag.objects.get(pk=targeting_flag_id, team_id=self.context["team_id"])
+                targeting_flag = FeatureFlag.objects.get(pk=targeting_flag_id, team_id=self.context["team_id"])
             except FeatureFlag.DoesNotExist:
                 raise serializers.ValidationError("Targeting Feature Flag with this ID does not exist")
+            # Re-saving a survey with the flag it already owns is not an adoption.
+            if self.instance is None or self.instance.targeting_flag_id != targeting_flag_id:
+                assert_flag_available_for(targeting_flag, product=FLAG_OWNER_SURVEY)
 
         linked_insight_id = data.get("linked_insight_id")
         if linked_insight_id:
@@ -1405,8 +1722,12 @@ class SurveySerializerCreateUpdateOnly(serializers.ModelSerializer):
         conditions = data.get("conditions") or {}
         linked_flag_variant = conditions.get("linkedFlagVariant")
         if linked_flag_variant and linked_flag and linked_flag_variant != "any":
-            # Get available variants from the linked feature flag
-            available_variants = [variant["key"] for variant in linked_flag.variants]
+            try:
+                available_variants = [variant["key"] for variant in linked_flag.variants]
+            except ConfigFormatError:
+                raise serializers.ValidationError(
+                    "linkedFlagVariant cannot be used with this feature flag's configuration format"
+                )
             if linked_flag_variant not in available_variants:
                 if available_variants:
                     raise serializers.ValidationError(
@@ -1417,7 +1738,13 @@ class SurveySerializerCreateUpdateOnly(serializers.ModelSerializer):
                         f"Feature flag variant '{linked_flag_variant}' specified but the linked feature flag has no variants"
                     )
         elif linked_flag_variant and not linked_flag_id:
-            raise serializers.ValidationError("linkedFlagVariant can only be used when a linked_flag_id is specified")
+            if self.instance is None:
+                raise serializers.ValidationError(
+                    "linkedFlagVariant can only be used when a linked_flag_id is specified"
+                )
+            if "linked_flag_id" in data or not self.instance.linked_flag_id:
+                # Deleting the flag sets linked_flag to NULL but keeps the variant, so drop it instead of blocking every save.
+                data["conditions"] = {key: value for key, value in conditions.items() if key != "linkedFlagVariant"}
 
         if (
             self.context["request"].method == "POST"
@@ -1562,7 +1889,25 @@ class SurveySerializerCreateUpdateOnly(serializers.ModelSerializer):
                         }
                     )
 
+        self._reconcile_schedule_with_iterations(data)
         return data
+
+    @staticmethod
+    def _reconcile_schedule_with_iterations(validated_data: dict) -> None:
+        # The edit form reads `schedule` while update_survey_iteration reads the iteration columns,
+        # so the two must agree or the survey repeats while presenting itself as one-shot.
+        schedule = validated_data.get("schedule")
+        if (
+            schedule is None
+            and validated_data.get("iteration_count")
+            and validated_data.get("iteration_frequency_days")
+        ):
+            # Iteration fields alone have always configured repeats, so keep the caller's values.
+            validated_data["schedule"] = Survey.Schedule.RECURRING
+        elif "schedule" in validated_data and schedule != Survey.Schedule.RECURRING:
+            # An explicit null counts as non-recurring: the edit form reads it as "Once".
+            validated_data["iteration_count"] = None
+            validated_data["iteration_frequency_days"] = None
 
     def create(self, validated_data):
         if "remove_targeting_flag" in validated_data:
@@ -1580,27 +1925,33 @@ class SurveySerializerCreateUpdateOnly(serializers.ModelSerializer):
                 team_id=self.context["team_id"],
                 feature_flag_id=validated_data["targeting_flag_id"],
             )
-        if validated_data.get("targeting_flag_filters"):
-            assert_feature_flag_write_scope(
-                self.context["request"],
-                action="survey.create",
-                resource_scope="survey:write",
-                team_id=self.context["team_id"],
-            )
-            targeting_feature_flag = self._create_or_update_targeting_flag(
-                None, validated_data["targeting_flag_filters"], validated_data["name"]
-            )
-            validated_data["targeting_flag_id"] = targeting_feature_flag.id
-            validated_data.pop("targeting_flag_filters")
+        # The survey row and its flags are one unit. A flag write can fail after the row is saved,
+        # which would leave a survey with no targeting or internal flag and no way to retry, so keep
+        # the whole create in one block. A create only mints flags.
+        # `_create_or_update_targeting_flag` turns a gated mint into a 400 and rolls back its
+        # change request in a savepoint, so `gated_atomic` has nothing to restore here.
+        with transaction.atomic():
+            if validated_data.get("targeting_flag_filters"):
+                assert_feature_flag_write_scope(
+                    self.context["request"],
+                    action="survey.create",
+                    resource_scope="survey:write",
+                    team_id=self.context["team_id"],
+                )
+                targeting_feature_flag = self._create_or_update_targeting_flag(
+                    None, validated_data["targeting_flag_filters"], validated_data["name"]
+                )
+                validated_data["targeting_flag_id"] = targeting_feature_flag.id
+                validated_data.pop("targeting_flag_filters")
 
-        if "targeting_flag_filters" in validated_data:
-            validated_data.pop("targeting_flag_filters")
+            if "targeting_flag_filters" in validated_data:
+                validated_data.pop("targeting_flag_filters")
 
-        validated_data["created_by"] = self.context["request"].user
-        instance = super().create(validated_data)
-        self._add_user_survey_interacted_filters(instance)
-        self._associate_actions(instance, validated_data.get("conditions"))
-        self._add_internal_response_sampling_filters(instance)
+            validated_data["created_by"] = self.context["request"].user
+            instance = super().create(validated_data)
+            self._add_user_survey_interacted_filters(instance)
+            self._associate_actions(instance, validated_data.get("conditions"))
+            self._add_internal_response_sampling_filters(instance)
 
         team = Team.objects.get(id=self.context["team_id"])
         log_activity(
@@ -1632,71 +1983,8 @@ class SurveySerializerCreateUpdateOnly(serializers.ModelSerializer):
                 feature_flag_id=validated_data["targeting_flag_id"],
             )
 
-        if validated_data.get("remove_targeting_flag"):
-            if instance.targeting_flag:
-                assert_feature_flag_write_scope(
-                    self.context["request"],
-                    action="survey.update.remove_targeting_flag",
-                    resource_scope="survey:write",
-                    team_id=self.context["team_id"],
-                    feature_flag_id=instance.targeting_flag_id,
-                )
-                # Manually delete the flag and log the change
-                # The `changes_between` method won't catch this because the flag (and underlying ForeignKey relationship)
-                # will have been deleted by the time the `changes_between` method is called, so we need to log the change manually
-                changes.append(
-                    Change(type="Survey", field="targeting_flag", action="deleted", before=instance.targeting_flag)
-                )
-                instance.targeting_flag.delete()
-                validated_data["targeting_flag_id"] = None
-            validated_data.pop("remove_targeting_flag")
-
-            # make sure instance.targeting_flag is gone
-            instance.refresh_from_db()
-
-        # if the target flag filters come back with data, update the targeting feature flag if there is one, otherwise create a new one
-        if validated_data.get("targeting_flag_filters"):
-            assert_feature_flag_write_scope(
-                self.context["request"],
-                action="survey.update.targeting_flag_filters",
-                resource_scope="survey:write",
-                team_id=self.context["team_id"],
-                feature_flag_id=instance.targeting_flag_id,
-            )
-            new_filters = validated_data["targeting_flag_filters"]
-            if instance.targeting_flag:
-                existing_targeting_flag = instance.targeting_flag
-                existing_targeting_flag_filters = existing_targeting_flag.filters
-                serialized_data_filters = {
-                    **existing_targeting_flag_filters,
-                    **new_filters,
-                }
-                # Log the existing filter change
-                # The `changes_between` method won't catch this because the flag (and underlying ForeignKey relationship)
-                # will have been deleted by the time the `changes_between` method is called, so we need to log the change manually
-                changes.append(
-                    Change(
-                        type="Survey",
-                        field="targeting_flag_filters",
-                        action="changed",
-                        before=existing_targeting_flag_filters,
-                        after=new_filters,
-                    )
-                )
-                self._create_or_update_targeting_flag(instance.targeting_flag, serialized_data_filters)
-            else:
-                new_flag = self._create_or_update_targeting_flag(
-                    None, new_filters, instance.name, bool(instance.start_date)
-                )
-                # Log the new filter change
-                # The `changes_between` method won't catch this because the flag (and underlying ForeignKey relationship)
-                # will have been deleted by the time the `changes_between` method is called, so we need to log the change manually
-                changes.append(
-                    Change(type="Survey", field="targeting_flag_filters", action="created", after=new_filters)
-                )
-                validated_data["targeting_flag_id"] = new_flag.id
-            validated_data.pop("targeting_flag_filters")
-
+        # Validate before any flag write. A flag minted below commits with the block, so a
+        # rejection after it would leave an active flag that no survey links.
         iteration_count = validated_data.get("iteration_count", None)
         if (
             instance.current_iteration is not None
@@ -1707,21 +1995,108 @@ class SurveySerializerCreateUpdateOnly(serializers.ModelSerializer):
                 f"Cannot change survey recurrence to {iteration_count}, should be at least {instance.current_iteration}"
             )
 
-        if iteration_count is not None:
-            instance.iteration_count = iteration_count
-            instance.iteration_frequency_days = validated_data.get("iteration_frequency_days")
+        # One PATCH can remove the existing targeting flag and ask for new filters. The gate can
+        # reject the replacement, so the delete and the write stay in one block. Without it a
+        # rejected change leaves the survey with no targeting flag at all. The survey row and
+        # its internal flags join the block, so a gate refusing an internal flag cannot leave
+        # the edits saved behind a 400.
+        with gated_atomic():
+            if validated_data.get("remove_targeting_flag"):
+                if instance.targeting_flag:
+                    assert_feature_flag_write_scope(
+                        self.context["request"],
+                        action="survey.update.remove_targeting_flag",
+                        resource_scope="survey:write",
+                        team_id=self.context["team_id"],
+                        feature_flag_id=instance.targeting_flag_id,
+                    )
+                    # Manually delete the flag and log the change
+                    # The `changes_between` method won't catch this because the flag (and underlying ForeignKey relationship)
+                    # will have been deleted by the time the `changes_between` method is called, so we need to log the change manually
+                    changes.append(
+                        Change(type="Survey", field="targeting_flag", action="deleted", before=instance.targeting_flag)
+                    )
+                    instance.targeting_flag.delete()
+                    validated_data["targeting_flag_id"] = None
+                validated_data.pop("remove_targeting_flag")
 
-        instance = super().update(instance, validated_data)
+                # make sure instance.targeting_flag is gone
+                instance.refresh_from_db()
 
-        team = Team.objects.get(id=self.context["team_id"])
-        # `changes_between` will not catch changes to the ForeignKey relationships
-        # so it's useful for any changes to the Survey model itself, but not for the related models
-        non_foreign_table_relation_changes = changes_between(
-            "Survey",
-            previous=before_update,
-            current=instance,
-        )
-        changes.extend(non_foreign_table_relation_changes)
+            # if the target flag filters come back with data, update the targeting feature flag if there is one, otherwise create a new one
+            if validated_data.get("targeting_flag_filters"):
+                assert_feature_flag_write_scope(
+                    self.context["request"],
+                    action="survey.update.targeting_flag_filters",
+                    resource_scope="survey:write",
+                    team_id=self.context["team_id"],
+                    feature_flag_id=instance.targeting_flag_id,
+                )
+                new_filters = validated_data["targeting_flag_filters"]
+                if instance.targeting_flag:
+                    existing_targeting_flag = instance.targeting_flag
+                    existing_targeting_flag_filters = existing_targeting_flag.filters
+                    serialized_data_filters = {
+                        **existing_targeting_flag_filters,
+                        **new_filters,
+                    }
+                    # Log the existing filter change
+                    # The `changes_between` method won't catch this because the flag (and underlying ForeignKey relationship)
+                    # will have been deleted by the time the `changes_between` method is called, so we need to log the change manually
+                    changes.append(
+                        Change(
+                            type="Survey",
+                            field="targeting_flag_filters",
+                            action="changed",
+                            before=existing_targeting_flag_filters,
+                            after=new_filters,
+                        )
+                    )
+                    self._create_or_update_targeting_flag(instance.targeting_flag, serialized_data_filters)
+                else:
+                    new_flag = self._create_or_update_targeting_flag(
+                        None, new_filters, instance.name, bool(instance.start_date)
+                    )
+                    # Log the new filter change
+                    # The `changes_between` method won't catch this because the flag (and underlying ForeignKey relationship)
+                    # will have been deleted by the time the `changes_between` method is called, so we need to log the change manually
+                    changes.append(
+                        Change(type="Survey", field="targeting_flag_filters", action="created", after=new_filters)
+                    )
+                    validated_data["targeting_flag_id"] = new_flag.id
+                validated_data.pop("targeting_flag_filters")
+
+            if iteration_count is not None:
+                instance.iteration_count = iteration_count
+                instance.iteration_frequency_days = validated_data.get("iteration_frequency_days")
+
+            instance = super().update(instance, validated_data)
+
+            team = Team.objects.get(id=self.context["team_id"])
+            # `changes_between` will not catch changes to the ForeignKey relationships
+            # so it's useful for any changes to the Survey model itself, but not for the related models
+            non_foreign_table_relation_changes = changes_between(
+                "Survey",
+                previous=before_update,
+                current=instance,
+            )
+            changes.extend(non_foreign_table_relation_changes)
+
+            should_flag_be_active = self._should_survey_flags_be_active(instance)
+
+            # Intentionally NOT gated on feature_flag:write: this only syncs the active state of
+            # the survey's OWN dedicated targeting flag to the survey's running state (start/stop/
+            # archive), which survey:write already controls. The flag's definition (its filters)
+            # can only be set via the gated targeting_flag_filters path. Enforcement covers
+            # definition writes, not this lifecycle mirror.
+            if instance.targeting_flag:
+                instance.targeting_flag.active = should_flag_be_active
+                instance.targeting_flag.save()
+
+            self._add_user_survey_interacted_filters(instance)
+            self._associate_actions(instance, validated_data.get("conditions"))
+            self._add_internal_response_sampling_filters(instance)
+
         log_activity(
             organization_id=team.organization_id,
             team_id=self.context["team_id"],
@@ -1768,21 +2143,6 @@ class SurveySerializerCreateUpdateOnly(serializers.ModelSerializer):
                 team=team,
                 request=self.context["request"],
             )
-
-        should_flag_be_active = self._should_survey_flags_be_active(instance)
-
-        # Intentionally NOT gated on feature_flag:write: this only syncs the active state of
-        # the survey's OWN dedicated targeting flag to the survey's running state (start/stop/
-        # archive), which survey:write already controls. The flag's definition (its filters)
-        # can only be set via the gated targeting_flag_filters path. Enforcement covers
-        # definition writes, not this lifecycle mirror.
-        if instance.targeting_flag:
-            instance.targeting_flag.active = should_flag_be_active
-            instance.targeting_flag.save()
-
-        self._add_user_survey_interacted_filters(instance)
-        self._associate_actions(instance, validated_data.get("conditions"))
-        self._add_internal_response_sampling_filters(instance)
         return instance
 
     def _add_internal_response_sampling_filters(self, instance: Survey):
@@ -1926,35 +2286,49 @@ class SurveySerializerCreateUpdateOnly(serializers.ModelSerializer):
     def _create_or_update_targeting_flag(
         self, existing_flag=None, filters=None, name=None, active=False, flag_name_suffix=None
     ):
+        request = self.context["request"]
+        team = self.context["get_team"]()
         with create_flag_with_survey_errors():
-            # Ensure the request method is set correctly for validation
+            # Ensure the request method is set correctly for validation. The facade passes a
+            # real request through as-is, so it does not set the method.
             if existing_flag:
-                self.context["request"].method = "PATCH"
-                existing_flag_serializer = FeatureFlagSerializer(
+                request.method = "PATCH"
+                return update_flag(
                     existing_flag,
-                    data={"filters": filters},
-                    partial=True,
-                    context=self.context,
+                    {"filters": filters},
+                    team=team,
+                    user=request.user,
+                    request=request,
+                    serializer_context=self.context,
                 )
-                existing_flag_serializer.is_valid(raise_exception=True)
-                return existing_flag_serializer.save()
             else:
-                self.context["request"].method = "POST"
+                request.method = "POST"
                 random_id = generate("1234567890abcdef", 10)
                 feature_flag_key = slugify(f"{SURVEY_TARGETING_FLAG_PREFIX}{random_id}{flag_name_suffix or ''}")
-                feature_flag_serializer = FeatureFlagSerializer(
-                    data={
-                        "key": feature_flag_key,
-                        "name": f"Targeting flag for survey {name}",
-                        "filters": filters,
-                        "active": active,
-                        "creation_context": "surveys",
-                    },
-                    context=self.context,
-                )
-
-                feature_flag_serializer.is_valid(raise_exception=True)
-                return feature_flag_serializer.save()
+                # An approved change request replays only the flag write. The survey that links the
+                # flag is not part of it, so approval would create an orphan flag and no survey.
+                # Refuse the write instead, and let the savepoint take the change request with it.
+                try:
+                    with transaction.atomic():
+                        return create_flag(
+                            {
+                                "key": feature_flag_key,
+                                "name": f"Targeting flag for survey {name}",
+                                "filters": filters,
+                                "active": active,
+                                "creation_context": "surveys",
+                            },
+                            team=team,
+                            user=request.user,
+                            request=request,
+                            serializer_context=self.context,
+                            owner=FLAG_OWNER_SURVEY,
+                        )
+                except ApprovalRequired:
+                    raise serializers.ValidationError(
+                        "A feature flag approval policy covers the flag this survey needs, so the survey "
+                        "can't be saved. Ask someone who can bypass the policy to save it."
+                    )
 
 
 class SurveySerializerCreateUpdateOnlySchema(SurveySerializerCreateUpdateOnly):
@@ -2023,7 +2397,7 @@ class SurveySerializerCreateUpdateOnlySchema(SurveySerializerCreateUpdateOnly):
         required=False,
         allow_null=True,
         min_value=1,
-        max_value=365,
+        max_value=MAX_ITERATION_FREQUENCY_DAYS,
         help_text="For a recurring schedule, this field specifies the interval in days between each survey instance shown to the user, used alongside iteration_count for precise scheduling.",
     )
     enable_partial_responses = serializers.BooleanField(
@@ -2034,8 +2408,20 @@ class SurveySerializerCreateUpdateOnlySchema(SurveySerializerCreateUpdateOnly):
 
     class Meta(SurveySerializerCreateUpdateOnly.Meta):
         extra_kwargs = {
-            "name": {"help_text": "Survey name.", "min_length": 1},
-            "description": {"help_text": "Survey description."},
+            "name": {
+                "help_text": (
+                    "Survey name. Anyone can read it. In-app surveys send it to every visitor's browser "
+                    "alongside the questions and appearance text, and a hosted survey shows it on its public "
+                    "page. Keep customer names and other private details out of it."
+                ),
+                "min_length": 1,
+            },
+            "description": {
+                "help_text": (
+                    "Survey description. Internal only: unlike the name and questions, it is never delivered "
+                    "to visitors."
+                )
+            },
             "type": {"help_text": "Survey type."},
             "start_date": {
                 "help_text": "Setting this will launch the survey immediately. Don't add a start_date unless explicitly requested to do so."
@@ -2056,6 +2442,28 @@ class SurveyFilterSet(FilterSet):
         field_name="id",
         label="Filter to a comma-separated list of survey IDs. IDs that don't exist are silently omitted rather than erroring.",
     )
+    created_by = django_filters.NumberFilter(
+        field_name="created_by_id",
+        label="Filter surveys by the ID of the user who created them.",
+    )
+    linked_flag_id = django_filters.NumberFilter(
+        field_name="linked_flag_id",
+        label="Filter surveys by the ID of the feature flag they are linked to.",
+    )
+    status = django_filters.ChoiceFilter(
+        choices=[("draft", "Draft"), ("running", "Running"), ("complete", "Complete")],
+        method="filter_status",
+        label="Filter surveys by their current status.",
+    )
+
+    def filter_status(self, queryset: QuerySet, _name: str, value: str) -> QuerySet:
+        if value == "draft":
+            return queryset.filter(start_date__isnull=True)
+        if value == "running":
+            return queryset.filter(start_date__isnull=False, end_date__isnull=True)
+        if value == "complete":
+            return queryset.filter(end_date__isnull=False)
+        return queryset
 
     class Meta:
         model = Survey
@@ -2064,6 +2472,7 @@ class SurveyFilterSet(FilterSet):
 
 @extend_schema_view(
     create=extend_schema(request=SurveySerializerCreateUpdateOnlySchema),
+    update=extend_schema(request=SurveySerializerCreateUpdateOnlySchema),
     partial_update=extend_schema(request=SurveySerializerCreateUpdateOnlySchema),
     list=extend_schema(
         parameters=[
@@ -2075,7 +2484,7 @@ class SurveyFilterSet(FilterSet):
         ],
     ),
 )
-class SurveyViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixin, viewsets.ModelViewSet):
+class SurveyViewSet(ApprovalHandlingMixin, TeamAndOrgViewSetMixin, AccessControlViewSetMixin, viewsets.ModelViewSet):
     scope_object = "survey"
     queryset = Survey.objects.select_related(
         "linked_flag", "linked_insight", "targeting_flag", "internal_targeting_flag"
@@ -2084,10 +2493,9 @@ class SurveyViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixin, viewsets.
     filterset_class = SurveyFilterSet
 
     def get_serializer_class(self) -> type[serializers.Serializer]:
-        if self.request.method == "POST" or self.request.method == "PATCH":
+        if self.request.method in ("POST", "PUT", "PATCH"):
             return SurveySerializerCreateUpdateOnly
-        else:
-            return SurveySerializer
+        return SurveySerializer
 
     def safely_get_queryset(self, queryset):
         queryset = queryset.exclude(product_tour__isnull=False)
@@ -2261,12 +2669,6 @@ class SurveyViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixin, viewsets.
 
         return Response(SurveySerializer(survey, context=self.get_serializer_context()).data)
 
-    def _get_partial_responses_filter(self, base_conditions_sql: builtins.list[str]) -> str:
-        return partial_responses_filter(base_conditions_sql)
-
-    def _get_archived_responses_filter(self, survey_id: str | None = None) -> tuple[str, dict]:
-        return archived_responses_filter(survey_id, self.team_id)
-
     @action(methods=["GET"], detail=False, required_scopes=["survey:read"])
     def responses_count(self, request: request.Request, **kwargs):
         """Get response counts for all surveys.
@@ -2279,62 +2681,10 @@ class SurveyViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixin, viewsets.
             Dictionary mapping survey IDs to response counts
         """
         exclude_archived = request.query_params.get("exclude_archived", "false").lower() == "true"
-        survey_ids_param = request.query_params.get("survey_ids")
+        survey_ids_param = request.query_params.get("survey_ids") or ""
+        survey_ids = [survey_id.strip() for survey_id in survey_ids_param.split(",") if survey_id.strip()]
 
-        earliest_survey_start_date = Survey.objects.filter(team__project_id=self.project_id).aggregate(
-            Min("start_date")
-        )["start_date__min"]
-
-        if not earliest_survey_start_date:
-            # If there are no surveys or none have a start date, there can be no responses.
-            return Response({})
-
-        params = {"team_id": self.team_id, "timestamp": earliest_survey_start_date}
-        survey_id_expr = get_survey_property_string_expr(SurveyEventProperties.SURVEY_ID)
-
-        partial_responses_filter = self._get_partial_responses_filter(
-            base_conditions_sql=[
-                "team_id = %(team_id)s",
-                "timestamp >= %(timestamp)s",
-            ],
-        )
-
-        archived_filter = ""
-        if exclude_archived:
-            archived_filter_sql, archived_params = self._get_archived_responses_filter()
-            if archived_filter_sql:
-                archived_filter = f"AND {archived_filter_sql}"
-                params.update(archived_params)
-
-        survey_ids_filter = ""
-        if survey_ids_param:
-            survey_ids = [sid.strip() for sid in survey_ids_param.split(",") if sid.strip()]
-            if survey_ids:
-                survey_ids_filter = f"AND {survey_id_expr} IN %(survey_ids)s"
-                params["survey_ids"] = survey_ids
-
-        query = f"""
-            SELECT
-                {survey_id_expr} as survey_id,
-                count()
-            FROM events
-            WHERE
-                team_id = %(team_id)s
-                AND event = '{SurveyEventName.SENT}'
-                AND timestamp >= %(timestamp)s
-                AND {partial_responses_filter}
-                {archived_filter}
-                {survey_ids_filter}
-            GROUP BY survey_id
-        """
-
-        tag_queries(product=ProductKey.SURVEYS, feature=Feature.QUERY)
-        data = sync_execute(query, params)
-
-        counts = {}
-        for survey_id, count in data:
-            counts[survey_id] = count
-
+        counts = get_survey_responses_count(team=self.team, exclude_archived=exclude_archived, survey_ids=survey_ids)
         return Response(counts)
 
     def _validate_and_parse_dates(
@@ -2553,6 +2903,7 @@ class SurveyViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixin, viewsets.
 
         return Response(status.HTTP_200_OK)
 
+    # nosemgrep: api-path-underscore -- shipped public API path, a rename breaks clients
     @action(methods=["GET"], detail=True, url_path="archived-response-uuids", required_scopes=["survey:read"])
     def archived_response_uuids(self, request: request.Request, **kwargs) -> Response:
         """
@@ -2597,6 +2948,8 @@ class SurveyViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixin, viewsets.
         if cleaned.get("exclude_archived"):
             exclude_uuids = get_archived_response_uuids(str(survey.id), self.team_id)
 
+        limit = cleaned.get("limit", 100)
+        offset = cleaned.get("offset", 0)
         rows, has_more = fetch_response_rows(
             survey=survey,
             team=self.team,
@@ -2605,8 +2958,8 @@ class SurveyViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixin, viewsets.
             question_id=cleaned.get("question_id"),
             score_lte=cleaned.get("score_lte"),
             score_gte=cleaned.get("score_gte"),
-            limit=cleaned.get("limit", 100),
-            offset=cleaned.get("offset", 0),
+            limit=limit,
+            offset=offset,
             exclude_uuids=exclude_uuids,
         )
 
@@ -2635,11 +2988,14 @@ class SurveyViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixin, viewsets.
                     for row in rows
                 ],
                 "has_more": has_more,
-                "limit": cleaned.get("limit", 100),
-                "offset": cleaned.get("offset", 0),
+                "limit": limit,
+                "offset": offset,
             }
         )
-        return Response(serialized.data)
+        data = serialized.data
+        next_offset = offset + limit if has_more else None
+        data.update(offset_page_links(request, offset=offset, limit=limit, next_offset=next_offset))
+        return Response(data)
 
     @extend_schema(
         operation_id="surveys_question_labels",
@@ -2757,17 +3113,17 @@ class SurveyViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixin, viewsets.
     @extend_schema(operation_id="surveys_all_activity_retrieve")
     @action(methods=["GET"], url_path="activity", detail=False, required_scopes=["activity_log:read"])
     def all_activity(self, request: request.Request, **kwargs):
-        limit = int(request.query_params.get("limit", "10"))
-        page = int(request.query_params.get("page", "1"))
+        page_params = parse_activity_page_params(request)
 
-        activity_page = load_activity(scope="Survey", team_id=self.team_id, limit=limit, page=page)
+        activity_page = load_activity(
+            scope="Survey", team_id=self.team_id, limit=page_params.limit, page=page_params.page
+        )
 
-        return activity_page_response(activity_page, limit, page, request)
+        return activity_page_response(activity_page, page_params.limit, page_params.page, request)
 
     @action(methods=["GET"], detail=True, required_scopes=["activity_log:read"])
     def activity(self, request: request.Request, **kwargs):
-        limit = int(request.query_params.get("limit", "10"))
-        page = int(request.query_params.get("page", "1"))
+        page_params = parse_activity_page_params(request)
 
         item = self.get_object()
 
@@ -2775,10 +3131,10 @@ class SurveyViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixin, viewsets.
             scope="Survey",
             team_id=self.team_id,
             item_ids=[str(item.id)],
-            limit=limit,
-            page=page,
+            limit=page_params.limit,
+            page=page_params.page,
         )
-        return activity_page_response(activity_page, limit, page, request)
+        return activity_page_response(activity_page, page_params.limit, page_params.page, request)
 
     @extend_schema(
         description=(
@@ -2857,8 +3213,7 @@ class SurveyViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixin, viewsets.
             return Response(cached_response)
 
         environment_is_allowed = settings.DEBUG or is_cloud()
-        has_gemini_api_key = bool(settings.GEMINI_API_KEY)
-        if not environment_is_allowed or not has_gemini_api_key:
+        if not environment_is_allowed or not gemini_configured():
             raise exceptions.ValidationError("survey summary is only supported in PostHog Cloud")
 
         # Same AI-processing gate that summary_headline uses — applies to per-question summaries too.
@@ -2874,13 +3229,13 @@ class SurveyViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixin, viewsets.
 
         # Extract the question text and choices from the survey
         question_text = None
-        question_choices = None
+        question_dict = None
         if survey.questions and question_id:
             # Find the question with the matching ID
             for idx, question in enumerate(survey.questions):
                 if question.get("id", None) == question_id:
                     question_text = question.get("question")
-                    question_choices = question.get("choices")
+                    question_dict = question
                     # Backfill the index so the index-based response key fallback works.
                     # Without this, fetch_responses passes question_index=None into the
                     # getSurveyResponse() HogQL function, which requires an integer first
@@ -2891,17 +3246,24 @@ class SurveyViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixin, viewsets.
         elif survey.questions and question_index is not None:
             # Fallback to question index if question_id is not provided
             if 0 <= question_index < len(survey.questions):
-                question_text = survey.questions[question_index].get("question")
-                question_choices = survey.questions[question_index].get("choices")
+                question_dict = survey.questions[question_index]
+                question_text = question_dict.get("question")
 
         if question_text is None:
             raise exceptions.ValidationError("the text of the question is required")
+
+        # For choice questions, exclude predefined choices (base and translated) to only get
+        # open-ended "Other" responses — otherwise a predefined answer given in a non-base
+        # language leaks into the free-text set fed to the summarizer. Same translation-aware
+        # matching as per_question_stats' distribution.
+        exclude_values = None
+        if question_dict is not None:
+            exclude_values = list(build_choice_translation_map(question_dict).keys()) or None
 
         # Get archived response UUIDs to exclude
         archived_uuids = get_archived_response_uuids(survey_id, self.team.pk)
 
         # Fetch responses using the new module
-        # For choice questions, exclude predefined choices to only get open-ended "Other" responses
         responses = fetch_responses(
             survey_id=survey_id,
             question_index=question_index,
@@ -2909,7 +3271,7 @@ class SurveyViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixin, viewsets.
             start_date=(survey.start_date or survey.created_at).replace(hour=0, minute=0, second=0, microsecond=0),
             end_date=end_date,
             team=self.team,
-            exclude_values=question_choices,
+            exclude_values=exclude_values,
             exclude_uuids=archived_uuids,
         )
         response_count = len(responses)
@@ -3061,8 +3423,10 @@ class SurveyViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixin, viewsets.
                 "survey translation generation is only supported in PostHog Cloud or DEBUG mode"
             )
 
-        if not settings.GEMINI_API_KEY:
-            raise exceptions.ValidationError("GEMINI_API_KEY must be configured to generate translations")
+        if not gemini_configured():
+            raise exceptions.ValidationError(
+                "GEMINI_API_KEY or the AI gateway must be configured to generate translations"
+            )
 
         if not self.team.organization.is_ai_data_processing_approved:
             return Response(
@@ -3121,11 +3485,35 @@ class SurveyViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixin, viewsets.
             }
         )
 
+    def _check_duplicate_target_access(
+        self, request: request.Request, target_team: Team, access_control: UserAccessControl
+    ) -> None:
+        # The permission classes check only the source project in the URL. Apply the checks that
+        # `POST /surveys/` in the target project applies: the key's project scope, project access,
+        # and survey editor access.
+        scoped_teams = get_authenticator_scoped_team_ids(getattr(request, "successful_authenticator", None))
+        if scoped_teams is not None and target_team.id not in scoped_teams:
+            raise exceptions.PermissionDenied(
+                f"API key does not have access to the requested project: ID {target_team.id}."
+            )
+
+        if (
+            self.user_permissions.team(target_team).effective_membership_level is None
+            or not access_control.check_access_level_for_object(target_team, required_level="member")
+            or not access_control.check_access_level_for_resource("survey", required_level="editor")
+        ):
+            raise exceptions.PermissionDenied(
+                f"You don't have permission to create surveys in project {target_team.id}. "
+                "Ask a project admin for access, or remove the project from the list."
+            )
+
     @action(methods=["POST"], detail=True, required_scopes=["survey:write"])
     def duplicate_to_projects(self, request: request.Request, **kwargs):
         """Duplicate a survey to multiple projects in a single transaction.
 
         Accepts a list of target team IDs and creates a copy of the survey in each project.
+        Every target project must be in the source project's organization, and the caller needs
+        survey editor access in each one.
         Uses an all-or-nothing approach - if any duplication fails, all changes are rolled back.
         """
         if not request.user.is_authenticated:
@@ -3143,14 +3531,21 @@ class SurveyViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixin, viewsets.
         if not target_team_ids or not isinstance(target_team_ids, list):
             raise exceptions.ValidationError("target_team_ids must be a non-empty list of team IDs")
 
-        user_organization = user.organization
-        if not user_organization:
-            raise exceptions.ValidationError("User must belong to an organization")
+        organization_id = self.team.organization_id
+        requested_teams = Team.objects.select_related("parent_team").filter(
+            id__in=target_team_ids, organization_id=organization_id
+        )
+        # Surveys are project-scoped, so an environment resolves to its project, as RootTeamMixin.save does.
+        # The checks below and bulk_create must see the project, because bulk_create skips that save.
+        target_teams = list({team.id: team for team in (t.parent_team or t for t in requested_teams)}.values())
+        # for_team_ids loads the teams again, so a team deleted between the two queries is missing from its result
+        target_access_controls = self.user_access_control.for_team_ids(team.id for team in target_teams)
 
-        target_teams = Team.objects.filter(id__in=target_team_ids, organization_id=user_organization.id)
-
-        if len(target_teams) != len(target_team_ids):
+        if len(requested_teams) != len(target_team_ids) or len(target_access_controls) != len(target_teams):
             raise exceptions.ValidationError("One or more target teams not found or you don't have access to them")
+
+        for target_team in target_teams:
+            self._check_duplicate_target_access(request, target_team, target_access_controls[target_team.id])
 
         duplicate_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         created_surveys = []
@@ -3172,8 +3567,11 @@ class SurveyViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixin, viewsets.
                         "name": f"{source_survey.name} (duplicated at {duplicate_timestamp})",
                         "description": source_survey.description,
                         "type": source_survey.type,
+                        # Per-question translations are stripped here and restored verbatim after
+                        # validation (see below), for the same reason as the survey-level translations.
                         "questions": [
-                            {k: v for k, v in q.items() if k != "id"} for q in (source_survey.questions or [])
+                            {k: v for k, v in q.items() if k not in ("id", "translations")}
+                            for q in (source_survey.questions or [])
                         ],
                         "appearance": source_survey.appearance,
                         "conditions": cleaned_conditions,
@@ -3206,8 +3604,23 @@ class SurveyViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixin, viewsets.
                     new_survey = Survey(
                         team=team,
                         created_by=user,
+                        # Copied outside the serializer so a duplicate is never stricter than its source:
+                        # these values are already sanitized, and surveys with grandfathered language keys
+                        # (which only validate against an existing instance) would otherwise fail to copy.
+                        base_language=source_survey.base_language,
+                        translations=source_survey.translations,
                         **serializer.validated_data,
                     )
+
+                    # Restore per-question translations verbatim. The create serializer grandfathers legacy
+                    # language keys only against an existing instance, so re-validating them here would 400
+                    # a copy the source already saved. Order matches: validate_questions keeps input order.
+                    source_questions = source_survey.questions or []
+                    for index, question in enumerate(new_survey.questions or []):
+                        source_translations = source_questions[index].get("translations")
+                        if source_translations is not None:
+                            question["translations"] = source_translations
+
                     surveys_to_create.append(new_survey)
 
                 for survey in surveys_to_create:
@@ -3227,7 +3640,7 @@ class SurveyViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixin, viewsets.
                     )
 
                     log_activity(
-                        organization_id=user_organization.id,
+                        organization_id=organization_id,
                         team_id=created_survey.team_id,
                         user=user,
                         was_impersonated=is_impersonated(request),
@@ -3292,14 +3705,17 @@ class SurveyViewSet(TeamAndOrgViewSetMixin, AccessControlViewSetMixin, viewsets.
         )
 
 
-class SurveyConfigSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Team
-        fields = ["survey_config"]
+class _SurveyAPIActionStepSerializer(ActionStepJSONSerializer):
+    # This payload is cached and downloaded by every SDK client, so it carries only what
+    # a client needs in order to match. selector_warning is guidance for the Actions editor.
+    def get_fields(self):
+        fields = super().get_fields()
+        fields.pop("selector_warning", None)
+        return fields
 
 
 class SurveyAPIActionSerializer(serializers.ModelSerializer):
-    steps = ActionStepJSONSerializer(many=True, required=False)
+    steps = _SurveyAPIActionStepSerializer(many=True, required=False)
 
     class Meta:
         model = Action
@@ -3356,7 +3772,7 @@ def get_survey_api_translations(
             continue
 
         safe_translation = {
-            field: value
+            field: _sanitize_survey_html(value)
             for field, value in translation.items()
             if field in SURVEY_API_TRANSLATION_FIELDS and isinstance(value, str)
         }
@@ -3376,7 +3792,6 @@ class SurveyAPISerializer(serializers.ModelSerializer):
     internal_targeting_flag_key = serializers.CharField(source="internal_targeting_flag.key", read_only=True)
     conditions = serializers.SerializerMethodField(method_name="get_conditions")
     enable_partial_responses = serializers.BooleanField(read_only=True)
-    base_language = serializers.CharField(read_only=True)
     questions = serializers.SerializerMethodField(method_name="get_questions")
     translations = serializers.SerializerMethodField(method_name="get_translations")
 
@@ -3403,7 +3818,6 @@ class SurveyAPISerializer(serializers.ModelSerializer):
             "current_iteration_start_date",
             "schedule",
             "enable_partial_responses",
-            "base_language",
             "translations",
         ]
         read_only_fields = fields
@@ -3422,7 +3836,7 @@ class SurveyAPISerializer(serializers.ModelSerializer):
 
     @extend_schema_field(serializers.ListField(child=serializers.DictField(), allow_null=True))
     def get_questions(self, survey: Survey) -> list[dict[str, Any]] | None:
-        """Return questions with question-level translation keys filtered to what the SDK can match."""
+        """Return only question fields used by SDKs, with translation keys normalized."""
         questions = survey.questions
         if not isinstance(questions, list):
             return questions
@@ -3434,21 +3848,23 @@ class SurveyAPISerializer(serializers.ModelSerializer):
             if not isinstance(question, dict):
                 cleaned.append(question)
                 continue
-            inline_translations = question.get("translations")
-            if not isinstance(inline_translations, dict):
-                cleaned.append(question)
-                continue
-            filtered = _strip_invalid_translation_keys(inline_translations, normalized_base)
             next_question = dict(question)
-            if filtered:
-                next_question["translations"] = filtered
-            else:
-                next_question.pop("translations", None)
-            cleaned.append(next_question)
+            next_question.pop("isNpsQuestion", None)
+            inline_translations = question.get("translations")
+            if isinstance(inline_translations, dict):
+                filtered = _strip_invalid_translation_keys(inline_translations, normalized_base)
+                if filtered:
+                    next_question["translations"] = filtered
+                else:
+                    next_question.pop("translations", None)
+            cleaned.append(sanitize_survey_question(next_question))
         return cleaned
 
     def to_representation(self, instance: Survey) -> dict[str, Any]:
         data = super().to_representation(instance)
+        appearance = data.get("appearance")
+        if isinstance(appearance, dict):
+            data["appearance"] = sanitize_survey_appearance(normalize_survey_appearance(appearance))
         if data.get("translations") is None:
             data.pop("translations", None)
         return data
@@ -3470,24 +3886,30 @@ def get_surveys_count(team: Team) -> int:
     )
 
 
-def get_surveys_response(team: Team):
+def get_surveys_response(team: Team) -> dict[str, Any]:
+    # Every SDK discards surveys that aren't running before evaluating eligibility, so drafts and
+    # stopped surveys are payload every client downloads and throws away. The nullness check mirrors
+    # the SDKs' own `isSurveyRunning`; keeping it time-independent matters because this response is
+    # cached and only rebuilt when a survey is saved, so a comparison against `now` would go stale.
     surveys = SurveyAPISerializer(
         Survey.objects.db_manager(READ_DB_FOR_SURVEYS)
         .filter(team__project_id=team.project_id)
         .exclude(archived=True)
+        .filter(start_date__isnull=False, end_date__isnull=True)
+        # External surveys are their own hosted page, rendered server-side from the database by id.
+        # No SDK can display one: the web SDK renders only in-app types, and the mobile SDKs have no
+        # external_survey case in their type enums at all.
+        .exclude(type=Survey.SurveyType.EXTERNAL_SURVEY)
         .select_related("linked_flag", "targeting_flag", "internal_targeting_flag")
-        .prefetch_related("actions"),
+        .prefetch_related("actions")
+        # SDKs display one popover at a time and break appearance-delay ties by payload
+        # order, so this ordering decides which of two colliding surveys a user sees.
+        # Launch order (oldest first) keeps that winner deterministic across cache rebuilds.
+        .order_by("start_date", "created_at", "id"),
         many=True,
     ).data
 
-    serialized_survey_config: dict[str, Any] = {}
-    if team.survey_config is not None:
-        serialized_survey_config = SurveyConfigSerializer(team).data
-
-    return {
-        "surveys": surveys,
-        "survey_config": serialized_survey_config.get("survey_config", None),
-    }
+    return {"surveys": surveys}
 
 
 def _survey_page_site_url() -> str:
@@ -3502,6 +3924,34 @@ def _survey_page_site_url() -> str:
     if hostname in (None, "localhost", "127.0.0.1", "::1"):
         return ""
     return settings.SITE_URL
+
+
+def _public_survey_csp(request: HttpRequest) -> str:
+    nonce = getattr(request, "csp_nonce", "")
+    script_sources = ["'self'", f"'nonce-{nonce}'", "'strict-dynamic'"]
+    if settings.DEBUG or settings.TEST:
+        script_sources.append("http://localhost:8234")
+    elif settings.SITE_URL.endswith(".dev.posthog.dev"):
+        script_sources.append("https://*.dev.posthog.dev")
+    else:
+        script_sources.extend(["https://*.posthog.com", "https://*.i.posthog.com"])
+
+    return "; ".join(
+        [
+            "sandbox allow-scripts allow-forms allow-popups",
+            f"script-src {' '.join(script_sources)}",
+            "script-src-attr 'none'",
+            "object-src 'none'",
+            "base-uri 'none'",
+        ]
+    )
+
+
+def _isolate_public_survey_response(request: HttpRequest, response: HttpResponse) -> HttpResponse:
+    # This must omit allow-same-origin because hosted survey content shares a host with authenticated app sessions.
+    response["Content-Security-Policy"] = _public_survey_csp(request)
+    response["Referrer-Policy"] = "no-referrer"
+    return response
 
 
 def _survey_error_response(
@@ -3519,17 +3969,35 @@ def _survey_error_response(
     }
     if appearance is not None:
         context["appearance"] = appearance
-    return render(request, "surveys/error.html", context, status=status)
+    return _isolate_public_survey_response(request, render(request, "surveys/error.html", context, status=status))
+
+
+def _survey_not_available_response(request: HttpRequest) -> HttpResponse:
+    # Use generic error message to prevent survey ID enumeration
+    return _survey_error_response(
+        request,
+        error_title="Survey not available",
+        error_message="The requested survey is not available.",
+        status=404,
+    )
+
+
+def _is_another_organizations_proxy_domain(request: HttpRequest, survey: Survey) -> bool:
+    # get_host() prefers X-Forwarded-Host, which a client can set. The managed proxy keeps the visitor's Host header.
+    domain, _ = split_domain_port(request.META.get("HTTP_HOST", ""))
+    return (
+        ProxyRecord.objects.filter(domain__iexact=domain).exclude(organization_id=survey.team.organization_id).exists()
+    )
 
 
 @csrf_exempt
 @axes_dispatch
-def public_survey_page(request, survey_id: str):
+def public_survey_page(request: HttpRequest, survey_id: str) -> HttpResponse:
     """
     Server-side rendered public survey page with security and performance optimizations
     """
     if request.method == "OPTIONS":
-        return cors_response(request, HttpResponse(""))
+        return _isolate_public_survey_response(request, cors_response(request, HttpResponse("")))
 
     # Input validation
     if not UUIDT.is_valid_uuid(survey_id):
@@ -3545,15 +4013,10 @@ def public_survey_page(request, survey_id: str):
     try:
         # nosemgrep: idor-lookup-without-team (public survey page, intentionally unauthenticated)
         survey = Survey.objects.select_related("team").get(id=survey_id)
+        is_another_organizations_proxy_domain = _is_another_organizations_proxy_domain(request, survey)
     except Survey.DoesNotExist:
         logger.info("survey_page_not_found", survey_id=survey_id)
-        # Use generic error message to prevent survey ID enumeration
-        return _survey_error_response(
-            request,
-            error_title="Survey not available",
-            error_message="The requested survey is not available.",
-            status=404,
-        )
+        return _survey_not_available_response(request)
     except Exception as e:
         logger.exception("survey_page_db_error", error=str(e), survey_id=survey_id)
         capture_exception(e)
@@ -3563,6 +4026,10 @@ def public_survey_page(request, survey_id: str):
             error_message="The service is temporarily unavailable. Please try again later.",
             status=503,
         )
+
+    if is_another_organizations_proxy_domain:
+        logger.info("survey_page_foreign_proxy_domain", survey_id=survey_id, host=request.META.get("HTTP_HOST"))
+        return _survey_not_available_response(request)
 
     survey_is_running = (
         survey.start_date is not None and survey.start_date <= datetime.now(UTC) and survey.end_date is None
@@ -3588,7 +4055,6 @@ def public_survey_page(request, survey_id: str):
 
     # Build project config
     project_config = {
-        "api_host": request.build_absolute_uri("/").rstrip("/"),
         "token": survey.team.api_token,
     }
 
@@ -3621,7 +4087,7 @@ def public_survey_page(request, survey_id: str):
     response["Cache-Control"] = f"public, max-age={CACHE_TIMEOUT_SECONDS}"
     response["Vary"] = "Accept-Encoding"  # Enable compression caching
 
-    return response
+    return _isolate_public_survey_response(request, response)
 
 
 @contextmanager

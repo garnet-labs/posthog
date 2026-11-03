@@ -3,6 +3,8 @@
 import dataclasses
 from typing import Any
 
+from posthog.dataclasses import frozen
+
 
 @dataclasses.dataclass
 class ScheduleAllEvalReportsWorkflowInputs:
@@ -51,7 +53,7 @@ class PrepareReportContextInput:
     manual: bool = False
 
 
-@dataclasses.dataclass
+@frozen
 class PrepareReportContextOutput:
     report_id: str
     team_id: int
@@ -65,9 +67,11 @@ class PrepareReportContextOutput:
     previous_period_start: str
     report_prompt_guidance: str = ""
     output_type: str = "boolean"
+    true_is_failure: bool = False
+    output_config: dict[str, Any] = dataclasses.field(default_factory=dict)
 
 
-@dataclasses.dataclass
+@frozen
 class RunEvalReportAgentInput:
     report_id: str
     team_id: int
@@ -81,6 +85,10 @@ class RunEvalReportAgentInput:
     previous_period_start: str
     report_prompt_guidance: str = ""
     output_type: str = "boolean"
+    true_is_failure: bool = False
+    output_config: dict[str, Any] = dataclasses.field(default_factory=dict)
+    trace_id: str = ""
+    session_id: str = ""
 
 
 @dataclasses.dataclass
@@ -95,6 +103,7 @@ class RunEvalReportAgentOutput:
     content: dict[str, Any]
     period_start: str
     period_end: str
+    generation_status: str = "completed"
 
 
 @dataclasses.dataclass
@@ -122,6 +131,9 @@ class DeliverReportInput:
 class UpdateNextDeliveryDateInput:
     report_id: str
     period_end: str
+    generation_status: str = "completed"
+    record_attempt: bool = True
+    advance_data_cursor: bool | None = None
 
 
 @dataclasses.dataclass

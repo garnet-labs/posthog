@@ -15,11 +15,25 @@ cross the boundary through sibling facade submodules (``sandbox``, ``warm``,
 their data results.
 """
 
-from datetime import datetime
+from datetime import date, datetime
+from enum import StrEnum
+from typing import Literal
 from uuid import UUID
 
 from pydantic import Field
 from pydantic.dataclasses import dataclass
+
+from posthog.enums import LabeledStrEnum
+
+# Re-exported: the exception is defined in an import-light module so ``storage.py`` can raise it
+# without dragging this module onto the ``django.setup()`` path.
+from products.tasks.backend.storage_errors import TaskRunLogAppendUnserialized as TaskRunLogAppendUnserialized
+
+
+# Each label repeats its value, because the API documents these choices as plain values.
+class DesktopAccessReason(LabeledStrEnum):
+    STARTUP_PLAN = "startup_plan", "startup_plan"
+    PREPAID_CREDITS = "prepaid_credits", "prepaid_credits"
 
 
 @dataclass(frozen=True)
@@ -41,6 +55,100 @@ class TaskDTO:
     slug: str = ""
 
 
+@dataclass(frozen=True, kw_only=True)
+class TaskAccessScope:
+    """Task IDs a user can or cannot access through channel visibility rules."""
+
+    user_id: int
+    has_resource_access: bool
+    allowed_ids: frozenset[str]
+    blocked_ids: frozenset[str]
+
+
+@dataclass(frozen=True, kw_only=True)
+class AgentTaskRunDTO:
+    """Identity and workflow handle for a newly dispatched agent task."""
+
+    task_id: UUID
+    run_id: UUID
+    team_id: int
+    workflow_id: str
+
+
+@dataclass(frozen=True, kw_only=True)
+class AgentStartupFailure:
+    provider: Literal["claude", "codex", "pi"]
+    phase: Literal["session_setup", "sdk_initialization", "setup_hooks"]
+    reason: (
+        Literal[
+            "credential_unavailable",
+            "credential_service_unavailable",
+            "org_pin_api_key_conflict",
+            "org_verify_failed",
+            "org_pin_mismatch",
+            "managed_settings_invalid",
+            "remote_settings_required_unavailable",
+            "gateway_signin_required",
+            "gateway_access_denied",
+            "proxy_invalid",
+            "temp_dir_unusable",
+            "cwd_unavailable",
+            "shell_tool_missing",
+            "session_held_by_background",
+            "worktree_resume_refused",
+            "worktree_unverified",
+            "cli_version_too_old",
+            "bypass_root",
+            "sandbox_required_unavailable",
+            "provider_not_allowed",
+            "org_config_required_unavailable",
+            "org_config_refused",
+        ]
+        | None
+    )
+    retryability: Literal["requires_action", "transient", "unknown"]
+
+
+@dataclass(frozen=True, kw_only=True)
+class SessionFile:
+    """A text file a custom-prompt session puts in the sandbox before its first turn.
+
+    The agent server writes it under the run's attachments directory and lists its path in the
+    first prompt, so the agent and any sub-agent it starts can read it from disk.
+    """
+
+    name: str
+    content: str
+
+
+@dataclass(frozen=True)
+class StreamNotificationDelivery:
+    """Where a server-originated stream notification landed.
+
+    ``live`` reached the run's Redis stream, so connected threads show the frame now. ``persisted``
+    reached the run's S3 log, so a thread loaded after the stream expires replays it too.
+    """
+
+    live: bool
+    persisted: bool
+
+
+@dataclass(frozen=True)
+class SignalImplementationRunDTO:
+    """Identity of a signals-origin ("self-driving") implementation run that produced a PR.
+
+    Returned by ``find_signal_implementation_run``. Consumers (stamphog's inbox carve-out) use it
+    to confirm a bot-authored PR is a PostHog Code self-driving implementation and to find whose
+    review preferences apply.
+    """
+
+    run_id: UUID
+    task_id: UUID
+    team_id: int
+    signal_report_id: UUID
+    task_created_by_id: int | None = None
+
+
 @dataclass(frozen=True)
 class WizardCloudRunDTO:
     """A team's active onboarding wizard cloud run.
@@ -54,6 +162,33 @@ class WizardCloudRunDTO:
     run_id: UUID
     status: str
     started_at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class TaskRunTokenUsage:
+    """Settled token subtotal in micro-USD and whether every request is accounted for."""
+
+    cost_microusd: int | None
+    complete: bool
+
+
+@dataclass(frozen=True, kw_only=True)
+class TaskRunSpend:
+    created_at: datetime
+    run_id: UUID
+    task_id: UUID
+    cost_microusd: int | None
+    complete: bool
+    is_terminal: bool
+    stage: str
+
+
+@dataclass(frozen=True)
+class TaskRunCost:
+    """Provider costs in integer USD cents, or None while a source is unavailable or incomplete."""
+
+    token_cost: int | None
+    compute_cost: int | None
 
 
 @dataclass(frozen=True)
@@ -90,6 +225,15 @@ class TaskRunDTO:
 
 
 @dataclass(frozen=True)
+class InProgressGithubRunsDTO:
+    """In-progress runs that block disconnecting a team GitHub integration."""
+
+    count: int
+    oldest_task_id: UUID | None = None
+    oldest_task_title: str | None = None
+
+
+@dataclass(frozen=True)
 class WizardPrReadyEmailContextDTO:
     """Everything ``send_wizard_pr_ready_email`` needs to read off a task run's PR-ready state."""
 
@@ -115,6 +259,40 @@ class WarmRunDTO:
 
 
 @dataclass(frozen=True)
+class SlackThreadReferenceDTO:
+    """A passive link from a task to a public Slack discussion."""
+
+    url: str
+    channel: str
+    created_at: str | None = None
+
+
+@dataclass(frozen=True)
+class TaskSlackUnfurlDTO:
+    """The task metadata needed to build a Slack unfurl."""
+
+    id: UUID
+    title: str
+    created_by_id: int | None
+    latest_run_status: str | None
+
+
+@dataclass(frozen=True)
+class TaskArtifactSlackUnfurlDTO:
+    """The task run artifact metadata needed to build a Slack unfurl."""
+
+    name: str
+    content_type: str
+    size: int | None
+    uploaded_at: datetime | None
+    task_id: UUID
+    task_title: str
+    run_id: UUID
+    artifact_id: str
+    download_path: str
+
+
+@dataclass(frozen=True)
 class TaskDetailDTO:
     """The HTTP detail representation of a task.
 
@@ -124,7 +302,8 @@ class TaskDetailDTO:
     ``None``). ``latest_run`` is the most-recent run as a ``TaskRunDetailDTO`` (or ``None``).
     ``latest_run_id`` carries just that run's id for the conversation envelope, which needs the id
     to reconnect to sandbox logs but not the full (presigned-log) run payload. ``created_by``
-    mirrors core ``UserBasicSerializer`` output.
+    mirrors core ``UserBasicSerializer`` output. ``last_activity_at`` is when something last
+    happened in the task, as opposed to ``updated_at``, which is when the row was last written.
     """
 
     id: UUID
@@ -136,6 +315,7 @@ class TaskDetailDTO:
     origin_product: str
     runtime: str
     repository: str | None
+    repositories: list[str]
     github_integration: int | None
     github_user_integration: UUID | None
     signal_report: UUID | None
@@ -147,9 +327,31 @@ class TaskDetailDTO:
     latest_run: "TaskRunDetailDTO | None" = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    last_activity_at: datetime | None = None
     created_by: "TaskUserBasicInfo | None" = None
     latest_run_id: UUID | None = None
     channel: UUID | None = None
+    slack_thread_references: list[SlackThreadReferenceDTO] = Field(default_factory=list)
+    origin_key: str | None = None
+    client_provenance: str | None = None
+
+
+@dataclass(frozen=True)
+class TaskCreateResponseDTO(TaskDetailDTO):
+    run_error: str | None = None
+
+
+@dataclass(frozen=True)
+class TaskRunResponseDTO(TaskCreateResponseDTO):
+    """The task ``run`` action's response: the refreshed task detail plus the run this call made.
+
+    ``run`` is the run the call created or activated — the payload a caller reads run-scoped ids
+    from, instead of inferring them from ``latest_run`` (or, worse, the top-level task ``id``).
+    Set on every 200; when ``run_error`` is also set, the run exists but its workflow did not
+    start.
+    """
+
+    run: "TaskRunDetailDTO | None" = None
 
 
 @dataclass(frozen=True)
@@ -159,7 +361,41 @@ class ChannelDTO:
     id: UUID
     name: str
     channel_type: str
+    github_integration: int | None
+    repositories: list[str]
+    auto_archive_after_days: int | None
     created_at: datetime
+    created_by: "TaskUserBasicInfo | None" = None
+    starred: bool = False
+    system_role: str | None = None
+
+
+@dataclass(frozen=True)
+class ChannelContributorsDTO:
+    """The people who own at least one task or canvas in a channel, most recently active first."""
+
+    channel: UUID
+    people: list["TaskUserBasicInfo"]
+
+
+@dataclass(frozen=True)
+class ProvisionedChannelsDTO:
+    channels: list[ChannelDTO]
+    personal_created: bool
+    general_created: bool
+
+
+@dataclass(frozen=True)
+class ChannelInstructionsDTO:
+    """The HTTP representation of a channel's CONTEXT.md instructions version.
+
+    A channel that has never had instructions published reads as a blank
+    version 0 — publish against ``base_version: 0`` to create version 1."""
+
+    channel: UUID
+    content: str
+    version: int
+    created_at: datetime | None = None
     created_by: "TaskUserBasicInfo | None" = None
 
 
@@ -210,17 +446,15 @@ class TaskMentionDTO:
 
 @dataclass(frozen=True)
 class TaskActivityDTO:
-    """One task the requesting user is involved in, for the task-centric activity feed.
+    """One entry in the requesting user's task-centric activity feed.
 
-    Unlike ``TaskMentionDTO`` (one row per mention message), this is one row per task,
-    surfacing the most recent relevant activity. ``activity_kind`` classifies the winning
-    signal so the client can pick row copy; ``snippet``/``latest_author``/``latest_message_id``
-    describe the thread message tied to ``activity_at`` (empty/None when the winning signal is
-    task creation, which has no message).
+    Lifecycle signals collapse to one row per task, while comment notifications remain
+    separate entries. Source fields describe the message or comment tied
+    to ``activity_at`` and stay empty for task creation.
     """
 
     id: UUID
-    task_id: UUID
+    task_id: UUID | None
     task_title: str
     channel_id: UUID | None
     channel_name: str | None
@@ -229,6 +463,9 @@ class TaskActivityDTO:
     snippet: str
     latest_author: "TaskUserBasicInfo | None" = None
     latest_message_id: UUID | None = None
+    latest_comment_id: UUID | None = None
+    latest_comment_scope: str | None = None
+    latest_comment_item_id: str | None = None
     is_unread: bool = True
 
 
@@ -241,11 +478,80 @@ class TaskActivityPageDTO:
 
 
 @dataclass(frozen=True)
-class TaskLatestRunSummaryDTO:
-    """The latest-run status/environment pair nested in a task summary response."""
+class TaskArtifactDTO:
+    id: str
+    type: str
+    name: str
 
+
+@dataclass(frozen=True)
+class TaskRunInputFile:
+    """An existing server-owned object attached before a task run starts."""
+
+    id: str
+    name: str
+    storage_path: str
+    size_bytes: int
+    content_type: str
+
+
+@dataclass(frozen=True)
+class TaskCommentTargetDTO:
+    id: str
+    type: str
+    name: str
+
+
+@dataclass(frozen=True)
+class TaskCommentSummaryDTO:
+    id: UUID
+    target: TaskCommentTargetDTO
+    content: str
+    content_truncated: bool
+    selected_text: str | None
+    created_at: datetime
+    reply_count: int
+    resolved: bool
+
+
+@dataclass(frozen=True)
+class TaskCommentPageDTO:
+    comments: list[TaskCommentSummaryDTO]
+    next: str | None
+
+
+@dataclass(frozen=True)
+class TaskCommentEntryDTO:
+    id: UUID
+    content: str
+    content_truncated: bool
+    content_next_offset: int | None
+    author: str | None
+    created_at: datetime
+    anchor: dict | None
+    canvas_version_id: str | None
+
+
+@dataclass(frozen=True)
+class TaskCommentDetailDTO:
+    id: UUID
+    target: TaskCommentTargetDTO
+    resolved: bool
+    comments: list[TaskCommentEntryDTO]
+    next: str | None
+
+
+@dataclass(frozen=True)
+class TaskLatestRunSummaryDTO:
+    """The latest-run state nested in a task summary response."""
+
+    id: UUID
     status: str | None
     environment: str | None
+    mode: Literal["interactive", "background"]
+    pr_url: str | None = None
+    pr_state: str | None = None
+    task_summary: str | None = None
 
 
 @dataclass(frozen=True)
@@ -253,16 +559,21 @@ class TaskSummaryDTO:
     """The HTTP summary representation of a task.
 
     Mirrors exactly the fields ``TaskSummarySerializer`` emits. ``latest_run`` carries the
-    most-recent run's ``status`` and ``environment`` (or ``None`` when the task has no runs).
+    most-recent run's status, environment, mode and pull request (or ``None`` when the task has no runs).
     """
 
     id: UUID
     title: str
     repository: str | None
+    created_by_id: int | None
     created_at: datetime
     updated_at: datetime
     origin_product: str = ""
     latest_run: TaskLatestRunSummaryDTO | None = None
+
+
+class TaskAnalysisError(Exception):
+    """A task analysis could not be created or recorded; ``message`` is safe to surface."""
 
 
 @dataclass(frozen=True)
@@ -289,10 +600,14 @@ class TaskRunResult:
 
     Exactly one of ``task`` / ``error`` is set. ``task`` is the refreshed task detail DTO with
     its new latest run; ``error`` carries the structured error the original view returned inline.
+    ``run_id`` names the run this call created or activated, so the view does not have to infer
+    it from ``task.latest_run`` (which a concurrent run creation can race past).
     """
 
     task: "TaskDetailDTO | None" = None
     error: TaskValidationError | None = None
+    run_error: str | None = None
+    run_id: UUID | None = None
 
 
 @dataclass(frozen=True)
@@ -358,6 +673,7 @@ class SlackThreadContextRunDTO:
     mention_workflow_url: str | None
     task_view_url: str
     log_url: str | None
+    admin_url: str
     repo_research: SlackThreadContextRepoResearchDTO | None = None
 
 
@@ -370,6 +686,10 @@ class SlackThreadContextThreadDTO:
     thread_ts: str
     slack_workspace_id: str | None
     mentioning_slack_user_id: str | None
+    queue_workflow_id: str | None
+    queue_workflow_url: str | None
+    # Null on the no-mapping path, where there is no row to link.
+    mapping_admin_url: str | None = None
 
 
 @dataclass(frozen=True)
@@ -383,6 +703,7 @@ class SlackThreadContextTaskDTO:
     origin_product: str
     created_at: datetime | None
     url: str
+    admin_url: str
 
 
 @dataclass(frozen=True)
@@ -435,11 +756,15 @@ class TaskRunDetailDTO:
     log_url: str | None
     error_message: str | None
     output: dict | None
+    task_summary: str | None
     state: dict
     artifacts: list = Field(default_factory=list)
+    task_tags: list[str] = Field(default_factory=list)
     created_at: datetime | None = None
     updated_at: datetime | None = None
     completed_at: datetime | None = None
+    preview_available: bool = False
+    scheduled_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -470,16 +795,42 @@ class TaskRunCreateResult:
 
 
 @dataclass(frozen=True)
+class TaskRunLogSliceDTO:
+    """Part of a run's conversation log.
+
+    ``content`` is JSONL. ``offset`` is the index in the full log of the first entry after the
+    ``preamble`` entries, ``count`` is the number of entries in the full log, and ``turns_before`` is the
+    number of user turns that start before ``offset``. ``origin`` is the id of the first run in the chain: the
+    chain keeps a limited number of runs, so indexes hold only while the origin stays the same. ``sliced`` is
+    false when the run's log cannot be read in parts, so ``content`` is the full log and the other fields carry
+    no index.
+    """
+
+    content: str
+    offset: int
+    count: int
+    preamble: int = 0
+    turns_before: int = 0
+    origin: str = ""
+    sliced: bool = True
+
+
+@dataclass(frozen=True)
 class TaskRunStreamInfoDTO:
     """The minimal run facts the SSE stream view needs without holding a model.
 
-    ``id`` keys the Redis stream, ``state`` decides dedicated-stream routing, and
-    ``origin_product`` is the bounded metric label resolved off the parent task.
+    ``id`` keys the Redis stream, ``state`` decides dedicated-stream routing,
+    ``origin_product`` is the bounded metric label resolved off the parent task, and
+    ``is_terminal`` lets the view end immediately when the stream key is already gone.
+    ``state_event`` is the run's current ``task_run_state`` frame, emitted before that
+    immediate end so a client that never received any state still settles the run.
     """
 
     id: UUID
     state: dict
     origin_product: str
+    is_terminal: bool
+    state_event: dict
 
 
 @dataclass(frozen=True)
@@ -488,11 +839,86 @@ class TaskRunSandboxConnectionDTO:
 
     Carries the sandbox URL and connect token parsed off the run state plus a freshly-minted
     connection token. ``sandbox_url`` is ``None`` when the run has no active sandbox.
+    ``run_is_terminal`` disambiguates that case: a terminal run's sandbox is cleaned up and
+    never comes back, while a non-terminal run's sandbox may simply not be reachable yet.
     """
 
     sandbox_url: str | None
     sandbox_connect_token: str | None
     connection_token: str | None = None
+    # Query-param name the transport token travels under (provider-specific).
+    sandbox_token_param: str = "_modal_connect_token"
+    run_is_terminal: bool = False
+
+
+SPACE_SETUP_SCOPES = (
+    "task:write",
+    "canvas:write",
+    "hog_flow:write",
+    # workflows-schedule-create and workflows-test-run require these beside hog_flow:write.
+    "person:read",
+    "group:read",
+    "integration:read",
+    # The MCP server reads the caller from `/api/users/@me/` and refuses the whole session without it.
+    "user:read",
+    "query:read",
+    "action:read",
+    "data_catalog:read",
+    "insight:read",
+    "dashboard:read",
+    "feature_flag:read",
+    "experiment:read",
+    "error_tracking:read",
+    "session_recording:read",
+    "event_definition:read",
+    "property_definition:read",
+    "project:read",
+    "organization:read",
+    "survey:read",
+)
+
+
+class SpaceSetupInProgressError(Exception):
+    pass
+
+
+@dataclass(frozen=True)
+class SpaceGoalRequest:
+    """The metric a goal space is set up to move."""
+
+    statement: str
+    period: Literal["day", "week", "month"] = "week"
+    direction: Literal["at_least", "at_most"] = "at_least"
+    target: str | None = None
+    deadline: date | None = None
+    insight_short_id: str | None = None
+
+
+@dataclass(frozen=True)
+class SpaceFeatureRequest:
+    """The feature a feature space is set up around."""
+
+    name: str
+    description: str = ""
+    flag_key: str | None = None
+
+
+@dataclass(frozen=True)
+class SpaceSetupRequest:
+    """What the space setup task should set the space up for. Exactly one of ``goal`` and
+    ``feature`` is set, matching ``kind``."""
+
+    kind: Literal["goal", "feature"]
+    goal: SpaceGoalRequest | None = None
+    feature: SpaceFeatureRequest | None = None
+    repository: str | None = None
+
+
+@dataclass(frozen=True)
+class SpaceSetupStartedDTO:
+    """The setup task that now owns the channel's context generation marker."""
+
+    task_id: UUID
 
 
 @dataclass(frozen=True)
@@ -510,46 +936,66 @@ class CreatedTaskDTO:
 
 
 @dataclass(frozen=True)
-class CodeInviteRedeemResult:
-    """Outcome of attempting to redeem a PostHog Desktop invite.
+class WorkflowLastRunDTO:
+    """The newest task a workflow created, as its last run.
 
-    ``outcome`` is one of ``redeemed`` (or ``already_redeemed``), ``invalid_code``, or
-    ``not_redeemable``. The presentation layer maps it to the success/error HTTP response;
-    the ORM redemption, idempotency check, count increment, and analytics capture all
-    happen inside the facade so no model leaks across the boundary.
+    ``status`` is the task's newest run status, or ``not_started`` when the task has no run yet.
+    ``ran_at`` is when that run started, or when the task was made if it has no run.
     """
 
-    outcome: str
+    hog_flow_id: UUID
+    task_id: UUID
+    status: str
+    ran_at: datetime
 
 
 @dataclass(frozen=True)
-class TaskAutomationDTO:
-    """A scheduled task automation.
+class WorkflowTaskDTO:
+    """Outcome of a workflow's "Create AI task" action.
 
-    Mirrors exactly the fields ``TaskAutomationSerializer`` emits. Most read fields are
-    proxied off the underlying ``Task`` (``name``/``prompt``/``repository``/
-    ``github_integration``) or derived from the linked last run (``last_run_at``/
-    ``last_run_status``). ``github_integration`` is the integration's primary key (or
-    ``None``). ``last_task_id`` is always present (the automation's task id as a string);
-    ``last_task_run_id`` is the most recent run's id as a string, or ``None``.
+    ``created`` is False when the request replayed an already-used idempotency key and the
+    ids belong to the previously created task. ``run_id`` is ``None`` only for a replayed
+    task whose run has since been deleted.
     """
 
-    id: UUID
-    name: str
-    prompt: str
-    repository: str | None
-    github_integration: int | None
-    cron_expression: str
-    timezone: str
-    template_id: str | None
-    enabled: bool
-    last_run_at: datetime | None
-    last_run_status: str | None
-    last_task_id: str
-    last_task_run_id: str | None
-    last_error: str | None
-    created_at: datetime
-    updated_at: datetime
+    task_id: UUID
+    run_id: UUID | None
+    created: bool
+
+
+@dataclass(frozen=True, kw_only=True)
+class WorkflowTaskRateLimits:
+    """Optional per-project overrides for workflow-created AI task daily limits."""
+
+    per_workflow: int | None = Field(default=None, ge=0)
+    per_team: int | None = Field(default=None, ge=0)
+
+
+@dataclass(frozen=True, kw_only=True)
+class WorkflowTaskSlackContext:
+    """The Slack thread whose message triggered the workflow run, so the task reports back there.
+
+    ``integration_id`` is the PostHog integration pk stamped on the trigger event;
+    ``slack_team_id`` is the Slack workspace id, kept as a fallback for re-resolving the
+    integration when the stamped pk is stale. ``slack_user_id`` is empty when a bot
+    posted the triggering message. ``message_ts`` is the triggering message itself,
+    which differs from ``thread_ts`` when a reply started the run.
+    ``is_ext_shared_channel`` comes from the Slack event envelope and decides whether the
+    channel needs an approval on file before a task may reply in it.
+    """
+
+    integration_id: int
+    channel: str
+    thread_ts: str
+    message_ts: str = ""
+    slack_user_id: str = ""
+    slack_team_id: str = ""
+    is_ext_shared_channel: bool = False
+
+
+@dataclass(frozen=True)
+class DesktopBetaTermsAcceptanceDTO:
+    is_desktop_beta_terms_accepted: bool
 
 
 @dataclass(frozen=True)
@@ -586,6 +1032,7 @@ class SandboxEnvironmentDTO:
     repositories: list[str] = Field(default_factory=list)
     effective_domains: list[str] = Field(default_factory=list)
     has_environment_variables: bool = False
+    environment_variable_keys: list[str] = Field(default_factory=list)
     created_by: TaskUserBasicInfo | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
@@ -662,3 +1109,60 @@ class TaskRunStateMetricsDTO:
     oldest_open_age_seconds: list[TaskRunGaugeRow] = Field(default_factory=list)
     created_recently: list[TaskRunGaugeRow] = Field(default_factory=list)
     terminal_recently: list[TaskRunGaugeRow] = Field(default_factory=list)
+
+
+class ComputeQuotaDenialReason(StrEnum):
+    """Why a compute request was refused. The value is the denial code the API returns."""
+
+    COMPUTE_QUOTA_EXHAUSTED = "posthog_code_billing_limit_exceeded"
+    ORGANIZATION_DEACTIVATED = "organization_deactivated"
+
+
+@dataclass(frozen=True, kw_only=True)
+class TaskPullRequest:
+    url: str
+    state: str
+
+
+@dataclass(frozen=True, kw_only=True)
+class LivingArtifactVersionContent:
+    name: str
+    content_type: str
+    content: bytes
+    script_sha256: str | None
+
+
+@dataclass(frozen=True, kw_only=True)
+class LivingArtifactVersionPreview:
+    name: str
+    content_type: str
+    script_sha256: str | None
+
+
+@dataclass(frozen=True, kw_only=True)
+class LivingArtifactVersionDownload:
+    url: str | None
+    error: Literal["not_found", "not_stored", "unavailable"] | None
+
+
+class SandboxRunStartDenial(StrEnum):
+    """Why a task sandbox cannot start a run."""
+
+    NO_ACTOR = "no_actor"
+    NESTED = "nested"
+
+
+@dataclass(frozen=True)
+class SandboxRunStarter:
+    """The task and run whose sandbox starts a run for the task's owner."""
+
+    parent_task_id: UUID
+    parent_run_id: UUID
+
+
+@dataclass(frozen=True, kw_only=True)
+class RunPlan:
+    """The user plan a run bills to in place of PostHog credits."""
+
+    plan_name: str
+    owner_user_id: int | None

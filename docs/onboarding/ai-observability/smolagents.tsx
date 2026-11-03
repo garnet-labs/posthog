@@ -1,6 +1,7 @@
 import { OnboardingComponentsContext, createInstallation } from 'scenes/onboarding/shared/OnboardingDocsContentWrapper'
 
 import { StepDefinition } from '../steps'
+import { getOtelRequestContextStep } from './_snippets/otel-request-context'
 
 export const getSmolagentsSteps = (ctx: OnboardingComponentsContext): StepDefinition[] => {
     const { CodeBlock, CalloutBox, Markdown, Blockquote, dedent, snippets } = ctx
@@ -17,7 +18,7 @@ export const getSmolagentsSteps = (ctx: OnboardingComponentsContext): StepDefini
                         <Markdown>
                             See the complete [Python
                             example](https://github.com/PostHog/posthog-python/tree/master/examples/example-ai-smolagents)
-                            on GitHub. If you're using the PostHog SDK wrapper instead of OpenTelemetry, see the [Python
+                            on GitHub. If you use the PostHog SDK wrapper instead of OpenTelemetry, see the [Python
                             wrapper
                             example](https://github.com/PostHog/posthog-python/tree/7223c52/examples/example-ai-smolagents).
                         </Markdown>
@@ -100,9 +101,10 @@ export const getSmolagentsSteps = (ctx: OnboardingComponentsContext): StepDefini
 
                     <Blockquote>
                         <Markdown>
-                            **Note:** If you want to capture LLM events anonymously, omit the `posthog.distinct_id`
-                            resource attribute. See our docs on [anonymous vs identified
-                            events](https://posthog.com/docs/data/anonymous-vs-identified-events) to learn more.
+                            **Note:** To capture LLM events anonymously, omit the `posthog.distinct_id` resource
+                            attribute and don't set a distinct ID in the PostHog context. See our docs on [anonymous vs
+                            identified events](https://posthog.com/docs/data/anonymous-vs-identified-events) to learn
+                            more.
                         </Markdown>
                     </Blockquote>
 
@@ -116,6 +118,7 @@ export const getSmolagentsSteps = (ctx: OnboardingComponentsContext): StepDefini
                 </>
             ),
         },
+        getOtelRequestContextStep(ctx, { languages: ['Python'] }),
     ]
 }
 

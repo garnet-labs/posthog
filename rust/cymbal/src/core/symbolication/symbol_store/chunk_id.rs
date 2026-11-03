@@ -16,7 +16,7 @@ use crate::{
     symbolication::symbol_store::BlobClient,
 };
 
-use super::{saving::SymbolSetRecord, Fetcher, Parser};
+use super::{saving::SymbolSetRecord, Fetcher, ParsePermit, Parser};
 
 pub struct ChunkIdFetcher<Parser> {
     pub inner: Parser,
@@ -141,7 +141,7 @@ where
             }
             SymbolSetLoadResult::MissingStoragePtr(set_ref) => {
                 // It's never valid to have no failure reason and no storage pointer - if we hit this case, just panic
-                error!("No storage pointer found for chunk id {}", set_ref);
+                error!(team_id, "No storage pointer found for chunk id {}", set_ref);
                 panic!("No storage pointer found for chunk id {set_ref}");
             }
             SymbolSetLoadResult::MissingBlob(mut record) => {
@@ -165,8 +165,8 @@ where
     type Set = P::Set;
     type Err = P::Err;
 
-    async fn parse(&self, data: Self::Source) -> Result<Self::Set, Self::Err> {
-        self.inner.parse(data).await
+    async fn parse(&self, data: Self::Source, permit: ParsePermit) -> Result<Self::Set, Self::Err> {
+        self.inner.parse(data, permit).await
     }
 }
 

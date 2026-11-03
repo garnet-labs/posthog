@@ -67,41 +67,30 @@
             }
         }
 
-        .PlayerSeekbar__segments {
+        .PlayerSeekbar__observation {
             position: absolute;
-            top: 0;
-            left: 0;
             z-index: 4;
-            width: 100%;
+            width: 3px;
             height: 100%;
-            overflow: hidden;
-            pointer-events: none;
-            border-radius: var(--bar-height);
+            margin-left: -1.5px;
+            cursor: pointer;
+            background-color: var(--color-accent);
+            border-radius: 2px;
+            opacity: 0.45;
+            transition:
+                opacity 150ms ease,
+                width 150ms ease,
+                margin-left 150ms ease;
 
-            .PlayerSeekbar__segment {
-                position: absolute;
-                height: 100%;
-                pointer-events: auto;
-                cursor: pointer;
-                border-radius: 2px;
-                opacity: 0.75;
-                transition: opacity 150ms ease;
+            &--flagged {
+                opacity: 0.85;
+            }
 
-                &:hover {
-                    opacity: 0.9;
-                }
-
-                &--success {
-                    background-color: var(--success);
-                }
-
-                &--failure {
-                    background-color: var(--danger);
-                }
-
-                &--unknown {
-                    background-color: var(--color-neutral-500);
-                }
+            &:hover,
+            &--hovered {
+                width: 5px;
+                margin-left: -2.5px;
+                opacity: 1;
             }
         }
 

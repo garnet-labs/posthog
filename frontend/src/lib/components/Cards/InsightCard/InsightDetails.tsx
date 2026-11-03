@@ -1,5 +1,6 @@
 import './InsightDetails.scss'
 
+import { deepEqual } from 'fast-equals'
 import { useValues } from 'kea'
 import React from 'react'
 
@@ -18,6 +19,7 @@ import {
 import { Lettermark, LettermarkColor, Tooltip } from '@posthog/lemon-ui'
 
 import { CodeSnippet, Language } from 'lib/components/CodeSnippet'
+import { compareFilterLabel } from 'lib/components/CompareFilter/compareFilterLabel'
 import { convertPropertiesToPropertyGroup } from 'lib/components/PropertyFilters/utils'
 import { SeriesLetter } from 'lib/components/SeriesGlyph'
 import { TaxonomicFilterGroupType } from 'lib/components/TaxonomicFilter/types'
@@ -28,33 +30,13 @@ import { Link } from 'lib/lemon-ui/Link'
 import { ProfilePicture } from 'lib/lemon-ui/ProfilePicture'
 import { dateFilterToText } from 'lib/utils/dateFilters'
 import { capitalizeFirstLetter } from 'lib/utils/strings'
-import { BreakdownTag } from 'scenes/insights/filters/BreakdownFilter/BreakdownTag'
+import { everyWarehouseSeriesReadsFlagCalls } from 'scenes/insights/filters/ActionFilter/flagCallsSeries'
 import { humanizePathsEventTypes, hasUnsupportedBreakdownForDataWarehouseTrends } from 'scenes/insights/utils'
-import { QUERY_TYPES_METADATA } from 'scenes/saved-insights/SavedInsights'
-import { MathCategory, apiValueToMathType, mathsLogic } from 'scenes/trends/mathsLogic'
+import { QUERY_TYPES_METADATA } from 'scenes/saved-insights/insightTypesMetadata'
 import { urls } from 'scenes/urls'
 
+import { getCompareFilter, getInterval } from '~/queries/schema/node-accessors'
 import {
-    AnyEntityNode,
-    BreakdownFilter,
-    FunnelsQuery,
-    HogQLQuery,
-    HogQLVariable,
-    InsightQueryNode,
-    LifecycleQuery,
-    Node,
-    NodeKind,
-    PathsQuery,
-    RetentionQuery,
-    StickinessQuery,
-    TrendsFormulaNode,
-    TrendsQuery,
-    AnyDataWarehouseNode,
-    DashboardFilter,
-    TileFilters,
-} from '~/queries/schema/schema-general'
-import {
-    getInterval,
     isActionsNode,
     isAnyDataWarehouseNode,
     isDataTableNodeWithHogQLQuery,
@@ -67,10 +49,32 @@ import {
     isInsightVizNode,
     isLifecycleQuery,
     isPathsQuery,
+    isPathsV2Query,
     isRetentionQuery,
     isTrendsQuery,
     hasBreakdownFilter,
-} from '~/queries/utils'
+} from '~/queries/schema/node-guards'
+import {
+    AnyEntityNode,
+    BreakdownFilter,
+    FunnelsQuery,
+    HogQLQuery,
+    HogQLVariable,
+    InsightQueryNode,
+    LifecycleQuery,
+    Node,
+    NodeKind,
+    PathsQuery,
+    PathsV2Query,
+    RetentionQuery,
+    StickinessQuery,
+    TrendsFormulaNode,
+    TrendsQuery,
+    AnyDataWarehouseNode,
+    CompareFilter as CompareFilterType,
+    DashboardFilter,
+    TileFilters,
+} from '~/queries/schema/schema-general'
 import {
     AnyPropertyFilter,
     BaseMathType,
@@ -79,6 +83,14 @@ import {
     IntervalType,
     UserBasicType,
 } from '~/types'
+
+import { BreakdownTag } from 'products/product_analytics/frontend/insights/editor/filters/BreakdownFilter/BreakdownTag'
+import { journeysSummaryParts } from 'products/product_analytics/frontend/insights/journeys/journeysSummary'
+import {
+    MathCategory,
+    apiValueToMathType,
+    mathsLogic,
+} from 'products/product_analytics/frontend/insights/trends/mathsLogic'
 
 import { PropertyKeyInfo } from '../../PropertyKeyInfo'
 import { TZLabel } from '../../TZLabel'
@@ -301,6 +313,25 @@ function PathsSummary({ query }: { query: PathsQuery }): JSX.Element {
     )
 }
 
+function PathsV2Summary({ query }: { query: PathsV2Query }): JSX.Element {
+    // Sync format with summarizeJourneys in journeysSummary.ts
+    const { sources, anchor } = journeysSummaryParts(query.pathsV2Filter)
+    return (
+        <div className="SeriesDisplay">
+            <div>
+                <div>
+                    Journeys based on <b>{sources}</b>
+                </div>
+                {anchor && (
+                    <div>
+                        {anchor.verb} at <b>{anchor.label}</b>
+                    </div>
+                )}
+            </div>
+        </div>
+    )
+}
+
 function RetentionSummary({ query }: { query: RetentionQuery }): JSX.Element {
     const { aggregationLabel } = useValues(mathsLogic)
 
@@ -374,6 +405,8 @@ export function SeriesSummary({
                     {isTrendsQuery(query) && <FormulaSummary query={query} />}
                     {isPathsQuery(query) ? (
                         <PathsSummary query={query} />
+                    ) : isPathsV2Query(query) ? (
+                        <PathsV2Summary query={query} />
                     ) : isRetentionQuery(query) ? (
                         <RetentionSummary query={query} />
                     ) : isInsightQueryWithSeries(query) ? (
@@ -678,6 +711,35 @@ export function TestAccountFilterSummary({
     )
 }
 
+function CompareFilterSummary({
+    compareFilter,
+    override,
+    insightCompareFilter,
+}: {
+    compareFilter: CompareFilterType
+    override: { source: OverrideSource }
+    insightCompareFilter?: CompareFilterType | null
+}): JSX.Element {
+    const replaced =
+        insightCompareFilter && !deepEqual(insightCompareFilter, compareFilter) ? insightCompareFilter : null
+    return (
+        <InsightDetailSectionDisplay icon={<IconClock />} label="Compare">
+            <div className="flex items-center gap-1">
+                <span className="font-medium">{compareFilterLabel(compareFilter)}</span>
+                <LayerTag source={override.source} />
+            </div>
+            {replaced && (
+                <div className="text-muted-alt text-xs mt-0.5 flex items-center gap-1">
+                    <span>
+                        was <span className="line-through">{compareFilterLabel(replaced)}</span> from
+                    </span>
+                    <LayerTag source="insight" />
+                </div>
+            )}
+        </InsightDetailSectionDisplay>
+    )
+}
+
 interface InsightDetailsProps {
     query: Node | null
     footerInfo?: {
@@ -713,6 +775,7 @@ export const InsightDetails = React.memo(
             breakdown: overrideBreakdown,
             interval: overrideInterval,
             filterTestAccounts: overrideFilterTestAccounts,
+            compareFilter: overrideCompareFilter,
             ignoresDashboardFilters,
         } = getEffectiveFilterOverrides(filterOverrideContext, filtersOverride, tileFiltersOverride)
         const insightDateRange = isInsightVizNode(query) ? query.source.dateRange : undefined
@@ -724,6 +787,8 @@ export const InsightDetails = React.memo(
         )
         const overrideBreakdownFilter = overrideBreakdown?.breakdownFilter
         const hasPropertyOverrides = propertyGroups.length > 0
+        const ignoresPropertyOverrides =
+            hasDataWarehouseSeries && isInsightVizNode(query) && !everyWarehouseSeriesReadsFlagCalls(query.source)
         const hasIgnoredBreakdownOverrides =
             isInsightVizNode(query) &&
             isTrendsQuery(query.source) &&
@@ -754,7 +819,7 @@ export const InsightDetails = React.memo(
                                 override={dateOverride}
                             />
                         )}
-                        {hasDataWarehouseSeries && hasPropertyOverrides ? (
+                        {ignoresPropertyOverrides && hasPropertyOverrides ? (
                             <PropertiesIgnoredWarning />
                         ) : (
                             <PropertiesSummary
@@ -793,6 +858,13 @@ export const InsightDetails = React.memo(
                                         ? query.source.filters?.filterTestAccounts
                                         : query.source.filterTestAccounts
                                 }
+                            />
+                        )}
+                        {overrideCompareFilter && (
+                            <CompareFilterSummary
+                                compareFilter={overrideCompareFilter.value}
+                                override={{ source: overrideCompareFilter.source }}
+                                insightCompareFilter={isInsightVizNode(query) ? getCompareFilter(query.source) : null}
                             />
                         )}
                     </>

@@ -1,17 +1,12 @@
 from typing import Optional, cast
 
-from posthog.schema import (
+from products.warehouse_sources.backend.facade.codebase_detection import detect
+from products.warehouse_sources.backend.facade.source_config import (
     DataWarehouseSourceCategory,
-    ExternalDataSourceType as SchemaExternalDataSourceType,
     ReleaseStatus,
     SourceConfig,
     SourceFieldInputConfig,
     SourceFieldInputConfigType,
-)
-
-from products.warehouse_sources.backend.temporal.data_imports.pipelines.pipeline.typings import (
-    SourceInputs,
-    SourceResponse,
 )
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.base import FieldType, ResumableSource
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.canonical_descriptions import (
@@ -23,6 +18,7 @@ from products.warehouse_sources.backend.temporal.data_imports.sources.common.sch
     SourceSchema,
     build_endpoint_schemas,
 )
+from products.warehouse_sources.backend.temporal.data_imports.sources.common.typings import SourceInputs, SourceResponse
 from products.warehouse_sources.backend.temporal.data_imports.sources.generated_configs.plunk import PlunkSourceConfig
 from products.warehouse_sources.backend.temporal.data_imports.sources.plunk.plunk import (
     HOST_NOT_ALLOWED_ERROR,
@@ -40,6 +36,8 @@ from products.warehouse_sources.backend.types import ExternalDataSourceType
 
 @SourceRegistry.register
 class PlunkSource(ResumableSource[PlunkSourceConfig, PlunkResumeConfig]):
+    codebase_detection = detect(env=("^PLUNK_", "^PLUNK_SECRET_KEY$"), npm=("@plunk/node",))
+
     # Plunk's data endpoints carry no version prefix (only the public send/track endpoints
     # are versioned), so the source is unversioned.
     api_docs_url = "https://docs.useplunk.com/api-reference/overview"
@@ -108,10 +106,10 @@ class PlunkSource(ResumableSource[PlunkSourceConfig, PlunkResumeConfig]):
     @property
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
-            name=SchemaExternalDataSourceType.PLUNK,
+            name=ExternalDataSourceType.PLUNK,
             category=DataWarehouseSourceCategory.MARKETING___EMAIL,
             label="Plunk",
-            releaseStatus=ReleaseStatus.ALPHA,
+            releaseStatus=ReleaseStatus.GA,
             keywords=["useplunk", "email marketing"],
             caption="""Enter your Plunk secret API key to pull your contacts, campaigns, templates, and segments into the PostHog Data warehouse.
 

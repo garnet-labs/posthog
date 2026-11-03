@@ -1,9 +1,12 @@
 import { useActions, useValues } from 'kea'
 import { router } from 'kea-router'
 
-import { LemonButton, LemonTag } from '@posthog/lemon-ui'
+import { LemonButton } from '@posthog/lemon-ui'
 
+import { AccessDenied } from 'lib/components/AccessDenied'
 import { NotFound } from 'lib/components/NotFound'
+import { useFeatureFlag } from 'lib/hooks/useFeatureFlag'
+import { LemonSwitch } from 'lib/lemon-ui/LemonSwitch'
 import { deleteWithUndo } from 'lib/utils/deleteWithUndo'
 import { getCurrentTeamId } from 'lib/utils/getAppContext'
 import { SceneExport } from 'scenes/sceneTypes'
@@ -13,11 +16,12 @@ import { SceneContent } from '~/layout/scenes/components/SceneContent'
 import { SceneTitleSection } from '~/layout/scenes/components/SceneTitleSection'
 
 import type { SubscriptionApi } from 'products/subscriptions/frontend/generated/api.schemas'
-import { ResourceTypeEnumApi } from 'products/subscriptions/frontend/generated/api.schemas'
+import { SubscriptionResourceTypeEnumApi } from 'products/subscriptions/frontend/generated/api.schemas'
 
 import { SubscriptionDeliveryHistory } from './components/SubscriptionDeliveryHistory'
 import { isSubscriptionEnabled, subscriptionEditHref, subscriptionName } from './components/SubscriptionsTable'
 import { SubscriptionSummary } from './components/SubscriptionSummary'
+import { QuillSubscriptionDetailActions } from './QuillSubscriptionDetailActions'
 import { subscriptionSceneLogic } from './subscriptionSceneLogic'
 import { subscriptionsSceneLogic } from './subscriptionsSceneLogic'
 
@@ -25,6 +29,10 @@ function SubscriptionDetailActions({ sub }: { sub: SubscriptionApi }): JSX.Eleme
     const { push } = useActions(router)
     const { setEnabled, deliverSubscription } = useActions(subscriptionSceneLogic)
     const { subscriptionLoading, deliveringSubscriptionId } = useValues(subscriptionSceneLogic)
+    const todayRailNav = useFeatureFlag('TODAY_RAIL_NAV')
+    if (todayRailNav) {
+        return <QuillSubscriptionDetailActions sub={sub} />
+    }
     const editHref = subscriptionEditHref(sub)
     const enabled = isSubscriptionEnabled(sub)
     const isDelivering = deliveringSubscriptionId === sub.id
@@ -46,17 +54,13 @@ function SubscriptionDetailActions({ sub }: { sub: SubscriptionApi }): JSX.Eleme
 
     return (
         <div className="flex flex-wrap items-center gap-2">
-            <LemonTag type={enabled ? 'success' : 'danger'} data-attr="subscription-status-tag">
-                {enabled ? 'Enabled' : 'Disabled'}
-            </LemonTag>
-            <LemonButton
-                type="secondary"
-                onClick={() => setEnabled({ enabled: !enabled })}
+            <LemonSwitch
+                checked={enabled}
+                onChange={(newEnabled) => setEnabled({ enabled: newEnabled })}
                 loading={subscriptionLoading}
+                label={enabled ? 'Enabled' : 'Disabled'}
                 data-attr="subscription-toggle-enabled"
-            >
-                {enabled ? 'Disable subscription' : 'Enable subscription'}
-            </LemonButton>
+            />
             {editHref ? (
                 <LemonButton type="secondary" onClick={() => push(editHref)}>
                     Edit subscription
@@ -86,6 +90,7 @@ function SubscriptionDetailActions({ sub }: { sub: SubscriptionApi }): JSX.Eleme
 export function SubscriptionScene(): JSX.Element {
     const {
         subscription,
+        subscriptionAccessDenied,
         subscriptionLoading,
         deliveriesPage,
         deliveriesPageLoading,
@@ -97,11 +102,13 @@ export function SubscriptionScene(): JSX.Element {
     const { loadDeliveriesPage, deliverSubscription, setDeliveryStatusFilter, submitDeliveryFeedback } =
         useActions(subscriptionSceneLogic)
 
-    const showNotFound = !subscriptionLoading && !subscription
+    const showNotFound = !subscriptionLoading && !subscription && !subscriptionAccessDenied
 
     return (
         <SceneContent>
-            {showNotFound ? (
+            {subscriptionAccessDenied ? (
+                <AccessDenied object="subscription" />
+            ) : showNotFound ? (
                 <NotFound object="subscription" />
             ) : (
                 <div className="py-8 flex-1 min-h-0 flex flex-col gap-6 max-w-full">
@@ -113,7 +120,7 @@ export function SubscriptionScene(): JSX.Element {
                         actions={subscription ? <SubscriptionDetailActions sub={subscription} /> : undefined}
                     />
                     {subscription ? (
-                        // Mute the body when the subscription is paused — the LemonTag in the
+                        // Mute the body when the subscription is disabled — the switch in the
                         // header is the explicit signal; this is the at-a-glance reinforcement.
                         <div className={isSubscriptionEnabled(subscription) ? '' : 'opacity-60'}>
                             <SubscriptionSummary sub={subscription} />
@@ -130,7 +137,7 @@ export function SubscriptionScene(): JSX.Element {
                         onTestDelivery={subscription ? () => deliverSubscription(subscription.id) : undefined}
                         testDeliveryLoading={Boolean(subscription && deliveringSubscriptionId === subscription.id)}
                         onDeliveryFeedback={
-                            subscription?.resource_type === ResourceTypeEnumApi.AiPrompt
+                            subscription?.resource_type === SubscriptionResourceTypeEnumApi.AiPrompt
                                 ? (deliveryId, feedback) => submitDeliveryFeedback(deliveryId, feedback, 'in_app')
                                 : undefined
                         }

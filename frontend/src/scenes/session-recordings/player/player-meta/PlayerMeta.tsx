@@ -13,20 +13,27 @@ import { Tooltip } from 'lib/lemon-ui/Tooltip'
 import { isObject } from 'lib/utils/guards'
 import { DraggableToNotebook } from 'scenes/notebooks/AddToNotebook/DraggableToNotebook'
 import { IconWindow } from 'scenes/session-recordings/player/icons'
-import { PlayerMetaLinks } from 'scenes/session-recordings/player/player-meta/PlayerMetaLinks'
+import {
+    InsertInNotebookPlaylistButton,
+    MenuActions,
+    PinToPlaylistButton,
+} from 'scenes/session-recordings/player/player-meta/PlayerMetaLinks'
 import {
     SessionRecordingPlayerMode,
     sessionRecordingPlayerLogic,
 } from 'scenes/session-recordings/player/sessionRecordingPlayerLogic'
+import { PlayerShareMenu } from 'scenes/session-recordings/player/share/PlayerShareMenu'
 import { urls } from 'scenes/urls'
 
 import { getCurrentExporterData } from '~/exporter/exporterViewLogic'
 
+import { PlayerInspectorButton } from './PlayerInspectorButton'
 import { PlayerMetaExperimentTags } from './PlayerMetaExperimentTags'
 import { playerMetaLogic } from './playerMetaLogic'
+import { InspectDOM, SetPlaybackSpeed, usePlayerChromeMenuItems } from './PlayerMetaTopSettings'
 import { PlayerPersonMeta } from './PlayerPersonMeta'
 
-export function parseUrl(lastUrl: unknown): { urlToUse: string | undefined; isValidUrl: boolean } {
+export function parseUrl(lastUrl: unknown): { urlToUse: string | undefined; isValidUrl: boolean; isWebUrl: boolean } {
     let urlToUse: string | undefined = typeof lastUrl === 'string' ? lastUrl : undefined
     if (isObject(lastUrl)) {
         // regression protection, we saw a user whose site was sometimes sending the string-ified location object
@@ -39,22 +46,26 @@ export function parseUrl(lastUrl: unknown): { urlToUse: string | undefined; isVa
     }
 
     if (!urlToUse || urlToUse.trim() === '') {
-        return { urlToUse: undefined, isValidUrl: false }
+        return { urlToUse: undefined, isValidUrl: false, isWebUrl: false }
     }
 
     let isValidUrl = false
+    let isWebUrl = false
     try {
-        new URL(urlToUse)
+        const parsed = new URL(urlToUse)
         isValidUrl = true
+        // Only http/https can be opened from an https page. A file:// or other scheme
+        // would render a dead link that ejects the user onto a 404, so treat it as plain text.
+        isWebUrl = parsed.protocol === 'http:' || parsed.protocol === 'https:'
     } catch {
         // no valid url
     }
 
-    return { urlToUse, isValidUrl }
+    return { urlToUse, isValidUrl, isWebUrl }
 }
 
 function URLOrScreen({ url }: { url: unknown }): JSX.Element | null {
-    const { urlToUse, isValidUrl } = parseUrl(url)
+    const { urlToUse, isWebUrl } = parseUrl(url)
 
     if (!urlToUse) {
         return null
@@ -72,14 +83,14 @@ function URLOrScreen({ url }: { url: unknown }): JSX.Element | null {
                         data-attr="player-meta-copy-url"
                     />
                 </span>
-                {isValidUrl ? (
+                {isWebUrl ? (
                     <Tooltip title={`Click to open url: ${urlToUse}`}>
-                        <Link to={urlToUse} target="_blank" className="truncate">
+                        <Link data-attr="player-meta-open-url" to={urlToUse} target="_blank" className="truncate">
                             {urlToUse}
                         </Link>
                     </Tooltip>
                 ) : (
-                    urlToUse
+                    <span className="truncate">{urlToUse}</span>
                 )}
             </span>
         </span>
@@ -87,6 +98,32 @@ function URLOrScreen({ url }: { url: unknown }): JSX.Element | null {
 }
 
 export type PlayerMetaBreakpoints = 'small' | 'normal'
+
+function PlayerMetaControls({ size }: { size: PlayerMetaBreakpoints }): JSX.Element {
+    const {
+        sessionRecordingId,
+        logicProps: { withSidebar, mode },
+    } = useValues(sessionRecordingPlayerLogic)
+    const chromeItems = usePlayerChromeMenuItems()
+    const isSharing = mode === SessionRecordingPlayerMode.Sharing
+
+    return (
+        <div className="flex items-center gap-0.5">
+            {!isSharing && sessionRecordingId && <MenuActions size={size} extraItems={chromeItems} />}
+            <SetPlaybackSpeed />
+            {withSidebar && <InspectDOM />}
+            {!isSharing && (
+                <>
+                    <InsertInNotebookPlaylistButton size={size} />
+                    <PinToPlaylistButton />
+                    <PlayerShareMenu />
+                </>
+            )}
+            {withSidebar && <PlayerInspectorButton />}
+            {!withSidebar && <PlayerPersonMeta />}
+        </div>
+    )
+}
 
 export function PlayerMeta(): JSX.Element {
     const { logicProps, isFullScreen } = useValues(sessionRecordingPlayerLogic)
@@ -179,8 +216,7 @@ export function PlayerMeta(): JSX.Element {
                     )}
                     <PlayerMetaExperimentTags />
                     <div className={clsx('flex-1', size === 'small' ? 'min-w-[1rem]' : 'min-w-[5rem]')} />
-                    <PlayerMetaLinks size={size} />
-                    <PlayerPersonMeta />
+                    <PlayerMetaControls size={size} />
                 </div>
             </div>
         </DraggableToNotebook>

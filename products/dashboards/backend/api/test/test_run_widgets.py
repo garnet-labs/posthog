@@ -4,6 +4,7 @@ from typing import Any, cast
 from posthog.test.base import APIBaseTest
 from unittest.mock import MagicMock, patch
 
+from django.test import SimpleTestCase
 from django.test.utils import override_settings
 
 from parameterized import parameterized
@@ -17,14 +18,15 @@ from posthog.clickhouse.query_tagging import Feature, Product, get_query_tags
 from posthog.models import Team
 from posthog.models.personal_api_key import PersonalAPIKey
 from posthog.models.utils import generate_random_token_personal, hash_key_value
-from posthog.rbac.user_access_control import AccessControlLevel, UserAccessControl
 from posthog.scopes import APIScopeObject
 from posthog.session_recordings.models.session_recording import SessionRecording
 from posthog.session_recordings.models.session_recording_playlist import SessionRecordingPlaylist
 from posthog.session_recordings.models.session_recording_playlist_item import SessionRecordingPlaylistItem
+from posthog.session_recordings.session_recording_api import RecordingsListingResult
 from posthog.slo.types import SloOperation, SloOutcome
 from posthog.test.persons import create_person
 
+from products.access_control.backend.facade.user_access_control import AccessControlLevel, UserAccessControl
 from products.dashboards.backend.api import widget_openapi_serializers as widget_openapi_serializers_module
 from products.dashboards.backend.constants import (
     ACTIVITY_EVENTS_DEFAULT_LIMIT,
@@ -59,7 +61,11 @@ from products.error_tracking.backend.facade.query_utils import ERROR_TRACKING_LI
 from products.logs.backend.models import LogsView
 
 
-class TestWidgetRegistry(APIBaseTest):
+def _empty_listing_result() -> RecordingsListingResult:
+    return RecordingsListingResult(recordings=[], more_recordings_available=False, timings_header="", next_cursor=None)
+
+
+class TestWidgetRegistry(SimpleTestCase):
     def test_widget_registry_catalog_and_expected_types_stay_in_sync(self) -> None:
         registry_types = frozenset(WIDGET_REGISTRY.keys())
         assert EXPECTED_WIDGET_TYPES == registry_types
@@ -340,21 +346,6 @@ class TestDashboardRunWidgets(APIBaseTest):
     def setUp(self) -> None:
         super().setUp()
         self.dashboard_api = DashboardAPI(self.client, self.team, self.assertEqual)
-        self.widgets_flag_patcher = patch(
-            "products.dashboards.backend.api.dashboard.dashboard_widgets_enabled",
-            return_value=True,
-        )
-        self.widget_create_flag_patcher = patch(
-            "products.dashboards.backend.widget_create.dashboard_widgets_enabled",
-            return_value=True,
-        )
-        self.widgets_flag_patcher.start()
-        self.widget_create_flag_patcher.start()
-
-    def tearDown(self) -> None:
-        self.widget_create_flag_patcher.stop()
-        self.widgets_flag_patcher.stop()
-        super().tearDown()
 
     def _run(self, dashboard_id: int, tile_ids: list[int]) -> dict:
         response = self.client.get(
@@ -403,7 +394,7 @@ class TestDashboardRunWidgets(APIBaseTest):
 
     @patch("posthog.session_recordings.session_recording_api.list_recordings_from_query")
     def test_runs_session_replay_widget_for_requested_tile(self, mock_list_recordings: MagicMock) -> None:
-        mock_list_recordings.return_value = ([], False, None, None)
+        mock_list_recordings.return_value = _empty_listing_result()
         dashboard_id, _ = self.dashboard_api.create_dashboard({"name": "dash"})
         _, dashboard_json = self.dashboard_api.create_widget_tile(
             dashboard_id, widget_type="session_replay_list", config={"limit": 10}
@@ -570,13 +561,32 @@ class TestDashboardRunWidgets(APIBaseTest):
         self.assertEqual(query.severityLevels, ["error"])
         self.assertEqual(query.limit, 15)
 
+    @parameterized.expand(
+        [
+            ("invalid_severity", {"severityLevels": ["critical"]}),
+            ("filters_list", ["invalid"]),
+            ("filters_string", "invalid"),
+            ("filters_empty_list", []),
+            ("filters_empty_string", ""),
+            ("filters_false", False),
+            ("filters_zero", 0),
+            ("date_range_list", {"dateRange": ["invalid"]}),
+            ("date_range_string", {"dateRange": "invalid"}),
+            ("date_range_empty_list", {"dateRange": []}),
+            ("date_range_empty_string", {"dateRange": ""}),
+            ("date_range_false", {"dateRange": False}),
+            ("date_range_zero", {"dateRange": 0}),
+        ]
+    )
     @patch("products.dashboards.backend.widgets.logs_list.LogsQueryRunner")
-    def test_runs_logs_widget_falls_back_when_saved_view_filters_invalid(self, mock_runner_cls: MagicMock) -> None:
+    def test_runs_logs_widget_falls_back_when_saved_view_filters_invalid(
+        self, _name: str, filters: Any, mock_runner_cls: MagicMock
+    ) -> None:
         mock_runner_cls.return_value.calculate.return_value = MagicMock(
             model_dump=lambda mode="json": {"results": [], "hasMore": False}
         )
         # `filters` has no inner schema validation on write, so a stored level outside the enum is possible.
-        view = LogsView.objects.create(team=self.team, name="Bad view", filters={"severityLevels": ["critical"]})
+        view = LogsView.objects.create(team=self.team, name="Bad view", filters=filters)
 
         # In-process so the lookup sees the view (see test_runs_logs_widget_with_saved_view). A malformed
         # view degrades to the widget's own config rather than raising.
@@ -710,7 +720,7 @@ class TestDashboardRunWidgets(APIBaseTest):
         _mock_burst_allow: MagicMock,
         _mock_sustained_allow: MagicMock,
     ) -> None:
-        mock_list_recordings.return_value = ([], False, None, None)
+        mock_list_recordings.return_value = _empty_listing_result()
         dashboard_id, _ = self.dashboard_api.create_dashboard({"name": "dash"})
         _, dashboard_json = self.dashboard_api.create_widget_tile(
             dashboard_id, widget_type="session_replay_list", config={"limit": 10}
@@ -724,13 +734,13 @@ class TestDashboardRunWidgets(APIBaseTest):
 
     @patch("posthog.session_recordings.session_recording_api.list_recordings_from_query")
     def test_session_replay_widget_tags_queries_in_debug_mode(self, mock_list_recordings: MagicMock) -> None:
-        mock_list_recordings.return_value = ([], False, None, None)
+        mock_list_recordings.return_value = _empty_listing_result()
 
-        def assert_tagged(*_args: object, **_kwargs: object) -> tuple[list[object], bool, None, None]:
+        def assert_tagged(*_args: object, **_kwargs: object) -> RecordingsListingResult:
             tags = get_query_tags()
             if tags.product != Product.REPLAY or tags.feature != Feature.QUERY:
                 raise UntaggedQueryError("session replay widget must tag ClickHouse queries")
-            return ([], False, None, None)
+            return _empty_listing_result()
 
         mock_list_recordings.side_effect = assert_tagged
 
@@ -746,7 +756,7 @@ class TestDashboardRunWidgets(APIBaseTest):
 
     @patch("posthog.session_recordings.session_recording_api.list_recordings_from_query")
     def test_session_replay_widget_applies_widget_filter_properties(self, mock_list_recordings: MagicMock) -> None:
-        mock_list_recordings.return_value = ([], False, None, None)
+        mock_list_recordings.return_value = _empty_listing_result()
         filter_id = "filter-1"
 
         run_session_replay_list_widget(
@@ -809,7 +819,7 @@ class TestDashboardRunWidgets(APIBaseTest):
 
     @patch("posthog.session_recordings.session_recording_api.list_recordings_from_query")
     def test_session_replay_widget_uses_saved_filter_as_source_of_truth(self, mock_list_recordings: MagicMock) -> None:
-        mock_list_recordings.return_value = ([], False, None, None)
+        mock_list_recordings.return_value = _empty_listing_result()
         saved_filter = self._saved_filter_for_browser(self.team, "Firefox")
 
         run_session_replay_list_widget(
@@ -840,7 +850,7 @@ class TestDashboardRunWidgets(APIBaseTest):
 
     @patch("posthog.session_recordings.session_recording_api.list_recordings_from_query")
     def test_session_replay_widget_falls_back_when_saved_filter_missing(self, mock_list_recordings: MagicMock) -> None:
-        mock_list_recordings.return_value = ([], False, None, None)
+        mock_list_recordings.return_value = _empty_listing_result()
 
         run_session_replay_list_widget(
             self.team,
@@ -859,7 +869,7 @@ class TestDashboardRunWidgets(APIBaseTest):
 
     @patch("posthog.session_recordings.session_recording_api.list_recordings_from_query")
     def test_session_replay_widget_ignores_saved_filter_from_other_team(self, mock_list_recordings: MagicMock) -> None:
-        mock_list_recordings.return_value = ([], False, None, None)
+        mock_list_recordings.return_value = _empty_listing_result()
         other_team = Team.objects.create(organization=self.organization, name="other team")
         saved_filter = self._saved_filter_for_browser(other_team, "Firefox")
 
@@ -889,7 +899,7 @@ class TestDashboardRunWidgets(APIBaseTest):
 
     @patch("posthog.session_recordings.session_recording_api.list_recordings_from_query")
     def test_session_replay_widget_scopes_to_collection(self, mock_list_recordings: MagicMock) -> None:
-        mock_list_recordings.return_value = ([], False, None, None)
+        mock_list_recordings.return_value = _empty_listing_result()
         collection = self._collection_with_recordings(self.team, ["session-a", "session-b"])
 
         run_session_replay_list_widget(
@@ -919,7 +929,7 @@ class TestDashboardRunWidgets(APIBaseTest):
     def test_session_replay_widget_collection_skips_legacy_null_recording_items(
         self, mock_list_recordings: MagicMock
     ) -> None:
-        mock_list_recordings.return_value = ([], False, None, None)
+        mock_list_recordings.return_value = _empty_listing_result()
         collection = self._collection_with_recordings(self.team, ["session-a"])
         # Legacy items used the deprecated session_id field and have a null recording FK.
         SessionRecordingPlaylistItem.objects.create(playlist=collection, recording=None, session_id="legacy")
@@ -939,7 +949,7 @@ class TestDashboardRunWidgets(APIBaseTest):
     def test_session_replay_widget_skips_collection_without_object_access(
         self, mock_list_recordings: MagicMock, mock_user_access_control: MagicMock
     ) -> None:
-        mock_list_recordings.return_value = ([], False, None, None)
+        mock_list_recordings.return_value = _empty_listing_result()
         # The user lacks object-level viewer access to the collection.
         mock_user_access_control.return_value.check_access_level_for_object.return_value = False
         collection = self._collection_with_recordings(self.team, ["session-a"])
@@ -962,7 +972,7 @@ class TestDashboardRunWidgets(APIBaseTest):
 
     @patch("posthog.session_recordings.session_recording_api.list_recordings_from_query")
     def test_session_replay_widget_filters_within_collection(self, mock_list_recordings: MagicMock) -> None:
-        mock_list_recordings.return_value = ([], False, None, None)
+        mock_list_recordings.return_value = _empty_listing_result()
         collection = self._collection_with_recordings(self.team, ["session-a", "session-b"])
 
         run_session_replay_list_widget(
@@ -983,7 +993,7 @@ class TestDashboardRunWidgets(APIBaseTest):
 
     @patch("posthog.session_recordings.session_recording_api.list_recordings_from_query")
     def test_session_replay_widget_combines_collection_and_saved_filter(self, mock_list_recordings: MagicMock) -> None:
-        mock_list_recordings.return_value = ([], False, None, None)
+        mock_list_recordings.return_value = _empty_listing_result()
         collection = self._collection_with_recordings(self.team, ["session-a", "session-b"])
         saved_filter = self._saved_filter_for_browser(self.team, "Firefox")
 
@@ -1006,7 +1016,7 @@ class TestDashboardRunWidgets(APIBaseTest):
 
     @patch("posthog.session_recordings.session_recording_api.list_recordings_from_query")
     def test_session_replay_widget_ignores_collection_from_other_team(self, mock_list_recordings: MagicMock) -> None:
-        mock_list_recordings.return_value = ([], False, None, None)
+        mock_list_recordings.return_value = _empty_listing_result()
         other_team = Team.objects.create(organization=self.organization, name="other team")
         collection = self._collection_with_recordings(other_team, ["session-a"])
 
@@ -1029,7 +1039,7 @@ class TestDashboardRunWidgets(APIBaseTest):
 
     @patch("posthog.session_recordings.session_recording_api.list_recordings_from_query")
     def test_session_replay_widget_falls_back_when_collection_missing(self, mock_list_recordings: MagicMock) -> None:
-        mock_list_recordings.return_value = ([], False, None, None)
+        mock_list_recordings.return_value = _empty_listing_result()
 
         run_session_replay_list_widget(
             self.team,
@@ -1051,7 +1061,7 @@ class TestDashboardRunWidgets(APIBaseTest):
     def test_session_replay_widget_attaches_matching_events_query_for_widget_filters(
         self, mock_list_recordings: MagicMock
     ) -> None:
-        mock_list_recordings.return_value = ([], False, None, None)
+        mock_list_recordings.return_value = _empty_listing_result()
 
         result = run_session_replay_list_widget(
             self.team,
@@ -1071,7 +1081,7 @@ class TestDashboardRunWidgets(APIBaseTest):
     def test_session_replay_widget_attaches_matching_events_query_for_saved_filter_with_events(
         self, mock_list_recordings: MagicMock
     ) -> None:
-        mock_list_recordings.return_value = ([], False, None, None)
+        mock_list_recordings.return_value = _empty_listing_result()
         saved_filter = SessionRecordingPlaylist.objects.create(
             team=self.team,
             name="Pageview filter",
@@ -1094,7 +1104,7 @@ class TestDashboardRunWidgets(APIBaseTest):
     def test_session_replay_widget_omits_matching_events_query_without_event_filters(
         self, mock_list_recordings: MagicMock
     ) -> None:
-        mock_list_recordings.return_value = ([], False, None, None)
+        mock_list_recordings.return_value = _empty_listing_result()
 
         result = run_session_replay_list_widget(
             self.team,
@@ -1109,7 +1119,7 @@ class TestDashboardRunWidgets(APIBaseTest):
     def test_session_replay_widget_does_not_persist_legacy_filter_conversion(
         self, mock_list_recordings: MagicMock
     ) -> None:
-        mock_list_recordings.return_value = ([], False, None, None)
+        mock_list_recordings.return_value = _empty_listing_result()
         # A legacy-format playlist (no filter_group) — rendering must not write the converted filters back.
         legacy_filters = {"events": [{"id": "$pageview", "type": "events", "order": 0, "name": "$pageview"}]}
         saved_filter = SessionRecordingPlaylist.objects.create(
@@ -1136,7 +1146,9 @@ class TestDashboardRunWidgets(APIBaseTest):
             duration=120,
         )
         recording.person = person
-        mock_list_recordings.return_value = ([recording], False, None, None)
+        mock_list_recordings.return_value = RecordingsListingResult(
+            recordings=[recording], more_recordings_available=False, timings_header="", next_cursor=None
+        )
 
         dashboard_id, _ = self.dashboard_api.create_dashboard({"name": "dash"})
         _, dashboard_json = self.dashboard_api.create_widget_tile(
@@ -1363,15 +1375,6 @@ class TestDashboardRunWidgets(APIBaseTest):
         body = self._run(other_id, [tile_id])
 
         self.assertEqual(body["results"][0]["error"], "Tile not found or is not a widget tile.")
-
-    @patch("products.dashboards.backend.api.dashboard.dashboard_widgets_enabled", return_value=False)
-    def test_disabled_when_feature_flag_off(self, _mock_flag: MagicMock) -> None:
-        dashboard_id, _ = self.dashboard_api.create_dashboard({"name": "dash"})
-        response = self.client.get(
-            f"/api/projects/{self.team.id}/dashboards/{dashboard_id}/run_widgets/",
-            {"tile_ids": "1"},
-        )
-        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_run_widgets_denies_without_product_access(self) -> None:
         dashboard_id, _ = self.dashboard_api.create_dashboard({"name": "dash"})

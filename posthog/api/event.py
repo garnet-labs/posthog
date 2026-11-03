@@ -17,7 +17,6 @@ from opentelemetry import trace
 from prometheus_client import Counter
 from rest_framework import mixins, request, response, serializers, viewsets
 from rest_framework.exceptions import NotFound
-from rest_framework.pagination import LimitOffsetPagination
 from rest_framework.renderers import BaseRenderer
 from rest_framework.settings import api_settings
 from rest_framework_csv import renderers as csvrenderers
@@ -30,11 +29,13 @@ from posthog.hogql.property_utils import create_property_conditions
 from posthog.hogql.query import execute_hogql_query
 
 from posthog.api.documentation import PropertiesSerializer, extend_schema
+from posthog.api.pagination import BoundedLimitOffsetPagination
 from posthog.api.property_value_metrics import PROPERTY_VALUES_DURATION
 from posthog.api.routing import TeamAndOrgViewSetMixin
 from posthog.api.utils import action
 from posthog.auth import PersonalAPIKeyAuthentication
 from posthog.clickhouse.query_tagging import Feature, tag_queries
+from posthog.errors import ExposedCHQueryError
 from posthog.event_usage import get_request_analytics_properties
 from posthog.exceptions_capture import capture_exception
 from posthog.models import Element, Person, PropertyDefinition, User
@@ -52,6 +53,8 @@ from posthog.rate_limit import (
 )
 from posthog.taxonomy.taxonomy import CORE_FILTER_DEFINITIONS_BY_GROUP
 from posthog.utils import convert_property_value, flatten, refresh_requested_by_client, relative_date_parse
+
+from products.event_definitions.backend.models.property_definition import effective_project_id_expr
 
 tracer = trace.get_tracer(__name__)
 
@@ -110,6 +113,11 @@ class EventValueQueryParams:
     value: str | None
 
 
+class EventListPagingQuerySerializer(serializers.Serializer):
+    limit = serializers.IntegerField(required=False, min_value=0, help_text="The maximum number of results to return")
+    offset = serializers.IntegerField(required=False, default=0, min_value=0, help_text="Number of rows to skip.")
+
+
 class ElementSerializer(serializers.ModelSerializer):
     event = serializers.CharField()
 
@@ -129,7 +137,24 @@ class ElementSerializer(serializers.ModelSerializer):
         ]
 
 
-class UncountedLimitOffsetPagination(LimitOffsetPagination):
+class EventPropertyValueSerializer(serializers.Serializer):
+    name = serializers.CharField(
+        help_text="A value of the property, always as a string. Booleans come back as 'true' or 'false', "
+        "and objects and lists as JSON."
+    )
+    count = serializers.IntegerField(
+        required=False, help_text="How many times the value occurs, when the lookup counts values."
+    )
+
+
+class EventPropertyValuesResponseSerializer(serializers.Serializer):
+    results = EventPropertyValueSerializer(many=True, help_text="Values of the property that match the request.")
+    refreshing = serializers.BooleanField(
+        help_text="True when these results come from a stale cache and a refresh runs in the background."
+    )
+
+
+class UncountedLimitOffsetPagination(BoundedLimitOffsetPagination):
     """
     the events api works with the default LimitOffsetPagination, but the
     results don't have a count, so we need to override the pagination class
@@ -254,23 +279,16 @@ class EventViewSet(
     )
     def list(self, request: request.Request, *args: Any, **kwargs: Any) -> response.Response:
         tag_queries(product=ProductKey.PRODUCT_ANALYTICS, feature=Feature.QUERY)
+        is_csv_request = self.request.accepted_renderer.format == "csv"
+        # An empty `limit=` or `offset=` means the default, so only non-empty values are validated.
+        paging = EventListPagingQuerySerializer(
+            data={key: request.GET[key] for key in ("limit", "offset") if request.GET.get(key)}
+        )
+        paging.is_valid(raise_exception=True)
+        default_limit = QUERY_DEFAULT_EXPORT_LIMIT if is_csv_request else DEFAULT_RETURNED_ROWS
+        limit = min(paging.validated_data.get("limit", default_limit), EVENT_LIST_MAX_LIMIT)
+        offset: int = paging.validated_data["offset"]
         try:
-            is_csv_request = self.request.accepted_renderer.format == "csv"
-
-            if self.request.GET.get("limit", None):
-                limit = int(self.request.GET.get("limit"))  # type: ignore
-            elif is_csv_request:
-                limit = QUERY_DEFAULT_EXPORT_LIMIT
-            else:
-                limit = DEFAULT_RETURNED_ROWS
-
-            limit = min(limit, EVENT_LIST_MAX_LIMIT)
-
-            try:
-                offset = int(request.GET["offset"]) if request.GET.get("offset") else 0
-            except ValueError:
-                offset = 0
-
             team = self.team
 
             deprecate_offset = (
@@ -379,6 +397,31 @@ class EventViewSet(
         res = ClickhouseEventSerializer(query_result[0], many=False, context=query_context).data
         return response.Response(res)
 
+    @extend_schema(
+        description="List values of an event property from recent events.",
+        parameters=[
+            OpenApiParameter("key", OpenApiTypes.STR, required=True, description="The property to list values for."),
+            OpenApiParameter(
+                "event_name",
+                OpenApiTypes.STR,
+                many=True,
+                # The generated client emits repeated keys only for params the spec marks explode,
+                # and getlist below needs repeated keys, because a comma-joined value matches no event.
+                explode=True,
+                description="Only read values from events with these names. Repeat to pass several. "
+                "Required with a personal API key. Projects that read values from the precomputed "
+                "property values table ignore this filter.",
+            ),
+            OpenApiParameter(
+                "value", OpenApiTypes.STR, description="Only return values that contain this text, ignoring case."
+            ),
+            OpenApiParameter(
+                "is_column", OpenApiTypes.BOOL, description="Read 'key' as an events table column, not a property."
+            ),
+        ],
+        responses=EventPropertyValuesResponseSerializer,
+        extensions={"x-product": "core"},
+    )
     @action(methods=["GET"], detail=False, required_scopes=["query:read"])
     def values(self, request: request.Request, **kwargs) -> response.Response:
         # `/events/values` is hit from every taxonomic property-value picker across the app, so
@@ -476,7 +519,12 @@ class EventViewSet(
             execution_mode = execution_mode_from_refresh(refresh)
             if execution_mode == ExecutionMode.CACHE_ONLY_NEVER_CALCULATE and not refresh:
                 execution_mode = ExecutionMode.RECENT_CACHE_CALCULATE_ASYNC_IF_STALE_AND_BLOCKING_ON_MISS
-            result = runner.run(execution_mode, analytics_props=get_request_analytics_properties(self.request))
+            # Convert here rather than in the runner, so QueryRunner.run() sees the original
+            # ClickHouse error and can classify it and record it in the failure cache. Matches persons/values.
+            try:
+                result = runner.run(execution_mode, analytics_props=get_request_analytics_properties(self.request))
+            except ExposedCHQueryError as e:
+                raise serializers.ValidationError(str(e), e.code_name)
             assert isinstance(result, (PropertyValuesQueryResponse, CachedPropertyValuesQueryResponse))
             is_refreshing = (
                 isinstance(result, CachedPropertyValuesQueryResponse)
@@ -668,12 +716,16 @@ class EventViewSet(
         try:
             from ee.models.property_definition import EnterprisePropertyDefinition
 
-            property_is_hidden = EnterprisePropertyDefinition.objects.filter(
-                team=team,
-                name=key,
-                type=PropertyDefinition.Type.EVENT.value,
-                hidden=True,
-            ).exists()
+            property_is_hidden = (
+                EnterprisePropertyDefinition.objects.alias(effective_project_id=effective_project_id_expr())
+                .filter(
+                    effective_project_id=team.project_id,
+                    name=key,
+                    type=PropertyDefinition.Type.EVENT.value,
+                    hidden=True,
+                )
+                .exists()
+            )
         except ImportError:
             # Enterprise features not available, continue normally
             pass

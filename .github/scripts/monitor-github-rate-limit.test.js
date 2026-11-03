@@ -112,6 +112,51 @@ describe('monitor-github-rate-limit', () => {
         })
     })
 
+    for (const spent of [false, true]) {
+        it(`reads the core bucket from response headers when the bucket is ${spent ? 'spent' : 'healthy'}`, async () => {
+            process.env.POSTHOG_DEVEX_PROJECT_API_TOKEN = 'devex-key'
+            const captured = []
+            const fetchMock = recordingFn((_url, opts) => {
+                captured.push(JSON.parse(opts.body))
+                return fetchOk()
+            })
+            const used = spent ? 15000 : 8030
+            const headers = {
+                'x-ratelimit-limit': '15000',
+                'x-ratelimit-remaining': String(15000 - used),
+                'x-ratelimit-used': String(used),
+                'x-ratelimit-reset': String(T_BASE_SECONDS + 600),
+            }
+            const response = {
+                headers,
+                data: spent
+                    ? { message: 'API rate limit exceeded' }
+                    : { repositories: [{ full_name: 'PostHog/posthog-js' }, { full_name: 'PostHog/posthog' }] },
+            }
+            const github = {
+                // /rate_limit reads zero for this token, so the probe must never consult it.
+                rest: { rateLimit: { get: () => Promise.resolve({ data: { resources: { core: snapshot({ remaining: 15000, limit: 15000 }) } } }) } },
+                request: () => (spent ? Promise.reject(Object.assign(new Error('403'), { response })) : Promise.resolve(response)),
+            }
+
+            await monitor(
+                { github, context, core: createCore() },
+                { now: () => T_BASE, fetch: fetchMock, source: 'depot_ambient', probe: 'headers' }
+            )
+
+            assert.equal(captured.length, 1)
+            assertMatch(captured[0].properties, {
+                resource: 'core',
+                used,
+                remaining: 15000 - used,
+                limit: 15000,
+                reset_in_seconds: 600,
+                source: 'depot_ambient',
+                installation_repositories: spent ? null : 'PostHog/posthog,PostHog/posthog-js',
+            })
+        })
+    }
+
     it('counts capture failures without aborting later emissions', async () => {
         process.env.POSTHOG_DEVEX_PROJECT_API_TOKEN = 'devex-key'
         let calls = 0
@@ -190,6 +235,69 @@ describe('monitor-github-rate-limit', () => {
             })
         })
     }
+
+    // The `configured` flag is the whole reason this isn't just `!minted`: the
+    // Apps are rolled out one org secret at a time, so an App with no secrets
+    // yet reports exactly like one whose credential broke. Collapsing the two
+    // would alert on every run until the last secret landed.
+    for (const [configured, minted, expectedEmissions] of [
+        [true, false, 1],
+        [true, true, 0],
+        [false, false, 0],
+    ]) {
+        it(`emits ${expectedEmissions} mint failure(s) when configured=${configured} minted=${minted}`, async () => {
+            process.env.POSTHOG_DEVEX_PROJECT_API_TOKEN = 'devex-key'
+            const captured = []
+            const fetchMock = recordingFn((_url, opts) => {
+                captured.push(JSON.parse(opts.body))
+                return fetchOk()
+            })
+            const core = createCore()
+
+            const failed = await monitor.reportMintFailures(
+                { context, core },
+                {
+                    mints: [{ source: 'posthog-setup-actions', configured, minted }],
+                    now: () => T_BASE,
+                    fetch: fetchMock,
+                }
+            )
+
+            assert.equal(captured.length, expectedEmissions)
+            assert.equal(failed.length, expectedEmissions)
+            assert.ok(calledWith(core.setOutput, 'mint_failures', String(expectedEmissions)))
+        })
+    }
+
+    it('names the broken bucket in the mint failure payload', async () => {
+        process.env.POSTHOG_DEVEX_PROJECT_API_TOKEN = 'devex-key'
+        const captured = []
+        const fetchMock = recordingFn((_url, opts) => {
+            captured.push(JSON.parse(opts.body))
+            return fetchOk()
+        })
+        const core = createCore()
+
+        await monitor.reportMintFailures(
+            { context, core },
+            {
+                mints: [
+                    { source: 'posthog-tests', configured: true, minted: true },
+                    { source: 'posthog-paths-filter', configured: true, minted: false },
+                ],
+                now: () => T_BASE,
+                fetch: fetchMock,
+            }
+        )
+
+        assert.equal(captured.length, 1)
+        assertMatch(captured[0], {
+            api_key: 'devex-key',
+            event: 'github_app_token_mint_failed',
+            distinct_id: 'PostHog/posthog',
+            properties: { repo: 'PostHog/posthog', source: 'posthog-paths-filter' },
+        })
+    })
 
     it('skips emission when devex token is not configured', async () => {
         const fetchMock = recordingFn(fetchOk)

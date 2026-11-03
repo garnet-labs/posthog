@@ -6,7 +6,8 @@ import { closeHub, createHub } from '~/common/utils/db/hub'
 import { PostgresUse } from '~/common/utils/db/postgres'
 import { waitForExpect } from '~/tests/helpers/expectations'
 import { forSnapshot } from '~/tests/helpers/snapshots'
-import { createTeam, getTeam, resetTestDatabase } from '~/tests/helpers/sql'
+import { createTeam, createTestTeamFixture } from '~/tests/helpers/sql'
+import { INVALID_TEAM_ID_KEYS } from '~/tests/helpers/team'
 import { Hub } from '~/types'
 
 import { insertHogFlow } from '../../_tests/fixtures-hogflows'
@@ -24,13 +25,11 @@ describe('HogFlowManager', () => {
 
     beforeEach(async () => {
         hub = await createHub()
-        await resetTestDatabase()
         manager = new HogFlowManagerService(hub.postgres, hub.pubSub, hub.encryptedFields)
 
-        const team = await getTeam(hub.postgres, 2)
-
-        teamId1 = await createTeam(hub.postgres, team!.organization_id)
-        teamId2 = await createTeam(hub.postgres, team!.organization_id)
+        const { organizationId, team } = await createTestTeamFixture(hub.postgres)
+        teamId1 = team.id
+        teamId2 = await createTeam(hub.postgres, organizationId)
 
         hogFlows = []
 
@@ -77,13 +76,17 @@ describe('HogFlowManager', () => {
         expect(items.map((item) => item.team_id)).toEqual([teamId1, teamId1])
 
         expect(
-            forSnapshot(items, {
-                overrides: {
-                    team_id: 'TEAM_ID',
-                    created_at: 'CREATED_AT',
-                    updated_at: 'UPDATED_AT',
-                },
-            })
+            // The manager's queries are unordered, so sort before snapshotting.
+            forSnapshot(
+                [...items].sort((a, b) => a.name.localeCompare(b.name)),
+                {
+                    overrides: {
+                        team_id: 'TEAM_ID',
+                        created_at: 'CREATED_AT',
+                        updated_at: 'UPDATED_AT',
+                    },
+                }
+            )
         ).toMatchSnapshot()
 
         await hub.postgres.query(
@@ -145,6 +148,33 @@ describe('HogFlowManager', () => {
         }, 10000)
     })
 
+    describe('email sending pause', () => {
+        // The pause only reaches the send choke point through the manager's column list, so a
+        // column left out of HOG_FLOW_FIELDS silently lets a paused workflow keep sending.
+        it('carries the pause state and reaches the worker on a reload', async () => {
+            let items = await manager.getHogFlowsForTeam(teamId1)
+            expect(items.find((item) => item.id === hogFlows[0].id)?.email_sending_paused_at).toBeNull()
+
+            await hub.postgres.query(
+                PostgresUse.COMMON_WRITE,
+                `UPDATE posthog_hogflow
+                 SET email_sending_paused_at = NOW(),
+                     email_sending_paused_reason = 'Spam complaints reached 2% of the 400 emails sent.',
+                     updated_at = NOW()
+                 WHERE id = $1`,
+                [hogFlows[0].id],
+                'testKey'
+            )
+            // Normally dispatched by the HogFlow post_save signal
+            manager['onHogFlowsReloaded'](teamId1, [hogFlows[0].id])
+
+            items = await manager.getHogFlowsForTeam(teamId1)
+            const paused = items.find((item) => item.id === hogFlows[0].id)
+            expect(paused?.email_sending_paused_at).toBeTruthy()
+            expect(paused?.email_sending_paused_reason).toBe('Spam complaints reached 2% of the 400 emails sent.')
+        })
+    })
+
     describe('getHogFlowIdsForTeam', () => {
         it('returns function IDs', async () => {
             const result = await manager.getHogFlowIdsForTeams([teamId1, teamId2])
@@ -162,6 +192,17 @@ describe('HogFlowManager', () => {
             const result = await manager.getHogFlowIdsForTeams([nonExistentTeamId])
             expect(result[nonExistentTeamId]).toEqual([])
         })
+
+        it.each(INVALID_TEAM_ID_KEYS)(
+            'returns no ids for invalid team id %p without failing the valid team in the same load',
+            async (key) => {
+                const invalidTeamId = key as unknown as number
+                const result = await manager.getHogFlowIdsForTeams([teamId1, invalidTeamId])
+
+                expect(result[teamId1]).toHaveLength(2)
+                expect(result[invalidTeamId]).toEqual([])
+            }
+        )
 
         it('handles archived hog flows', async () => {
             const originalResult = await manager.getHogFlowIdsForTeams([teamId1, teamId2])
@@ -349,5 +390,45 @@ describe('HogFlowManager', () => {
             expect(loaded).not.toBeNull()
             expect(loaded).not.toHaveProperty('encrypted_inputs')
         })
+
+        it.each<{ name: string; actions: unknown }>([
+            { name: 'actions is not a list', actions: { trigger: { type: 'trigger' } } },
+            { name: 'actions holds a null entry', actions: [null] },
+            {
+                name: 'the trigger action has a null config',
+                actions: [{ id: 'trigger', type: 'trigger', config: null }],
+            },
+        ])(
+            'leaves out a flow whose secrets cannot be merged when $name, and loads the rest of its batch',
+            async ({ actions }) => {
+                // Served without its secrets, a webhook trigger would skip its auth header check.
+                const flow = await insertHogFlow(
+                    hub.postgres,
+                    new FixtureHogFlowBuilder()
+                        .withName('Flow that cannot take its secrets')
+                        .withTeamId(teamId1)
+                        .withStatus('active')
+                        .build()
+                )
+                await hub.postgres.query(
+                    PostgresUse.COMMON_WRITE,
+                    `UPDATE posthog_hogflow SET encrypted_inputs = $2, actions = $3::jsonb WHERE id = $1`,
+                    [
+                        flow.id,
+                        hub.encryptedFields.encrypt(
+                            JSON.stringify({ trigger: { auth_header: { value: 'Bearer secret' } } })
+                        ),
+                        JSON.stringify(actions),
+                    ],
+                    'testKey'
+                )
+                manager['onHogFlowsReloaded'](teamId1, [flow.id])
+
+                const loaded = await manager.getHogFlows([flow.id, hogFlows[0].id])
+
+                expect(loaded[flow.id]).toBeNull()
+                expect(loaded[hogFlows[0].id]?.id).toBe(hogFlows[0].id)
+            }
+        )
     })
 })

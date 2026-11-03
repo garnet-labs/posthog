@@ -1,15 +1,21 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime
-from uuid import UUID
+from datetime import UTC, datetime, timedelta
 
 from django.db.models import Q
 
-from products.alerts.backend.scheduling import (
+import structlog
+
+from products.alerts_platform.backend.facade.enums import PlatformAlertOwner
+from products.alerts_platform.backend.facade.scheduling import (
     advance_next_check_at,
-    compute_shard_offset_seconds as shared_compute_shard_offset_seconds,
+    compute_team_shard_offset_seconds,
+    parse_blocked_windows_tuples,
+    scan_next_unblocked_utc,
 )
+
+logger = structlog.get_logger(__name__)
 
 __all__ = [
     "MAX_BYTES_TO_READ",
@@ -17,6 +23,7 @@ __all__ = [
     "advance_next_check_at",
     "compute_shard_offset_seconds",
     "due_alerts_q",
+    "next_allowed_check_at",
 ]
 
 # How often the Temporal schedule fires. Drives shard granularity in
@@ -35,12 +42,45 @@ SCHEDULE_INTERVAL_SECONDS = 60
 MAX_BYTES_TO_READ = int(os.environ.get("LOGS_ALERTING_MAX_BYTES_TO_READ", "5368709120"))
 
 
-def compute_shard_offset_seconds(alert_id: UUID, check_interval_minutes: int) -> int:
-    return shared_compute_shard_offset_seconds(
-        alert_id,
-        check_interval_minutes,
-        schedule_interval_seconds=SCHEDULE_INTERVAL_SECONDS,
+# Shard by team, not by alert. The cohort key includes `date_to`, which comes from
+# `next_check_at`, so two alerts from one team share a ClickHouse query only when they
+# land in the same slot.
+def compute_shard_offset_seconds(team_id: int, check_interval_minutes: int) -> int:
+    return compute_team_shard_offset_seconds(
+        team_id, check_interval_minutes, schedule_interval_seconds=SCHEDULE_INTERVAL_SECONDS
     )
+
+
+def next_allowed_check_at(
+    candidate: datetime,
+    *,
+    team_timezone: str,
+    schedule_restriction: dict[str, object] | None,
+) -> datetime:
+    windows = parse_blocked_windows_tuples(schedule_restriction)
+    allowed_at = scan_next_unblocked_utc(candidate, team_timezone, windows)
+    if allowed_at is not None:
+        return allowed_at
+
+    logger.warning(
+        "logs_alert.schedule_restriction.next_allowed_check_at_exceeded_cap",
+        team_timezone=team_timezone,
+    )
+    retry_candidate = candidate.astimezone(UTC) + timedelta(days=1)
+    allowed_at = scan_next_unblocked_utc(retry_candidate, team_timezone, windows)
+    if allowed_at is not None:
+        return allowed_at
+
+    logger.error(
+        "logs_alert.schedule_restriction.next_allowed_check_at_giving_up_after_retry",
+        team_timezone=team_timezone,
+    )
+    return retry_candidate.replace(second=0, microsecond=0)
+
+
+# How long the logs stack keeps evaluating an alert after the platform takes it over, so the two
+# stacks' checks can be compared. It sends nothing for the alert in that time.
+PLATFORM_SHADOW = timedelta(days=7)
 
 
 def due_alerts_q(now: datetime, *, broken_state: str, snoozed_state: str) -> Q:
@@ -49,4 +89,9 @@ def due_alerts_q(now: datetime, *, broken_state: str, snoozed_state: str) -> Q:
         & (Q(next_check_at__lte=now) | Q(next_check_at__isnull=True))
         & ~Q(state=broken_state)
         & ~Q(state=snoozed_state, snooze_until__gt=now)
+        # A platform-owned row with no cutover time has no shadow to finish, so it is not evaluated.
+        & ~(
+            Q(owner=PlatformAlertOwner.PLATFORM.value)
+            & (Q(owner_changed_at__isnull=True) | Q(owner_changed_at__lt=now - PLATFORM_SHADOW))
+        )
     )

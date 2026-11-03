@@ -1,12 +1,14 @@
 import { MakeLogicType, actions, connect, kea, listeners, path, props, reducers, selectors } from 'kea'
 import { loaders } from 'kea-loaders'
-import { actionToUrl, router, urlToAction } from 'kea-router'
+import { actionToUrl, combineUrl, router, urlToAction } from 'kea-router'
 
-import { LemonDialog, PaginationManual } from '@posthog/lemon-ui'
+import { LemonDialog, PaginationManual, lemonToast } from '@posthog/lemon-ui'
 
 import api, { CountedPaginatedResponse } from 'lib/api'
 import { SetupTaskId, globalSetupLogic } from 'lib/components/ProductSetup'
-import { objectsEqual } from 'lib/utils/objects'
+import { FEATURE_FLAGS } from 'lib/constants'
+import { featureFlagLogic as enabledFeaturesLogic, FeatureFlagsSet } from 'lib/logic/featureFlagLogic'
+import { objectClean, objectsEqual } from 'lib/utils/objects'
 import { parseNumericArrayFilter, parseTagsFilter, toParams } from 'lib/utils/url'
 import { handleFlagApprovalRequired } from 'scenes/feature-flags/updateFlagActiveInProject'
 import { projectLogic } from 'scenes/projectLogic'
@@ -14,12 +16,24 @@ import { Scene } from 'scenes/sceneTypes'
 import { urls } from 'scenes/urls'
 
 import { SIDE_PANEL_CONTEXT_KEY, SidePanelSceneContext } from '~/layout/navigation-3000/sidepanel/types'
+import { deleteFromTree, refreshTreeItem } from '~/layout/panel-layout/ProjectTree/projectTreeLogic'
 import { ActivityScope, Breadcrumb, FeatureFlagType } from '~/types'
+
+import {
+    STALE_ROW_VERSION_RELOADED_MESSAGE,
+    isStaleRowVersionError,
+    rowVersionToken,
+} from 'products/feature_flags/frontend/featureFlagConfigFormat'
+import { featureFlagsRetrieve } from 'products/feature_flags/frontend/generated/api'
 
 import { FeatureFlagArchivedSource, reportFeatureFlagArchived } from './featureFlagArchiveDialog'
 import { openFeatureFlagDisableDialog } from './featureFlagDisableDialog'
 
 export const FLAGS_PER_PAGE = 100
+
+// The server rejects search terms longer than this (see products/feature_flags/backend/api/feature_flag.py).
+// The search input caps at the same length so the client and server agree.
+export const FEATURE_FLAG_SEARCH_MAX_LENGTH = 200
 
 export function flagMatchesSearch(flag: FeatureFlagType, search?: string): boolean {
     if (!search?.trim()) {
@@ -37,9 +51,16 @@ export function flagMatchesSearch(flag: FeatureFlagType, search?: string): boole
             .filter(Boolean)
             .join(' ') || ''
 
-    // Use regex pattern matching like the backend - escape metacharacters then replace spaces with word boundary pattern
-    const escapedSearchValue = searchValue.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    const regexPattern = escapedSearchValue.replace(/\s+/g, '[\\s\\-_]*')
+    // Match the backend: spaces, hyphens, and underscores are one separator class, so MY_FLAG finds my-flag
+    // A query of only separators has no parts, so match it literally rather than with a pattern that matches every flag
+    // A leading or trailing separator stays required, so _prod does not find production
+    const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const parts = searchValue.split(/[\s\-_]+/).filter(Boolean)
+    const leadingSeparator = /^[\s\-_]/.test(searchValue) ? '[\\s\\-_]' : ''
+    const trailingSeparator = /[\s\-_]$/.test(searchValue) ? '[\\s\\-_]' : ''
+    const regexPattern = parts.length
+        ? leadingSeparator + parts.map(escapeRegex).join('[\\s\\-_]*') + trailingSeparator
+        : escapeRegex(searchValue)
 
     try {
         const regex = new RegExp(regexPattern, 'i')
@@ -63,7 +84,11 @@ export function flagMatchesStatus(flag: FeatureFlagType, active?: string): boole
         return !flag.active
     }
     if (active === 'STALE') {
-        return flag.status === 'STALE'
+        // The server's STALE set is wider than the checker's STALE status. The `filter_stale_flags`
+        // docstring in flag_status.py lists where they diverge. The count and the "select all
+        // matching" delete use the server's set, so the list has to show the same rows, and every
+        // row in that set is active.
+        return flag.active
     }
     return true
 }
@@ -96,8 +121,10 @@ export function flagMatchesFilters(flag: FeatureFlagType, filters: FeatureFlagsF
         flagMatchesSearch(flag, filters.search) &&
         flagMatchesStatus(flag, filters.active) &&
         flagMatchesType(flag, filters.type) &&
-        // Archived flags are hidden unless explicitly filtered for, mirroring the API default
-        (filters.archived === 'true' ? !!flag.archived : !flag.archived) &&
+        // Deleted and archived flags are hidden unless explicitly filtered for, mirroring the API defaults.
+        // The deleted view lists a flag whether or not it was archived before the delete.
+        (filters.deleted === 'true' ? !!flag.deleted : !flag.deleted) &&
+        (filters.deleted === 'true' || (filters.archived === 'true' ? !!flag.archived : !flag.archived)) &&
         (!filters.created_by_id?.length ||
             (flag.created_by != null && filters.created_by_id.includes(flag.created_by.id))) &&
         (!filters.tags?.length || filters.tags.some((tag) => flag.tags?.includes(tag))) &&
@@ -122,6 +149,10 @@ export enum FeatureFlagsTab {
     TESTING = 'testing',
 }
 
+export function isFeatureFlagsTab(tab: unknown): tab is FeatureFlagsTab {
+    return typeof tab === 'string' && (Object.values(FeatureFlagsTab) as string[]).includes(tab)
+}
+
 export interface FeatureFlagsResult extends CountedPaginatedResponse<FeatureFlagType> {
     /* not in the API response */
     filters?: FeatureFlagsFilters | null
@@ -132,6 +163,8 @@ export interface FeatureFlagsFilters {
     active?: string
     /** 'true' shows only archived flags; when unset, archived flags are excluded */
     archived?: string
+    /** 'true' shows only deleted flags, which can be restored; when unset, deleted flags are excluded */
+    deleted?: string
     created_by_id?: number[]
     type?: string
     search?: string
@@ -145,6 +178,7 @@ export interface FeatureFlagsFilters {
 const DEFAULT_FILTERS: FeatureFlagsFilters = {
     active: undefined,
     archived: undefined,
+    deleted: undefined,
     created_by_id: undefined,
     type: undefined,
     search: undefined,
@@ -155,14 +189,94 @@ const DEFAULT_FILTERS: FeatureFlagsFilters = {
     excluded_tags: undefined,
 }
 
+const FILTER_PARAM_KEYS = Object.keys(DEFAULT_FILTERS) as (keyof FeatureFlagsFilters)[]
+
+function filtersFromSearchParams(searchParams: Record<string, any>): FeatureFlagsFilters {
+    const { page, created_by_id, active, archived, deleted, type, search, order, evaluation_runtime, tags } =
+        searchParams
+    return {
+        ...DEFAULT_FILTERS,
+        created_by_id: parseNumericArrayFilter(created_by_id),
+        type,
+        order,
+        evaluation_runtime,
+        tags: parseTagsFilter(tags),
+        excluded_tags: parseTagsFilter(searchParams['excluded_tags']),
+        active: active !== undefined ? String(active) : undefined,
+        archived: archived !== undefined ? String(archived) : undefined,
+        deleted: deleted !== undefined ? String(deleted) : undefined,
+        page: page !== undefined ? parseInt(page) : undefined,
+        search: search !== undefined ? String(search) : undefined,
+    }
+}
+
+/**
+ * Prefix for the list's filter params while they ride on a flag detail URL. The prefix keeps them
+ * out of the way of the detail page's own params — most importantly `page`, which the History tab's
+ * activityLogLogic reads for its pagination.
+ */
+const CARRIED_FILTER_PARAM_PREFIX = 'list_'
+
+/**
+ * The list's filter params found in `filters` or in the list URL's search params. A flag opened
+ * from the list carries them (prefixed) in its own URL, and the detail scene's list breadcrumb
+ * hands them back, so returning that way restores the view the user left. They ride in the URL
+ * because sceneLogic unmounts the list scene's logic before it mounts the flag scene's logic, so
+ * the flag logic's connection to `featureFlagsLogic` mounts a new copy with default filters.
+ */
+export function featureFlagsListFilterParams(searchParams: Record<string, any>): Record<string, any> {
+    const params = objectClean(Object.fromEntries(FILTER_PARAM_KEYS.map((key) => [key, searchParams[key]])))
+    // Page 1 is the default view, so leave the param out and keep default URLs bare
+    if (String(params.page) === '1') {
+        delete params.page
+    }
+    return params
+}
+
+/** A flag detail URL that carries the list's current filters as `list_`-prefixed params. */
+export function featureFlagUrlFromList(
+    id: number | string,
+    filters: Record<string, any>,
+    extraParams: Record<string, any> = {}
+): string {
+    const carried = Object.fromEntries(
+        Object.entries(featureFlagsListFilterParams(filters)).map(([key, value]) => [
+            CARRIED_FILTER_PARAM_PREFIX + key,
+            value,
+        ])
+    )
+    return combineUrl(urls.featureFlag(id), { ...carried, ...extraParams }).url
+}
+
+/** The `list_`-prefixed params on a flag page's URL, as-is, for redirects that stay on the flag page. */
+export function carriedListFilterParams(searchParams: Record<string, any>): Record<string, any> {
+    return objectClean(
+        Object.fromEntries(
+            FILTER_PARAM_KEYS.map((key) => [
+                CARRIED_FILTER_PARAM_PREFIX + key,
+                searchParams[CARRIED_FILTER_PARAM_PREFIX + key],
+            ])
+        )
+    )
+}
+
+/** The carried params translated back into the list's own filter params, for the list breadcrumb. */
+export function listFilterParamsFromCarried(searchParams: Record<string, any>): Record<string, any> {
+    return Object.fromEntries(
+        Object.entries(carriedListFilterParams(searchParams)).map(([key, value]) => [
+            key.slice(CARRIED_FILTER_PARAM_PREFIX.length),
+            value,
+        ])
+    )
+}
+
 export interface FlagLogicProps {
     flagPrefix?: string // used to filter flags by prefix e.g. for the user interview flags
 }
 
 type FlagsUpdatingState = Record<number, boolean>
 
-// Shared by the updateFeatureFlag and updateFeatureFlagArchived reducer cases, which track the
-// per-row spinner identically.
+// Shared by the per-row write loaders (update, archive, restore), which track the per-row spinner identically.
 const markFlagUpdating = (state: FlagsUpdatingState, { id }: { id: number }): FlagsUpdatingState => ({
     ...state,
     [id]: true,
@@ -181,6 +295,8 @@ const clearFlagUpdating = (
 
 // Generated by kea-typegen. Update if you're an agent, ignore if you're human.
 export interface featureFlagsLogicValues {
+    enabledFeatureFlags: FeatureFlagsSet // enabledFeaturesLogic
+    receivedFeatureFlags: boolean // enabledFeaturesLogic
     currentProjectId: number | null // projectLogic
     activeTab: FeatureFlagsTab
     breadcrumbs: Breadcrumb[]
@@ -192,12 +308,13 @@ export interface featureFlagsLogicValues {
     featureFlagsUpdating: Record<number, boolean>
     filters: FeatureFlagsFilters
     filtersChanged: boolean
-    localFlagsCache: FeatureFlagType[]
+    hasActiveFilters: boolean
     pagination: PaginationManual
     paramsFromFilters: {
         active?: string | undefined
         archived?: string | undefined
         created_by_id?: number[] | undefined
+        deleted?: string | undefined
         evaluation_runtime?: string | undefined
         excluded_tags?: string[] | undefined
         limit: number
@@ -210,17 +327,25 @@ export interface featureFlagsLogicValues {
     }
     shouldShowEmptyState: boolean
     sidePanelContext: SidePanelSceneContext
+    switchingDeletedView: boolean
 }
 
 // Generated by kea-typegen. Update if you're an agent, ignore if you're human.
 export interface featureFlagsLogicActions {
+    setFeatureFlags: (
+        flags: string[],
+        variants: Record<string, boolean | string>
+    ) => {
+        flags: string[]
+        variants: Record<string, boolean | string>
+    } // enabledFeaturesLogic
     closeEnrichAnalyticsNotice: () => {
         value: true
     }
     deleteFlag: (id: number) => {
         id: number
     }
-    loadFeatureFlags: () => any
+    loadFeatureFlags: (_: void) => void
     loadFeatureFlagsFailure: (
         error: string,
         errorObject?: any
@@ -230,10 +355,48 @@ export interface featureFlagsLogicActions {
     }
     loadFeatureFlagsSuccess: (
         featureFlags: FeatureFlagsResult,
-        payload?: any
+        payload?: void
     ) => {
         featureFlags: FeatureFlagsResult
-        payload?: any
+        payload?: void
+    }
+    resetFilters: () => {
+        value: true
+    }
+    restoreFeatureFlag: ({ id }: { id: number }) => {
+        id: number
+    }
+    restoreFeatureFlagFailure: (
+        error: string,
+        errorObject?: any
+    ) => {
+        error: string
+        errorObject?: any
+    }
+    restoreFeatureFlagSuccess: (
+        featureFlags: {
+            count: number
+            filters?: FeatureFlagsFilters | null | undefined
+            lastUpdatedFlagId: number
+            next?: string | null | undefined
+            previous?: string | null | undefined
+            results: any[]
+        },
+        payload?: {
+            id: number
+        }
+    ) => {
+        featureFlags: {
+            count: number
+            filters?: FeatureFlagsFilters | null | undefined
+            lastUpdatedFlagId: number
+            next?: string | null | undefined
+            previous?: string | null | undefined
+            results: any[]
+        }
+        payload?: {
+            id: number
+        }
     }
     setActiveTab: (tabKey: FeatureFlagsTab) => {
         tabKey: FeatureFlagsTab
@@ -247,8 +410,10 @@ export interface featureFlagsLogicActions {
     }
     setFeatureFlagsFilters: (
         filters: Partial<FeatureFlagsFilters>,
-        replace?: boolean
+        replace?: boolean,
+        debounce?: boolean
     ) => {
+        debounce: boolean
         filters: Partial<FeatureFlagsFilters>
         replace: boolean | undefined
     }
@@ -373,10 +538,12 @@ export interface featureFlagsLogicMeta {
     __keaTypeGenInternalSelectorTypes: {
         count: (featureFlags: FeatureFlagsResult) => number
         filtersChanged: (filters: FeatureFlagsFilters, featureFlags: FeatureFlagsResult) => boolean
+        switchingDeletedView: (filters: FeatureFlagsFilters, featureFlags: FeatureFlagsResult) => boolean
         paramsFromFilters: (filters: FeatureFlagsFilters) => {
             active?: string | undefined
             archived?: string | undefined
             created_by_id?: number[] | undefined
+            deleted?: string | undefined
             evaluation_runtime?: string | undefined
             excluded_tags?: string[] | undefined
             limit: number
@@ -387,18 +554,14 @@ export interface featureFlagsLogicMeta {
             tags?: string[] | undefined
             type?: string | undefined
         }
+        hasActiveFilters: (filters: FeatureFlagsFilters) => boolean
         shouldShowEmptyState: (
             featureFlagsLoading: boolean,
             featureFlags: FeatureFlagsResult,
-            filters: FeatureFlagsFilters
+            hasActiveFilters: boolean
         ) => boolean
-        pagination: (
-            filters: FeatureFlagsFilters,
-            displayedFlags: FeatureFlagType[],
-            featureFlags: FeatureFlagsResult,
-            filtersChanged: boolean
-        ) => PaginationManual
-        displayedFlags: (localFlagsCache: FeatureFlagType[], filters: FeatureFlagsFilters) => FeatureFlagType[]
+        pagination: (filters: FeatureFlagsFilters, featureFlags: FeatureFlagsResult) => PaginationManual
+        displayedFlags: (featureFlags: FeatureFlagsResult) => FeatureFlagType[]
     }
 }
 
@@ -413,7 +576,13 @@ export const featureFlagsLogic = kea<featureFlagsLogicType>([
     props({} as FlagLogicProps),
     path(['scenes', 'feature-flags', 'featureFlagsLogic']),
     connect(() => ({
-        values: [projectLogic, ['currentProjectId']],
+        values: [
+            projectLogic,
+            ['currentProjectId'],
+            enabledFeaturesLogic,
+            ['featureFlags as enabledFeatureFlags', 'receivedFeatureFlags'],
+        ],
+        actions: [enabledFeaturesLogic, ['setFeatureFlags']],
     })),
     actions({
         updateFlag: (flag: FeatureFlagType) => ({ flag }),
@@ -421,7 +590,16 @@ export const featureFlagsLogic = kea<featureFlagsLogicType>([
         updateFlagActive: (id: number, active: boolean) => ({ id, active }),
         deleteFlag: (id: number) => ({ id }),
         setActiveTab: (tabKey: FeatureFlagsTab) => ({ tabKey }),
-        setFeatureFlagsFilters: (filters: Partial<FeatureFlagsFilters>, replace?: boolean) => ({ filters, replace }),
+        setFeatureFlagsFilters: (
+            filters: Partial<FeatureFlagsFilters>,
+            replace?: boolean,
+            debounce: boolean = true
+        ) => ({
+            filters,
+            replace,
+            debounce,
+        }),
+        resetFilters: true,
         toggleFeatureFlagActive: (id: number, active: boolean) => ({ id, active }),
         closeEnrichAnalyticsNotice: true,
         setFeatureFlagUpdating: (id: number, updating: boolean) => ({ id, updating }),
@@ -430,22 +608,33 @@ export const featureFlagsLogic = kea<featureFlagsLogicType>([
         featureFlags: [
             { results: [], count: 0, filters: DEFAULT_FILTERS, offset: 0 } as FeatureFlagsResult,
             {
-                loadFeatureFlags: async () => {
+                loadFeatureFlags: async (_: void, breakpoint) => {
+                    // Read the filters up front: `values` is live, so reading them after the await would
+                    // stamp the response with whatever the user has typed since, and displayedFlags would
+                    // then filter this page against filters it was never requested under.
+                    const params = values.paramsFromFilters
+                    const filters = values.filters
+                    // nosemgrep: prefer-codegen-api -- Legacy raw API call with a hand-written URL and an unchecked response type. Use featureFlagsList() from 'products/feature_flags/frontend/generated/api' instead.
                     const response = await api.get(
-                        `api/projects/${values.currentProjectId}/feature_flags/?${toParams(values.paramsFromFilters)}`
+                        `api/projects/${values.currentProjectId}/feature_flags/?${toParams(params)}`
                     )
+                    // Drop a response that a newer request has already superseded, so slow-then-fast
+                    // responses can't land out of order.
+                    breakpoint()
 
                     return {
                         ...response,
-                        offset: values.paramsFromFilters.offset,
-                        filters: values.filters,
+                        offset: params.offset,
+                        filters,
                     }
                 },
                 updateFeatureFlag: async ({ id, payload }: { id: number; payload: Partial<FeatureFlagType> }) => {
+                    const versioned = rowVersionToken(values.featureFlags.results.find((flag) => flag.id === id))
                     try {
+                        // nosemgrep: prefer-codegen-api -- Legacy raw API call with a hand-written URL and an unchecked response type. Use featureFlagsPartialUpdate() from 'products/feature_flags/frontend/generated/api' instead.
                         const response = await api.update(
                             `api/projects/${values.currentProjectId}/feature_flags/${id}`,
-                            payload
+                            { ...payload, ...versioned }
                         )
                         const updatedFlags = values.featureFlags.results.map((flag) =>
                             flag.id === response.id ? response : flag
@@ -462,6 +651,18 @@ export const featureFlagsLogic = kea<featureFlagsLogicType>([
                                   ? 'disable this feature flag'
                                   : 'update this feature flag'
                         handleFlagApprovalRequired(e, id, actionDescription)
+                        if (isStaleRowVersionError(versioned, e)) {
+                            // The global error toast skips every 409, so say why the click seemed to do nothing.
+                            lemonToast.error(e?.detail || STALE_ROW_VERSION_RELOADED_MESSAGE)
+                            // The row version we sent is stale: the conflicting write may have replaced the whole
+                            // document, so take the fresh row whole, not only its version.
+                            try {
+                                const fresh = await featureFlagsRetrieve(String(values.currentProjectId), id)
+                                actions.updateFlag(fresh as unknown as FeatureFlagType)
+                            } catch {
+                                // The 409 stays the failure this loader reports.
+                            }
+                        }
                         throw e
                     }
                 },
@@ -478,9 +679,13 @@ export const featureFlagsLogic = kea<featureFlagsLogicType>([
                     via?: FeatureFlagArchivedSource
                 }) => {
                     try {
+                        // nosemgrep: prefer-codegen-api -- Legacy raw API call with a hand-written URL and an unchecked response type. Use featureFlagsPartialUpdate() from 'products/feature_flags/frontend/generated/api' instead.
                         const response = await api.update(
                             `api/projects/${values.currentProjectId}/feature_flags/${id}`,
-                            archived ? { archived: true, active: false } : { archived: false }
+                            {
+                                ...(archived ? { archived: true, active: false } : { archived: false }),
+                                ...rowVersionToken(values.featureFlags.results.find((flag) => flag.id === id)),
+                            }
                         )
                         const updatedFlags = values.featureFlags.results.map((flag) =>
                             flag.id === response.id ? response : flag
@@ -496,6 +701,40 @@ export const featureFlagsLogic = kea<featureFlagsLogicType>([
                             id,
                             archived ? 'archive this feature flag' : 'unarchive this feature flag'
                         )
+                        throw e
+                    }
+                },
+                restoreFeatureFlag: async ({ id }: { id: number }) => {
+                    try {
+                        // nosemgrep: prefer-codegen-api -- The generated partial update request type has no `deleted` field.
+                        const response = await api.update(
+                            `api/projects/${values.currentProjectId}/feature_flags/${id}`,
+                            { deleted: false }
+                        )
+                        // Restore gives the flag a new tree entry. A delete from another tab or the API leaves the old entry in this tab's tree.
+                        deleteFromTree('feature_flag', String(id))
+                        refreshTreeItem('feature_flag', String(id))
+                        // The response carries the restored key, not the one the delete renamed it to.
+                        lemonToast.success(`${response.key} has been restored`)
+                        const cached = values.featureFlags
+                        // Restore is only offered in the deleted view, but the user can switch views while the
+                        // request is in flight. Only the deleted view loses the restored flag, so any other cached
+                        // list stays as it is, and the success listener refetches it.
+                        if (cached.filters?.deleted !== 'true') {
+                            return { ...cached, lastUpdatedFlagId: id }
+                        }
+                        return {
+                            ...cached,
+                            results: cached.results.map((flag) => (flag.id === response.id ? response : flag)),
+                            count: Math.max(0, cached.count - 1),
+                            lastUpdatedFlagId: id,
+                        }
+                    } catch (e: any) {
+                        actions.setFeatureFlagUpdating(id, false)
+                        // The global loader toast only covers errors with an HTTP status. A dropped connection has none.
+                        if (e?.status === undefined) {
+                            lemonToast.error("Couldn't restore this feature flag. Try again.")
+                        }
                         throw e
                     }
                 },
@@ -520,20 +759,6 @@ export const featureFlagsLogic = kea<featureFlagsLogicType>([
                 results: state.results.filter((flag) => flag.id !== id),
             }),
         },
-        localFlagsCache: [
-            [] as FeatureFlagType[],
-            {
-                loadFeatureFlagsSuccess: (_, { featureFlags }) => {
-                    return featureFlags.results
-                },
-                updateFeatureFlagSuccess: (_, { featureFlags }) => featureFlags.results,
-                updateFeatureFlagArchivedSuccess: (_, { featureFlags }) => featureFlags.results,
-                updateFlag: (state, { flag }) => state.map((f) => (f.id === flag.id ? flag : f)),
-                updateFlagFromPartial: (state, { flag }) =>
-                    state.map((f) => (f.id === flag.id ? { ...f, ...flag } : f)),
-                deleteFlag: (state, { id }) => state.filter((f) => f.id !== id),
-            },
-        ],
         activeTab: [
             FeatureFlagsTab.OVERVIEW as FeatureFlagsTab,
             {
@@ -573,6 +798,8 @@ export const featureFlagsLogic = kea<featureFlagsLogicType>([
                 updateFeatureFlagSuccess: clearFlagUpdating,
                 updateFeatureFlagArchived: markFlagUpdating,
                 updateFeatureFlagArchivedSuccess: clearFlagUpdating,
+                restoreFeatureFlag: markFlagUpdating,
+                restoreFeatureFlagSuccess: clearFlagUpdating,
             },
         ],
     }),
@@ -586,6 +813,14 @@ export const featureFlagsLogic = kea<featureFlagsLogicType>([
                 }
                 return !objectsEqual({ ...featureFlags.filters, page: undefined }, { ...filters, page: undefined })
             },
+        ],
+        // True from a switch into or out of the deleted view until that view's rows arrive. Until then the
+        // table still shows the previous view's rows, and a selection made on them would carry into a view
+        // that hides them, where bulk actions would act on flags the user can't see.
+        switchingDeletedView: [
+            (s) => [s.filters, s.featureFlags],
+            (filters: FeatureFlagsFilters, featureFlags: FeatureFlagsResult): boolean =>
+                (filters.deleted === 'true') !== (featureFlags.filters?.deleted === 'true'),
         ],
         paramsFromFilters: [
             (s) => [s.filters],
@@ -606,28 +841,39 @@ export const featureFlagsLogic = kea<featureFlagsLogicType>([
                 },
             ],
         ],
-        // Check to see if any non-default filters are being used
+        // True when a real filter narrows the list. Checks filter values directly rather than
+        // comparing the whole object to the defaults: `page` and `order` are not filters, and a
+        // bare URL leaves `page` undefined (not 1), so a shape comparison reports the default view
+        // as filtered and the empty state offers "Clear filters" when nothing is set.
+        hasActiveFilters: [
+            (s) => [s.filters],
+            (filters: FeatureFlagsFilters): boolean =>
+                Boolean(
+                    filters.search?.trim() ||
+                    filters.active ||
+                    filters.archived ||
+                    filters.deleted ||
+                    filters.type ||
+                    filters.evaluation_runtime ||
+                    filters.created_by_id?.length ||
+                    filters.tags?.length ||
+                    filters.excluded_tags?.length
+                ),
+        ],
         shouldShowEmptyState: [
-            (s) => [s.featureFlagsLoading, s.featureFlags, s.filters],
-            (featureFlagsLoading: boolean, featureFlags: FeatureFlagsResult, filters: FeatureFlagsFilters): boolean => {
-                return (
-                    !featureFlagsLoading && featureFlags.results.length <= 0 && objectsEqual(filters, DEFAULT_FILTERS)
-                )
+            (s) => [s.featureFlagsLoading, s.featureFlags, s.hasActiveFilters],
+            (featureFlagsLoading: boolean, featureFlags: FeatureFlagsResult, hasActiveFilters: boolean): boolean => {
+                return !featureFlagsLoading && featureFlags.results.length <= 0 && !hasActiveFilters
             },
         ],
         pagination: [
-            (s) => [s.filters, s.displayedFlags, s.featureFlags, s.filtersChanged],
-            (
-                filters: FeatureFlagsFilters,
-                displayedFlags: FeatureFlagType[],
-                featureFlags: FeatureFlagsResult,
-                filtersChanged: boolean
-            ): PaginationManual => {
+            (s) => [s.filters, s.featureFlags],
+            (filters: FeatureFlagsFilters, featureFlags: FeatureFlagsResult): PaginationManual => {
                 return {
                     controlled: true,
                     pageSize: FLAGS_PER_PAGE,
                     currentPage: filters.page || 1,
-                    entryCount: filtersChanged ? displayedFlags.length : featureFlags.count,
+                    entryCount: featureFlags.count,
                 }
             },
         ],
@@ -638,65 +884,84 @@ export const featureFlagsLogic = kea<featureFlagsLogicType>([
             }),
         ],
         displayedFlags: [
-            (s) => [s.localFlagsCache, s.filters],
-            (cache: FeatureFlagType[], filters: FeatureFlagsFilters): FeatureFlagType[] => {
-                return cache.filter((flag) => flagMatchesFilters(flag, filters))
+            (s) => [s.featureFlags],
+            (featureFlags: FeatureFlagsResult): FeatureFlagType[] => {
+                // Re-applies the page's own server-side filters so optimistic row edits that no longer match
+                // (a flag toggled off under active=true, or archived) drop out without a refetch. Filtering
+                // against the live filters instead would empty the list between a filter change and its
+                // refetch, and LemonTable renders skeleton rows over an empty dataSource.
+                const appliedFilters = featureFlags.filters ?? DEFAULT_FILTERS
+                return featureFlags.results.filter((flag) => flagMatchesFilters(flag, appliedFilters))
             },
         ],
     }),
     listeners(({ actions, values }) => ({
+        setFeatureFlags: () => {
+            if (
+                !values.enabledFeatureFlags[FEATURE_FLAGS.FEATURE_FLAG_REQUEST_USAGE] &&
+                values.activeTab === FeatureFlagsTab.USAGE &&
+                router.values.location.pathname.endsWith(urls.featureFlags())
+            ) {
+                actions.setActiveTab(FeatureFlagsTab.OVERVIEW)
+            }
+        },
         updateFlagActive: ({ id, active }) => {
             actions.updateFeatureFlag({ id, payload: { active } })
         },
-        // Mirrors featureFlagLogic's listener of the same name, so both surfaces of the
-        // disable-and-archive experiment are driven from a logic rather than from the row component.
+        // Mirrors featureFlagLogic's listener of the same name, so both the list and the detail
+        // view drive the toggle from a logic rather than from the row component.
         toggleFeatureFlagActive: ({ id, active }) => {
             const applyUpdate = (payload: Partial<FeatureFlagType>): void => {
                 actions.updateFeatureFlag({ id, payload })
             }
-            const openControlDialog = (onConfirm?: () => void, onCancel?: () => void): void => {
+
+            if (active) {
                 LemonDialog.open({
-                    title: `${active ? 'Enable' : 'Disable'} this flag?`,
-                    description: `This flag will be immediately ${
-                        active ? 'rolled out to' : 'rolled back from'
-                    } the users matching the release conditions.`,
+                    title: 'Enable this flag?',
+                    description:
+                        'This flag will be immediately rolled out to the users matching the release conditions.',
                     primaryButton: {
                         children: 'Confirm',
                         type: 'primary',
-                        onClick: onConfirm ?? (() => applyUpdate({ active })),
+                        onClick: () => applyUpdate({ active: true }),
                         size: 'small',
                     },
                     secondaryButton: {
                         children: 'Cancel',
                         type: 'tertiary',
                         size: 'small',
-                        onClick: onCancel,
                     },
                 })
-            }
-
-            if (active) {
-                openControlDialog()
                 return
             }
 
             openFeatureFlagDisableDialog({
                 source: 'feature-flags-list',
+                filters: values.featureFlags.results.find((flag) => flag.id === id)?.filters,
                 onDisable: () => applyUpdate({ active: false }),
                 onDisableAndArchive: () =>
                     actions.updateFeatureFlagArchived({ id, archived: true, via: 'disable-confirmation' }),
-                openControlDialog,
             })
         },
-        setFeatureFlagsFilters: async (_, breakpoint) => {
+        setFeatureFlagsFilters: async ({ debounce }, breakpoint) => {
             if (values.activeTab === FeatureFlagsTab.OVERVIEW) {
-                await breakpoint(300)
+                if (debounce) {
+                    await breakpoint(300)
+                }
                 actions.loadFeatureFlags()
             }
         },
         setActiveTab: () => {
             // Don't carry over pagination from previous tab
             actions.setFeatureFlagsFilters({ page: 1 }, true)
+        },
+        resetFilters: () => {
+            actions.setFeatureFlagsFilters({ ...DEFAULT_FILTERS, order: values.filters.order }, true)
+        },
+        restoreFeatureFlagSuccess: () => {
+            // The deleted view drops the restored row at once, but its page is then a row short of its count, so the
+            // first flag of the next page can't be reached. Any other view may have loaded without the restored flag.
+            actions.loadFeatureFlags()
         },
         loadFeatureFlagsSuccess: () => {
             if (values.featureFlags.results.length > 0) {
@@ -740,35 +1005,35 @@ export const featureFlagsLogic = kea<featureFlagsLogicType>([
             setActiveTab: changeUrl,
         }
     }),
-    urlToAction(({ actions, values }) => ({
-        [urls.featureFlags()]: async (_, searchParams) => {
-            const tabInURL = searchParams['tab']
-
-            if (!tabInURL) {
-                if (values.activeTab !== FeatureFlagsTab.OVERVIEW) {
-                    actions.setActiveTab(FeatureFlagsTab.OVERVIEW)
+    urlToAction(({ actions, values, cache }) => ({
+        [urls.featureFlags()]: async (_, searchParams, __, { initial }, previousLocation) => {
+            if (cache.settingTabFromUrl) {
+                return
+            }
+            const tabInURL = searchParams['tab'] || FeatureFlagsTab.OVERVIEW
+            if (tabInURL !== values.activeTab) {
+                const tab =
+                    tabInURL === FeatureFlagsTab.USAGE &&
+                    values.receivedFeatureFlags &&
+                    !values.enabledFeatureFlags[FEATURE_FLAGS.FEATURE_FLAG_REQUEST_USAGE]
+                        ? FeatureFlagsTab.OVERVIEW
+                        : tabInURL
+                // Ignore actionToUrl's echo of the filter reset in setActiveTab, so the list loads once, with the URL's filters
+                cache.settingTabFromUrl = true
+                try {
+                    actions.setActiveTab(tab)
+                } finally {
+                    cache.settingTabFromUrl = false
                 }
-            } else if (tabInURL !== values.activeTab) {
-                actions.setActiveTab(tabInURL)
             }
 
-            const { page, created_by_id, active, archived, type, search, order, evaluation_runtime, tags } =
-                searchParams
-            const pageFiltersFromUrl: Partial<FeatureFlagsFilters> = {
-                created_by_id: parseNumericArrayFilter(created_by_id),
-                type,
-                order,
-                evaluation_runtime,
-                tags: parseTagsFilter(tags),
-                excluded_tags: parseTagsFilter(searchParams['excluded_tags']),
+            const filtersFromUrl = filtersFromSearchParams(searchParams)
+            // actionToUrl sends every filter change back here. Skip that echo: it would send the same request
+            // twice, or cut short the debounce of a search the user is still typing.
+            const arrived = initial || previousLocation?.pathname !== router.values.location.pathname
+            if (arrived || !objectsEqual({ ...values.filters, ...filtersFromUrl }, values.filters)) {
+                actions.setFeatureFlagsFilters(filtersFromUrl, false, false)
             }
-
-            pageFiltersFromUrl.active = active !== undefined ? String(active) : undefined
-            pageFiltersFromUrl.archived = archived !== undefined ? String(archived) : undefined
-            pageFiltersFromUrl.page = page !== undefined ? parseInt(page) : undefined
-            pageFiltersFromUrl.search = search !== undefined ? String(search) : undefined
-
-            actions.setFeatureFlagsFilters({ ...DEFAULT_FILTERS, ...pageFiltersFromUrl })
         },
     })),
 ])

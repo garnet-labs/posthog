@@ -8,6 +8,7 @@ import type { RadialSlicePayload } from '../../core/hooks/useRadialInteraction'
 import { useRadialLayout } from '../../core/radial-context'
 import { RadialChart } from '../../core/RadialChart'
 import type { RadialLayoutBuilder } from '../../core/RadialChart'
+import { useResolvedChartTheme } from '../../core/theme'
 import type {
     ChartDrawArgs,
     ChartLegendConfig,
@@ -20,14 +21,19 @@ import { computePieLayout } from './computePieLayout'
 import type { PieLayout } from './computePieLayout'
 import { PieTooltip } from './PieTooltip'
 import { SliceLabels } from './SliceLabels'
+import type { SliceValueDisplay } from './SliceLabels'
 
 export interface PieChartConfig<Meta = unknown> {
     /** 0 = pie (default), 0.5 = donut. Clamped to [0, 0.95]. */
     innerRadiusRatio?: number
-    /** Show the slice value above the slice (per Chart.js parity). Default true. */
+    /** Show the slice value above the slice. Default true for a pie, false for a donut, whose `centerLabel` carries the number. */
     showValueOnSlice?: boolean
     /** Show the breakdown label above the slice. Default false. */
     showLabelOnSlice?: boolean
+    /** What the on-slice numeric line contains. Defaults to `'percent'` when `isPercent` is set,
+     *  else `'value'`. `'both'` renders `value (percent)` on one line. Gated by
+     *  `showValueOnSlice`, which stays the on/off switch for that line. */
+    sliceValueDisplay?: SliceValueDisplay
     /** Render slice values as percentages of total. Drives both axes-label-style formatting
      *  and the on-slice / tooltip formatting. */
     isPercent?: boolean
@@ -62,7 +68,8 @@ export interface PieChartConfig<Meta = unknown> {
 
 export interface PieChartProps<Meta = unknown> {
     series: Series<Meta>[]
-    theme: ChartTheme
+    /** Defaults to the nearest `ChartThemeProvider`, then the quill CSS vars. */
+    theme?: ChartTheme
     config?: PieChartConfig<Meta>
     tooltip?: (ctx: TooltipContext<Meta>) => React.ReactNode
     onSliceClick?: (payload: RadialSlicePayload<Meta>) => void
@@ -73,8 +80,8 @@ export interface PieChartProps<Meta = unknown> {
      *  Receives the raw slice magnitude; the chart handles percent conversion when
      *  `isPercent` is on. */
     valueFormatter?: (value: number) => string
-    /** Optional content rendered at the center of the chart — typically the aggregation
-     *  total for a donut. Receives the layout so consumers can position custom content. */
+    /** Content rendered in the center of the chart, typically the total of a donut
+     *  (`config.innerRadiusRatio` above 0). A top-level prop, not a `config` key. */
     centerLabel?: React.ReactNode
     /** React children passed through to the radial overlay layer (custom decorations). */
     children?: React.ReactNode
@@ -131,7 +138,7 @@ function defaultValueFormatter(value: number): string {
 
 function PieChartInner<Meta = unknown>({
     series,
-    theme,
+    theme: themeProp,
     config,
     tooltip,
     onSliceClick,
@@ -141,10 +148,12 @@ function PieChartInner<Meta = unknown>({
     centerLabel,
     children,
 }: Omit<PieChartProps<Meta>, 'onError'>): React.ReactElement {
+    const theme = useResolvedChartTheme(themeProp)
     const {
         innerRadiusRatio = 0,
-        showValueOnSlice = true,
+        showValueOnSlice = !(innerRadiusRatio > 0),
         showLabelOnSlice = false,
+        sliceValueDisplay,
         isPercent = false,
         hoverGrowth = DEFAULT_HOVER_GROWTH,
         hoverAnimationMs = DEFAULT_HOVER_ANIMATION_MS,
@@ -260,6 +269,7 @@ function PieChartInner<Meta = unknown>({
                     valueFormatter={valueFormatter}
                     showValueOnSlice={showValueOnSlice}
                     showLabelOnSlice={showLabelOnSlice}
+                    sliceValueDisplay={sliceValueDisplay}
                     minSlicePercentForLabel={minSlicePercentForLabel}
                     labelRadiusRatio={labelRadiusRatio}
                     isPercent={isPercent}

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Preflight dashboard widget OpenAPI codegen from the backend registry.
 
-Same pattern as ``bin/build-mcp-oauth-scopes.py``: a ``bin/*`` codegen script
-invoked from ``hogli build:*``, reading backend SSOT and writing frontend JSON.
+A ``bin/*`` codegen step inside ``hogli build:openapi``, reading backend SSOT and
+writing frontend JSON next to the generated OpenAPI types.
 
 Checks every ``WIDGET_SPECS`` type has an ``ENUM_NAME_OVERRIDES`` entry (Orval /
 ``build:openapi-schema`` fails otherwise) and emits frontend SSOT JSON for date
@@ -108,6 +108,7 @@ def main() -> int:
             "configTypeExport": _friendly_config_type_export(config_model_name),
             "formSchemaExport": config_schema_export.replace("ConfigSchema", "FormSchema"),
             "formFields": list(spec.form_fields),
+            "live": spec.is_live,
         }
 
     FORM_FIELDS_JSON.write_text(json.dumps({"widgets": form_fields_manifest}, indent=2) + "\n", encoding="utf-8")

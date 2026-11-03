@@ -18,9 +18,10 @@ import {
 } from '@posthog/icons'
 import { LemonSelectOptions } from '@posthog/lemon-ui'
 
+import { FEATURE_FLAGS, FeatureFlagKey } from 'lib/constants'
 import {
     IconAction,
-    IconBracketsChart,
+    IconSQL,
     IconInsightCalendarHeatmap,
     IconInsightFunnels,
     IconInsightLifecycle,
@@ -30,6 +31,7 @@ import {
     IconInsightUserPaths,
     IconTableChart,
 } from 'lib/lemon-ui/icons'
+import type { FeatureFlagsSet } from 'lib/logic/featureFlagLogic'
 
 import { NodeKind } from '~/queries/schema/schema-general'
 import { InsightType } from '~/types'
@@ -41,7 +43,14 @@ export interface InsightTypeMetadata {
     tooltipDescription?: string
     icon: React.ComponentType<any>
     inMenu: boolean
+    /** Creation surfaces only offer this insight type when the flag is enabled for the viewer. */
+    flag?: FeatureFlagKey
     tooltipDocLink?: string
+}
+
+/** Whether creation surfaces should offer this insight type to the current user. */
+export function isInsightTypeCreatable(metadata: InsightTypeMetadata, featureFlags: FeatureFlagsSet): boolean {
+    return metadata.inMenu && (!metadata.flag || !!featureFlags[metadata.flag])
 }
 
 export const QUERY_TYPES_METADATA: Record<NodeKind, InsightTypeMetadata> = {
@@ -80,6 +89,13 @@ export const QUERY_TYPES_METADATA: Record<NodeKind, InsightTypeMetadata> = {
         inMenu: true,
         tooltipDocLink: 'https://posthog.com/docs/product-analytics/paths',
     },
+    [NodeKind.PathsV2Query]: {
+        name: 'Journeys',
+        description: 'Follow the steps users take through your product and where they stop.',
+        icon: IconInsightUserPaths,
+        inMenu: true,
+        flag: FEATURE_FLAGS.PRODUCT_ANALYTICS_PATHS_V2,
+    },
     [NodeKind.StickinessQuery]: {
         name: 'Stickiness',
         description: 'See what keeps users coming back by viewing the interval between repeated actions.',
@@ -94,12 +110,6 @@ export const QUERY_TYPES_METADATA: Record<NodeKind, InsightTypeMetadata> = {
         icon: IconInsightLifecycle,
         inMenu: true,
         tooltipDocLink: 'https://posthog.com/docs/product-analytics/lifecycle',
-    },
-    [NodeKind.FunnelCorrelationQuery]: {
-        name: 'Funnel Correlation',
-        description: 'See which events or properties correlate to a funnel result.',
-        icon: IconCorrelationAnalysis,
-        inMenu: false,
     },
     [NodeKind.EventsNode]: {
         name: 'Events',
@@ -191,9 +201,9 @@ export const QUERY_TYPES_METADATA: Record<NodeKind, InsightTypeMetadata> = {
         icon: IconPerson,
         inMenu: false,
     },
-    [NodeKind.FunnelCorrelationActorsQuery]: {
+    [NodeKind.PathsV2ActorsQuery]: {
         name: 'Persons',
-        description: 'List of persons matching specified conditions, derived from an insight.',
+        description: 'List of persons behind a journey grid element, derived from an insight.',
         icon: IconPerson,
         inMenu: false,
     },
@@ -212,7 +222,13 @@ export const QUERY_TYPES_METADATA: Record<NodeKind, InsightTypeMetadata> = {
     [NodeKind.DataVisualizationNode]: {
         name: 'SQL',
         description: 'Slice and dice your data in a table or chart.',
-        icon: IconBracketsChart,
+        icon: IconSQL,
+        inMenu: false,
+    },
+    [NodeKind.BIVisualizationNode]: {
+        name: 'Business intelligence',
+        description: 'Explore data with a visual worksheet.',
+        icon: IconGraph,
         inMenu: false,
     },
     [NodeKind.SavedInsightNode]: {
@@ -236,25 +252,25 @@ export const QUERY_TYPES_METADATA: Record<NodeKind, InsightTypeMetadata> = {
     [NodeKind.HogQLQuery]: {
         name: 'SQL',
         description: 'Direct SQL query.',
-        icon: IconBracketsChart,
+        icon: IconSQL,
         inMenu: true,
     },
     [NodeKind.HogQLMetadata]: {
         name: 'SQL Metadata',
         description: 'Metadata for a SQL query.',
-        icon: IconBracketsChart,
+        icon: IconSQL,
         inMenu: true,
     },
     [NodeKind.HogQLAutocomplete]: {
         name: 'SQL Autocomplete',
         description: 'Autocomplete for the SQL query editor.',
-        icon: IconBracketsChart,
+        icon: IconSQL,
         inMenu: false,
     },
     [NodeKind.DatabaseSchemaQuery]: {
         name: 'Database Schema',
         description: 'Introspect the PostHog database schema.',
-        icon: IconBracketsChart,
+        icon: IconSQL,
         inMenu: true,
     },
     [NodeKind.WebOverviewQuery]: {
@@ -280,6 +296,24 @@ export const QUERY_TYPES_METADATA: Record<NodeKind, InsightTypeMetadata> = {
         description: 'View clicks on external links.',
         icon: IconPieChart,
         inMenu: true,
+    },
+    [NodeKind.WebBotsTableQuery]: {
+        name: 'Bot traffic',
+        description: 'View bot and crawler activity on your site.',
+        icon: IconPieChart,
+        inMenu: true,
+    },
+    [NodeKind.WebAgentAnalyticsQuery]: {
+        name: 'Agent analytics',
+        description: 'View AI agent demand, request failures, and content readiness.',
+        icon: IconPieChart,
+        inMenu: false,
+    },
+    [NodeKind.WebPageDirectoryQuery]: {
+        name: 'Page directory',
+        description: 'See how each page earns its traffic, from search engines through to AI crawlers.',
+        icon: IconPieChart,
+        inMenu: false,
     },
     [NodeKind.WebVitalsQuery]: {
         name: 'Web vitals',
@@ -329,15 +363,33 @@ export const QUERY_TYPES_METADATA: Record<NodeKind, InsightTypeMetadata> = {
         icon: IconCorrelationAnalysis,
         inMenu: false,
     },
+    [NodeKind.ErrorTrackingIssueEventsQuery]: {
+        name: 'Error Tracking Issue Exceptions',
+        description: "List an issue's exceptions, optionally only the ones with a session recording.",
+        icon: IconWarning,
+        inMenu: false,
+    },
     [NodeKind.ErrorTrackingSimilarIssuesQuery]: {
         name: 'Error Tracking Similar Issues',
         description: 'Explore issues similar to the selected one.',
         icon: IconWarning,
         inMenu: false,
     },
+    [NodeKind.ErrorTrackingFingerprintProjectionQuery]: {
+        name: 'Error tracking fingerprint projection',
+        description: 'Plot issue fingerprints by embedding similarity.',
+        icon: IconWarning,
+        inMenu: false,
+    },
     [NodeKind.ErrorTrackingBreakdownsQuery]: {
         name: 'Error Tracking Breakdowns',
         description: 'Break down error tracking issues by properties.',
+        icon: IconWarning,
+        inMenu: false,
+    },
+    [NodeKind.ErrorTrackingReleasesQuery]: {
+        name: 'Error tracking releases',
+        description: 'Count occurrences of an error tracking issue per app release.',
         icon: IconWarning,
         inMenu: false,
     },
@@ -360,14 +412,14 @@ export const QUERY_TYPES_METADATA: Record<NodeKind, InsightTypeMetadata> = {
         inMenu: false,
     },
     [NodeKind.ExperimentTrendsQuery]: {
-        name: 'Experiment Trends Result',
-        description: 'View experiment trend result.',
+        name: 'Legacy experiment trends metric',
+        description: 'Trends metric from the legacy experiments engine. Its results are no longer available.',
         icon: IconFlask,
         inMenu: false,
     },
     [NodeKind.ExperimentFunnelsQuery]: {
-        name: 'Experiment Funnels Result',
-        description: 'View experiment funnel result.',
+        name: 'Legacy experiment funnel metric',
+        description: 'Funnel metric from the legacy experiments engine. Its results are no longer available.',
         icon: IconFlask,
         inMenu: false,
     },
@@ -386,6 +438,24 @@ export const QUERY_TYPES_METADATA: Record<NodeKind, InsightTypeMetadata> = {
     [NodeKind.ExperimentDataWarehouseNode]: {
         name: 'Experiment Data Warehouse',
         description: 'Experiment data warehouse source configuration.',
+        icon: IconFlask,
+        inMenu: false,
+    },
+    [NodeKind.ExperimentExposureNode]: {
+        name: 'Experiment Exposure',
+        description: 'Retention metric start resolved to the experiment exposure.',
+        icon: IconFlask,
+        inMenu: false,
+    },
+    [NodeKind.ExperimentWarehouseNativeNode]: {
+        name: 'Experiment Warehouse-native Node',
+        description: 'Experiment metric source run in the customer warehouse.',
+        icon: IconFlask,
+        inMenu: false,
+    },
+    [NodeKind.ExperimentWarehouseNativeExposureConfig]: {
+        name: 'Experiment Warehouse-native Exposure Config',
+        description: 'Experiment exposures run in the customer warehouse.',
         icon: IconFlask,
         inMenu: false,
     },
@@ -462,6 +532,12 @@ export const QUERY_TYPES_METADATA: Record<NodeKind, InsightTypeMetadata> = {
         icon: IconLive,
         inMenu: false,
     },
+    [NodeKind.MetricsHistogramQuery]: {
+        name: 'Metrics heatmap',
+        description: 'Chart a histogram metric as a latency-over-time heatmap',
+        icon: IconLive,
+        inMenu: false,
+    },
     [NodeKind.TraceSpansQuery]: {
         name: 'Trace Spans',
         icon: IconLive,
@@ -502,8 +578,28 @@ export const QUERY_TYPES_METADATA: Record<NodeKind, InsightTypeMetadata> = {
         icon: IconHogQL,
         inMenu: false,
     },
-    [NodeKind.NonIntegratedConversionsTableQuery]: {
-        name: 'Non-Integrated Conversions Table',
+    [NodeKind.MarketingAnalyticsAttributionQuery]: {
+        name: 'Marketing Analytics Attribution',
+        icon: IconHogQL,
+        inMenu: false,
+    },
+    [NodeKind.MarketingAnalyticsAttributionPathsQuery]: {
+        name: 'Marketing Analytics Attribution Paths',
+        icon: IconHogQL,
+        inMenu: false,
+    },
+    [NodeKind.MarketingAnalyticsRetentionQuery]: {
+        name: 'Marketing Analytics Retention',
+        icon: IconHogQL,
+        inMenu: false,
+    },
+    [NodeKind.MarketingAnalyticsSearchQuery]: {
+        name: 'Marketing analytics search performance',
+        icon: IconHogQL,
+        inMenu: false,
+    },
+    [NodeKind.MarketingAnalyticsRecommendationsQuery]: {
+        name: 'Marketing analytics recommendations',
         icon: IconHogQL,
         inMenu: false,
     },
@@ -515,6 +611,16 @@ export const QUERY_TYPES_METADATA: Record<NodeKind, InsightTypeMetadata> = {
     [NodeKind.AccountsQuery]: {
         name: 'Accounts',
         icon: IconPieChart,
+        inMenu: false,
+    },
+    [NodeKind.AccountsTableQuery]: {
+        name: 'Accounts table',
+        icon: IconPieChart,
+        inMenu: false,
+    },
+    [NodeKind.AccountUsersQuery]: {
+        name: 'Account users',
+        icon: IconPerson,
         inMenu: false,
     },
     [NodeKind.EndpointsUsageOverviewQuery]: {
@@ -543,9 +649,33 @@ export const QUERY_TYPES_METADATA: Record<NodeKind, InsightTypeMetadata> = {
         icon: IconPieChart,
         inMenu: false,
     },
+    [NodeKind.MCPToolCallBreakdownQuery]: {
+        name: 'MCP tool call breakdown',
+        description: 'MCP tool-call volume over time, broken down by tool.',
+        icon: IconPieChart,
+        inMenu: false,
+    },
+    [NodeKind.MCPToolCallsAndErrorsQuery]: {
+        name: 'MCP tool calls and errors',
+        description: 'MCP tool-call volume over time, split into successful and failed calls.',
+        icon: IconPieChart,
+        inMenu: false,
+    },
     [NodeKind.MCPHarnessBreakdownQuery]: {
         name: 'MCP harness breakdown',
         description: 'MCP tool-call activity grouped by client harness.',
+        icon: IconPieChart,
+        inMenu: false,
+    },
+    [NodeKind.MCPModelBreakdownQuery]: {
+        name: 'MCP model breakdown',
+        description: 'MCP tool-call activity grouped by captured model.',
+        icon: IconPieChart,
+        inMenu: false,
+    },
+    [NodeKind.MCPProtocolVersionBreakdownQuery]: {
+        name: 'MCP protocol version breakdown',
+        description: 'MCP tool-call activity grouped by negotiated protocol revision.',
         icon: IconPieChart,
         inMenu: false,
     },
@@ -558,6 +688,12 @@ export const QUERY_TYPES_METADATA: Record<NodeKind, InsightTypeMetadata> = {
     [NodeKind.MCPToolNeighborsQuery]: {
         name: 'MCP tool neighbors',
         description: 'Tools called adjacent to a single MCP tool within a conversation.',
+        icon: IconPieChart,
+        inMenu: false,
+    },
+    [NodeKind.MCPMissingCapabilitiesQuery]: {
+        name: 'MCP missing capabilities',
+        description: 'Capabilities agents asked an MCP server for and could not get.',
         icon: IconPieChart,
         inMenu: false,
     },
@@ -621,6 +757,12 @@ export const QUERY_TYPES_METADATA: Record<NodeKind, InsightTypeMetadata> = {
         icon: IconPieChart,
         inMenu: false,
     },
+    [NodeKind.MCPToolCategoryMapQuery]: {
+        name: 'MCP tool categories by tool',
+        description: 'Which categories each tool belongs to, for the intent clustering scope selector.',
+        icon: IconPieChart,
+        inMenu: false,
+    },
 }
 
 export const INSIGHT_TYPES_METADATA: Record<InsightType, InsightTypeMetadata> = {
@@ -628,12 +770,13 @@ export const INSIGHT_TYPES_METADATA: Record<InsightType, InsightTypeMetadata> = 
     [InsightType.FUNNELS]: QUERY_TYPES_METADATA[NodeKind.FunnelsQuery],
     [InsightType.RETENTION]: QUERY_TYPES_METADATA[NodeKind.RetentionQuery],
     [InsightType.PATHS]: QUERY_TYPES_METADATA[NodeKind.PathsQuery],
+    [InsightType.JOURNEYS]: QUERY_TYPES_METADATA[NodeKind.PathsV2Query],
     [InsightType.STICKINESS]: QUERY_TYPES_METADATA[NodeKind.StickinessQuery],
     [InsightType.LIFECYCLE]: QUERY_TYPES_METADATA[NodeKind.LifecycleQuery],
     [InsightType.SQL]: {
         name: 'SQL',
         description: 'Use SQL to query your data.',
-        icon: IconBracketsChart,
+        icon: IconSQL,
         inMenu: true,
         tooltipDocLink: 'https://posthog.com/docs/data-warehouse/sql',
     },
@@ -648,7 +791,10 @@ export const INSIGHT_TYPES_METADATA: Record<InsightType, InsightTypeMetadata> = 
         description: 'Use Hog to query your data.',
         icon: IconHogQL,
         inMenu: false,
+        flag: FEATURE_FLAGS.HOG,
     },
+    // The new insight menu adds its own Metrics card, because the card needs two flags.
+    [InsightType.METRICS]: { ...QUERY_TYPES_METADATA[NodeKind.MetricsQuery], inMenu: false },
     [InsightType.WEB_ANALYTICS]: {
         name: 'Web Analytics',
         description: 'Web analytics insights from your website data.',

@@ -24,12 +24,14 @@ from posthog.schema import (
     TrendsQuery,
 )
 
+from posthog.hogql_queries.utils.result_series import get_action_names
+
 from .boxplot import BoxPlotResultsFormatter
 from .funnel import FunnelResultsFormatter
 from .lifecycle import LifecycleResultsFormatter
 from .paths import PathsResultsFormatter
 from .retention import RetentionResultsFormatter
-from .sql import TRUNCATED_MARKER, SQLResultsFormatter
+from .sql import NULL_MARKER, TRUNCATED_MARKER, SQLResultsFormatter
 from .stickiness import StickinessResultsFormatter
 from .trends import TrendsResultsFormatter
 
@@ -99,15 +101,27 @@ def format_query_results_for_llm(
         if is_boxplot_query(query):
             formatted = BoxPlotResultsFormatter(get_boxplot_results(response)).format()
         else:
-            formatted = TrendsResultsFormatter(query, response["results"], team, utc_now).format()
+            formatted = TrendsResultsFormatter(
+                query,
+                response["results"],
+                team,
+                utc_now,
+                resolved_date_range=response.get("resolved_date_range"),
+                resolved_compare_date_range=response.get("resolved_compare_date_range"),
+                action_names=get_action_names(team, query.model_dump(mode="json")),
+            ).format()
     elif isinstance(query, AssistantFunnelsQuery | FunnelsQuery):
         formatted = FunnelResultsFormatter(query, response["results"], team, utc_now).format()
     elif isinstance(query, AssistantLifecycleQuery | LifecycleQuery):
-        formatted = LifecycleResultsFormatter(query, response["results"]).format()
+        formatted = LifecycleResultsFormatter(
+            query, response["results"], action_names=get_action_names(team, query.model_dump(mode="json"))
+        ).format()
     elif isinstance(query, AssistantPathsQuery | PathsQuery):
         formatted = PathsResultsFormatter(response["results"]).format()
     elif isinstance(query, AssistantStickinessQuery | StickinessQuery):
-        formatted = StickinessResultsFormatter(query, response["results"]).format()
+        formatted = StickinessResultsFormatter(
+            query, response["results"], action_names=get_action_names(team, query.model_dump(mode="json"))
+        ).format()
     elif isinstance(query, AssistantRetentionQuery | RetentionQuery):
         formatted = RetentionResultsFormatter(query, response["results"]).format()
     elif isinstance(query, AssistantHogQLQuery | HogQLQuery):
@@ -129,6 +143,7 @@ __all__ = [
     "StickinessResultsFormatter",
     "TrendsResultsFormatter",
     "TRUNCATED_MARKER",
+    "NULL_MARKER",
     "format_access_control_warnings",
     "format_query_results_for_llm",
     "format_warehouse_sync_warnings",

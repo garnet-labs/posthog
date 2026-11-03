@@ -13,9 +13,15 @@ from products.replay_vision.backend.temporal.scanners.base import (
     BaseScannerOutput,
     Segment,
     confidence_field,
+    key_moment_field,
+    thumbnail_field,
 )
 
 _MAX_FREEFORM_TAGS = 5
+_REASONING_DESCRIPTION = (
+    "One or more short paragraphs of two to four sentences, separated by a blank line, grounding the tag choice in "
+    "concrete moments."
+)
 
 
 class ClassifierOutput(BaseScannerOutput, frozen=True):
@@ -27,7 +33,7 @@ class ClassifierOutput(BaseScannerOutput, frozen=True):
             "Open-text tags emitted by the LLM when the scanner has `allow_freeform_tags=True`; lowercase, deduped."
         ),
     )
-    reasoning: str = Field(description="One paragraph grounding the tag choice in concrete moments.")
+    reasoning: str = Field(description=_REASONING_DESCRIPTION)
     reasoning_segments: list[Segment] = Field(default_factory=list)
 
     @field_validator("tags_freeform", mode="after")
@@ -48,6 +54,11 @@ class ClassifierScanner(BaseScanner, frozen=True):
         default=False,
         description=f"When true, the LLM may emit up to {_MAX_FREEFORM_TAGS} freeform tags alongside the fixed picks.",
     )
+    # Scan-time context rather than persisted config: freeform tags this scanner emitted on recent recordings,
+    # injected per scan (see call_scanner_provider) so the model reuses established names instead of coining
+    # synonyms (`ai_search_failure` next to an existing `search_error`). `exclude=True` keeps it out of dumps,
+    # so it can never leak into a stored scanner_config or snapshot.
+    known_freeform_tags: list[str] = Field(default_factory=list, exclude=True)
 
     @property
     def llm_response_schema(self) -> type[BaseModel]:
@@ -55,7 +66,10 @@ class ClassifierScanner(BaseScanner, frozen=True):
         tag_literal = typing.Literal[tuple(self.tags)]  # type: ignore[valid-type]
         # Field order is load-bearing: reasoning first (reason before tagging), confidence last.
         fields: dict[str, Any] = {
-            "reasoning": (str, Field(description="One paragraph grounding the tag choice in concrete moments.")),
+            "reasoning": (
+                str,
+                Field(description=_REASONING_DESCRIPTION),
+            ),
             "tags": (
                 list[tag_literal],  # type: ignore[valid-type]
                 Field(
@@ -83,6 +97,8 @@ class ClassifierScanner(BaseScanner, frozen=True):
                 ),
             )
         fields["confidence"] = (float, confidence_field())
+        fields["key_moment_t"] = (int | None, key_moment_field())
+        fields["thumbnail_t"] = (int | None, thumbnail_field())
         return create_model("ClassifierLlmResponse", **fields)
 
     @cached_property
@@ -100,11 +116,15 @@ class ClassifierScanner(BaseScanner, frozen=True):
         return output
 
     def prompt_context(self) -> dict[str, Any]:
+        # Drop known tags that were since promoted into the fixed vocabulary: the prompt already tells the
+        # model to prefer the fixed tag, so offering them for freeform reuse would contradict that.
+        known_freeform = [t for t in self.known_freeform_tags if t not in self._fixed_vocab_slugs]
         return {
             "vocabulary": ", ".join(repr(t) for t in self.tags),
             "multi_label": self.multi_label,
             "allow_freeform_tags": self.allow_freeform_tags,
             "max_freeform_tags": _MAX_FREEFORM_TAGS,
+            "known_freeform_tags": ", ".join(repr(t) for t in known_freeform),
         }
 
     def validate_semantics(self, output: BaseScannerOutput) -> str | None:

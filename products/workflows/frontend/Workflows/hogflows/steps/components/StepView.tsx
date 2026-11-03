@@ -9,6 +9,7 @@ import { LemonBadge } from 'lib/lemon-ui/LemonBadge'
 import { LemonButton } from 'lib/lemon-ui/LemonButton'
 import { LemonMenu } from 'lib/lemon-ui/LemonMenu'
 
+import { StepImportNotesTooltipBadge } from '../../../import/StepImportNotesTooltipBadge'
 import { workflowLogic } from '../../../workflowLogic'
 import { hogFlowEditorLogic } from '../../hogFlowEditorLogic'
 import { NODE_HEIGHT, NODE_WIDTH } from '../../react_flow_utils/constants'
@@ -28,6 +29,7 @@ export function StepView({ action }: { action: HogFlowAction }): JSX.Element {
         selectedNodeCanBeCopiedOrMoved,
         animatingEdgePair,
         workflow,
+        isZoomedOutFar,
     } = useValues(hogFlowEditorLogic)
     const { setSelectedNodeId, startCopyingNode, startMovingNode } = useActions(hogFlowEditorLogic)
     const { actionValidationErrorsById, logicProps, scheduleState, scheduleStartsAt, isScheduleRepeating } =
@@ -82,7 +84,7 @@ export function StepView({ action }: { action: HogFlowAction }): JSX.Element {
             color: Step?.color || 'var(--text-secondary)',
             icon: Step?.icon,
         }
-    }, [action, isSelected, Step])
+    }, [isSelected, Step])
 
     const hasValidationError = actionValidationErrorsById[action.id]?.valid === false
     const hasValidationWarning = Object.keys(actionValidationErrorsById[action.id]?.warnings ?? {}).length > 0
@@ -184,7 +186,7 @@ export function StepView({ action }: { action: HogFlowAction }): JSX.Element {
                                 className="text-[0.3rem] text-muted !bg-transparent !border-0 !shadow-none !p-0 !px-1 !m-0 !min-h-0 !max-h-[0.9rem] !leading-[0.45rem] !resize-none !overflow-hidden !rounded-sm"
                             />
                         </div>
-                    ) : (
+                    ) : isZoomedOutFar ? null : (
                         <Tooltip title={scheduleDescription ?? action.description ?? ''}>
                             <div
                                 className={`text-[0.3rem]/1.5 text-muted line-clamp-2 !rounded-sm px-0.5 -mx-0.5 transition-colors pl-1 min-w-0 min-h-[0.45rem] overflow-hidden ${isSelected && !isScheduleTrigger(action) ? 'cursor-text hover:bg-fill-button-tertiary-hover' : ''}`}
@@ -244,6 +246,7 @@ export function StepView({ action }: { action: HogFlowAction }): JSX.Element {
                     </div>
                 )}
             </div>
+            {logicProps.id ? <StepImportNotesTooltipBadge workflowId={logicProps.id} stepId={action.id} /> : null}
             {hasValidationError || hasValidationWarning ? (
                 <div className="absolute top-0 right-0 scale-75">
                     <LemonBadge status="warning" size="small" content="!" position="top-right" />

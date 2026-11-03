@@ -3,12 +3,13 @@ import { Message } from 'node-rdkafka'
 import { logger } from '~/common/utils/logger'
 import { createTestMessage } from '~/tests/helpers/kafka-message'
 
+import { BatchBudget } from './batch-budget'
 import { ChunkPipelineBuilder } from './builders'
 import { ChunkPipeline } from './chunk-pipeline.interface'
 import { FanOutFanInChunkPipeline, FanOutSubContext } from './fan-out-fan-in-chunk-pipeline'
-import { createNewChunkPipeline, createOkContext } from './helpers'
-import { PipelineResultWithContext, PipelineWarning } from './pipeline.interface'
-import { PipelineResult, dlq, drop, isDlqResult, isOkResult, ok, redirect } from './results'
+import { createKafkaDebugContext, createNewChunkPipeline, createOkContext } from './helpers'
+import { PipelineContext, PipelineResultWithContext, PipelineWarning } from './pipeline.interface'
+import { PipelineResult, dlq, drop, isDlqResult, isOkResult, isTimeoutResult, ok, redirect, timeout } from './results'
 
 jest.mock('~/common/utils/logger', () => ({
     logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() },
@@ -52,7 +53,12 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
 }
 
 function feedParents(pipeline: ChunkPipeline<Parent, unknown, { message: Message }>, parents: Parent[]): void {
-    pipeline.feed(parents.map((parent) => createOkContext(parent, { message: createTestMessage() })))
+    pipeline.feed(
+        parents.map((parent) => {
+            const message = createTestMessage()
+            return createOkContext(parent, { message, debugContext: createKafkaDebugContext(message) })
+        })
+    )
 }
 
 async function drainAll<T, R extends string>(
@@ -158,6 +164,35 @@ describe('FanOutFanInChunkPipeline', () => {
         const second = await pipeline.next()
         expect(okValues(second!)).toEqual([{ id: 'a', total: 2 }])
         expect(await pipeline.next()).toBeNull()
+    })
+
+    it('copies the parent budget onto every sub-element context', async () => {
+        // Without the parent's budget, sub-elements would run with no checkpoint.
+        const budget = BatchBudget.unlimited()
+        const subContexts: PipelineContext<FanOutSubContext>[] = []
+        let buffered: PipelineResultWithContext<SubItem, FanOutSubContext>[] = []
+        const sub: ChunkPipeline<SubItem, SubItem, FanOutSubContext> = {
+            feed: (elements) => {
+                subContexts.push(...elements.map((element) => element.context))
+                buffered = [...elements]
+            },
+            next: () => {
+                const chunk = buffered
+                buffered = []
+                return Promise.resolve(chunk.length > 0 ? chunk : null)
+            },
+        }
+        const pipeline = new FanOutFanInChunkPipeline(
+            createNewChunkPipeline<Parent, { message: Message; budget: BatchBudget }>().build(),
+            splitSubs,
+            sub,
+            sumSubs
+        )
+
+        pipeline.feed([createOkContext({ id: 'a', subs: [1, 2] }, { message: createTestMessage(), budget })])
+
+        expect(okValues((await pipeline.next())!)).toEqual([{ id: 'a', total: 3 }])
+        expect(subContexts.map((context) => context.budget)).toEqual([budget, budget])
     })
 
     it('emits parents unordered as they complete, keeping sub-results correlated', async () => {
@@ -356,6 +391,39 @@ describe('FanOutFanInChunkPipeline', () => {
         expect(isDlqResult(results[0].result) && results[0].result.reason).toBe(expectedReason)
     })
 
+    it('times the parent out when a sub-result times out', async () => {
+        const fanInCalls: string[] = []
+        function trackingFanIn(parent: Parent, subs: SubItem[]): Merged {
+            fanInCalls.push(parent.id)
+            return sumSubs(parent, subs)
+        }
+        function cutOffFirstSubStep(items: SubItem[]): Promise<PipelineResult<SubItem>[]> {
+            return Promise.resolve(
+                items.map((item) => (item.value === 1 ? timeout<SubItem>('budget exceeded') : ok(item)))
+            )
+        }
+
+        const pipeline = createNewChunkPipeline<Parent>()
+            .fanOut(splitSubs)
+            .via((sub) => sub.pipeChunk(cutOffFirstSubStep))
+            .fanIn(trackingFanIn)
+            .build()
+
+        feedParents(pipeline, [
+            { id: 'cutoff', subs: [1, 2] },
+            { id: 'healthy', subs: [3] },
+        ])
+
+        const results = await drainAll(pipeline)
+
+        expect(results).toHaveLength(2)
+        const timedOut = results.find((r) => isTimeoutResult(r.result))!
+        expect((timedOut.result as { reason: string }).reason).toBe('fan-out sub-element timed out: budget exceeded')
+        expect(fanInCalls).toEqual(['healthy'])
+        expect(okValues(results)).toEqual([{ id: 'healthy', total: 3 }])
+        expect(mockLogger.warn).not.toHaveBeenCalled()
+    })
+
     it('merges sub side effects and warnings into the parent context without double-counting', async () => {
         const outerEffect = Promise.resolve('outer')
         function attachOuterEffectStep(parents: Parent[]): Promise<PipelineResult<Parent>[]> {
@@ -466,6 +534,53 @@ describe('FanOutFanInChunkPipeline', () => {
         expect(okValues(first!)).toEqual([{ id: 'done', total: 1 }])
         await expect(pipeline.next()).rejects.toThrow('sub boom')
         await expect(pipeline.next()).rejects.toThrow('sub boom')
+    })
+
+    it('logs the copied parent debug context when a sub step throws', async () => {
+        function failingSubStep(): Promise<PipelineResult<SubItem>> {
+            return Promise.reject(new Error('sub failed'))
+        }
+
+        const pipeline = createNewChunkPipeline<Parent>()
+            .fanOut(splitSubs)
+            .via((sub) => sub.concurrently((b) => b.pipe(failingSubStep)))
+            .fanIn(sumSubs)
+            .build()
+
+        feedParents(pipeline, [{ id: 'a', subs: [1] }])
+
+        await expect(drainAll(pipeline)).rejects.toThrow('sub failed')
+        expect(mockLogger.error).toHaveBeenCalledWith(
+            '🔥',
+            expect.stringContaining('threw'),
+            expect.objectContaining({
+                error: 'sub failed',
+                debugContext: { topic: 'test-topic', partition: 5, offset: 100 },
+            })
+        )
+    })
+
+    it('logs the parent debug context when the fan-out function throws', async () => {
+        function failingFanOut(): SubItem[] {
+            throw new Error('fan-out failed')
+        }
+
+        const pipeline = createNewChunkPipeline<Parent>()
+            .fanOut(failingFanOut)
+            .via((sub) => sub.concurrently((b) => b.pipe(doubleStep)))
+            .fanIn(sumSubs)
+            .build()
+
+        feedParents(pipeline, [{ id: 'a', subs: [1] }])
+
+        await expect(drainAll(pipeline)).rejects.toThrow('fan-out failed')
+        expect(mockLogger.error).toHaveBeenCalledWith(
+            '🔥',
+            expect.stringContaining('failingFanOut threw'),
+            expect.objectContaining({
+                debugContext: { topic: 'test-topic', partition: 5, offset: 100 },
+            })
+        )
     })
 
     it('routes a batch fed while a prior parent is parked on slow subs', async () => {

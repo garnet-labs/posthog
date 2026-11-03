@@ -3,25 +3,18 @@ import '@testing-library/jest-dom'
 import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { BindLogic } from 'kea'
-import { router } from 'kea-router'
 
-import { FEATURE_FLAGS } from 'lib/constants'
-import { featureFlagLogic } from 'lib/logic/featureFlagLogic'
 import { maxGlobalLogic } from 'scenes/max/maxGlobalLogic'
-import { urls } from 'scenes/urls'
 
 import { useMocks } from '~/mocks/jest'
 import { initKeaTests } from '~/test/init'
-import { AccessControlLevel, DashboardType, QueryBasedInsightModel } from '~/types'
+import { AccessControlLevel, DashboardType } from '~/types'
 
+import { addInsightToDashboardLogic } from './addInsightToDashboardModalLogic'
 import { dashboardLogic } from './dashboardLogic'
 import { EmptyDashboardComponent } from './EmptyDashboardComponent'
 
-jest.mock('./emptyDashboardAiStarterPrompts', () => ({
-    EmptyDashboardAiStarterPrompts: () => null,
-}))
-
-const MOCK_DASHBOARD: DashboardType<QueryBasedInsightModel> = {
+const MOCK_DASHBOARD: DashboardType = {
     id: 5,
     name: 'Test Dashboard',
     description: 'A test dashboard',
@@ -56,7 +49,6 @@ describe('EmptyDashboardComponent', () => {
             },
         })
         initKeaTests()
-        featureFlagLogic.mount()
         maxGlobalLogic.mount()
     })
 
@@ -64,73 +56,90 @@ describe('EmptyDashboardComponent', () => {
         cleanup()
     })
 
-    function renderEmptyState(opts: { widgetsEnabled?: boolean } = {}): {
+    function renderEmptyState(opts: { canEdit?: boolean } = {}): {
         logic: ReturnType<typeof dashboardLogic.build>
     } {
-        const { widgetsEnabled = false } = opts
-
-        featureFlagLogic.actions.setFeatureFlags([FEATURE_FLAGS.DASHBOARD_WIDGETS], {
-            [FEATURE_FLAGS.DASHBOARD_WIDGETS]: widgetsEnabled,
-        })
+        const { canEdit = true } = opts
 
         const logic = dashboardLogic({ id: MOCK_DASHBOARD.id, dashboard: MOCK_DASHBOARD })
         logic.mount()
 
         render(
             <BindLogic logic={dashboardLogic} props={{ id: MOCK_DASHBOARD.id, dashboard: MOCK_DASHBOARD }}>
-                <EmptyDashboardComponent loading={false} canEdit={true} />
+                <EmptyDashboardComponent loading={false} canEdit={canEdit} />
             </BindLogic>
         )
 
         return { logic }
     }
 
-    async function openGetStartedDropdown(): Promise<void> {
+    async function openBuildItMyselfMenu(): Promise<void> {
         await userEvent.click(document.querySelector('[data-attr="dashboard-add-dropdown"]')!)
     }
 
-    it('routes Add widget preview to feature previews when flag is disabled', async () => {
-        const pushSpy = jest.spyOn(router.actions, 'push')
+    it('reserves space for dashboard controls while loading', () => {
+        render(<EmptyDashboardComponent loading canEdit />)
+
+        expect(document.querySelector('[data-attr="dashboard-loading-controls"]')).toBeInTheDocument()
+    })
+
+    it('shows clear paths to add a chart or create one with PostHog AI', () => {
         const { logic } = renderEmptyState()
 
-        await openGetStartedDropdown()
-        await userEvent.click(screen.getByText('Add widget'))
+        expect(screen.getByText('Build your dashboard')).toBeInTheDocument()
+        expect(
+            screen.getByText(
+                'Add a chart from your library, or start with a question about what matters to your product.'
+            )
+        ).toBeInTheDocument()
+        expect(screen.getByText('Add a chart')).toBeInTheDocument()
+        expect(screen.getByText('Build it myself')).toBeInTheDocument()
+        expect(screen.getByText('or View Web Analytics')).toBeInTheDocument()
+        expect(screen.getByText('What do you want to learn?')).toBeInTheDocument()
 
-        expect(pushSpy).toHaveBeenCalledWith(urls.featurePreview(FEATURE_FLAGS.DASHBOARD_WIDGETS))
-        expect(logic.values.addWidgetModalOpen).toBe(false)
-
-        pushSpy.mockRestore()
         logic.unmount()
     })
 
-    it('shows Add text card in Get started dropdown', async () => {
+    it('opens the insight picker when Add a chart is clicked', async () => {
         const { logic } = renderEmptyState()
 
-        await openGetStartedDropdown()
+        await userEvent.click(document.querySelector('[data-attr="dashboard-add-graph-header"]')!)
 
-        expect(screen.getByText('Add text card')).toBeInTheDocument()
-        expect(screen.getByText('Add widget')).toBeInTheDocument()
-        expect(screen.getByText('BETA')).toBeInTheDocument()
+        expect(addInsightToDashboardLogic.values.addInsightToDashboardModalVisible).toBe(true)
 
         logic.unmount()
     })
 
-    it('shows Add widget in Get started dropdown when dashboard widgets flag is enabled', async () => {
-        const { logic } = renderEmptyState({ widgetsEnabled: true })
+    it('disables the dropdown when the user cannot edit the dashboard', () => {
+        const { logic } = renderEmptyState({ canEdit: false })
 
-        await openGetStartedDropdown()
-
-        expect(screen.getByText('Add widget')).toBeInTheDocument()
-        expect(screen.getByText('NEW')).toBeInTheDocument()
+        expect(document.querySelector('[data-attr="dashboard-add-dropdown"]')).toHaveAttribute('aria-disabled', 'true')
 
         logic.unmount()
     })
 
-    it('opens add widget modal when Add widget is clicked', async () => {
-        const { logic } = renderEmptyState({ widgetsEnabled: true })
+    it('shows the shared dashboard add options in the Build it myself menu', async () => {
+        const { logic } = renderEmptyState()
 
-        await openGetStartedDropdown()
-        await userEvent.click(screen.getByText('Add widget'))
+        await openBuildItMyselfMenu()
+
+        expect(screen.getByText('Content')).toBeInTheDocument()
+        expect(screen.getByText('Charts')).toBeInTheDocument()
+        expect(screen.getByText('Add text')).toBeInTheDocument()
+        expect(screen.getByText('Image')).toBeInTheDocument()
+        expect(screen.getByText('Button')).toBeInTheDocument()
+        expect(screen.getByText('Widget')).toBeInTheDocument()
+        expect(screen.queryByText('BETA')).not.toBeInTheDocument()
+        expect(screen.getAllByText('NEW')).toHaveLength(2)
+
+        logic.unmount()
+    })
+
+    it('opens the add widget modal when Widget is clicked', async () => {
+        const { logic } = renderEmptyState()
+
+        await openBuildItMyselfMenu()
+        await userEvent.click(screen.getByText('Widget'))
 
         expect(logic.values.addWidgetModalOpen).toBe(true)
 

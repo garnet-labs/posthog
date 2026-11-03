@@ -8,9 +8,18 @@ class BingAdsResource(str, Enum):
     CAMPAIGN_PERFORMANCE_REPORT = "campaign_performance_report"
     AD_GROUP_PERFORMANCE_REPORT = "ad_group_performance_report"
     AD_PERFORMANCE_REPORT = "ad_performance_report"
+    DESTINATION_URL_PERFORMANCE_REPORT = "destination_url_performance_report"
+    KEYWORD_PERFORMANCE_REPORT = "keyword_performance_report"
 
 
 REPORT_CONFIG: dict[BingAdsResource, dict] = {
+    BingAdsResource.DESTINATION_URL_PERFORMANCE_REPORT: {
+        "report_type": "DestinationUrlPerformanceReportRequest",
+        "column_array_type": "ArrayOfDestinationUrlPerformanceReportColumn",
+        "column_field": "DestinationUrlPerformanceReportColumn",
+        "scope_type": "AccountThroughAdGroupReportScope",
+        "report_name": "Destination URL Performance Report",
+    },
     BingAdsResource.CAMPAIGN_PERFORMANCE_REPORT: {
         "report_type": "CampaignPerformanceReportRequest",
         "column_array_type": "ArrayOfCampaignPerformanceReportColumn",
@@ -32,10 +41,41 @@ REPORT_CONFIG: dict[BingAdsResource, dict] = {
         "scope_type": "AccountThroughAdGroupReportScope",
         "report_name": "Ad Performance Report",
     },
+    BingAdsResource.KEYWORD_PERFORMANCE_REPORT: {
+        "report_type": "KeywordPerformanceReportRequest",
+        "column_array_type": "ArrayOfKeywordPerformanceReportColumn",
+        "column_field": "KeywordPerformanceReportColumn",
+        "scope_type": "AccountThroughAdGroupReportScope",
+        "report_name": "Keyword Performance Report",
+    },
 }
 
 
 RESOURCE_SCHEMAS: dict[BingAdsResource, dict] = {
+    BingAdsResource.DESTINATION_URL_PERFORMANCE_REPORT: {
+        "resource_name": "destination_url_performance_report",
+        "primary_key": ["AccountId", "AdId", "DestinationUrl", "CurrencyCode", "AdDistribution", "TimePeriod"],
+        "field_names": [
+            "AccountId",
+            "AdId",
+            "DestinationUrl",
+            "CurrencyCode",
+            "AdDistribution",
+            "TimePeriod",
+            "Clicks",
+            "Impressions",
+            "TopImpressionRatePercent",
+            "AbsoluteTopImpressionRatePercent",
+            "Spend",
+            "ConversionsQualified",
+        ],
+        "partition_keys": ["TimePeriod"],
+        "partition_mode": "datetime",
+        "partition_format": "month",
+        "is_stats": True,
+        "partition_size": 1,
+        "filter_field_names": [("TimePeriod", IncrementalFieldType.Date)],
+    },
     BingAdsResource.CAMPAIGNS: {
         "resource_name": "campaigns",
         "primary_key": ["Id"],
@@ -156,6 +196,50 @@ RESOURCE_SCHEMAS: dict[BingAdsResource, dict] = {
             "Ctr",
             "CurrencyCode",
             "Impressions",
+            "ReturnOnAdSpend",
+            "Revenue",
+            "Spend",
+            "TimePeriod",
+        ],
+        "partition_keys": ["TimePeriod"],
+        "partition_mode": "datetime",
+        "partition_format": "month",
+        "is_stats": True,
+        "partition_size": 1,
+        "filter_field_names": [("TimePeriod", IncrementalFieldType.Date)],
+    },
+    BingAdsResource.KEYWORD_PERFORMANCE_REPORT: {
+        "resource_name": "keyword_performance_report",
+        # KeywordId encodes the keyword text and its match type, so one keyword yields one row per
+        # day. DeliveredMatchType is intentionally excluded from the columns below — requesting it
+        # would split a keyword-day into one row per served match type and break this grain.
+        "primary_key": ["KeywordId", "TimePeriod"],
+        "field_names": [
+            "AccountName",
+            "AdGroupId",
+            "AdGroupName",
+            "AdRelevance",
+            "Assists",
+            "AverageCpc",
+            "AverageCpm",
+            "BidMatchType",
+            "CampaignId",
+            "CampaignName",
+            "Clicks",
+            "ConversionRate",
+            "Conversions",
+            "CostPerConversion",
+            "Ctr",
+            "CurrencyCode",
+            "ExpectedCtr",
+            "Impressions",
+            "TopImpressionRatePercent",
+            "AbsoluteTopImpressionRatePercent",
+            "Keyword",
+            "KeywordId",
+            "KeywordStatus",
+            "LandingPageExperience",
+            "QualityScore",
             "ReturnOnAdSpend",
             "Revenue",
             "Spend",

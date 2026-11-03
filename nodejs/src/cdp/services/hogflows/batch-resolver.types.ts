@@ -19,10 +19,18 @@ export const BatchResolverStateSchema = z.object({
     teamId: z.number().int(),
     hogFlowId: z.string().min(1),
     filters: z.object({
+        // 'accounts' switches the resolver to page customer analytics accounts
+        // (external ids) instead of persons. Frozen here like the rest of the
+        // audience so a mid-run trigger edit can't change what a page fans out to.
+        audience_type: z.enum(['persons', 'accounts']).optional(),
         // Each property entry is an arbitrary record — keep loose so resolver
         // replays survive new filter-property fields the worker doesn't read.
         properties: z.array(z.record(z.string(), z.any())).optional(),
         filter_test_accounts: z.boolean().optional(),
+        tag_names: z.array(z.string()).optional(),
+        assignment_status: z.enum(['all', 'assigned', 'unassigned']).optional(),
+        assigned_to_user_ids: z.array(z.number()).optional(),
+        all_roles_unassigned: z.boolean().optional(),
     }),
     variables: z.record(z.string(), z.unknown()),
     groupTypeIndex: z.number().int().optional(),
@@ -32,6 +40,18 @@ export const BatchResolverStateSchema = z.object({
     // mid-run flow edits can't flip dedup semantics between pages. Optional so
     // jobs written by older deploys keep parsing (they run un-deduped).
     dedupeKey: z.enum(['email']).optional(),
+    // Set by Django when the audience is exactly one realtime cohort. The resolver then pages that
+    // cohort's members from the realtime pipeline's Postgres table instead of the Django audience
+    // query. `teamId` is the cohort's own team, which owns its membership rows.
+    realtimeCohort: z
+        .object({
+            id: z.number().int(),
+            teamId: z.number().int(),
+            // Set while the cohort is still calculating: the job stays parked until Django resumes it
+            // once the cohort is ready, or fails at this instant if that never happens.
+            waitUntil: z.string().datetime().optional(),
+        })
+        .optional(),
     maxAudienceSize: z.number().int().nonnegative(),
     cursor: z.string().nullable(),
     totalEnqueued: z.number().int().nonnegative(),

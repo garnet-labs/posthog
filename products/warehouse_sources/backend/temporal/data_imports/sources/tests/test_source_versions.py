@@ -1,6 +1,5 @@
 import pytest
 
-import products.warehouse_sources.backend.temporal.data_imports.sources._load_all  # noqa: F401
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.base import VersionDeprecation
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.registry import SourceRegistry
 
@@ -25,6 +24,11 @@ def test_every_source_declares_valid_versions(source_type):
     assert source.default_version in source.supported_versions, (
         f"{source_type}: default_version {source.default_version!r} is not in supported_versions — "
         f"a missing pin would resolve to a version the source does not implement"
+    )
+    assert source.default_version == source.supported_versions[-1], (
+        f"{source_type}: default_version {source.default_version!r} must be the newest supported version "
+        f"{source.supported_versions[-1]!r} — supported_versions is declared oldest→newest and the default "
+        f"is never held back (see .agents/skills/warehouse-source-new-version/SKILL.md)"
     )
 
     assert all(isinstance(d, VersionDeprecation) for d in source.deprecated_versions), (

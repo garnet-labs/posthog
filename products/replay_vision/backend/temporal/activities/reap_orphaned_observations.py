@@ -4,23 +4,31 @@ from datetime import UTC, datetime
 from typing import Any, cast
 from uuid import UUID
 
+from django.db.models import Count, Min
+
 import structlog
 from temporalio import activity
-from temporalio.client import Client, WorkflowExecutionStatus
-from temporalio.service import RPCError, RPCStatusCode
+from temporalio.client import Client
 
 from posthog.sync import database_sync_to_async
 from posthog.temporal.common.client import async_connect
 
-from products.replay_vision.backend.models.replay_observation import ObservationStatus, ReplayObservation
+from products.replay_vision.backend.models.replay_observation import (
+    IN_FLIGHT_STATUSES,
+    ObservationStatus,
+    ReplayObservation,
+)
 from products.replay_vision.backend.temporal.activities.observation_state import mark_observation_terminal
+from products.replay_vision.backend.temporal.activities.reaping import classify_stale_rows
 from products.replay_vision.backend.temporal.constants import (
     OBSERVATION_ORPHAN_CUTOFF,
     REAP_ORPHANED_OBSERVATIONS_BATCH_SIZE,
+    REAP_ORPHANED_OBSERVATIONS_HEARTBEAT_TIMEOUT,
 )
 from products.replay_vision.backend.temporal.decorators import track_activity
 from products.replay_vision.backend.temporal.errors import FailureKind
-from products.replay_vision.backend.temporal.metrics import record_failure_kind
+from products.replay_vision.backend.temporal.metrics import push_in_flight_observation_gauges, record_failure_kind
+from products.replay_vision.backend.temporal.query_budget import bounded_queries
 
 logger = structlog.get_logger(__name__)
 
@@ -28,28 +36,32 @@ _LIVE_STATUSES = (ObservationStatus.PENDING, ObservationStatus.RUNNING)
 _ORPHANED_ERROR_REASON = f"{FailureKind.ORPHANED.value}:The analysis stopped without recording an outcome."
 
 
+def _measure_in_flight() -> None:
+    """Report how many observations are pending or running and how old the oldest is, so a growing queue
+    shows before rows reach the orphan cutoff."""
+    now = datetime.now(UTC)
+    with bounded_queries(REAP_ORPHANED_OBSERVATIONS_HEARTBEAT_TIMEOUT):
+        rows = {
+            row["status"]: (row["count"], (now - row["oldest"]).total_seconds())
+            for row in ReplayObservation.objects.filter(status__in=IN_FLIGHT_STATUSES)
+            .order_by()
+            .values("status")
+            .annotate(count=Count("id"), oldest=Min("created_at"))
+        }
+    push_in_flight_observation_gauges({status.value: rows.get(status, (0, 0.0)) for status in IN_FLIGHT_STATUSES})
+
+
 def _list_stale_observations() -> list[dict[str, Any]]:
     cutoff = datetime.now(UTC) - OBSERVATION_ORPHAN_CUTOFF
-    rows = (
-        ReplayObservation.objects.filter(status__in=_LIVE_STATUSES, created_at__lt=cutoff)
-        .order_by("created_at")
-        .values("id", "workflow_id", "scanner_snapshot")[:REAP_ORPHANED_OBSERVATIONS_BATCH_SIZE]
-    )
+    # The listing runs before the first heartbeat, so the heartbeat timeout ends a slow attempt.
+    with bounded_queries(REAP_ORPHANED_OBSERVATIONS_HEARTBEAT_TIMEOUT):
+        rows = list(
+            ReplayObservation.objects.filter(status__in=_LIVE_STATUSES, created_at__lt=cutoff)
+            .order_by("created_at")
+            .values("id", "workflow_id", "scanner_snapshot")[:REAP_ORPHANED_OBSERVATIONS_BATCH_SIZE]
+        )
     # cast: django-stubs types `.values()` rows as a TypedDict, which mypy won't widen to dict[str, Any].
-    return cast(list[dict[str, Any]], list(rows))
-
-
-async def _workflow_is_open(temporal: Client, workflow_id: str) -> bool | None:
-    """Whether the latest run of `workflow_id` is still open; `None` when Temporal couldn't answer."""
-    try:
-        desc = await temporal.get_workflow_handle(workflow_id).describe()
-    except RPCError as e:
-        if e.status == RPCStatusCode.NOT_FOUND:
-            return False
-        return None
-    except Exception:
-        return None
-    return desc.status == WorkflowExecutionStatus.RUNNING
+    return cast(list[dict[str, Any]], rows)
 
 
 def _mark_orphaned(observation_id: UUID, scanner_type: str) -> bool:
@@ -63,33 +75,19 @@ def _mark_orphaned(observation_id: UUID, scanner_type: str) -> bool:
     )
 
 
-@activity.defn
-@track_activity()
-async def reap_orphaned_observations_activity() -> int:
-    """Fail pending/running rows past the orphan cutoff whose workflow is no longer open; returns the count reaped.
-
-    The describe check protects rows reclaimed by a live re-trigger of the same deterministic workflow id.
-    """
-    rows = await database_sync_to_async(_list_stale_observations, thread_sensitive=False)()
-    if not rows:
-        return 0
-    temporal = await async_connect()
+async def _reap_observations(temporal: Client, rows: list[dict[str, Any]]) -> int:
+    reapable, skipped_open, skipped_temporal_error = await classify_stale_rows(
+        temporal, rows, workflow_id_key="workflow_id"
+    )
+    activity.heartbeat({"phase": "observations_described", "reapable": len(reapable)})
     reaped = 0
-    skipped_open = 0
-    skipped_temporal_error = 0
-    for row in rows:
-        if row["workflow_id"]:
-            is_open = await _workflow_is_open(temporal, row["workflow_id"])
-            if is_open:
-                skipped_open += 1
-                continue
-            if is_open is None:
-                skipped_temporal_error += 1  # Can't prove it's closed — leave it for the next tick.
-                continue
+    for row in reapable:
         snapshot = row["scanner_snapshot"] or {}
         scanner_type = snapshot.get("scanner_type") or "unknown"
         if await database_sync_to_async(_mark_orphaned, thread_sensitive=False)(row["id"], scanner_type):
             reaped += 1
+        # The SDK throttles the RPCs, so per-row is cheap.
+        activity.heartbeat({"phase": "observations_reaping", "reaped": reaped})
     logger.info(
         "replay_vision.reap_orphaned_observations",
         scanned=len(rows),
@@ -98,3 +96,22 @@ async def reap_orphaned_observations_activity() -> int:
         skipped_temporal_error=skipped_temporal_error,
     )
     return reaped
+
+
+@activity.defn
+@track_activity()
+async def reap_orphaned_observations_activity() -> int:
+    """Fail pending/running rows past the orphan cutoff whose workflow is no longer open; returns the count reaped.
+
+    The describe check protects rows reclaimed by a live re-trigger of the same deterministic workflow id.
+    """
+    try:
+        await database_sync_to_async(_measure_in_flight, thread_sensitive=False)()
+    except Exception:
+        logger.exception("replay_vision.reap_orphaned_observations.measure_in_flight_failed")
+    rows = await database_sync_to_async(_list_stale_observations, thread_sensitive=False)()
+    if not rows:
+        return 0
+    activity.heartbeat({"phase": "listed", "observations": len(rows)})
+    temporal = await async_connect()
+    return await _reap_observations(temporal, rows)

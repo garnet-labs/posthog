@@ -1,5 +1,5 @@
 import { useValues } from 'kea'
-import { combineUrl, router } from 'kea-router'
+import { router } from 'kea-router'
 
 import { Link } from '@posthog/lemon-ui'
 import {
@@ -19,18 +19,10 @@ import {
 } from '@posthog/quill-primitives'
 
 import { formatPercentage } from 'lib/utils/numbers'
-import { urls } from 'scenes/urls'
 
 import { type NotableSession } from '../mcpDashboardOverviewLogic'
+import { mcpSessionUrl, mcpSessionsUrl } from '../sessionUrls'
 import { formatDuration, truncateSessionId } from './formatters'
-
-// Link to the Sessions tab, keeping the dashboard's date range so a linked session resolves in the
-// same window. A sessionId becomes the search term (filtering the list to it and selecting it);
-// without one, opens the full list.
-function sessionsUrl(searchParams: Record<string, any>, sessionId?: string): string {
-    const { search: _search, ...rest } = searchParams
-    return combineUrl(urls.mcpAnalyticsSessions(), sessionId ? { ...rest, search: sessionId } : rest).url
-}
 
 const DESTRUCTIVE_ERROR_PCT = 5
 const WARNING_ERROR_PCT = 1
@@ -79,7 +71,7 @@ function SessionRows({
         )
     }
     if (sessions.length === 0) {
-        return <TableEmpty className="py-6 text-secondary">No notable sessions in the last 30 days.</TableEmpty>
+        return <TableEmpty className="py-6 text-secondary">No sessions were flagged in this period.</TableEmpty>
     }
     return (
         <TableBody>
@@ -87,7 +79,7 @@ function SessionRows({
                 <TableRow key={entry.session.session_id}>
                     <TableCell className="whitespace-nowrap">
                         <Link
-                            to={sessionsUrl(searchParams, entry.session.session_id)}
+                            to={mcpSessionUrl(entry.session.session_id, searchParams)}
                             className="font-mono"
                             title={entry.session.session_id}
                         >
@@ -133,13 +125,11 @@ export function NotableSessionsTable({
                 </TableHeader>
                 <SessionRows sessions={sessions} loading={loading} searchParams={searchParams} />
             </Table>
-            {sessions.length > 0 && (
-                <CardFooter className="justify-end">
-                    <Link to={sessionsUrl(searchParams)} className="text-[10px]">
-                        Open in Sessions tab ↗
-                    </Link>
-                </CardFooter>
-            )}
+            <CardFooter className="justify-end">
+                <Link to={mcpSessionsUrl(searchParams)} className="text-[10px]">
+                    Open in Sessions tab ↗
+                </Link>
+            </CardFooter>
         </Card>
     )
 }

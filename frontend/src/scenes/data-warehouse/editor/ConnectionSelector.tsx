@@ -3,22 +3,23 @@ import { router } from 'kea-router'
 
 import { IconGear } from '@posthog/icons'
 
+import { FEATURE_FLAGS } from 'lib/constants'
 import { useOnMountEffect } from 'lib/hooks/useOnMountEffect'
 import { LemonSelect, LemonSelectOption } from 'lib/lemon-ui/LemonSelect'
+import { featureFlagLogic } from 'lib/logic/featureFlagLogic'
 import { newInternalTab } from 'lib/utils/newInternalTab'
 import { urls } from 'scenes/urls'
 
 import {
-    ADD_MYSQL_DIRECT_CONNECTION,
-    ADD_POSTGRES_DIRECT_CONNECTION,
-    ADD_REDSHIFT_DIRECT_CONNECTION,
-    ADD_SNOWFLAKE_DIRECT_CONNECTION,
+    ADD_DIRECT_CONNECTION_PREFIX,
     CONFIGURE_SOURCES,
     type ConnectionSelectOption,
     POSTHOG_WAREHOUSE,
+    addHiddenSelectedConnectionOption,
     connectionSelectorLogic,
     getConnectionSelectorValue,
-} from './connectionSelectorLogic'
+} from 'products/data_warehouse/frontend/shared/logics/connectionSelectorLogic'
+
 import { sqlEditorLogic } from './sqlEditorLogic'
 
 const sourceIcon = (src: string): JSX.Element => (
@@ -35,12 +36,19 @@ export function ConnectionSelector({ tabId }: ConnectionSelectorProps): JSX.Elem
     const { connectionOptions, connectionOptionsLoading, connectionSelectOptions } =
         useValues(connectionSelectorLogic())
     const { maybeLoadConnectionOptions } = useActions(connectionSelectorLogic())
-    const { setSourceQuery, syncUrlWithQuery } = useActions(logic)
+    const { setSourceQuery, syncUrlWithQuery, setExecutionTarget } = useActions(logic)
+    const { featureFlags } = useValues(featureFlagLogic)
+    const hostedTrinoEnabled = !!featureFlags[FEATURE_FLAGS.MANAGED_TRINO_QUERY]
 
     useOnMountEffect(() => {
         maybeLoadConnectionOptions()
     })
-    const connectionSelectorValue = getConnectionSelectorValue(
+    const connectionSelectorValue =
+        sourceQuery.source.executionTarget === 'managed_trino'
+            ? 'managed_trino'
+            : getConnectionSelectorValue(connectionOptionsLoading, selectedConnectionId)
+    const displayedConnectionSelectOptions = addHiddenSelectedConnectionOption(
+        connectionSelectOptions,
         connectionOptions,
         connectionOptionsLoading,
         selectedConnectionId
@@ -53,16 +61,26 @@ export function ConnectionSelector({ tabId }: ConnectionSelectorProps): JSX.Elem
 
     return (
         <LemonSelect
+            data-attr="sql-editor-connection-selector"
             size="small"
             fullWidth
-            className="flex-1"
+            // min-w-0 lets the flex item shrink past the label's min-content width, and
+            // truncateText ellipsizes the label — a long source name (e.g. "managed_warehouse
+            // (DuckDB)") otherwise wraps and spills out of the narrow database-tree sidebar.
+            className="flex-1 min-w-0"
+            truncateText={{ maxWidthClass: 'max-w-full' }}
             value={connectionSelectorValue}
             onChange={(nextValue) => {
+                if (nextValue === 'managed_trino') {
+                    setExecutionTarget('managed_trino')
+                    return
+                }
                 if (!nextValue || nextValue === POSTHOG_WAREHOUSE) {
                     setSourceQuery({
                         ...sourceQueryWithoutLegacyConnectionId,
                         source: {
                             ...sourceQuery.source,
+                            executionTarget: undefined,
                             connectionId: undefined,
                             sendRawQuery: undefined,
                         },
@@ -71,23 +89,9 @@ export function ConnectionSelector({ tabId }: ConnectionSelectorProps): JSX.Elem
                     return
                 }
 
-                if (nextValue === ADD_POSTGRES_DIRECT_CONNECTION) {
-                    router.actions.push(urls.dataWarehouseSourceNew('Postgres', undefined, undefined, 'direct'))
-                    return
-                }
-
-                if (nextValue === ADD_MYSQL_DIRECT_CONNECTION) {
-                    router.actions.push(urls.dataWarehouseSourceNew('MySQL', undefined, undefined, 'direct'))
-                    return
-                }
-
-                if (nextValue === ADD_SNOWFLAKE_DIRECT_CONNECTION) {
-                    router.actions.push(urls.dataWarehouseSourceNew('Snowflake', undefined, undefined, 'direct'))
-                    return
-                }
-
-                if (nextValue === ADD_REDSHIFT_DIRECT_CONNECTION) {
-                    router.actions.push(urls.dataWarehouseSourceNew('Redshift', undefined, undefined, 'direct'))
+                if (nextValue.startsWith(ADD_DIRECT_CONNECTION_PREFIX)) {
+                    const sourceType = nextValue.slice(ADD_DIRECT_CONNECTION_PREFIX.length)
+                    router.actions.push(urls.dataWarehouseSourceNew(sourceType, undefined, undefined, 'direct'))
                     return
                 }
 
@@ -102,14 +106,34 @@ export function ConnectionSelector({ tabId }: ConnectionSelectorProps): JSX.Elem
                     ...sourceQueryWithoutLegacyConnectionId,
                     source: {
                         ...sourceQuery.source,
+                        executionTarget: undefined,
                         connectionId: nextValue,
                         sendRawQuery: undefined,
                     },
                 } as typeof sourceQuery)
                 syncUrlWithQuery()
             }}
-            options={connectionSelectOptions.map((group) => ({
-                options: group.options.map(toLemonSelectOption),
+            options={displayedConnectionSelectOptions.map((group) => ({
+                options: group.options.flatMap((option) => {
+                    const connectionOption = toLemonSelectOption(option)
+                    if (
+                        option.value === POSTHOG_WAREHOUSE &&
+                        (hostedTrinoEnabled || sourceQuery.source.executionTarget === 'managed_trino')
+                    ) {
+                        return [
+                            connectionOption,
+                            {
+                                label: 'PostHog (Trino)',
+                                value: 'managed_trino',
+                                icon: connectionOption.icon,
+                                disabledReason: hostedTrinoEnabled
+                                    ? undefined
+                                    : 'PostHog (Trino) queries are not enabled for this organization',
+                            },
+                        ]
+                    }
+                    return [connectionOption]
+                }),
             }))}
         />
     )
@@ -126,6 +150,7 @@ function toLemonSelectOption(option: ConnectionSelectOption): LemonSelectOption<
         value: option.value as string,
         label: option.label,
         icon,
+        hidden: option.hidden,
         sideAction: option.managementUrl
             ? {
                   onClick: () => newInternalTab(option.managementUrl),

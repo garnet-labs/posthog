@@ -1,6 +1,15 @@
-import { PromiseTimeoutError, retryWithBackoff, withTimeout } from 'lib/utils/async'
+import { delay, PromiseTimeoutError, retryWithBackoff, withTimeout } from 'lib/utils/async'
 
 describe('async utils', () => {
+    describe('delay()', () => {
+        it('rejects immediately when the signal is already aborted', async () => {
+            const controller = new AbortController()
+            controller.abort()
+
+            await expect(delay(10000, controller.signal)).rejects.toThrow('Aborted')
+        })
+    })
+
     describe('withTimeout()', () => {
         beforeEach(() => {
             jest.useFakeTimers()
@@ -23,10 +32,13 @@ describe('async utils', () => {
             // A promise that never resolves nor rejects — the stalled-fetch scenario.
             const neverSettles = new Promise<string>(() => {})
             const wrapped = withTimeout(neverSettles, 10000, 'loadRecents timed out')
-            const assertion = expect(wrapped).rejects.toThrow(PromiseTimeoutError)
+            // Captured before the clock moves, so the rejection always has a handler; `expect().rejects`
+            // can't be used here because it has to be awaited, and nothing rejects until timers advance.
+            const settled = wrapped.catch((error: unknown) => error)
             await jest.advanceTimersByTimeAsync(10000)
-            await assertion
-            await expect(wrapped).rejects.toThrow('loadRecents timed out')
+            const error = await settled
+            expect(error).toBeInstanceOf(PromiseTimeoutError)
+            expect((error as Error).message).toBe('loadRecents timed out')
         })
 
         it('does not time out a promise that resolves just before the deadline', async () => {
@@ -52,9 +64,9 @@ describe('async utils', () => {
                 received = signal
                 return new Promise<string>(() => {}) // never settles
             }, 10000)
-            const assertion = expect(wrapped).rejects.toThrow(PromiseTimeoutError)
+            const settled = wrapped.catch((error: unknown) => error)
             await jest.advanceTimersByTimeAsync(10000)
-            await assertion
+            expect(await settled).toBeInstanceOf(PromiseTimeoutError)
             expect(received?.aborted).toBe(true)
         })
     })
@@ -135,6 +147,39 @@ describe('async utils', () => {
 
                 // After 2000ms (initialDelayMs * 2^1), third attempt
                 await jest.advanceTimersByTimeAsync(2000)
+                expect(fn).toHaveBeenCalledTimes(3)
+
+                await expect(promise).resolves.toBe('success')
+            } finally {
+                jest.useRealTimers()
+            }
+        })
+
+        it('waits the delay getDelayMs gives, and the backoff when it gives none', async () => {
+            jest.useFakeTimers()
+            try {
+                const fn = jest
+                    .fn()
+                    .mockRejectedValueOnce(new Error('wait 5000'))
+                    .mockRejectedValueOnce(new Error('no wait given'))
+                    .mockResolvedValue('success')
+
+                const promise = retryWithBackoff(fn, {
+                    maxAttempts: 3,
+                    initialDelayMs: 1000,
+                    backoffMultiplier: 2,
+                    getDelayMs: (error) => ((error as Error).message === 'wait 5000' ? 5000 : undefined),
+                })
+
+                await jest.advanceTimersByTimeAsync(4999)
+                expect(fn).toHaveBeenCalledTimes(1)
+                await jest.advanceTimersByTimeAsync(1)
+                expect(fn).toHaveBeenCalledTimes(2)
+
+                // initialDelayMs * 2^1 after the second failure
+                await jest.advanceTimersByTimeAsync(1999)
+                expect(fn).toHaveBeenCalledTimes(2)
+                await jest.advanceTimersByTimeAsync(1)
                 expect(fn).toHaveBeenCalledTimes(3)
 
                 await expect(promise).resolves.toBe('success')

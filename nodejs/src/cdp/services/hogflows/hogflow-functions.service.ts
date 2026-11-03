@@ -7,7 +7,7 @@ import {
     HogFunctionType,
 } from '~/cdp/types'
 
-import { HogExecutorExecuteAsyncOptions, HogExecutorService } from '../hog-executor.service'
+import { HogExecutorAsyncService, HogExecutorExecuteAsyncOptions } from '../hog-executor-async.service'
 import { HogFunctionTemplateManagerService } from '../managers/hog-function-template-manager.service'
 
 type FunctionActionType = 'function' | 'function_email' | 'function_sms'
@@ -18,10 +18,14 @@ export class HogFlowFunctionsService {
     constructor(
         private siteUrl: string,
         private hogFunctionTemplateManager: HogFunctionTemplateManagerService,
-        private hogFunctionExecutor: HogExecutorService
+        private hogFunctionExecutor: HogExecutorAsyncService
     ) {}
 
-    async buildHogFunction(hogFlow: HogFlow, configuration: Action['config']): Promise<HogFunctionType> {
+    async buildHogFunction(
+        hogFlow: HogFlow,
+        configuration: Action['config'],
+        actionName?: string
+    ): Promise<HogFunctionType> {
         const template = await this.hogFunctionTemplateManager.getHogFunctionTemplate(configuration.template_id)
 
         if (!template) {
@@ -45,7 +49,17 @@ export class HogFlowFunctionsService {
             mappings,
             created_at: '',
             updated_at: '',
-            metadata: config,
+            // The action's config, plus flow-level send settings the email service needs at the
+            // send choke point, where only the synthetic hog function is in scope.
+            metadata: {
+                ...config,
+                hog_flow_name: hogFlow.name,
+                hog_flow_action_name: actionName ?? null,
+                email_sending_rate_limit: hogFlow.email_sending_rate_limit ?? null,
+                email_sending_paused_at: hogFlow.email_sending_paused_at ?? null,
+                email_sending_paused_reason: hogFlow.email_sending_paused_reason ?? null,
+                email_sending_paused_by: hogFlow.email_sending_paused_by ?? null,
+            },
         }
 
         return hogFunction
@@ -96,7 +110,8 @@ export class HogFlowFunctionsService {
             // Include workflow-level variables
             variables: invocation.state.variables,
             source: {
-                name: hogFunction.name ?? `Hog flow: ${invocation.hogFlow.id}`,
+                id: invocation.hogFlow.id,
+                name: invocation.hogFlow.name || `Hog flow: ${invocation.hogFlow.id}`,
                 url: `${projectUrl}/workflows/${invocation.hogFlow.id}/workflow?node=${hogFunction.id}`,
             },
             project: {
@@ -110,10 +125,21 @@ export class HogFlowFunctionsService {
             ...invocation,
             hogFunction,
             state: invocation.state.currentAction?.hogFunctionState ?? {
-                globals: await this.hogFunctionExecutor.buildInputsWithGlobals(hogFunction, globalsWithSource),
+                globals: await this.hogFunctionExecutor.hogExecutor.buildInputsWithGlobals(
+                    hogFunction,
+                    globalsWithSource,
+                    undefined,
+                    {
+                        appSourceId: invocation.parentRunId ?? invocation.hogFlow.id,
+                        instanceId: invocation.state.currentAction?.id,
+                    }
+                ),
                 timings: [],
                 attempts: 0,
                 actionId: invocation.state.currentAction?.id,
+                actionStepCount: invocation.state.actionStepCount,
+                customerTaskIdempotencyVersion: invocation.state.customerTaskIdempotencyVersion,
+                rerunAttempts: invocation.state.rerunAttempts,
             },
         }
 

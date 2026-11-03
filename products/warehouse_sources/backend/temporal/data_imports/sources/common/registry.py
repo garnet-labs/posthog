@@ -1,10 +1,27 @@
 import threading
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from products.warehouse_sources.backend.types import ExternalDataSourceType
 
 if TYPE_CHECKING:
     from products.warehouse_sources.backend.temporal.data_imports.sources.common.base import AnySource
+
+
+# The type of a registry key. Sources name this alias rather than the enum, so the key type can
+# become `str` without a change in any vendor directory.
+SourceKey = ExternalDataSourceType
+
+
+def source_key(key: str) -> SourceKey:
+    """The registry key for a source type string: its enum member, or the string itself.
+
+    A string that matches a member resolves to that member, so every enum caller keeps working.
+    A string with no member stays a plain string, cast to the enum type.
+    """
+    try:
+        return ExternalDataSourceType(key)
+    except ValueError:
+        return cast(SourceKey, key)
 
 
 class SourceRegistry:
@@ -20,8 +37,10 @@ class SourceRegistry:
         # on first registry use rather than at package import, so a process that never
         # touches the registry (most of them) doesn't pay for every vendor SDK at startup.
         # Double-checked lock: concurrent first-callers in a web worker must not observe a
-        # half-populated registry, and `_loaded` flips only after the import succeeds — so a
-        # failed load (e.g. a broken optional dependency) is retried rather than cached.
+        # half-populated registry, and `_loaded` flips only after the load returns — so a load
+        # that raises outright is retried rather than cached. A single source module that can't
+        # be imported is skipped by `load_all_sources`, leaving it absent here (and reported as
+        # an unknown type by `get_source`) rather than taking every other source down with it.
         if cls._loaded:
             return
         with cls._load_lock:
@@ -38,17 +57,39 @@ class SourceRegistry:
     @classmethod
     def register(cls, source_class: type["AnySource"]):
         source_class_instance = source_class()
-        source_type = source_class_instance.source_type
+        source_type = source_key(source_class_instance.source_type)
 
         cls._sources[source_type] = source_class_instance
 
         return source_class
 
     @classmethod
+    def _load_one(cls, source_type: ExternalDataSourceType) -> None:
+        # Importing every source module costs seconds per process, and a request typically
+        # needs a handful of types. Import only the module for this type; `get_source` falls
+        # back to the full load when that leaves the type unregistered.
+        if cls._loaded or source_type in cls._sources:
+            return
+        from products.warehouse_sources.backend.temporal.data_imports.sources import load_source  # noqa: PLC0415
+
+        load_source(source_type)
+
+    @classmethod
     def get_source(cls, source_type: ExternalDataSourceType) -> "AnySource":
         """Get a source instance by type"""
 
-        cls._ensure_loaded()
+        # Callers may hand us the raw string value (e.g. an `oauth_accounts` query param). The
+        # str-mixin enum compares equal to its value, so the `in cls._sources` checks below still
+        # work, but the lazy single-module load reads `source_type.name`, which a plain str lacks.
+        # Coerce to a real enum member first so both the lazy and full-load paths resolve, and so
+        # an unknown value surfaces as ValueError rather than AttributeError.
+        source_type = source_key(source_type)
+
+        cls._load_one(source_type)
+        # A string key with no enum member can only come from a vendor directory named after it,
+        # which the single-module load already tried. An unknown string must not start the full load.
+        if source_type not in cls._sources and isinstance(source_type, ExternalDataSourceType):
+            cls._ensure_loaded()
         if source_type not in cls._sources:
             raise ValueError(f"Unknown source type: {source_type}")
         return cls._sources[source_type]

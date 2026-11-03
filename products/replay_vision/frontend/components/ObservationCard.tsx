@@ -1,13 +1,9 @@
-import { useValues } from 'kea'
+import { IconCopy, IconSparkles } from '@posthog/icons'
+import { LemonButton, LemonTag, Spinner, Tooltip } from '@posthog/lemon-ui'
 
-import { IconRefresh, IconRewindPlay, IconSparkles } from '@posthog/icons'
-import { LemonButton, LemonTag, Link, Spinner, Tooltip } from '@posthog/lemon-ui'
-
-import { colonDelimitedDuration } from 'lib/utils/durations'
-import { urls } from 'scenes/urls'
+import { copyToClipboard } from 'lib/utils/copyToClipboard'
 
 import type { ReplayObservationApi } from '../generated/api.schemas'
-import { replayScannerLogic } from '../replay_scanners/replayScannerLogic'
 import {
     type ClassifierScannerConfig,
     type ScorerScannerConfig,
@@ -16,11 +12,11 @@ import {
     ineligibleKindDescription,
     parseFailureReason,
     parseIneligibleReason,
-    scannerTypeLabel,
 } from '../replay_scanners/types'
-import { getReplayVisionEditDisabledReason } from '../utils/accessControl'
-import { parseCitedSegments } from '../utils/citations'
-import { ObservationProgressBar } from './ObservationProgressBar'
+import { citedTextToPlainText, parseCitedSegments } from '../utils/citations'
+import { VERDICT_LABEL, confidenceLevel, isSummaryScannerType, readReasoning } from '../utils/observation'
+import { LabeledRow } from './LabeledRow'
+import { TimestampCitation } from './TimestampCitation'
 
 export function ObservationStatusTag({
     status,
@@ -34,9 +30,16 @@ export function ObservationStatusTag({
         return <LemonTag type="success">Succeeded</LemonTag>
     }
     if (status === 'failed') {
-        // Raw exception text lives in `FailureDetail`; tooltip is the description only.
+        // Raw exception text lives in `FailureDetail`.
         const parsed = errorReason ? parseFailureReason(errorReason) : null
-        const tooltip = parsed ? failureKindDescription(parsed.kind) : errorReason || null
+        const tooltip = parsed ? (
+            <div className="flex flex-col gap-1">
+                <div>{parsed.label}</div>
+                <div className="text-xs opacity-80">{failureKindDescription(parsed.kind)}</div>
+            </div>
+        ) : (
+            errorReason || null
+        )
         return (
             <Tooltip title={tooltip}>
                 <LemonTag type="danger">Failed</LemonTag>
@@ -91,26 +94,13 @@ export function CitedText({
     }
     return (
         <>
-            {list.map((segment, i) => {
-                if (segment.kind === 'text') {
-                    return <span key={i}>{segment.value}</span>
-                }
-                const seconds = Math.max(0, Math.floor(segment.timestamp_ms / 1000))
-                const label = colonDelimitedDuration(seconds, null)
-                if (onSeek) {
-                    return (
-                        <Link key={i} onClick={() => onSeek(segment.timestamp_ms)} className="ml-0.5">
-                            <IconRewindPlay className="inline-block align-text-bottom mr-0.5" />
-                            <span className="font-mono">{label}</span>
-                        </Link>
-                    )
-                }
-                return (
-                    <span key={i} className="text-muted font-mono ml-0.5">
-                        {label}
-                    </span>
+            {list.map((segment, i) =>
+                segment.kind === 'text' ? (
+                    <span key={i}>{segment.value}</span>
+                ) : (
+                    <TimestampCitation key={i} timestampMs={segment.timestamp_ms} onSeek={onSeek} />
                 )
-            })}
+            )}
         </>
     )
 }
@@ -121,6 +111,9 @@ export function ObservationPrimaryOutput({
     showPrompt = true,
     onSeek,
     expandSummary = false,
+    copyable = false,
+    reasoningTooltip = false,
+    largeTitle = false,
 }: {
     observation: ReplayObservationApi
     compact?: boolean
@@ -129,6 +122,12 @@ export function ObservationPrimaryOutput({
     onSeek?: (timestampMs: number) => void
     /** When true (dock/detail), summarizer body wraps in full; when false (table), single-line truncate. */
     expandSummary?: boolean
+    /** Shows a copy button on summarizer output: the clipboard gets the title plus the summary with citations as plain timestamps. */
+    copyable?: boolean
+    /** Hovering the result shows its reasoning. For list rows, which have nowhere else to print it. */
+    reasoningTooltip?: boolean
+    /** Sets a summarizer's title at headline size, for the observation page. */
+    largeTitle?: boolean
 }): JSX.Element | null {
     const snapshot = observation.scanner_snapshot
     const result = readResult(observation)
@@ -138,8 +137,15 @@ export function ObservationPrimaryOutput({
     const scannerType = snapshot.scanner_type
     const config = configFromSnapshot(snapshot)
     const prompt = showPrompt ? (config?.prompt ?? null) : null
-    const summaryClass = expandSummary ? 'text-sm whitespace-pre-wrap' : compact ? 'text-sm truncate' : 'text-sm'
-    const bodyClass = compact ? 'text-sm truncate' : 'text-sm'
+    const reasoning = reasoningTooltip ? readReasoning(observation) : null
+    const resultTooltip = reasoning ? citedTextToPlainText(reasoning, result.reasoning_segments) : null
+    const textClass = 'text-sm'
+    const summaryClass = expandSummary
+        ? `${textClass} whitespace-pre-wrap`
+        : compact
+          ? `${textClass} truncate`
+          : textClass
+    const bodyClass = compact ? `${textClass} truncate` : textClass
     const promptClass = 'text-xs text-muted'
 
     if (scannerType === 'monitor') {
@@ -154,23 +160,51 @@ export function ObservationPrimaryOutput({
                     ? 'muted'
                     : 'muted'
         const tagLabel =
-            verdict === 'yes' ? 'Yes' : verdict === 'no' ? 'No' : verdict === 'inconclusive' ? 'Inconclusive' : '—'
+            verdict === 'yes' || verdict === 'no' || verdict === 'inconclusive' ? VERDICT_LABEL[verdict] : '—'
         return (
             <div className="flex flex-col gap-1">
-                <LemonTag size="medium" type={tagType} className="self-start">
-                    {tagLabel}
-                </LemonTag>
+                <Tooltip title={resultTooltip}>
+                    <LemonTag size="medium" type={tagType} className="self-start">
+                        {tagLabel}
+                    </LemonTag>
+                </Tooltip>
                 {prompt && <span className={promptClass}>{prompt}</span>}
             </div>
         )
     }
 
-    if (scannerType === 'summarizer') {
+    if (isSummaryScannerType(scannerType)) {
         const title = typeof result.title === 'string' ? result.title : null
         const summary = typeof result.summary === 'string' ? result.summary : null
+        const showCopy = copyable && summary !== null
         return (
             <div className="flex flex-col gap-1">
-                {title && <span className="font-semibold text-sm">{title}</span>}
+                {(title || showCopy) && (
+                    <div className="flex items-start justify-between gap-2">
+                        {title && (
+                            <span className={largeTitle ? 'text-xl font-bold' : `font-semibold ${textClass}`}>
+                                {title}
+                            </span>
+                        )}
+                        {showCopy && (
+                            <LemonButton
+                                size="xsmall"
+                                icon={<IconCopy />}
+                                tooltip="Copy summary"
+                                className="ml-auto -my-1"
+                                onClick={() =>
+                                    void copyToClipboard(
+                                        [title, citedTextToPlainText(summary, result.summary_segments)]
+                                            .filter(Boolean)
+                                            .join('\n\n'),
+                                        'summary'
+                                    )
+                                }
+                                data-attr="vision-copy-summary"
+                            />
+                        )}
+                    </div>
+                )}
                 {summary && (
                     <span className={summaryClass}>
                         <CitedText text={summary} segments={result.summary_segments} onSeek={onSeek} />
@@ -212,7 +246,7 @@ export function ObservationPrimaryOutput({
                 <div className="flex flex-col gap-1">
                     <div className="flex flex-wrap gap-1">
                         {empty ? (
-                            <span className="text-muted text-sm">No tags</span>
+                            <span className={`text-muted ${textClass}`}>No categories</span>
                         ) : (
                             <>
                                 {fixedTags.map((tag, index) => (
@@ -231,7 +265,7 @@ export function ObservationPrimaryOutput({
         if (configuredTags.length === 0 && empty) {
             return (
                 <div className="flex flex-col gap-1">
-                    <span className="text-muted text-sm">No tags</span>
+                    <span className={`text-muted ${textClass}`}>No categories</span>
                     {prompt && <span className={promptClass}>{prompt}</span>}
                 </div>
             )
@@ -257,21 +291,21 @@ export function ObservationPrimaryOutput({
         const displayLabel = resultLabel ?? scaleLabel
         return (
             <div className="flex flex-col gap-1">
-                <span className="text-sm">
-                    <span className="font-semibold text-base">{score ?? '—'}</span>
-                    {scaleMax !== null && <span className="text-muted"> / {scaleMax}</span>}
-                    {displayLabel && <span className="text-muted"> — {displayLabel}</span>}
-                </span>
+                <Tooltip title={resultTooltip}>
+                    <span className={`${textClass} self-start`}>
+                        <span className="font-semibold text-base">{score ?? '—'}</span>
+                        {scaleMax !== null && <span className="text-muted"> / {scaleMax}</span>}
+                        {displayLabel && <span className="text-muted"> — {displayLabel}</span>}
+                    </span>
+                </Tooltip>
                 {prompt && <span className={promptClass}>{prompt}</span>}
             </div>
         )
     }
 
-    // Unknown / generic fallback (also covers summarizers that emit facets alongside title/summary).
+    // Unknown / generic fallback (also covers summarizers, whose body is `summary`).
     const summary = typeof result.summary === 'string' ? result.summary : null
     const userType = typeof result.user_type === 'string' ? result.user_type : null
-    const outcome = typeof result.outcome === 'string' ? result.outcome : null
-    const keywords = Array.isArray(result.keywords) ? (result.keywords as string[]) : []
     return (
         <div className="flex flex-col gap-1">
             {summary && <span className={bodyClass}>{summary}</span>}
@@ -281,42 +315,22 @@ export function ObservationPrimaryOutput({
                     {userType}
                 </span>
             )}
-            {outcome && (
-                <span className="text-muted text-xs">
-                    <span className="font-medium">Outcome: </span>
-                    {outcome}
-                </span>
-            )}
-            {keywords.length > 0 && (
-                <div className="flex flex-wrap gap-1">
-                    {keywords.map((keyword) => (
-                        <LemonTag key={keyword} type="option" size="small">
-                            {keyword}
-                        </LemonTag>
-                    ))}
-                </div>
-            )}
         </div>
     )
 }
 
+// A reader opens an observation for the result, not the prompt they configured. Collapse the prompt to one
+// peek line so the verdict and reasoning stay above the fold, but keep it in view so the verdict has context.
+/** Names the metric in the tag, for surfaces with no "Confidence" label of their own. */
 export function ObservationConfidence({ result }: { result: Record<string, unknown> }): JSX.Element | null {
     if (typeof result.confidence !== 'number') {
         return null
     }
-    const value = result.confidence
-    const pct = Math.round(value * 100)
-    const { type, label } =
-        value >= 0.8
-            ? ({ type: 'success', label: 'High' } as const)
-            : value >= 0.5
-              ? ({ type: 'warning', label: 'Medium' } as const)
-              : ({ type: 'danger', label: 'Low' } as const)
+    const { type, label } = confidenceLevel(result.confidence)
     return (
-        <div className="flex items-center gap-2">
-            <LemonTag type={type}>{label}</LemonTag>
-            <span className="text-sm tabular-nums text-muted">{pct}%</span>
-        </div>
+        <Tooltip title={`Confidence: ${Math.round(result.confidence * 100)}%`}>
+            <LemonTag type={type}>{`${label} confidence`}</LemonTag>
+        </Tooltip>
     )
 }
 
@@ -329,94 +343,40 @@ export function ObservationResultSummary({ observation }: { observation: ReplayO
     if (!snapshot || !result) {
         return <span className="text-muted text-sm">—</span>
     }
-    return <ObservationPrimaryOutput observation={observation} compact showPrompt={false} />
+    return <ObservationPrimaryOutput observation={observation} compact showPrompt={false} reasoningTooltip />
 }
 
 export function FailureDetail({ errorReason }: { errorReason: string }): JSX.Element {
     const parsed = parseFailureReason(errorReason)
-    if (!parsed) {
-        return <div className="text-danger text-sm">{errorReason}</div>
-    }
     return (
-        <div className="space-y-1">
-            <div className="font-semibold text-danger text-sm">{parsed.label}</div>
-            <div className="text-muted text-xs">{failureKindDescription(parsed.kind)}</div>
-            {parsed.message && <div className="text-muted text-xs font-mono">{parsed.message}</div>}
+        <div className="flex flex-col gap-2">
+            <LabeledRow label="Reason">
+                <p className="text-sm text-default m-0 leading-snug">
+                    {parsed ? failureKindDescription(parsed.kind) : errorReason}
+                </p>
+            </LabeledRow>
+            {parsed?.message && (
+                <LabeledRow label="Details">
+                    <p className="text-sm text-default m-0 leading-snug font-mono">{parsed.message}</p>
+                </LabeledRow>
+            )}
         </div>
     )
 }
 
 export function IneligibleDetail({ errorReason }: { errorReason: string }): JSX.Element {
     const parsed = parseIneligibleReason(errorReason)
-    if (!parsed) {
-        return <div className="text-muted text-sm">{errorReason}</div>
-    }
     return (
-        <div className="space-y-1">
-            <div className="font-semibold text-sm">{parsed.label}</div>
-            {parsed.message && <div className="text-muted text-xs">{parsed.message}</div>}
-        </div>
-    )
-}
-
-export function ObservationDockCard({
-    observation,
-    onSeek,
-    onRetry,
-    retrying = false,
-}: {
-    observation: ReplayObservationApi
-    onSeek?: (timestampMs: number) => void
-    onRetry?: () => void
-    retrying?: boolean
-}): JSX.Element {
-    const snapshot = observation.scanner_snapshot
-    const scannerType = snapshot?.scanner_type
-    const result = readResult(observation)
-    const { scanner } = useValues(replayScannerLogic({ id: observation.scanner_id }))
-
-    return (
-        <div className="border rounded p-3 bg-surface-primary space-y-2">
-            <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2 min-w-0">
-                    <ObservationStatusTag status={observation.status} errorReason={observation.error_reason} />
-                    <span className="font-semibold text-sm truncate">{snapshot?.name || 'Scanner'}</span>
-                    {scannerType && <span className="text-muted text-xs">{scannerTypeLabel(scannerType)}</span>}
-                </div>
-                <Link to={urls.replayVisionObservation(observation.id)} className="text-xs whitespace-nowrap">
-                    View details
-                </Link>
-            </div>
-
-            {observation.status === 'failed' && observation.error_reason && (
-                <div className="space-y-2">
-                    <FailureDetail errorReason={observation.error_reason} />
-                    {onRetry && (
-                        <LemonButton
-                            size="xsmall"
-                            type="secondary"
-                            icon={<IconRefresh />}
-                            onClick={onRetry}
-                            loading={retrying}
-                            disabledReason={getReplayVisionEditDisabledReason(scanner?.user_access_level)}
-                            data-attr="vision-dock-retry-observation"
-                        >
-                            Retry scan
-                        </LemonButton>
-                    )}
-                </div>
-            )}
-
-            {observation.status === 'ineligible' && observation.error_reason && (
-                <IneligibleDetail errorReason={observation.error_reason} />
-            )}
-
-            {observation.status === 'succeeded' && snapshot && result && (
-                <ObservationPrimaryOutput observation={observation} compact onSeek={onSeek} expandSummary />
-            )}
-
-            {(observation.status === 'pending' || observation.status === 'running') && (
-                <ObservationProgressBar observationId={observation.id} sessionId={observation.session_id} compact />
+        <div className="flex flex-col gap-2">
+            <LabeledRow label="Reason">
+                <p className="text-sm text-default m-0 leading-snug">
+                    {parsed ? ineligibleKindDescription(parsed.kind) : errorReason}
+                </p>
+            </LabeledRow>
+            {parsed?.message && (
+                <LabeledRow label="Details">
+                    <p className="text-sm text-default m-0 leading-snug">{parsed.message}</p>
+                </LabeledRow>
             )}
         </div>
     )

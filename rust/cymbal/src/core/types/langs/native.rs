@@ -133,7 +133,8 @@ pub struct RawNativeFrame {
     pub symbol_addr: Option<String>,
     pub image_addr: Option<String>,
     /// Display-language hint from the SDK (e.g. "rust"); the resolved
-    /// filename extension wins when available.
+    /// filename extension wins when available. Dart AOT frames use this hint
+    /// to keep their exact program counter for DWARF lookup.
     pub lang: Option<String>,
     pub module: Option<String>,
     pub function: Option<String>,
@@ -205,7 +206,11 @@ impl RawNativeFrame {
                 vec![self.handle_resolution_error(NativeError::MissingSymbolSet(chunk_id))],
             ),
             Err(ResolveError::ResolutionError(e)) => {
-                tracing::warn!("Unexpected native symbol resolution error: {:?}", e);
+                tracing::warn!(
+                    team_id,
+                    "Unexpected native symbol resolution error: {:?}",
+                    e
+                );
                 Ok(vec![self.handle_resolution_error(NativeError::ParseError(
                     e.to_string(),
                 ))])
@@ -232,11 +237,14 @@ impl RawNativeFrame {
 
         let relative_addr = calculate_relative_addr(instruction_addr, debug_image)?;
 
-        // Subtract 1 from return-address frames so the lookup targets the call
-        // instruction rather than the instruction after it, giving the correct
-        // source line. Safe for top (crash-site) frames too: addr-1 still falls
-        // within the same function body.
-        let lookup_addr = relative_addr.saturating_sub(1);
+        // Dart's AOT stack decoder looks up reported PCs directly, including
+        // synthetic async frames near function entries. Other native traces
+        // report return addresses, so look up the preceding call instruction.
+        let lookup_addr = if self.lang.as_deref() == Some("dart") {
+            relative_addr
+        } else {
+            relative_addr.saturating_sub(1)
+        };
 
         let symbols: Arc<ParsedNativeSymbols> = catalog
             .lookup(team_id, OrChunkId::chunk_id(debug_image.debug_id.clone()))
@@ -350,7 +358,6 @@ impl RawNativeFrame {
             resolve_failure: None,
 
             junk_drawer: None,
-            release: None,
             synthetic: self.meta.synthetic,
             context: None,
             suspicious: false,
@@ -400,7 +407,6 @@ impl RawNativeFrame {
             resolved: false,
             resolve_failure: Some(err.to_string()),
             junk_drawer: None,
-            release: None,
             synthetic: self.meta.synthetic,
             context: None,
             suspicious: false,
@@ -495,6 +501,10 @@ impl RawNativeFrame {
         if self.inline {
             hasher.update(b"inline");
         }
+        // A Dart lookup can resolve a different function at the same address.
+        if self.lang.as_deref() == Some("dart") {
+            hasher.update(b"dart-exact-pc");
+        }
         hasher.update(b"native");
 
         format!("{:x}", hasher.finalize())
@@ -563,7 +573,6 @@ impl From<&RawNativeFrame> for Frame {
             resolve_failure: None,
 
             junk_drawer: None,
-            release: None,
             synthetic: raw.meta.synthetic,
             context: None,
             suspicious: false,
@@ -966,6 +975,16 @@ mod test {
         let id_b = launch_b.frame_id(&[image_at("build-1", 0x104f00000)]);
         assert_eq!(id_a, id_b);
 
+        let mut dart_a = launch_a.clone();
+        dart_a.lang = Some("dart".to_string());
+        let mut dart_b = launch_b.clone();
+        dart_b.lang = Some("dart".to_string());
+        assert_eq!(
+            dart_a.frame_id(&[image_at("build-1", 0x100000000)]),
+            dart_b.frame_id(&[image_at("build-1", 0x104f00000)])
+        );
+        assert_ne!(id_a, dart_a.frame_id(&[image_at("build-1", 0x100000000)]));
+
         // Without a matching image the absolute address is hashed, so the ids differ.
         assert_ne!(launch_a.frame_id(&[]), launch_b.frame_id(&[]));
     }
@@ -1101,6 +1120,11 @@ mod test {
     //   test_rust_binary:   debug_id d1dea836-4ad3-daad-dd96-0e8626f766e1,
     //                       charge at 0x10640, lookup(0x10644) ->
     //                       core::hint::black_box inlined into charge
+    //   libtest_android.so: debug_id c393685c-6edc-d276-cbd6-37e4c8b4e2aa,
+    //                       preferred base 0, JNI entry at 0x4448,
+    //                       lookup(0x43d8) -> engine::inlined_leaf (line 12)
+    //                       inlined into engine::process_frame (entry 0x43cc),
+    //                       lookup(0x4454) -> the JNI entry's call site (line 27)
 
     /// Non-PIE ELF: the binary links at a fixed base (0x1000000) and loads
     /// there unchanged, so image_addr equals the link-time base.
@@ -1157,6 +1181,42 @@ mod test {
         assert_eq!(resolved.resolved_name.as_deref(), Some("inner_function"));
         assert_eq!(resolved.source.as_deref(), Some("test_binary.c"));
         assert!(resolved.line.is_some());
+    }
+
+    #[sqlx::test(migrations = "./tests/test_migrations")]
+    async fn test_flutter_aot_frame_at_function_entry_keeps_its_program_counter(db: sqlx::PgPool) {
+        use crate::frames::RawFrame;
+
+        const ELF: &[u8] =
+            include_bytes!("../../../../tests/static/native/flutter_android_arm64.symbols.zst");
+        const SOURCE: &str = include_str!("../../../../tests/static/native/flutter_sample.dart");
+        let chunk_id = "098518b7-ef99-d0be-1ab8-0642060ddbf3";
+        let dwarf = zstd::decode_all(ELF).unwrap();
+        let zip = zip_fixture(
+            &dwarf,
+            Some((
+                "/fixtures/flutter/native-symbolication-builds/sample/lib/main.dart",
+                SOURCE,
+            )),
+        );
+        let catalog = catalog_for_chunk(&db, chunk_id, zip).await;
+
+        let image_base = 0x7000000000u64;
+        let mut raw = native_frame_at(image_base + 0x205210, image_base);
+        raw.lang = Some("dart".to_string());
+        let debug_images = vec![debug_image_at(chunk_id, image_base)];
+        let resolved = RawFrame::Native(raw)
+            .resolve(1, &catalog, &debug_images, 3)
+            .await
+            .unwrap()
+            .pop()
+            .unwrap();
+
+        assert!(resolved.resolved, "{:?}", resolved.resolve_failure);
+        assert_eq!(resolved.resolved_name.as_deref(), Some("main"));
+        assert_eq!(resolved.lang, "dart");
+        assert_eq!(resolved.line, Some(7));
+        assert!(resolved.context.unwrap().line.line.contains("runApp("));
     }
 
     /// One raw frame at an address inside two levels of inlining expands into
@@ -1383,6 +1443,89 @@ mod test {
         assert_eq!(frames[1].source.as_deref(), Some("test_go.go"));
         assert_eq!(frames[1].line, Some(16));
         assert_eq!(frames[1].lang, "go");
+    }
+
+    /// Android NDK-shaped fixture: an aarch64-linux-android shared object
+    /// (JNI entry, Itanium-mangled C++, inlined leaf). Addresses are
+    /// synthesized the way an SDK would from a tombstone: the tombstone's
+    /// per-frame `rel_pc` is an ELF-relative address, so `image_addr` is
+    /// recovered as `pc - rel_pc` without knowing the real mapping layout.
+    #[sqlx::test(migrations = "./tests/test_migrations")]
+    async fn test_native_symbolication_android_ndk_shared_object(db: sqlx::PgPool) {
+        use crate::frames::RawFrame;
+
+        const ELF: &[u8] = include_bytes!("../../../../tests/static/native/libtest_android.so");
+
+        // Pin the debug id vocabulary: the CLI derives the chunk id from the
+        // ELF at upload, while an Android SDK would derive it from the
+        // tombstone's per-frame GNU build id (first 16 bytes, first three
+        // fields byte-swapped). Both must land on symbolic's derivation.
+        let object = symbolic::debuginfo::Object::parse(ELF).unwrap();
+        let chunk_id = object.debug_id().to_string();
+        assert_eq!(chunk_id, "c393685c-6edc-d276-cbd6-37e4c8b4e2aa");
+
+        let catalog = catalog_for_chunk(&db, &chunk_id, zip_fixture(ELF, None)).await;
+
+        // Android-typical load base. The fixture's rel_pc values are ELF
+        // vaddrs (preferred base 0), including the exec segment's nonzero
+        // load bias (p_vaddr 0x43cc vs p_offset 0x3cc from the NDK's 16 KiB
+        // max-page-size, the APK-embedded mapping shape).
+        let base = 0x7a12_3450_0000u64;
+        let debug_images = vec![debug_image_at(&chunk_id, base)];
+
+        // Tombstone pcs are already the right lookup address (the leaf is
+        // the faulting instruction and libunwindstack rewinds caller pcs to
+        // the call instruction), so the SDK biases instruction_addr by +1 to
+        // cancel the uniform -1 return-address adjustment applied here. The
+        // addresses below model that wire value.
+        //
+        // Crash leaf: faulting instruction 0x43d8, inside inlined_leaf as
+        // inlined into engine::process_frame; sent as 0x43d9, resolved at
+        // 0x43d8.
+        let frame = RawFrame::Native(native_frame_at(base + 0x43d9, base));
+        let frames = frame.resolve(1, &catalog, &debug_images, 15).await.unwrap();
+
+        assert_eq!(
+            frames.len(),
+            2,
+            "expected inline expansion, got: {frames:#?}"
+        );
+        assert!(frames.iter().all(|f| f.resolved));
+        assert_eq!(
+            frames[0].resolved_name.as_deref(),
+            Some("engine::process_frame")
+        );
+        assert_eq!(
+            frames[1].resolved_name.as_deref(),
+            Some("engine::inlined_leaf")
+        );
+        assert_eq!(frames[1].source.as_deref(), Some("test_android.cpp"));
+        assert_eq!(frames[1].lang, "cpp");
+        // The exact crash line: the +1 bias keeps the lookup on the
+        // faulting instruction instead of shifting one line-table row up.
+        assert_eq!(frames[1].line, Some(12));
+
+        // Caller: the JNI entry point (extern "C", so the name survives
+        // undecorated). The unwinder already rewound the arm64 return
+        // address 0x4458 to the call instruction 0x4454; sent as 0x4455,
+        // resolved at 0x4454. Without the bias the -1 here would adjust it
+        // a second time, off the call's source line.
+        let frame = RawFrame::Native(native_frame_at(base + 0x4455, base));
+        let resolved = frame
+            .resolve(1, &catalog, &debug_images, 15)
+            .await
+            .unwrap()
+            .pop()
+            .unwrap();
+
+        assert!(resolved.resolved, "{:?}", resolved.resolve_failure);
+        assert_eq!(
+            resolved.resolved_name.as_deref(),
+            Some("Java_com_example_app_MainActivity_nativeRender")
+        );
+        assert_eq!(resolved.lang, "cpp");
+        // The call's own line, not the row before it.
+        assert_eq!(resolved.line, Some(27));
     }
 
     /// Missing symbol set: the frame falls back to client-side enrichment and

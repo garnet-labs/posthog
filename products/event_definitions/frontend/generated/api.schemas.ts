@@ -15,6 +15,7 @@
  * * `leadership` - Leadership
  * * `marketing` - Marketing
  * * `sales` - Sales / Success
+ * * `student` - Student
  * * `other` - Other
  */
 export type RoleAtOrganizationEnumApi = (typeof RoleAtOrganizationEnumApi)[keyof typeof RoleAtOrganizationEnumApi]
@@ -27,6 +28,7 @@ export const RoleAtOrganizationEnumApi = {
     Leadership: 'leadership',
     Marketing: 'marketing',
     Sales: 'sales',
+    Student: 'student',
     Other: 'other',
 } as const
 
@@ -66,9 +68,10 @@ export interface UserBasicApi {
  * * `allow` - Allow
  * * `reject` - Reject
  */
-export type EnforcementModeEnumApi = (typeof EnforcementModeEnumApi)[keyof typeof EnforcementModeEnumApi]
+export type SchemaEnforcementModeEnumApi =
+    (typeof SchemaEnforcementModeEnumApi)[keyof typeof SchemaEnforcementModeEnumApi]
 
-export const EnforcementModeEnumApi = {
+export const SchemaEnforcementModeEnumApi = {
     Allow: 'allow',
     Reject: 'reject',
 } as const
@@ -80,8 +83,8 @@ export interface EnterpriseEventDefinitionApi {
     readonly id: string
     /** @maxLength 400 */
     name: string
-    /** @nullable */
-    owner?: number | null
+    /** The user responsible for the event, or null when it has no owner. */
+    readonly owner?: UserBasicApi | null
     /** @nullable */
     description?: string | null
     tags?: unknown[]
@@ -98,7 +101,7 @@ export interface EnterpriseEventDefinitionApi {
     readonly verified_by: UserBasicApi
     /** @nullable */
     hidden?: boolean | null
-    enforcement_mode?: EnforcementModeEnumApi
+    enforcement_mode?: SchemaEnforcementModeEnumApi
     /**
      * Name of a single property on this event that PostHog UIs should display alongside the event (for example `$pathname` on `$pageview`). When set, surfaces like the session replay inspector show the property's value next to the event name without the user having to open the event.
      * @maxLength 400
@@ -122,6 +125,53 @@ export interface PaginatedEnterpriseEventDefinitionListApi {
     /** @nullable */
     previous?: string | null
     results: EnterpriseEventDefinitionApi[]
+    /** True when `count` stopped at a cap, so it is a lower bound and `next` keeps paging past it. */
+    count_is_capped?: boolean
+}
+
+/**
+ * Serializer mixin that handles tags for objects.
+ */
+export interface EnterpriseEventDefinitionRequestApi {
+    readonly id: string
+    /** @maxLength 400 */
+    name: string
+    /**
+     * ID of the user responsible for the event. Null removes the owner.
+     * @nullable
+     */
+    owner?: number | null
+    /** @nullable */
+    description?: string | null
+    tags?: unknown[]
+    /** @nullable */
+    readonly created_at: string | null
+    readonly updated_at: string
+    readonly updated_by: UserBasicApi
+    /** @nullable */
+    readonly last_seen_at: string | null
+    readonly last_updated_at: string
+    verified?: boolean
+    /** @nullable */
+    readonly verified_at: string | null
+    readonly verified_by: UserBasicApi
+    /** @nullable */
+    hidden?: boolean | null
+    enforcement_mode?: SchemaEnforcementModeEnumApi
+    /**
+     * Name of a single property on this event that PostHog UIs should display alongside the event (for example `$pathname` on `$pageview`). When set, surfaces like the session replay inspector show the property's value next to the event name without the user having to open the event.
+     * @maxLength 400
+     * @nullable
+     */
+    primary_property?: string | null
+    readonly is_action: boolean
+    readonly action_id: number
+    readonly is_calculating: boolean
+    readonly last_calculated_at: string
+    readonly created_by: UserBasicApi
+    post_to_slack?: boolean
+    default_columns?: string[]
+    readonly media_preview_urls: readonly string[]
 }
 
 /**
@@ -131,7 +181,10 @@ export interface PatchedEnterpriseEventDefinitionApi {
     readonly id?: string
     /** @maxLength 400 */
     name?: string
-    /** @nullable */
+    /**
+     * ID of the user responsible for the event. Null removes the owner.
+     * @nullable
+     */
     owner?: number | null
     /** @nullable */
     description?: string | null
@@ -149,7 +202,7 @@ export interface PatchedEnterpriseEventDefinitionApi {
     readonly verified_by?: UserBasicApi
     /** @nullable */
     hidden?: boolean | null
-    enforcement_mode?: EnforcementModeEnumApi
+    enforcement_mode?: SchemaEnforcementModeEnumApi
     /**
      * Name of a single property on this event that PostHog UIs should display alongside the event (for example `$pathname` on `$pageview`). When set, surfaces like the session replay inspector show the property's value next to the event name without the user having to open the event.
      * @maxLength 400
@@ -194,7 +247,11 @@ export interface BulkUpdateTagsUUIDRequestApi {
      * * `remove` - remove
      * * `set` - set */
     action: BulkUpdateTagsActionEnumApi
-    /** Tag names to add, remove, or set. */
+    /**
+     * Tag names to add, remove, or set (up to 100 per request, 255 characters each).
+     * @maxItems 100
+     * @items.maxLength 255
+     */
     tags: string[]
 }
 
@@ -208,7 +265,7 @@ export interface BulkUpdateTagsUUIDItemApi {
 export interface BulkUpdateTagsUUIDErrorApi {
     /** UUID of the object that was skipped. */
     id: string
-    /** Why the object was skipped, e.g. 'Not found'. */
+    /** Why the object was skipped, e.g. 'Not found or no edit access'. */
     reason: string
 }
 
@@ -216,6 +273,30 @@ export interface BulkUpdateTagsUUIDResponseApi {
     /** Objects whose tags were successfully updated. */
     updated: BulkUpdateTagsUUIDItemApi[]
     /** Objects that were skipped, with a reason each. */
+    skipped: BulkUpdateTagsUUIDErrorApi[]
+}
+
+export interface EventDefinitionBulkUpdateVerifiedRequestApi {
+    /**
+     * List of event definition UUIDs to update.
+     * @maxItems 500
+     */
+    ids: string[]
+    /** Target verified state to apply to every matched event. `true` marks the events as verified (and unhides them, since an event cannot be both hidden and verified); `false` unverifies them. */
+    verified: boolean
+}
+
+export interface EventDefinitionBulkUpdateVerifiedItemApi {
+    /** UUID of the event definition whose verified state changed. */
+    id: string
+    /** The event's verified state after the update. */
+    verified: boolean
+}
+
+export interface EventDefinitionBulkUpdateVerifiedResponseApi {
+    /** Events whose verified state was changed. Events already in the target state are omitted. */
+    updated: EventDefinitionBulkUpdateVerifiedItemApi[]
+    /** Events that were skipped (e.g. not found in this project), with a reason each. */
     skipped: BulkUpdateTagsUUIDErrorApi[]
 }
 
@@ -232,7 +313,7 @@ export interface EventDefinitionRecordApi {
     last_seen_at?: string | null
     readonly last_updated_at: string
     tags?: unknown[]
-    enforcement_mode?: EnforcementModeEnumApi
+    enforcement_mode?: SchemaEnforcementModeEnumApi
     /**
      * Name of a single property on this event that PostHog UIs should display alongside the event (for example `$pathname` on `$pageview`). When set, surfaces like the session replay inspector show the property's value next to the event name without the user having to open the event.
      * @maxLength 400
@@ -259,6 +340,10 @@ export interface PrimaryPropertiesResponseApi {
 
 export type EventDefinitionsListParams = {
     /**
+     * `event_custom` keeps only names without a `$` prefix and `event_posthog` only names with one. Default `event`.
+     */
+    event_type?: EventDefinitionsListEventType
+    /**
      * When true, omit events that have been explicitly hidden by a team admin (Enterprise only).
      */
     exclude_hidden?: boolean
@@ -267,14 +352,53 @@ export type EventDefinitionsListParams = {
      */
     exclude_stale?: boolean
     /**
+     * JSON-encoded list of event names to omit. The name matches the property definitions endpoint that shares it.
+     */
+    excluded_properties?: string
+    /**
+     * When true, find similar event names only if the filtered search has no matches.
+     */
+    fuzzy_search?: boolean
+    /**
      * Number of results to return per page.
+     * @minimum 1
      */
     limit?: number
     /**
+     * Return exact matches for these event names. Pass names as repeated or comma-separated values.
+     */
+    names?: string[]
+    /**
      * The initial index from which to return the results.
+     * @minimum 0
      */
     offset?: number
+    /**
+     * Sort keys, prefixed with `-` for descending. Default `-last_seen_at::date` then `name`. Projects with more than 100000 event definitions default to `name`, unless the request sets `search`, `exclude_stale`, `verified`, `names`, `tags` or `event_type=event_posthog`.
+     */
+    ordering?: string[]
+    /**
+     * Case-insensitive match on the event name. Every whitespace-separated term has to match.
+     */
+    search?: string
+    /**
+     * JSON-encoded list of tag names. Keeps events that carry any of them.
+     */
+    tags?: string
+    /**
+     * When true, keep only verified events and core PostHog events. When false, keep the rest (Enterprise only).
+     */
+    verified?: boolean
 }
+
+export type EventDefinitionsListEventType =
+    (typeof EventDefinitionsListEventType)[keyof typeof EventDefinitionsListEventType]
+
+export const EventDefinitionsListEventType = {
+    Event: 'event',
+    EventCustom: 'event_custom',
+    EventPosthog: 'event_posthog',
+} as const
 
 export type EventDefinitionsByNameRetrieveParams = {
     /**

@@ -5,20 +5,20 @@ This module tests all Bayesian classes for correctness of calculations,
 validation, and edge case handling.
 """
 
-from typing import Any, cast
+from typing import Any
 
 import pytest
 from unittest import TestCase
 
 import numpy as np
+from parameterized import parameterized
 
-from products.experiments.stats.bayesian.method import BayesianConfig, BayesianMethod, PriorType
+from products.experiments.stats.bayesian.method import BayesianConfig, BayesianMethod
 from products.experiments.stats.bayesian.priors import GaussianPrior
 from products.experiments.stats.bayesian.tests import BayesianGaussianTest, BayesianResult
 from products.experiments.stats.bayesian.utils import (
     calculate_effect_size_and_variance,
     calculate_posterior,
-    calculate_risk,
     chance_to_win,
     credible_interval,
 )
@@ -28,6 +28,11 @@ from products.experiments.stats.shared.statistics import (
     RatioStatistic,
     SampleMeanStatistic,
     StatisticError,
+)
+from products.experiments.stats.tests.test_statistics import (
+    DEGENERATE_QUANTILE_CASES,
+    QUANTILE_CONTROL,
+    QUANTILE_TREATMENT,
 )
 
 
@@ -65,7 +70,6 @@ class TestBayesianConfig(TestCase):
         assert config.ci_level == 0.95
         assert config.inverse is False
         assert config.difference_type == DifferenceType.RELATIVE
-        assert config.prior_type == PriorType.RELATIVE
         assert config.prior_mean == 0.0
         assert config.prior_variance == 1.0
         assert config.proper_prior is False
@@ -175,17 +179,6 @@ class TestBayesianUtils(TestCase):
         lower_99, upper_99 = credible_interval(0.1, 0.05, alpha=0.01)
         assert upper_99 - lower_99 > upper - lower
 
-    def test_risk_calculation(self):
-        """Test risk assessment calculation."""
-
-        # Positive effect with some uncertainty
-        risk_control, risk_treatment = calculate_risk(0.05, 0.02)
-
-        # Risk of choosing control should be higher (we're missing positive effect)
-        assert risk_control > risk_treatment
-        assert risk_control > 0
-        assert risk_treatment >= 0  # Can be zero if effect is clearly positive
-
 
 class TestBayesianGaussianTest(TestCase):
     """Tests for BayesianGaussianTest class."""
@@ -237,10 +230,6 @@ class TestBayesianGaussianTest(TestCase):
 
 
 class TestBayesianMethod(TestCase):
-    @staticmethod
-    def _credible_interval(result_dict: dict[str, Any]) -> list[Any]:
-        return cast(list[Any], result_dict["credible_interval"])
-
     """Tests for BayesianMethod class."""
 
     def test_basic_method_usage(self):
@@ -271,35 +260,6 @@ class TestBayesianMethod(TestCase):
         assert result.prior_mean == 0.05
         assert result.prior_variance == 0.01
 
-    def test_summary_generation(self):
-        """Test summary generation."""
-        method = BayesianMethod()
-
-        treatment = ProportionStatistic(n=1000, sum=110)
-        control = ProportionStatistic(n=1000, sum=100)
-        result = method.run_test(treatment, control)
-
-        summary = method.get_summary(result)
-
-        # Check required summary fields
-        assert "preferred_variation" in summary
-        assert "chance_to_win" in summary
-        assert "confidence_in_decision" in summary
-        assert "interpretation" in summary
-        assert "risk_assessment" in summary
-        assert "recommendation" in summary
-
-    def test_create_simple_config(self):
-        """Test simple config creation."""
-        config = BayesianMethod.create_simple_config(
-            ci_level=0.99, difference_type="absolute", prior_mean=0.1, proper_prior=True
-        )
-
-        assert config.ci_level == 0.99
-        assert config.difference_type == DifferenceType.ABSOLUTE
-        assert config.prior_mean == 0.1
-        assert config.proper_prior is True
-
     def test_realistic_example(self):
         """Test basic two-sided t-test with sample mean statistics."""
         treatment = SampleMeanStatistic(sum=1922.7, sum_squares=94698.29, n=2461)
@@ -309,7 +269,6 @@ class TestBayesianMethod(TestCase):
         method = BayesianMethod(config)
         result = method.run_test(treatment, control)
 
-        result_dict = method.get_summary(result)
         expected_dict: dict[str, Any] = {
             "effect_size": 0.63646,
             "credible_interval": [-0.0873, 1.36026],
@@ -318,11 +277,11 @@ class TestBayesianMethod(TestCase):
         }
 
         # Compare the key values
-        self.assertAlmostEqual(result_dict["effect_size"], expected_dict["effect_size"], places=4)
-        credible_interval_result = self._credible_interval(result_dict)
+        self.assertAlmostEqual(result.effect_size, expected_dict["effect_size"], places=4)
+        credible_interval_result = result.credible_interval
         self.assertAlmostEqual(credible_interval_result[0], expected_dict["credible_interval"][0], places=4)
         self.assertAlmostEqual(credible_interval_result[1], expected_dict["credible_interval"][1], places=4)
-        self.assertAlmostEqual(result_dict["chance_to_win"], expected_dict["chance_to_win"], places=4)
+        self.assertAlmostEqual(result.chance_to_win, expected_dict["chance_to_win"], places=4)
 
     def test_two_sided_ttest_with_ratio_statistic(self):
         """Test basic two-sided t-test with ratio statistics."""
@@ -346,7 +305,6 @@ class TestBayesianMethod(TestCase):
         method = BayesianMethod(config)
         result = method.run_test(treatment, control)
 
-        result_dict = method.get_summary(result)
         expected_dict: dict[str, Any] = {
             "effect_size": 0.041333,
             "credible_interval": [0.01378609, 0.0689],
@@ -355,11 +313,45 @@ class TestBayesianMethod(TestCase):
         }
 
         # Compare the key values
-        self.assertAlmostEqual(result_dict["effect_size"], expected_dict["effect_size"], places=4)
-        self.assertAlmostEqual(result_dict["chance_to_win"], expected_dict["chance_to_win"], places=4)
-        credible_interval_result = self._credible_interval(result_dict)
+        self.assertAlmostEqual(result.effect_size, expected_dict["effect_size"], places=4)
+        self.assertAlmostEqual(result.chance_to_win, expected_dict["chance_to_win"], places=4)
+        credible_interval_result = result.credible_interval
         self.assertAlmostEqual(credible_interval_result[0], expected_dict["credible_interval"][0], places=4)
         self.assertAlmostEqual(credible_interval_result[1], expected_dict["credible_interval"][1], places=4)
+
+    @parameterized.expand(
+        [
+            (
+                "absolute",
+                DifferenceType.ABSOLUTE,
+                1.415000000000001,
+                (0.08583772923349264, 2.744162270766509),
+                0.9815350910332983,
+            ),
+            (
+                "relative",
+                DifferenceType.RELATIVE,
+                0.12982842462611258,
+                (0.0031120207966113256, 0.2565448284556138),
+                0.9776835938774414,
+            ),
+        ]
+    )
+    def test_gaussian_test_with_quantile_statistic(self, _name, difference_type, effect, interval, chance_to_win):
+        method = BayesianMethod(BayesianConfig(ci_level=0.95, difference_type=difference_type))
+        result = method.run_test(QUANTILE_TREATMENT, QUANTILE_CONTROL)
+
+        self.assertAlmostEqual(result.effect_size, effect, places=12)
+        self.assertAlmostEqual(result.credible_interval[0], interval[0], places=10)
+        self.assertAlmostEqual(result.credible_interval[1], interval[1], places=10)
+        self.assertAlmostEqual(result.chance_to_win, chance_to_win, places=10)
+
+    @parameterized.expand(DEGENERATE_QUANTILE_CASES)
+    def test_rejects_quantile_with_zero_variance(self, _name, treatment, control):
+        with self.assertRaisesRegex(
+            StatisticError, "Treatment statistic validation failed: Quantile has zero variance"
+        ):
+            BayesianMethod().run_test(treatment, control)
 
 
 class TestConvenienceFunctions:
@@ -370,10 +362,10 @@ class TestConvenienceFunctions:
         treatment = ProportionStatistic(n=1000, sum=110)
         control = ProportionStatistic(n=1000, sum=100)
 
-        config = BayesianMethod.create_simple_config(
+        config = BayesianConfig(
             ci_level=0.95,
             inverse=False,
-            difference_type="relative",
+            difference_type=DifferenceType.RELATIVE,
             prior_mean=0.05,
             prior_variance=0.01,
             proper_prior=True,

@@ -3,15 +3,124 @@
 You throw 'em, we catch 'em.
 
 Cymbal owns the HTTP ingress and full processing pipeline (fingerprinting,
-suppression, Kafka producers, issue linking). The binary runs in one of two
+suppression, Kafka producers, issue linking). The binary runs in one of three
 modes selected by `CYMBAL_MODE` (default `processing`): the processing
-pipeline, or the `cymbal.resolution.v1` gRPC symbol-resolution service
-(`CYMBAL_MODE=resolution`). Symbol resolution can run either inline inside the
-processing binary (default) or be offloaded to resolution-mode pods via the
-`cymbal.resolution.v1` contract. The remote path is opt-in via
-`CYMBAL_REMOTE_RESOLUTION_ENABLED=true` and has **no silent local fallback**
-— see the [resolution mode README](src/modes/resolution/README.md) for
-rollout, configuration, and operator guidance.
+pipeline, the `cymbal.resolution.v1` gRPC symbol-resolution service
+(`CYMBAL_MODE=resolution`), or the Kafka notification consumer
+(`CYMBAL_MODE=notifications`). The notification consumer starts the matching
+Temporal lifecycle workflow for every issue-created, issue-reopened, or
+issue-spiking notification. Issue-created is capped per team per hour (see
+[Issue-created rate limit](#issue-created-rate-limit-notifications-mode)).
+
+## Issue-created rate limit (notifications mode)
+
+Notifications mode caps issue-created workflow starts per team. One Redis token
+bucket per team, so a team that exhausts it gets no issue-created workflow, and
+therefore no embedding and no alert for new issues, until the bucket refills.
+
+The setting is both the bucket size and the hourly refill. A team that sits idle,
+spends the full bucket, then waits out the refill, gets up to twice the setting
+inside one rolling hour. The sustained rate is the setting. Size Temporal worker
+and embedding capacity against the peak rather than the sustained rate.
+
+Only issue-created is charged. It is the one notification type with no ceiling of
+its own, because a high-cardinality fingerprint mints issues as fast as a team
+sends events. Reopens need somebody to have resolved the issue first, and spikes
+already carry a per-issue Redis cooldown. Issue-created is also the only type
+that runs an embedding. A throttled team therefore keeps its reopen and spike
+alerts.
+
+The gate sits in the consumer rather than in processing mode, because the
+consumer is what starts the workflows. The Kafka payload carries no decision, so
+a replayed notification is judged the same way every time. `start_workflow` is
+idempotent on the workflow id, so a replay starts nothing, and the token it
+charged is credited back. `cymbal_issue_created_rate_limit_refunds` counts those
+credits, under an `error` label when the credit itself failed and the team kept
+the charge.
+
+A Redis failure while the consumer is running fails open: the notification is
+admitted and `cymbal_issue_created_rate_limit_fail_open` goes up, because a
+limiter outage must not silence alerts. A Redis that is configured but
+unreachable at startup is fatal instead, so a pod cannot come up and quietly run
+without the limit it was told to enforce.
+
+The variables are prefixed by the service, while the metrics and the Redis key
+are named for what is actually capped. Only issue-created is charged.
+
+| Variable | Default | Effect |
+| --- | --- | --- |
+| `ERROR_TRACKING_NOTIFICATIONS_RATE_LIMIT_REDIS_URL` | none | Required. The service does not start without it. |
+| `ERROR_TRACKING_NOTIFICATIONS_RATE_LIMIT_PER_HOUR` | `1000` | Bucket size, and the tokens a team earns back per hour. Zero or less disables the limit. |
+| `ERROR_TRACKING_NOTIFICATIONS_RATE_LIMIT_KEY_PREFIX` | `@posthog/error-tracking-notifications-rate-limiter` | Key namespace. It must differ from the event limiter's prefix. |
+| `ERROR_TRACKING_NOTIFICATIONS_RATE_LIMIT_BUCKET_TTL_SECONDS` | `3600` | Idle buckets expire and free the memory. A value below 3600 is raised to 3600, because a bucket takes an hour to refill and a shorter TTL would loosen the limit. |
+
+The limit covers every team. To size it before it cuts anything, set `PER_HOUR`
+far above real traffic, watch `cymbal_issue_created_rate_limit_outcomes`, then
+lower it. Setting `PER_HOUR` to zero or less switches the limit off.
+
+Set the Redis URL in every environment before this ships. It carries no default,
+so a pod without it fails to start.
+
+That counter carries an `outcome` label of `admitted` or `limited`, never both,
+so the two series sum to the notifications the limiter judged.
+
+The bucket lives in
+[`src/modes/notifications/token_bucket.rs`](src/modes/notifications/token_bucket.rs).
+It is deliberately separate from the per-event limiter in processing mode, which
+runs at event volume and charges a variable number of tokens against two fused
+keys.
+
+Symbol resolution runs in resolution-mode pods via the
+`cymbal.resolution.v1` contract. Processing has no inline fallback.
+See the [resolution mode README](src/modes/resolution/README.md) for
+configuration and operator guidance.
+
+## Dropping code variables (processing mode)
+
+`ERROR_TRACKING_DROP_CODE_VARIABLES_TEAM_IDS` takes a comma-separated list of
+team ids. The default is empty, which keeps code variables for every team. An
+entry that is not a team id stops processing mode at startup, so a typo cannot
+leave a team out of the list without an error. Use
+it for a team that receives events from senders you cannot upgrade, such as
+old SDK versions that attach frame locals without masking.
+
+For a listed team, processing mode removes `code_variables` from every frame
+two times:
+
+1. On the incoming event, before it is parsed. The resolution service then
+   never stores the variables, and an event that fails to parse is returned
+   without them.
+2. On the resolved frames. A stored frame record keeps the variables of the
+   event that first resolved that frame. The frame id does not include code
+   variables, so the record is reused for later events that hit the same
+   frame. This pass removes those replayed variables.
+
+The setting does not change frame records that are already in Postgres. Remove
+their variables separately if they must not stay there.
+
+## Masking code variables (processing mode)
+
+Processing mode masks `code_variables` in Python frames for every team that
+`ERROR_TRACKING_DROP_CODE_VARIABLES_TEAM_IDS` does not list. The rules are the
+default masking rules of the posthog-python SDK, ported to
+`src/core/code_variables.rs`. Older SDK versions send values that the current
+rules redact, so applying the rules on the server covers those senders.
+
+- A variable, key or string value that contains a sensitive name, such as
+  `password`, `token` or `auth`, is redacted whole.
+- A value in a known vendor format, a high-entropy token, a PEM private key and
+  a signed URL with a `sig` parameter are redacted whole.
+- URL credentials and `Bearer` or `Basic` credentials are replaced in place, so
+  the rest of the text stays.
+- A string that holds a JSON object or array, which is how the SDK sends a dict
+  or an object, is masked field by field.
+
+Masking runs at the same two points as dropping, so new frame records hold
+masked values, and records stored earlier are masked when they are replayed.
+It does not change records that are already in Postgres.
+
+Masking has no setting and is always on. When the SDK changes its default
+rules, change `src/core/code_variables.rs` to match.
 
 ## Remote resolution behavior
 
@@ -22,17 +131,13 @@ Node.js error-tracking consumer can keep using its existing DNS routing
 and HTTP body-size chunking because remote symbol resolution happens behind
 the same cymbal HTTP boundary.
 
-When remote resolution is enabled, `CYMBAL_REMOTE_RESOLUTION_SAMPLE_RATE`
-controls a deterministic event-level rollout. Events selected for remote
-processing are flattened into exception-level `ResolveItem`s, grouped by a
+Events are flattened into exception-level `ResolveItem`s, grouped by a
 symbol-set routing key when one is available, and submitted over a
 bidirectional `Resolve` stream. Items without a symbol-set reference fall back
 to the existing per-team key. Each item carries JSON
 `metadata` bytes for resolver-specific context such as
 `debug_images_json`, and each terminal `ResolveOutcome` is correlated by
-item id. Sampled remote attempts do not fall back to local resolution if the
-remote pool fails; unsampled events use the inline local exception and frame
-resolvers and then rejoin the same properties/grouping/linking pipeline.
+item id. Resolution failures do not fall back to inline processing.
 
 Backpressure is result-only on the `Resolve` stream: overload is surfaced as
 `ResolveOutcome.Error { kind: ERROR_KIND_OVERLOADED }`, which the cymbal client
@@ -51,7 +156,7 @@ Cymbal uses that load as a soft routing bias: busier endpoints are less likely t
 
 See [`docs/compatibility.md`](docs/compatibility.md) for the Node consumer
 compatibility checklist and [`src/modes/resolution/README.md`](src/modes/resolution/README.md)
-for rollout and dashboard guidance.
+for dashboard guidance.
 
 Fetched JavaScript sources and external source maps are limited to 25 MB after HTTP decompression by default. Set `SOURCEMAP_MAX_RESPONSE_BYTES` to adjust this limit.
 

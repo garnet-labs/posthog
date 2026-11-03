@@ -1,14 +1,21 @@
-import { MOCK_TEAM_ID } from 'lib/api.mock'
+import { MOCK_DEFAULT_TEAM, MOCK_TEAM_ID } from 'lib/api.mock'
 
 import { router } from 'kea-router'
 /* oxlint-disable react-hooks/rules-of-hooks -- useMocks is a test helper, not a React hook */
 import { expectLogic } from 'kea-test-utils'
 
+import { lemonToast } from '@posthog/lemon-ui'
+
+import { preflightLogic } from 'lib/logic/preflightLogic'
+import { teamLogic } from 'scenes/teamLogic'
+
 import { useMocks } from '~/mocks/jest'
 import { initKeaTests } from '~/test/init'
-import { EarlyAccessFeatureStage, EarlyAccessFeatureType, FeatureFlagBasicType } from '~/types'
+import { EarlyAccessFeatureStage, EarlyAccessFeatureType, FeatureFlagBasicType, Region } from '~/types'
 
-import { earlyAccessFeatureLogic } from './earlyAccessFeatureLogic'
+import * as messageAudience from 'products/workflows/frontend/MessageAudience/messageAudience'
+
+import { POSTHOG_TEAM_ID, earlyAccessFeatureLogic } from './earlyAccessFeatureLogic'
 import { earlyAccessFeaturesLogic } from './earlyAccessFeaturesLogic'
 
 const FEATURE_FLAG: FeatureFlagBasicType = {
@@ -110,6 +117,32 @@ describe('earlyAccessFeatureLogic', () => {
         expect(logic.values.isEditingFeature).toBe(false)
     })
 
+    it.each([
+        { from: EarlyAccessFeatureStage.Beta, to: EarlyAccessFeatureStage.GeneralAvailability, offered: true },
+        { from: EarlyAccessFeatureStage.Beta, to: EarlyAccessFeatureStage.Alpha, offered: false },
+    ])(
+        'offers to email opted-in users only on reaching general availability: $from to $to',
+        async ({ from, to, offered }) => {
+            const success = jest.spyOn(lemonToast, 'success')
+            jest.spyOn(messageAudience, 'messageAudienceAccessDisabledReason').mockReturnValue(null)
+            useMocks({
+                get: { '/api/projects/:team_id/early_access_feature/:id': mockFeature({ stage: from }) },
+                patch: { '/api/projects/:team_id/early_access_feature/:id': () => [200, mockFeature({ stage: to })] },
+            })
+            logic = earlyAccessFeatureLogic({ id: 'abc-123' })
+            logic.mount()
+            await expectLogic(logic).toDispatchActions(['loadEarlyAccessFeatureSuccess'])
+
+            await expectLogic(logic, () => {
+                logic.actions.saveEarlyAccessFeature({ ...logic.values.earlyAccessFeature, stage: to })
+            }).toDispatchActions(['saveEarlyAccessFeatureSuccess'])
+
+            const button = success.mock.calls.find(([message]) => message === 'Early access feature saved')?.[1]?.button
+            expect(button?.label).toBe(offered ? 'Email opted-in users' : undefined)
+            jest.restoreAllMocks()
+        }
+    )
+
     it('deletes a feature, removes it from the list, and returns to the list page', async () => {
         let deleted = false
         useMocks({
@@ -138,5 +171,66 @@ describe('earlyAccessFeatureLogic', () => {
         expect(deleted).toBe(true)
         expect(earlyAccessFeaturesLogic.values.earlyAccessFeatures).toEqual([])
         expect(router.values.location.pathname).toMatch(/\/early_access_features$/)
+    })
+
+    // PostHog's own project (US cloud, id 2) requires a description on newly created features.
+    // These guard that the frontend validator matches the backend's create-only + US-cloud scope.
+    describe('description requirement', () => {
+        beforeEach(() => {
+            useMocks({
+                get: {
+                    '/api/projects/:team_id/early_access_feature/:id': mockFeature({ id: 'existing-id' }),
+                },
+            })
+        })
+
+        async function mountWith(id: string, teamId: number, region: Region): Promise<void> {
+            logic = earlyAccessFeatureLogic({ id })
+            logic.mount()
+            // Wait for the mounted loaders (including preflightLogic's own fetch of the default
+            // US-region fixture) to settle first, so they can't overwrite the state set below.
+            await expectLogic(logic).toFinishAllListeners()
+            teamLogic.actions.loadCurrentTeamSuccess({ ...MOCK_DEFAULT_TEAM, id: teamId })
+            preflightLogic.actions.loadPreflightSuccess({ region } as any)
+        }
+
+        it('requires a description when creating on US-cloud project 2', async () => {
+            await mountWith('new', POSTHOG_TEAM_ID, Region.US)
+            logic.actions.setEarlyAccessFeatureValue('name', 'My feature')
+            logic.actions.setEarlyAccessFeatureValue('description', '   ')
+
+            expect(logic.values.earlyAccessFeatureValidationErrors.description).toEqual('A description is required')
+        })
+
+        it('accepts a valid description when creating on US-cloud project 2', async () => {
+            await mountWith('new', POSTHOG_TEAM_ID, Region.US)
+            logic.actions.setEarlyAccessFeatureValue('name', 'My feature')
+            logic.actions.setEarlyAccessFeatureValue('description', 'A real description')
+
+            expect(logic.values.earlyAccessFeatureValidationErrors.description).toBeUndefined()
+        })
+
+        it('does not require a description for other teams on US cloud', async () => {
+            await mountWith('new', MOCK_TEAM_ID, Region.US)
+            logic.actions.setEarlyAccessFeatureValue('name', 'My feature')
+            logic.actions.setEarlyAccessFeatureValue('description', '')
+
+            expect(logic.values.earlyAccessFeatureValidationErrors.description).toBeUndefined()
+        })
+
+        it('does not require a description for project 2 outside US cloud', async () => {
+            await mountWith('new', POSTHOG_TEAM_ID, Region.EU)
+            logic.actions.setEarlyAccessFeatureValue('name', 'My feature')
+            logic.actions.setEarlyAccessFeatureValue('description', '')
+
+            expect(logic.values.earlyAccessFeatureValidationErrors.description).toBeUndefined()
+        })
+
+        it('does not block editing an existing description-less feature on US-cloud project 2', async () => {
+            await mountWith('existing-id', POSTHOG_TEAM_ID, Region.US)
+            logic.actions.setEarlyAccessFeatureValue('description', '')
+
+            expect(logic.values.earlyAccessFeatureValidationErrors.description).toBeUndefined()
+        })
     })
 })

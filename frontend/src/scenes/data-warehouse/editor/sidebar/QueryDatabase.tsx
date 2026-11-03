@@ -17,7 +17,7 @@ import {
     IconExternal,
     IconPlusSmall,
 } from '@posthog/icons'
-import { LemonDialog } from '@posthog/lemon-ui'
+import { LemonDialog, Tooltip } from '@posthog/lemon-ui'
 
 import { FEATURE_FLAGS } from 'lib/constants'
 import { IconTextSize } from 'lib/lemon-ui/icons'
@@ -37,24 +37,37 @@ import {
 import { getAccessControlDisabledReason } from 'lib/utils/accessControlUtils'
 import { copyToClipboard } from 'lib/utils/copyToClipboard'
 import { cn } from 'lib/utils/css-classes'
+import { escapeDottedHogQLIdentifier, escapePropertyAsHogQLIdentifier } from 'lib/utils/hogql'
 import { newInternalTab } from 'lib/utils/newInternalTab'
-import { POSTHOG_WAREHOUSE } from 'scenes/data-warehouse/editor/connectionSelectorLogic'
+import {
+    MANAGED_TRINO_SCHEMA_SCOPE,
+    getDatabaseSchemaQueryScope,
+} from 'scenes/data-management/database/databaseTableListLogic'
+import { PropertyDefinitionEditModal } from 'scenes/data-management/properties/PropertyDefinitionEditModal'
 import { OutputTab } from 'scenes/data-warehouse/editor/outputPaneLogic'
 import { sqlEditorLogic } from 'scenes/data-warehouse/editor/sqlEditorLogic'
 import { urls } from 'scenes/urls'
 
 import { SearchHighlightMultiple } from '~/layout/navigation-3000/components/SearchHighlight'
-import { DatabaseSerializedFieldType, externalDataSources } from '~/queries/schema/schema-general'
-import { escapeDottedHogQLIdentifier, escapePropertyAsHogQLIdentifier } from '~/queries/utils'
+import { DatabaseSerializedFieldType } from '~/queries/schema/schema-general'
 import { AccessControlLevel, AccessControlResourceType } from '~/types'
 
-import { sourceManagementLogic } from 'products/data_warehouse/frontend/shared/logics/sourceManagementLogic'
+import { endpointModelUrl } from 'products/data_modeling/frontend/endpointModelName'
+import { MaterializationStatusIcon } from 'products/data_modeling/frontend/MaterializationStatusIcon'
+import { RenameViewModal } from 'products/data_warehouse/frontend/shared/components/RenameViewModal'
+import { TableCertificationIcon } from 'products/data_warehouse/frontend/shared/components/TableCertificationBadge'
+import { POSTHOG_WAREHOUSE } from 'products/data_warehouse/frontend/shared/logics/connectionSelectorLogic'
+import { expressionModalLogic } from 'products/data_warehouse/frontend/shared/logics/expressionModalLogic'
+import { joinsDataLogic } from 'products/data_warehouse/frontend/shared/logics/joinsDataLogic'
 import { buildSelectAllQuery } from 'products/data_warehouse/frontend/utils'
+import { ExternalDataSourceTypeEnumApi } from 'products/warehouse_sources/frontend/generated/api.schemas'
 
 import { dataWarehouseViewsLogic } from '../../saved_queries/dataWarehouseViewsLogic'
 import { draftsLogic } from '../draftsLogic'
 import { renderTableCount } from '../editorSceneLogic'
+import { PropertyDefinitionFilter } from './PropertyDefinitionFilter'
 import { isJoined, queryDatabaseLogic } from './queryDatabaseLogic'
+import { LineageTarget, SeeLineageMenuItem } from './SeeLineageMenuItem'
 
 export function getSidebarAddJoinSourceTableName(
     recordType: string | undefined,
@@ -70,6 +83,23 @@ export function getSidebarAddJoinSourceTableName(
         default:
             return null
     }
+}
+
+/**
+ * The text a column row inserts at the cursor, or null when there is nothing to insert.
+ *
+ * The name has to be checked rather than assumed: escaping an undefined one throws, and a throw
+ * escapes the tree row's `<a>` click handler before it can preventDefault, so the browser follows
+ * the row's placeholder href and leaves the scene the tree is embedded in.
+ */
+export function getColumnInsertText(record: Record<string, any> | undefined): string | null {
+    if (record?.type !== 'column' || !record.columnName) {
+        return null
+    }
+    if (typeof record.hogqlExpression === 'string') {
+        return record.hogqlExpression
+    }
+    return escapeDottedHogQLIdentifier(record.columnName)
 }
 
 /**
@@ -89,6 +119,18 @@ const filterTreeSections = (sections: TreeDataItem[], searchTerm: string): TreeD
     })
 }
 
+export const getQueryDatabaseTreeData = (
+    displayedTreeData: TreeDataItem[],
+    extraTreeSections: TreeDataItem[] | undefined,
+    searchText: string
+): TreeDataItem[] => {
+    if (!extraTreeSections?.length) {
+        return displayedTreeData
+    }
+
+    return [...filterTreeSections(extraTreeSections, searchText), ...displayedTreeData]
+}
+
 export const QueryDatabase = ({
     virtualizationScrollContainerRef,
     extraTreeSections,
@@ -103,7 +145,7 @@ export const QueryDatabase = ({
     extraTreeSections?: TreeDataItem[]
 }): JSX.Element => {
     const {
-        searchTerm,
+        searchText,
         joinsByFieldName,
         editingDraftId,
         displayedTreeData,
@@ -113,6 +155,10 @@ export const QueryDatabase = ({
         highlightedDropFolderId,
         highlightViewsSectionDrop,
         featureFlags,
+        editingPropertyDefinition,
+        materializationStatusFilters,
+        dataWarehouseSavedQueriesLoading,
+        renameView,
     } = useValues(queryDatabaseLogic)
     const {
         setExpandedFolders,
@@ -129,14 +175,26 @@ export const QueryDatabase = ({
         renameDraft,
         openUnsavedQuery,
         deleteUnsavedQuery,
+        setPropertyDefinitionSearch,
+        openPropertyDefinitionEditor,
+        closePropertyDefinitionEditor,
+        updatePropertyDefinition,
+        openRenameView,
+        closeRenameView,
+        setRenameViewName,
+        submitRenameView,
     } = useActions(queryDatabaseLogic)
+    const { dataWarehouseSavedQueriesLoaded, dataWarehouseSavedQueryDownstreamReferences } =
+        useValues(dataWarehouseViewsLogic)
     const {
         createDataWarehouseSavedQueryFolder,
         deleteDataWarehouseSavedQueryFolder,
         updateDataWarehouseSavedQueryFolder,
         deleteDataWarehouseSavedQuery,
     } = useActions(dataWarehouseViewsLogic)
-    const { deleteJoin } = useActions(sourceManagementLogic)
+    const { deleteJoin } = useActions(joinsDataLogic)
+    const { expressionsByFieldName } = useValues(expressionModalLogic)
+    const { openNewExpressionModal, openEditExpressionModal, deleteExpression } = useActions(expressionModalLogic)
     const { deleteDraft } = useActions(draftsLogic)
     const {
         openMaterializationModal,
@@ -158,7 +216,11 @@ export const QueryDatabase = ({
     )
     const addJoinAccessDisabledReason = resourceLevelEditorDisabledReason
     const materializationAccessDisabledReason = resourceLevelEditorDisabledReason
-    const warehouseAccessControlEnabled = !!featureFlags[FEATURE_FLAGS.HOGQL_WAREHOUSE_ACCESS_CONTROL]
+    // Embedded editors mount no modals (SQLEditor gates them on FullScene), so an access control
+    // item there opens nothing. Most embedded callers hide the tree entirely, but not all.
+    const warehouseAccessControlEnabled =
+        !!featureFlags[FEATURE_FLAGS.HOGQL_WAREHOUSE_ACCESS_CONTROL] && !isEmbeddedMode
+    const renameSavedViewEnabled = !!featureFlags[FEATURE_FLAGS.DATA_WAREHOUSE_RENAME_SAVED_VIEW]
     const formatTraversalChain = (chain?: (string | number)[]): string | null => {
         if (!chain || chain.length === 0) {
             return null
@@ -274,6 +336,12 @@ export const QueryDatabase = ({
         }
     }
 
+    const isManagedTrino = connectionId === MANAGED_TRINO_SCHEMA_SCOPE
+    const schemaQueryScope = {
+        ...getDatabaseSchemaQueryScope(connectionId && connectionId !== POSTHOG_WAREHOUSE ? connectionId : undefined),
+        ...(isManagedTrino ? { sendRawQuery: true } : {}),
+    }
+
     const isPreviewableViewItem = (item: TreeDataItem): boolean => {
         return ['view', 'managed-view', 'endpoint'].includes(item.record?.type)
     }
@@ -285,7 +353,6 @@ export const QueryDatabase = ({
 
         const table = item.record?.tableName || item.name
         const previewQuery = `SELECT * FROM ${escapePropertyAsHogQLIdentifier(table)} LIMIT 100`
-        const nextConnectionId = connectionId && connectionId !== POSTHOG_WAREHOUSE ? connectionId : undefined
 
         if (isEmbeddedMode) {
             setActiveTab(OutputTab.Results)
@@ -293,7 +360,7 @@ export const QueryDatabase = ({
                 ...sourceQuery,
                 source: {
                     ...sourceQuery.source,
-                    connectionId: nextConnectionId,
+                    ...schemaQueryScope,
                     query: previewQuery,
                 },
             })
@@ -306,7 +373,7 @@ export const QueryDatabase = ({
             urls.sqlEditor({
                 query: previewQuery,
                 outputTab: OutputTab.Results,
-                connectionId: nextConnectionId,
+                ...schemaQueryScope,
             })
         )
     }
@@ -323,15 +390,20 @@ export const QueryDatabase = ({
         router.actions.push(url)
     }
 
-    const getEndpointUrl = (item: TreeDataItem): string => {
-        const endpointName = item.record?.table?.name ?? item.name
-        const versionMatch = endpointName.match(/^(.+)_v(\d+)$/)
+    const getEndpointUrl = (item: TreeDataItem): string => endpointModelUrl(item.record?.table?.name ?? item.name)
 
-        if (versionMatch) {
-            return urls.endpoint(versionMatch[1], parseInt(versionMatch[2], 10))
+    const getMetricEditorUrl = (item: TreeDataItem): string =>
+        urls.sqlEditor({ source: 'metric', metricName: item.record?.metric.name })
+
+    const openMetricEditor = (item: TreeDataItem, newTab = false): void => {
+        const url = getMetricEditorUrl(item)
+
+        if (newTab || isEmbeddedMode) {
+            newInternalTab(url)
+            return
         }
 
-        return urls.endpoint(item.name)
+        router.actions.push(url)
     }
 
     const treeRef = useRef<LemonTreeRef>(null)
@@ -340,24 +412,21 @@ export const QueryDatabase = ({
     }, [treeRef, setTreeRef])
 
     const treeData = useMemo(() => {
-        if (!extraTreeSections?.length) {
-            return displayedTreeData
-        }
         // Filtered here rather than by the caller: the tree swaps in its own filtered data while
         // searching, so an unfiltered section would sit above the results still listing
         // everything — and keeping the search term on this side means an embedder doesn't have to
         // mount this logic just to read it.
-        return [...filterTreeSections(extraTreeSections, searchTerm), ...displayedTreeData]
-    }, [extraTreeSections, displayedTreeData, searchTerm])
+        return getQueryDatabaseTreeData(displayedTreeData, extraTreeSections, searchText)
+    }, [extraTreeSections, displayedTreeData, searchText])
 
-    return (
+    const tree = (
         <LemonTree
             ref={treeRef}
             data={treeData}
-            enableDragAndDrop={!searchTerm}
-            isItemDraggable={(item) => !searchTerm && item.record?.type === 'view' && item.record?.isSavedQuery}
+            enableDragAndDrop={!searchText}
+            isItemDraggable={(item) => !searchText && item.record?.type === 'view' && item.record?.isSavedQuery}
             isItemDroppable={(item) =>
-                !searchTerm &&
+                !searchText &&
                 ((item.record?.type === 'folder' && item.record?.folderType === 'view-folder') ||
                     item.record?.type === 'views')
             }
@@ -376,7 +445,7 @@ export const QueryDatabase = ({
             }}
             expandedItemIds={expandedItemIds}
             onSetExpandedItemIds={
-                searchTerm ? setExpandedSearchFolders : (folderIds) => setExpandedFolders(folderIds, connectionId)
+                searchText ? setExpandedSearchFolders : (folderIds) => setExpandedFolders(folderIds, connectionId)
             }
             onFolderClick={(folder, isExpanded) => {
                 if (folder) {
@@ -399,12 +468,17 @@ export const QueryDatabase = ({
                 }
 
                 // Insert the column at the cursor, preserving the rest of the query the user has typed
-                if (item && item.record?.type === 'column') {
-                    insertTextAtCursor(escapeDottedHogQLIdentifier(item.record.columnName))
+                const columnInsertText = getColumnInsertText(item?.record)
+                if (columnInsertText) {
+                    insertTextAtCursor(columnInsertText)
                 }
 
                 if (item && item.record?.type === 'unsaved-query') {
                     openUnsavedQuery(item.record)
+                }
+
+                if (item && item.record?.type === 'metric') {
+                    openMetricEditor(item)
                 }
             }}
             renderItem={(item) => {
@@ -413,7 +487,17 @@ export const QueryDatabase = ({
                 const hasMatches = matches && matches.length > 0
                 const isColumn = item.record?.type === 'column'
                 const columnType = isColumn ? item.record?.field?.type : null
+                const savedExpression =
+                    isColumn && item.record?.table && item.record?.field
+                        ? expressionsByFieldName[`${item.record.table}.${item.record.field.name}`]
+                        : null
                 const tableKindLabel = !isColumn && item.children?.length ? getTableKindLabel(item) : null
+                const certification =
+                    item.record?.type === 'table'
+                        ? item.record?.table?.certification
+                        : item.record?.type === 'view'
+                          ? item.record?.certification
+                          : undefined
                 const itemLabel = typeof item.displayName === 'string' ? item.displayName : item.name
                 const isHighlightedFolderDropTarget =
                     item.record?.type === 'folder' &&
@@ -438,29 +522,45 @@ export const QueryDatabase = ({
                     >
                         <div className="flex flex-row gap-1 justify-between">
                             <div className="shrink-0 flex min-w-0 items-center gap-2">
-                                {hasMatches && searchTerm ? (
-                                    <SearchHighlightMultiple
-                                        string={itemLabel}
-                                        substring={searchTerm}
-                                        className={cn(isColumn && 'font-mono text-xs')}
-                                    />
-                                ) : (
-                                    <span
-                                        className={cn(
-                                            ['managed-views', 'views', 'sources', 'drafts', 'unsaved-folder'].includes(
-                                                item.record?.type
-                                            ) && 'font-semibold',
-                                            item.record?.type === 'folder' &&
-                                                item.record?.folderType === 'view-folder' &&
-                                                'font-semibold',
-                                            isColumn && 'font-mono text-xs',
-                                            'truncate shrink-0'
-                                        )}
-                                    >
-                                        {item.displayName ?? item.name}
-                                    </span>
-                                )}
-                                {isColumn && columnType ? (
+                                <span className="shrink-0 flex items-center gap-1">
+                                    {item.record?.type === 'view' && item.record.isSavedQuery ? (
+                                        <MaterializationStatusIcon view={item.record.view} />
+                                    ) : null}
+                                    {hasMatches && searchText ? (
+                                        <SearchHighlightMultiple
+                                            string={itemLabel}
+                                            substring={searchText}
+                                            className={cn(isColumn && 'font-mono text-xs')}
+                                        />
+                                    ) : (
+                                        <span
+                                            className={cn(
+                                                [
+                                                    'managed-views',
+                                                    'views',
+                                                    'sources',
+                                                    'drafts',
+                                                    'unsaved-folder',
+                                                ].includes(item.record?.type) && 'font-semibold',
+                                                item.record?.type === 'folder' &&
+                                                    item.record?.folderType === 'view-folder' &&
+                                                    'font-semibold',
+                                                isColumn && 'font-mono text-xs',
+                                                'truncate shrink-0'
+                                            )}
+                                        >
+                                            {item.displayName ?? item.name}
+                                        </span>
+                                    )}
+                                </span>
+                                <TableCertificationIcon certification={certification} />
+                                {isColumn && columnType && savedExpression ? (
+                                    <Tooltip title={<code className="text-xs">{savedExpression.expression}</code>}>
+                                        <span className="shrink rounded px-1.5 py-0.5 text-xs text-muted-alt">
+                                            {columnType === 'expression' ? 'expression' : `${columnType} expression`}
+                                        </span>
+                                    </Tooltip>
+                                ) : isColumn && columnType ? (
                                     <span className="shrink rounded px-1.5 py-0.5 text-xs text-muted-alt">
                                         {columnType === 'field_traverser' && item?.record?.field.chain
                                             ? formatTraversalChain(item.record.field.chain)
@@ -482,6 +582,26 @@ export const QueryDatabase = ({
                 )
             }}
             itemSideAction={(item) => {
+                if (item.record?.type === 'property-field') {
+                    return null
+                }
+
+                if (item.record?.propertyDefinition) {
+                    return (
+                        <DropdownMenuGroup>
+                            <DropdownMenuItem
+                                asChild
+                                onClick={(e) => {
+                                    e.stopPropagation()
+                                    openPropertyDefinitionEditor(item.record?.propertyDefinition)
+                                }}
+                            >
+                                <ButtonPrimitive menuItem>Edit definition</ButtonPrimitive>
+                            </DropdownMenuItem>
+                        </DropdownMenuGroup>
+                    )
+                }
+
                 const joinMenu =
                     item.record?.field && item.record?.table
                         ? (() => {
@@ -525,6 +645,35 @@ export const QueryDatabase = ({
                     return joinMenu
                 }
 
+                // Menu for fields backed by a saved expression
+                if (item.record?.field && item.record?.table) {
+                    const expression = expressionsByFieldName[`${item.record.table}.${item.record.field.name}`]
+                    if (expression) {
+                        return (
+                            <DropdownMenuGroup>
+                                <DropdownMenuItem
+                                    asChild
+                                    onClick={(e) => {
+                                        e.stopPropagation()
+                                        openEditExpressionModal(expression)
+                                    }}
+                                >
+                                    <ButtonPrimitive menuItem>Edit expression</ButtonPrimitive>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                    asChild
+                                    onClick={(e) => {
+                                        e.stopPropagation()
+                                        deleteExpression(expression)
+                                    }}
+                                >
+                                    <ButtonPrimitive menuItem>Delete expression</ButtonPrimitive>
+                                </DropdownMenuItem>
+                            </DropdownMenuGroup>
+                        )
+                    }
+                }
+
                 // Show menu for drafts
                 if (item.record?.type === 'draft') {
                     const draft = item.record.draft
@@ -554,13 +703,95 @@ export const QueryDatabase = ({
                     )
                 }
 
+                if (item.record?.type === 'metric') {
+                    const metricName = item.record.metric.name
+                    const openMetricLabel = 'Open in SQL editor'
+                    return (
+                        <DropdownMenuGroup>
+                            <div className="flex gap-px">
+                                {isEmbeddedMode ? (
+                                    <DropdownMenuItem
+                                        asChild
+                                        onClick={(e) => {
+                                            e.stopPropagation()
+                                            openMetricEditor(item, true)
+                                        }}
+                                    >
+                                        <ButtonPrimitive menuItem>{openMetricLabel}</ButtonPrimitive>
+                                    </DropdownMenuItem>
+                                ) : (
+                                    <>
+                                        <DropdownMenuItem asChild>
+                                            <Link
+                                                to={getMetricEditorUrl(item)}
+                                                onClick={(e) => e.stopPropagation()}
+                                                buttonProps={{
+                                                    menuItem: true,
+                                                    className: 'flex-1 rounded-r-none',
+                                                }}
+                                            >
+                                                {openMetricLabel}
+                                            </Link>
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem asChild>
+                                            <Link
+                                                to={getMetricEditorUrl(item)}
+                                                target="_blank"
+                                                targetBlankIcon={false}
+                                                onClick={(e) => e.stopPropagation()}
+                                                tooltip={openMetricLabel}
+                                                buttonProps={{
+                                                    menuItem: true,
+                                                    iconOnly: true,
+                                                    className: 'px-2 rounded-l-none',
+                                                }}
+                                            >
+                                                <IconExternal />
+                                            </Link>
+                                        </DropdownMenuItem>
+                                    </>
+                                )}
+                            </div>
+                            <DropdownMenuItem asChild>
+                                <Link
+                                    to={urls.dataCatalogMetric(metricName)}
+                                    onClick={(e) => e.stopPropagation()}
+                                    buttonProps={{ menuItem: true }}
+                                >
+                                    View in data catalog
+                                </Link>
+                            </DropdownMenuItem>
+                            {!isEmbeddedMode ? (
+                                <SeeLineageMenuItem target={{ lookup: 'metric', id: item.record.metric.id }} />
+                            ) : null}
+                            <DropdownMenuItem
+                                asChild
+                                onClick={(e) => {
+                                    e.stopPropagation()
+                                    void copyToClipboard(metricName)
+                                }}
+                            >
+                                <ButtonPrimitive menuItem>Copy metric name</ButtonPrimitive>
+                            </DropdownMenuItem>
+                        </DropdownMenuGroup>
+                    )
+                }
+
                 // Show menu for tables
                 if (item.record?.type === 'table') {
                     // Per-object access control only exists for actual warehouse tables, not posthog/system tables
                     const warehouseTableId =
-                        warehouseAccessControlEnabled && item.record.table?.type === 'data_warehouse'
+                        warehouseAccessControlEnabled && !isManagedTrino && item.record.table?.type === 'data_warehouse'
                             ? item.record.table?.id
                             : null
+                    const tableLineageTarget: LineageTarget | null =
+                        isEmbeddedMode || isManagedTrino
+                            ? null
+                            : item.record.table?.type === 'data_warehouse'
+                              ? { lookup: 'warehouse_table', id: item.record.table.id }
+                              : item.record.table?.type === 'posthog'
+                                ? { lookup: 'posthog_table', id: item.record.table.name }
+                                : null
 
                     return (
                         <DropdownMenuGroup>
@@ -568,37 +799,63 @@ export const QueryDatabase = ({
                                 asChild
                                 onClick={(e) => {
                                     e.stopPropagation()
-                                    const nextConnectionId =
-                                        connectionId && connectionId !== POSTHOG_WAREHOUSE ? connectionId : undefined
                                     router.actions.push(
                                         urls.sqlEditor({
                                             query: buildSelectAllQuery(item.name, null),
-                                            connectionId: nextConnectionId,
+                                            ...schemaQueryScope,
                                         })
                                     )
                                 }}
                             >
                                 <ButtonPrimitive menuItem>Query</ButtonPrimitive>
                             </DropdownMenuItem>
-                            <DropdownMenuItem
-                                asChild
-                                onClick={(e) => {
-                                    e.stopPropagation()
-                                    if (addJoinAccessDisabledReason) {
-                                        return
-                                    }
-                                    selectSourceTable(item.name)
-                                }}
-                            >
-                                <ButtonPrimitive
-                                    menuItem
-                                    disabledReasons={
-                                        addJoinAccessDisabledReason ? { [addJoinAccessDisabledReason]: true } : {}
-                                    }
-                                >
-                                    Add join
-                                </ButtonPrimitive>
-                            </DropdownMenuItem>
+                            {tableLineageTarget ? <SeeLineageMenuItem target={tableLineageTarget} /> : null}
+                            {!isManagedTrino && (
+                                <>
+                                    <DropdownMenuItem
+                                        asChild
+                                        onClick={(e) => {
+                                            e.stopPropagation()
+                                            if (addJoinAccessDisabledReason) {
+                                                return
+                                            }
+                                            selectSourceTable(item.name)
+                                        }}
+                                    >
+                                        <ButtonPrimitive
+                                            menuItem
+                                            disabledReasons={
+                                                addJoinAccessDisabledReason
+                                                    ? { [addJoinAccessDisabledReason]: true }
+                                                    : {}
+                                            }
+                                        >
+                                            Add join
+                                        </ButtonPrimitive>
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem
+                                        asChild
+                                        onClick={(e) => {
+                                            e.stopPropagation()
+                                            if (addJoinAccessDisabledReason) {
+                                                return
+                                            }
+                                            openNewExpressionModal(item.name)
+                                        }}
+                                    >
+                                        <ButtonPrimitive
+                                            menuItem
+                                            disabledReasons={
+                                                addJoinAccessDisabledReason
+                                                    ? { [addJoinAccessDisabledReason]: true }
+                                                    : {}
+                                            }
+                                        >
+                                            Add expression
+                                        </ButtonPrimitive>
+                                    </DropdownMenuItem>
+                                </>
+                            )}
                             <DropdownMenuItem
                                 asChild
                                 onClick={(e) => {
@@ -816,6 +1073,34 @@ export const QueryDatabase = ({
                             >
                                 <ButtonPrimitive menuItem>Query</ButtonPrimitive>
                             </DropdownMenuItem>
+                            {renameSavedViewEnabled &&
+                            !isEmbeddedMode &&
+                            item.record.type === 'view' &&
+                            item.record.isSavedQuery &&
+                            item.record.view?.managed_viewset_kind === null ? (
+                                <DropdownMenuItem
+                                    asChild
+                                    onClick={(e) => {
+                                        e.stopPropagation()
+                                        if (!editViewAccessDisabledReason && item.record?.view) {
+                                            openRenameView({ id: item.record.view.id, name: item.record.view.name })
+                                        }
+                                    }}
+                                >
+                                    <ButtonPrimitive
+                                        menuItem
+                                        disabledReasons={
+                                            editViewAccessDisabledReason ? { [editViewAccessDisabledReason]: true } : {}
+                                        }
+                                        data-attr="data-warehouse-view-rename"
+                                    >
+                                        Rename view
+                                    </ButtonPrimitive>
+                                </DropdownMenuItem>
+                            ) : null}
+                            {!isEmbeddedMode && item.record.type === 'view' && item.record.isSavedQuery ? (
+                                <SeeLineageMenuItem target={{ lookup: 'saved_query', id: item.record.view.id }} />
+                            ) : null}
                             {addJoinSourceTableName ? (
                                 <DropdownMenuItem
                                     asChild
@@ -965,7 +1250,7 @@ export const QueryDatabase = ({
                 // External source folders get an actions menu: edit the source and add a new one of this type
                 if (
                     item.record?.type === 'source-folder' &&
-                    externalDataSources.includes(item.record?.sourceType as (typeof externalDataSources)[number])
+                    Object.values(ExternalDataSourceTypeEnumApi).includes(item.record?.sourceType)
                 ) {
                     const sourceType = item.record?.sourceType
                     const sources: { id: string; label: string }[] = item.record?.sources ?? []
@@ -1009,6 +1294,48 @@ export const QueryDatabase = ({
                                     </DropdownMenuSubContent>
                                 </DropdownMenuSub>
                             ) : null}
+                            {warehouseAccessControlEnabled && sources.length === 1 ? (
+                                <DropdownMenuItem
+                                    asChild
+                                    onClick={(e) => {
+                                        e.stopPropagation()
+                                        openAccessControlModal({
+                                            resource: AccessControlResourceType.ExternalDataSource,
+                                            resourceId: sources[0].id,
+                                            name: sources[0].label || sourceType || 'Source',
+                                        })
+                                    }}
+                                >
+                                    <ButtonPrimitive menuItem>Access control</ButtonPrimitive>
+                                </DropdownMenuItem>
+                            ) : warehouseAccessControlEnabled && sources.length > 1 ? (
+                                <DropdownMenuSub>
+                                    <DropdownMenuSubTrigger asChild>
+                                        <ButtonPrimitive menuItem>
+                                            Access control
+                                            <IconChevronRight className="ml-auto size-3" />
+                                        </ButtonPrimitive>
+                                    </DropdownMenuSubTrigger>
+                                    <DropdownMenuSubContent>
+                                        {sources.map((source) => (
+                                            <DropdownMenuItem
+                                                key={source.id}
+                                                asChild
+                                                onClick={(e) => {
+                                                    e.stopPropagation()
+                                                    openAccessControlModal({
+                                                        resource: AccessControlResourceType.ExternalDataSource,
+                                                        resourceId: source.id,
+                                                        name: source.label || sourceType || 'Source',
+                                                    })
+                                                }}
+                                            >
+                                                <ButtonPrimitive menuItem>{source.label}</ButtonPrimitive>
+                                            </DropdownMenuItem>
+                                        ))}
+                                    </DropdownMenuSubContent>
+                                </DropdownMenuSub>
+                            ) : null}
                             <DropdownMenuItem asChild>
                                 <Link
                                     to={urls.dataWarehouseSourceNew(sourceType)}
@@ -1032,6 +1359,17 @@ export const QueryDatabase = ({
                 return undefined
             }}
             itemSideActionButton={(item) => {
+                if (item.record?.type === 'property-field') {
+                    return (
+                        <PropertyDefinitionFilter
+                            propertyDefinitionKey={item.record.propertyDefinitionKey}
+                            propertyDefinitionSearch={item.record.propertyDefinitionSearch ?? ''}
+                            propertyDefinitionTarget={item.record.propertyDefinitionTarget}
+                            setPropertyDefinitionSearch={setPropertyDefinitionSearch}
+                        />
+                    )
+                }
+
                 if (item.record?.type === 'sources') {
                     return (
                         <ButtonPrimitive
@@ -1064,6 +1402,7 @@ export const QueryDatabase = ({
                     'managed-view',
                     'endpoint',
                     'draft',
+                    'metric',
                     'column',
                     'unsaved-query',
                     'folder',
@@ -1087,13 +1426,73 @@ export const QueryDatabase = ({
                 return undefined
             }}
             renderItemIcon={(item) => {
+                if (item.record?.type === 'property-field') {
+                    return (
+                        <TreeNodeDisplayIcon
+                            item={{ ...item, record: { ...item.record, type: 'table' } }}
+                            expandedItemIds={expandedItemIds}
+                        />
+                    )
+                }
                 if (item.record?.type === 'column') {
-                    return getFieldTypeIcon(item.record.field?.type)
+                    const icon = getFieldTypeIcon(item.record.field?.type)
+                    const savedExpression =
+                        item.record?.table && item.record?.field
+                            ? expressionsByFieldName[`${item.record.table}.${item.record.field.name}`]
+                            : null
+                    if (savedExpression) {
+                        return (
+                            <span className="relative inline-flex">
+                                {icon}
+                                <span
+                                    className="absolute -top-0.5 -right-0.5 size-1.5 rounded-full bg-accent"
+                                    aria-hidden="true"
+                                />
+                            </span>
+                        )
+                    }
+                    return icon
                 }
                 return <TreeNodeDisplayIcon item={item} expandedItemIds={expandedItemIds} />
             }}
             virtualized
             virtualizationScrollContainerRef={virtualizationScrollContainerRef}
         />
+    )
+
+    return (
+        <>
+            {!connectionId &&
+                materializationStatusFilters.length > 0 &&
+                dataWarehouseSavedQueriesLoaded &&
+                !dataWarehouseSavedQueriesLoading &&
+                treeData.length === 0 && (
+                    <p className="px-3 py-2 text-muted text-sm">No materialized views match your filters.</p>
+                )}
+            {tree}
+            {editingPropertyDefinition ? (
+                <PropertyDefinitionEditModal
+                    propertyDefinition={editingPropertyDefinition}
+                    onClose={closePropertyDefinitionEditor}
+                    onSave={updatePropertyDefinition}
+                />
+            ) : null}
+            {renameSavedViewEnabled && renameView ? (
+                <RenameViewModal
+                    key={renameView.id}
+                    viewName={renameView.originalName}
+                    name={renameView.name}
+                    nameError={renameView.nameError}
+                    submitError={renameView.submitError}
+                    isSaving={renameView.isSaving}
+                    references={dataWarehouseSavedQueryDownstreamReferences[renameView.id]?.references ?? []}
+                    referencesLoading={dataWarehouseSavedQueryDownstreamReferences[renameView.id]?.loading ?? true}
+                    referencesError={dataWarehouseSavedQueryDownstreamReferences[renameView.id]?.error ?? false}
+                    onNameChange={setRenameViewName}
+                    onClose={closeRenameView}
+                    onSubmit={submitRenameView}
+                />
+            ) : null}
+        </>
     )
 }

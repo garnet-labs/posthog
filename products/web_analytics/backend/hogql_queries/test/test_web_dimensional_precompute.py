@@ -1,10 +1,12 @@
 from datetime import UTC, datetime, timedelta
 
 import unittest
-from freezegun import freeze_time
+import time_machine
 from posthog.test.base import APIBaseTest, ClickhouseTestMixin, _create_event, _create_person
 
 from django.test import override_settings
+
+from parameterized import parameterized
 
 from posthog.hogql import ast
 from posthog.hogql.parser import parse_select
@@ -87,7 +89,7 @@ class TestWebDimensionalPrecompute(ClickhouseTestMixin, APIBaseTest):
         )
         return int(rows[0][0]), int(rows[0][1]), int(rows[0][2])
 
-    @freeze_time("2024-01-15T12:00:00Z")
+    @time_machine.travel("2024-01-15T12:00:00Z", tick=False)
     def test_stats_ensure_creates_jobs_and_correct_totals(self):
         self._seed_two_sessions()
         result = ensure_web_stats_dimensional_precomputed(self.team, WINDOW_START, WINDOW_END)
@@ -101,7 +103,7 @@ class TestWebDimensionalPrecompute(ClickhouseTestMixin, APIBaseTest):
         assert sessions == 2
         assert pageviews == 3
 
-    @freeze_time("2024-01-15T12:00:00Z")
+    @time_machine.travel("2024-01-15T12:00:00Z", tick=False)
     def test_stats_breaks_down_by_host(self):
         self._seed_two_sessions()
         result = ensure_web_stats_dimensional_precomputed(self.team, WINDOW_START, WINDOW_END)
@@ -124,7 +126,7 @@ class TestWebDimensionalPrecompute(ClickhouseTestMixin, APIBaseTest):
         assert by_host["example.com"] == (1, 1, 2)
         assert by_host["other.com"] == (1, 1, 1)
 
-    @freeze_time("2024-01-15T12:00:00Z")
+    @time_machine.travel("2024-01-15T12:00:00Z", tick=False)
     def test_stats_second_call_is_cache_hit(self):
         self._seed_two_sessions()
         first = ensure_web_stats_dimensional_precomputed(self.team, WINDOW_START, WINDOW_END)
@@ -138,7 +140,23 @@ class TestWebDimensionalPrecompute(ClickhouseTestMixin, APIBaseTest):
         assert jobs_after_second == jobs_after_first
         assert set(second.job_ids) == set(first.job_ids)
 
-    @freeze_time("2024-01-15T12:00:00Z")
+    @parameterized.expand([("UTC",), ("Pacific/Honolulu",), ("Asia/Tokyo",)])
+    def test_current_utc_day_refreshes_hourly_in_any_team_timezone(self, timezone: str):
+        # 16:00 UTC is after local midnight in both non-UTC zones, so team-timezone TTL bands would
+        # put the current UTC day in the 1-day band and skip the second build.
+        self.team.timezone = timezone
+        self.team.save()
+        today_start, today_end = datetime(2024, 1, 15, tzinfo=UTC), datetime(2024, 1, 16, tzinfo=UTC)
+
+        with time_machine.travel("2024-01-15T16:00:00Z", tick=False):
+            first = ensure_web_stats_dimensional_precomputed(self.team, today_start, today_end)
+        with time_machine.travel("2024-01-15T17:01:00Z", tick=False):
+            second = ensure_web_stats_dimensional_precomputed(self.team, today_start, today_end)
+
+        assert first.ready and second.ready
+        assert set(second.job_ids).isdisjoint(first.job_ids)
+
+    @time_machine.travel("2024-01-15T12:00:00Z", tick=False)
     def test_bounces_ensure_creates_jobs_and_correct_totals(self):
         self._seed_two_sessions()
         result = ensure_web_bounces_dimensional_precomputed(self.team, WINDOW_START, WINDOW_END)
@@ -167,7 +185,7 @@ class TestWebDimensionalPrecompute(ClickhouseTestMixin, APIBaseTest):
         # Bounce semantics depend on the session table; just assert it's in range.
         assert 0 <= bounces <= 2
 
-    @freeze_time("2024-01-15T12:00:00Z")
+    @time_machine.travel("2024-01-15T12:00:00Z", tick=False)
     def test_separate_chunks_share_one_query_hash_and_read_reassembles_window(self):
         # Two events in two different 7-day chunks of the same window.
         _create_person(team_id=self.team.pk, distinct_ids=["p1"], properties={"name": "p1"})
@@ -265,7 +283,7 @@ class TestColdBackfillSplitsByTtlBandNotPerDay(unittest.TestCase):
     window spans (a handful), and the bulk of history is one big INSERT — not 90.
     """
 
-    @freeze_time("2024-06-15T12:00:00Z")
+    @time_machine.travel("2024-06-15T12:00:00Z", tick=False)
     def test_dimensional_schedule_90d_cold_range_is_three_bands(self):
         end = datetime(2024, 6, 15, 12, tzinfo=UTC)
         start = end - timedelta(days=90)
@@ -290,7 +308,7 @@ class TestColdBackfillSplitsByTtlBandNotPerDay(unittest.TestCase):
             assert e1 == s2
         assert sum((e - s).days for s, e, _ in bands) >= 90
 
-    @freeze_time("2024-06-15T12:00:00Z")
+    @time_machine.travel("2024-06-15T12:00:00Z", tick=False)
     def test_today_yesterday_7d_rest_schedule_is_four_bands(self):
         # The exact schedule shape described in review: today / yesterday / last
         # 7 days / the rest -> four INSERTs for a cold 90-day range.

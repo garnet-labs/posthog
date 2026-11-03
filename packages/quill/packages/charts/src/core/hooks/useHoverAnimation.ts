@@ -10,7 +10,7 @@ import type {
     DrawHoverResult,
     ResolvedSeries,
 } from '../types'
-import { clearAndPrepare } from './clearCanvas'
+import { clearAndPrepare, releaseCanvas } from './clearCanvas'
 import { useLatest } from './useLatest'
 
 interface UseHoverAnimationOptions {
@@ -91,21 +91,34 @@ export function useHoverAnimation({
             }
             const elapsed = monotonicNow() - hoverAnimRef.current.startTime
             const hoverProgress = hoverAnimationMs > 0 ? Math.min(1, elapsed / hoverAnimationMs) : 1
-            clearAndPrepare(overlayCtx, dimensions)
-            const drewVisible = drawHoverRef.current({
-                ctx: overlayCtx,
-                dimensions,
-                scales,
-                series: seriesRef.current,
-                labels: labelsRef.current,
-                hoverIndex,
-                hoverPosition: hoverPositionRef.current,
-                theme: themeRef.current,
-                hoverProgress,
-                resetHoverFade,
-                dragRect: dragRectRef.current,
-            })
-            overlayCtx.restore()
+            // Idle (no hover, no drag) draws nothing, so release the bitmap instead of clearing a
+            // full-size one. drawHover still runs, against the empty canvas, so chart types can
+            // reset their own hover state.
+            const idle = hoverIndex < 0 && !dragRectRef.current
+            if (idle) {
+                releaseCanvas(overlayCtx.canvas)
+                overlayCtx.save()
+            } else {
+                clearAndPrepare(overlayCtx, dimensions)
+            }
+            let drewVisible: DrawHoverResult
+            try {
+                drewVisible = drawHoverRef.current({
+                    ctx: overlayCtx,
+                    dimensions,
+                    scales,
+                    series: seriesRef.current,
+                    labels: labelsRef.current,
+                    hoverIndex,
+                    hoverPosition: hoverPositionRef.current,
+                    theme: themeRef.current,
+                    hoverProgress,
+                    resetHoverFade,
+                    dragRect: dragRectRef.current,
+                })
+            } finally {
+                overlayCtx.restore()
+            }
             drewVisibleRef.current = drewVisible
             // Recompute after the draw — the chart type may have called resetHoverFade
             // mid-draw, which would leave the cached hoverProgress stale.

@@ -3,12 +3,15 @@ import posthog from 'posthog-js'
 
 import { lemonToast } from '@posthog/lemon-ui'
 
+import api from 'lib/api'
+
 import { useMocks } from '~/mocks/jest'
 import { initKeaTests } from '~/test/init'
 import { FilterLogicalOperator, PropertyFilterType, PropertyOperator } from '~/types'
 
 import { logsViewerConfigLogic } from 'products/logs/frontend/components/LogsViewer/config/logsViewerConfigLogic'
 import { logsViewerFiltersLogic } from 'products/logs/frontend/components/LogsViewer/Filters/logsViewerFiltersLogic'
+import { OTHER_BREAKDOWN_LABEL, OTHER_BREAKDOWN_VALUE } from 'products/logs/frontend/sparklineOtherBreakdown'
 
 import { logsViewerDataLogic, shouldSkipFilterGroupChange } from './logsViewerDataLogic'
 
@@ -65,6 +68,7 @@ describe('logsViewerDataLogic', () => {
 
         it.each([
             ['new query started', 'exact match for NEW_QUERY_STARTED_ERROR_MESSAGE'],
+            ['unmounting component', 'exact match for UNMOUNTING_ERROR_MESSAGE'],
             ['Fetch is aborted', 'Safari abort message'],
             ['The operation was aborted', 'alternative abort message'],
             ['ABORTED', 'uppercase abort'],
@@ -75,17 +79,79 @@ describe('logsViewerDataLogic', () => {
 
             expect(lemonToast.error).not.toHaveBeenCalled()
             expect(posthog.capture).not.toHaveBeenCalled()
+            expect(logic.values.logsError).toBeNull()
         })
 
         it.each([['Network error'], ['Server returned 500'], ['Timeout exceeded']])(
-            'shows toast for legitimate fetchLogs error "%s"',
-            async (error) => {
+            'sets logsError instead of toasting for legitimate fetchLogs error "%s"',
+            (error) => {
+                logic.actions.fetchLogs()
                 logic.actions.fetchLogsFailure(error)
-                await expectLogic(logic).toFinishAllListeners()
 
-                expect(lemonToast.error).toHaveBeenCalledWith(`Failed to load logs: ${error}`)
+                expect(lemonToast.error).not.toHaveBeenCalled()
+                expect(logic.values.logsError).toBe(error)
+                expect(logic.values.logsLoading).toBe(false)
             }
         )
+
+        it('sets sparklineError and stops the spinner for a legitimate fetchSparkline error', () => {
+            logic.actions.fetchSparkline()
+            logic.actions.fetchSparklineFailure('Network error')
+
+            expect(logic.values.sparklineError).toBe('Network error')
+            expect(logic.values.sparklineLoading).toBe(false)
+        })
+
+        it.each(['new query started', 'unmounting component'])(
+            'keeps loading and sets no error when a query is %s',
+            (error) => {
+                logic.actions.fetchLogs()
+                logic.actions.fetchLogsFailure(error)
+                logic.actions.fetchSparkline()
+                logic.actions.fetchSparklineFailure(error)
+
+                expect(logic.values.logsError).toBeNull()
+                expect(logic.values.logsLoading).toBe(true)
+                expect(logic.values.sparklineError).toBeNull()
+                expect(logic.values.sparklineLoading).toBe(true)
+            }
+        )
+
+        it('clears the errors when the next query starts', async () => {
+            logic.actions.fetchLogsFailure('Network error')
+            logic.actions.fetchSparklineFailure('Network error')
+
+            await expectLogic(logic, () => logic.actions.runQuery()).toDispatchActions([
+                'fetchLogsSuccess',
+                'fetchSparklineSuccess',
+            ])
+
+            expect(logic.values.logsError).toBeNull()
+            expect(logic.values.sparklineError).toBeNull()
+        })
+
+        it('retries a fast failure once before giving up', async () => {
+            const create = api.create.bind(api)
+            let queryCalls = 0
+            const createSpy = jest.spyOn(api, 'create').mockImplementation(((url: string, ...rest: any[]) => {
+                if (url.includes('/logs/query/')) {
+                    queryCalls += 1
+                    if (queryCalls === 1) {
+                        return Promise.reject(new Error('Network error'))
+                    }
+                }
+                return create(url, ...rest)
+            }) as typeof api.create)
+
+            try {
+                await logic.asyncActions.fetchLogs()
+            } finally {
+                createSpy.mockRestore()
+            }
+
+            expect(queryCalls).toBe(2)
+            expect(logic.values.logsError).toBeNull()
+        })
 
         it.each([
             ['Fetch is aborted', 'Safari abort message'],
@@ -163,25 +229,71 @@ describe('logsViewerDataLogic', () => {
 
             expect(logic.values.newLogUuids.size).toBe(0)
         })
+
+        it('unmounting mid-poll does not throw ([KEA] Can not find path ...)', async () => {
+            // beforeUnmount aborts the in-flight live-tail request. pollForNewLogs' finally
+            // block used to run unconditionally after that abort, dispatching actions against
+            // a logic that had already been torn down and crashing with a Kea "path not found"
+            // error. Guarding the finally block on signal.aborted (mirroring the existing catch
+            // block) fixes it.
+            let resolveQuery: (() => void) | undefined
+            useMocks({
+                post: {
+                    '/api/environments/:team_id/logs/query/': () =>
+                        new Promise((resolve) => {
+                            resolveQuery = () => resolve([200, { results: [], maxExportableLogs: 5000 }])
+                        }),
+                },
+            })
+
+            logic.actions.setLiveTailRunning(true)
+            await expectLogic(logic).toDispatchActions(['setLiveTailAbortController'])
+
+            expect(() => logic.unmount()).not.toThrow()
+
+            // Let the aborted request's rejection propagate through pollForNewLogs' catch/finally.
+            resolveQuery?.()
+            await new Promise((resolve) => setTimeout(resolve, 0))
+        })
     })
 
     describe('sparklineData selector', () => {
         it.each([
-            ['null', null, { labels: [], dates: [], data: [] }],
-            ['an empty array', [], { labels: [], dates: [], data: [] }],
+            ['null', null, { dates: [], data: [] }],
+            ['an empty array', [], { dates: [], data: [] }],
             [
                 'valid data',
                 [
                     { time: '2024-01-01T00:00:00Z', severity: 'info', count: 5 },
                     { time: '2024-01-01T00:01:00Z', severity: 'error', count: 3 },
                 ],
-                { labels: expect.any(Array), dates: expect.any(Array), data: expect.any(Array) },
+                {
+                    dates: ['2024-01-01T00:00:00Z', '2024-01-01T00:01:00Z'],
+                    data: [
+                        expect.objectContaining({ name: 'error', values: [0, 3] }),
+                        expect.objectContaining({ name: 'info', values: [5, 0] }),
+                    ],
+                },
             ],
         ])('returns correct data when sparkline is %s', async (_, sparklineInput, expected) => {
             logic.actions.setSparkline(sparklineInput as any[] | null)
             await expectLogic(logic).toFinishAllListeners()
 
             expect(logic.values.sparklineData).toEqual(expected)
+        })
+
+        it('renders the collapsed bucket as a muted trailing series, not as a literal sentinel', async () => {
+            // The sentinel starts with '$', so without special-casing it would sort ahead of every
+            // real value and be drawn as a breakdown value named "$$_posthog_breakdown_other_$$".
+            logic.actions.setSparkline([
+                { time: '2024-01-01T00:00:00Z', severity: 'info', count: 5 },
+                { time: '2024-01-01T00:00:00Z', severity: OTHER_BREAKDOWN_VALUE, count: 7 },
+            ] as any[])
+            await expectLogic(logic).toFinishAllListeners()
+
+            const { data } = logic.values.sparklineData
+            expect(data.map((series: { name: string }) => series.name)).toEqual(['info', OTHER_BREAKDOWN_LABEL])
+            expect(data[1]).toEqual(expect.objectContaining({ color: 'muted', values: [7] }))
         })
     })
 
@@ -331,18 +443,67 @@ describe('logsViewerDataLogic', () => {
         it.each([
             ['setSearchTerm', 'error message'],
             ['setDateRange', { date_from: '-24h', date_to: null }],
-            ['setSeverityLevels', ['error', 'warn']],
-            ['setServiceNames', ['api-server']],
         ])('%s triggers runQuery', async (action, value) => {
             await expectLogic(logic, () => {
                 ;(filtersLogic.actions as any)[action](value)
             }).toDispatchActions(['handleQueryChange', 'runQuery'])
         })
 
+        it('a manual refresh runs the query and bumps the facet refresh so the rail re-fetches its counts', async () => {
+            await expectLogic(logic, () => {
+                logic.actions.refreshQuery()
+            }).toDispatchActions(['runQuery', filtersLogic.actionCreators.bumpFacetRefresh()])
+        })
+
+        it('an automatic query run does not bump the facet refresh', async () => {
+            await expectLogic(logic, () => {
+                logic.actions.runQuery()
+            }).toNotHaveDispatchedActions([filtersLogic.actionCreators.bumpFacetRefresh()])
+        })
+
+        it.each([
+            ['setSessionId', 'sess-1'],
+            ['setPersonId', 'person-1'],
+        ])('setting and clearing the scope via %s triggers runQuery', async (action, value) => {
+            await expectLogic(logic, () => {
+                ;(filtersLogic.actions as any)[action](value)
+            }).toDispatchActions(['runQuery'])
+
+            await expectLogic(logic, () => {
+                ;(filtersLogic.actions as any)[action](undefined)
+            }).toDispatchActions(['runQuery'])
+        })
+
         it('setFilters triggers runQuery', async () => {
             await expectLogic(logic, () => {
                 filtersLogic.actions.setFilters({ searchTerm: 'new search' })
             }).toDispatchActions(['handleQueryChange', 'runQuery'])
+        })
+
+        it('mounting a scoped viewer runs one query, not one per scope prop', async () => {
+            // Without the guard the mount firing of each scope subscription adds its own query.
+            let queryCalls = 0
+            useMocks({
+                post: {
+                    '/api/environments/:team_id/logs/query/': () => {
+                        queryCalls += 1
+                        return [200, { results: [], maxExportableLogs: 5000 }]
+                    },
+                    '/api/environments/:team_id/logs/sparkline/': () => [200, []],
+                },
+            })
+
+            const scopedFilters = logsViewerFiltersLogic({ id: 'scoped-tab', sessionId: 'sess-1' })
+            const scoped = logsViewerDataLogic({ id: 'scoped-tab' })
+            queryCalls = 0
+            scopedFilters.mount()
+            scoped.mount()
+            await expectLogic(scoped).toFinishAllListeners()
+
+            expect(queryCalls).toBe(1)
+
+            scoped.unmount()
+            scopedFilters.unmount()
         })
 
         it('setOrderBy triggers runQuery', async () => {

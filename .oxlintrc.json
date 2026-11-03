@@ -5,6 +5,9 @@
         "builtin": true
     },
     "ignorePatterns": [
+        "products/desktop",
+        "products/mobile",
+        "packages/agent",
         "node_modules",
         "dist",
         "build",
@@ -13,6 +16,8 @@
         "nodejs",
         ".semgrep",
         ".github/actions/paths-filter",
+        ".depot/actions/paths-filter",
+        ".github/actions/shared-image-releases",
         ".github/scripts",
         "common/hogvm/typescript",
         "common/hogvm/typescript/dist",
@@ -20,10 +25,12 @@
         "common/hogvm/__tests__/__snapshots__",
         "common/hogvm/__tests__/__snapshots__/**",
         "frontend/src/queries/validators.js",
+        "frontend/src/queries/web-analytics-validators.js",
         "frontend/src/generated/**",
         "services/mcp/**/generated.ts",
         "services/mcp/schema/tool-inputs.json",
-        "products/**/frontend/generated/**"
+        "products/**/frontend/generated/**",
+        "hog/test/parity/bundles/**"
     ],
     "rules": {
         "no-constant-condition": "off",
@@ -93,14 +100,6 @@
                         "message": "Do not directly import dayjs. Only import the dayjs exported from 'lib/dayjs'."
                     },
                     {
-                        "name": "chart.js",
-                        "message": "Do not directly import chart.js. Only import the Chart and friends exported from 'lib/Chart'."
-                    },
-                    {
-                        "name": "chart.js/auto",
-                        "message": "Do not directly import chart.js/auto. Only import the Chart and friends exported from 'lib/Chart'."
-                    },
-                    {
                         "name": "~/queries/schema",
                         "message": "Import from 'queries/schema/schema-foo' to avoid Webpack/Sucrase enum export issues."
                     },
@@ -129,6 +128,15 @@
                     {
                         "name": "@posthog/brand/hoggies/png",
                         "message": "Import the per-asset stub instead: import * as name from '@posthog/brand/hoggies/png/<name>'. The barrel pulls every hoggie's stub into the graph."
+                    },
+                    {
+                        "name": "storybook/preview-api",
+                        "message": "The withKea decorator renders a story after Storybook clears its hook context, so Storybook preview hooks such as useArgs throw or never fire, and the story renders blank in visual regression runs. Keep story state in React's useState."
+                    },
+                    {
+                        "name": "storybook/test",
+                        "importNames": ["within", "waitFor"],
+                        "message": "Import within and waitFor from @testing-library/dom to use the configured Storybook async timeout."
                     }
                 ],
                 "patterns": [
@@ -208,6 +216,12 @@
             }
         },
         {
+            "files": ["services/mcp/src/generated/**/*.ts", "services/mcp/src/tools/generated/**/*.ts"],
+            "rules": {
+                "@typescript-eslint/explicit-function-return-type": "off"
+            }
+        },
+        {
             "files": ["services/mcp/src/ui-apps/**/*.{ts,tsx}"],
             "rules": {
                 "no-console": [
@@ -233,58 +247,13 @@
             }
         },
         {
-            "files": ["services/mcp/src/ui-apps/**/*.{ts,tsx}", "products/**/mcp/apps/**/*.{ts,tsx}"],
+            "files": [
+                "services/mcp/src/ui-apps/**/*.{ts,tsx}",
+                "products/**/mcp/apps/**/*.{ts,tsx}",
+                "products/tasks/frontend/infrastructure/**/*.{ts,tsx}"
+            ],
             "rules": {
                 "react/forbid-elements": "off"
-            }
-        },
-        {
-            "files": [
-                "products/agent_platform/services/agent-shared/**/*.test.{ts,tsx}",
-                "products/agent_platform/services/agent-ingress/**/*.test.{ts,tsx}",
-                "products/agent_platform/services/agent-runner/**/*.test.{ts,tsx}",
-                "products/agent_platform/services/agent-janitor/**/*.test.{ts,tsx}",
-                "products/agent_platform/services/agent-tools/**/*.test.{ts,tsx}",
-                "products/agent_platform/services/agent-tests/**/*.test.{ts,tsx}",
-                "products/agent_platform/services/agent-sandbox-host/**/*.test.{ts,js}"
-            ],
-            "rules": {
-                "jest/no-export": "off",
-                "jest/require-to-throw-message": "off",
-                "jest/expect-expect": "off",
-                "jest/valid-expect": "off",
-                "jest/no-conditional-expect": "off"
-            }
-        },
-        {
-            "files": [
-                "products/agent_platform/services/agent-shared/src/**/*.ts",
-                "products/agent_platform/services/agent-runner/src/**/*.ts",
-                "products/agent_platform/services/agent-tools/src/**/*.ts",
-                "products/agent_platform/services/agent-ingress/src/**/*.ts",
-                "products/agent_platform/services/agent-janitor/src/**/*.ts"
-            ],
-            "rules": {
-                "no-restricted-globals": [
-                    "error",
-                    {
-                        "name": "fetch",
-                        "message": "Use the injected HttpClient (e.g. ctx.http.fetch in tools, this.http.fetch in services). Bare global fetch bypasses the smokescreen proxy in prod."
-                    }
-                ]
-            }
-        },
-        {
-            "files": [
-                "products/agent_platform/services/agent-shared/src/runtime/http-client.ts",
-                "products/agent_platform/services/agent-shared/**/*.test.ts",
-                "products/agent_platform/services/agent-runner/**/*.test.ts",
-                "products/agent_platform/services/agent-tools/**/*.test.ts",
-                "products/agent_platform/services/agent-ingress/**/*.test.ts",
-                "products/agent_platform/services/agent-janitor/**/*.test.ts"
-            ],
-            "rules": {
-                "no-restricted-globals": "off"
             }
         },
         {
@@ -302,14 +271,6 @@
                             {
                                 "name": "dayjs",
                                 "message": "Do not directly import dayjs. Only import the dayjs exported from 'lib/dayjs'."
-                            },
-                            {
-                                "name": "chart.js",
-                                "message": "Do not directly import chart.js. Only import the Chart and friends exported from 'lib/Chart'."
-                            },
-                            {
-                                "name": "chart.js/auto",
-                                "message": "Do not directly import chart.js/auto. Only import the Chart and friends exported from 'lib/Chart'."
                             },
                             {
                                 "name": "~/queries/schema",
@@ -362,14 +323,6 @@
                             {
                                 "name": "dayjs",
                                 "message": "Do not directly import dayjs. Only import the dayjs exported from 'lib/dayjs'."
-                            },
-                            {
-                                "name": "chart.js",
-                                "message": "Do not directly import chart.js. Only import the Chart and friends exported from 'lib/Chart'."
-                            },
-                            {
-                                "name": "chart.js/auto",
-                                "message": "Do not directly import chart.js/auto. Only import the Chart and friends exported from 'lib/Chart'."
                             },
                             {
                                 "name": "~/queries/schema",

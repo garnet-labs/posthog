@@ -153,5 +153,12 @@ For each, suggest one of: **investigate** (`investigating-error-issue`), **assig
   may have already curated the most actionable issues so you avoid re-deriving them.
 - Provide each row's `_posthogUrl` (returned on every issue row) so the user can jump
   straight to the issue page if they want to drill down themselves. If you build the
-  link yourself, use the full `/project/<project_id>/error_tracking/<id>` path, never
-  a bare `/error_tracking/<id>`.
+  link yourself, use the full `/project/<project_id>/error-tracking/<id>` path, never
+  a bare `/error-tracking/<id>`.
+
+## Related skills
+
+- **`investigating-error-issue`** — deep-dive a single issue off the triage list
+- **`grouping-noisy-errors`** — when triage is drowned by duplicate or over-split issues
+- **`suppressing-noisy-errors`** — mute known-noise fingerprints so future triage runs are cleaner
+- **`authoring-error-tracking-alerts`** — route the issues worth acting on to Slack or a webhook instead of re-triaging manually

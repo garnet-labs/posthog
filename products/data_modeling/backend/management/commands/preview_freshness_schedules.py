@@ -1,12 +1,11 @@
 import uuid
-from collections import defaultdict
 
 from django.core.management.base import BaseCommand, CommandError
 
-from products.data_modeling.backend.logic.freshness import format_cadence
+from products.data_modeling.backend.logic.cohort_scheduling import format_tier, tier_sort_key
 from products.data_modeling.backend.logic.schedule_reconcile import DagSchedulePreview, preview_dag_schedules
 from products.data_modeling.backend.models.dag import DAG
-from products.data_modeling.backend.models.node import Node, NodeType
+from products.data_modeling.backend.models.node import Node
 
 
 class Command(BaseCommand):
@@ -14,8 +13,7 @@ class Command(BaseCommand):
         "Dry-run: show the per-cadence-tier schedules a DAG would get from its nodes' freshness "
         "targets, and the create/update/delete plan against its current schedules. Reads only — "
         "never creates, updates, or deletes a schedule, and touches no live read/write path. "
-        "Prints a compact summary by default (--verbose for per-node cadences), plus a team-level "
-        "cross-DAG duplication report to judge whether a redundant DAG is safe to drop."
+        "Prints a compact summary by default (--verbose for per-node cadences)."
     )
 
     def add_arguments(self, parser):
@@ -44,7 +42,6 @@ class Command(BaseCommand):
             raise CommandError("No matching DAGs")
         for dag in dags:
             self._preview(dag, seed=options["seed"], verbose=options["verbose"])
-        self._print_cross_dag_duplication(options["team_id"])
         self.stdout.write("\n(dry run — no schedules were created, updated, or deleted)")
 
     def _preview(self, dag: DAG, *, seed: bool, verbose: bool) -> None:
@@ -55,8 +52,8 @@ class Command(BaseCommand):
         self.stdout.write(f"\nDAG {dag.name} ({dag.id}) — team {dag.team_id}{seeded_note}")
 
         tiers = "  ".join(
-            f"{format_cadence(interval)} x{len(node_ids)}"
-            for interval, node_ids in sorted(preview.desired_tiers.items())
+            f"{format_tier(tier)} x{len(node_ids)}"
+            for tier, node_ids in sorted(preview.desired_tiers.items(), key=lambda kv: tier_sort_key(kv[0]))
         )
         unscheduled = sum(1 for cadence in preview.effective.values() if cadence is None)
         tier_line = tiers or "(none)"
@@ -106,53 +103,18 @@ class Command(BaseCommand):
             self.stdout.write(f"    {names.get(node_id, node_id)}: {cadence}")
 
         self.stdout.write("  Desired tiers:")
-        for interval, node_ids in sorted(preview.desired_tiers.items()):
+        for tier, node_ids in sorted(preview.desired_tiers.items(), key=lambda kv: tier_sort_key(kv[0])):
             members = ", ".join(sorted(names.get(node_id, node_id) for node_id in node_ids))
-            self.stdout.write(f"    {interval}: {members}")
+            self.stdout.write(f"    {format_tier(tier)}: {members}")
 
         plan = preview.plan
         self.stdout.write("  Plan vs current schedules:")
         if not (plan.to_create or plan.to_update or plan.to_delete):
             self.stdout.write("    (already in sync)")
             return
-        for schedule_id, (interval, node_ids) in sorted(plan.to_create.items()):
-            self.stdout.write(f"    CREATE {schedule_id} ({interval}, {len(node_ids)} nodes)")
-        for schedule_id, (interval, node_ids) in sorted(plan.to_update.items()):
-            self.stdout.write(f"    UPDATE {schedule_id} ({interval}, {len(node_ids)} nodes)")
+        for schedule_id, (tier, node_ids) in sorted(plan.to_create.items()):
+            self.stdout.write(f"    CREATE {schedule_id} ({format_tier(tier)}, {len(node_ids)} nodes)")
+        for schedule_id, (tier, node_ids) in sorted(plan.to_update.items()):
+            self.stdout.write(f"    UPDATE {schedule_id} ({format_tier(tier)}, {len(node_ids)} nodes)")
         for schedule_id in sorted(plan.to_delete):
             self.stdout.write(f"    DELETE {schedule_id}")
-
-    def _print_cross_dag_duplication(self, team_id: int) -> None:
-        """Which saved queries a team materializes in more than one DAG, and which are unique to
-        each DAG. A query in >1 DAG is materialized redundantly; a DAG whose queries all also live
-        elsewhere is safe to drop, one with unique queries is not."""
-        dags = list(DAG.objects.filter(team_id=team_id))
-        if len(dags) < 2:
-            return
-        dag_names = {dag.id: dag.name for dag in dags}
-        rows = (
-            Node.objects.filter(dag__in=dags)
-            .exclude(type=NodeType.TABLE)
-            .exclude(saved_query__deleted=True)
-            .values_list("dag_id", "saved_query_id")
-        )
-        dags_by_query: dict[object, set[object]] = defaultdict(set)
-        for dag_id, saved_query_id in rows:
-            if saved_query_id is not None:
-                dags_by_query[saved_query_id].add(dag_id)
-
-        if not dags_by_query:
-            return
-        double_materialized = sum(1 for owning in dags_by_query.values() if len(owning) > 1)
-        unique_per_dag: dict[object, int] = defaultdict(int)
-        for owning in dags_by_query.values():
-            if len(owning) == 1:
-                unique_per_dag[next(iter(owning))] += 1
-
-        self.stdout.write(f"\nTeam {team_id} cross-DAG duplication:")
-        self.stdout.write(f"  {len(dags_by_query)} distinct saved queries across {len(dags)} DAGs")
-        self.stdout.write(f"  in >1 DAG (double-materialized): {double_materialized}")
-        for dag in sorted(dags, key=lambda d: dag_names[d.id]):
-            unique = unique_per_dag.get(dag.id, 0)
-            note = "safe to drop" if unique == 0 else "unsafe to drop"
-            self.stdout.write(f"  only in {dag_names[dag.id]} ({note}): {unique}")

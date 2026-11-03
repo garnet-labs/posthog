@@ -1,6 +1,6 @@
 import { Counter } from 'prom-client'
 
-import { HogFlow } from '~/cdp/schema/hogflow'
+import { HogFlow, HogFlowAction } from '~/cdp/schema/hogflow'
 
 import { QuotaLimiting } from '../../../common/services/quota-limiting.service'
 import { CyclotronJobInvocationHogFlow } from '../../types'
@@ -14,6 +14,17 @@ export const counterHogFlowQuotaLimited = new Counter({
 
 export interface HogFlowQuotaLimitResult {
     isLimited: boolean
+}
+
+// Transactional emails bypass the email quota. Each send still reports billable usage, so the team pays for it.
+function sendsOnlyTransactionalEmail(hogFlow: HogFlow): boolean {
+    const emailActions = hogFlow.actions.filter(
+        (action): action is Extract<HogFlowAction, { type: 'function_email' }> => action.type === 'function_email'
+    )
+    return (
+        emailActions.length > 0 &&
+        emailActions.every((action) => action.config?.message_category_type === 'transactional')
+    )
 }
 
 /**
@@ -34,22 +45,25 @@ export async function checkHogFlowQuotaLimits(
     }
 
     // Check which quotas the team is limited on
-    const [isEmailQuotaLimited, isPushQuotaLimited, isDestinationQuotaLimited] = await Promise.all([
+    const [isEmailQuotaLimited, isDestinationQuotaLimited] = await Promise.all([
         quotaLimiting.isTeamQuotaLimited(teamId, 'workflow_emails'),
-        quotaLimiting.isTeamQuotaLimited(teamId, 'workflow_push'),
         quotaLimiting.isTeamQuotaLimited(teamId, 'workflow_destinations_dispatched'),
     ])
 
     // Check if any billable action type is quota limited
-    if (isEmailQuotaLimited && billableActionTypes.includes('function_email')) {
+    if (
+        isEmailQuotaLimited &&
+        billableActionTypes.includes('function_email') &&
+        !sendsOnlyTransactionalEmail(hogFlow)
+    ) {
         return { isLimited: true }
     }
 
-    if (isPushQuotaLimited && billableActionTypes.includes('function_push')) {
-        return { isLimited: true }
-    }
-
-    if (isDestinationQuotaLimited && billableActionTypes.includes('function')) {
+    // Push sends bill as destinations for now, so they fall under the destination quota
+    if (
+        isDestinationQuotaLimited &&
+        (billableActionTypes.includes('function') || billableActionTypes.includes('function_push'))
+    ) {
         return { isLimited: true }
     }
 
@@ -81,6 +95,7 @@ export async function shouldBlockHogFlowDueToQuota(
                 metric_kind: 'failure',
                 metric_name: 'quota_limited',
                 count: 1,
+                app_source_version: { id: item.hogFlow.id, version: item.hogFlow.version },
             },
             'hog_flow'
         )

@@ -9,7 +9,15 @@ from rest_framework.request import Request
 from posthog.api.routing import TeamAndOrgViewSetMixin
 from posthog.storage import object_storage
 
-INLINE_MIMES = {"image/png", "image/jpeg", "image/gif", "image/webp"}
+from products.ai_observability.backend.ai_blobs import blob_key
+
+SCRIPTABLE_IMAGE_MIMES = {"image/svg+xml"}
+
+
+def _is_inline_image(content_type: str | None) -> bool:
+    if content_type is None:
+        return False
+    return content_type.startswith("image/") and content_type not in SCRIPTABLE_IMAGE_MIMES
 
 
 class AIBlobViewSet(TeamAndOrgViewSetMixin, viewsets.ViewSet):
@@ -21,12 +29,13 @@ class AIBlobViewSet(TeamAndOrgViewSetMixin, viewsets.ViewSet):
     @extend_schema(exclude=True)
     @action(detail=False, methods=["GET"], url_path=r"v1/sha256/(?P<hash>[0-9a-f]{64})")
     def serve(self, request: Request, hash: str, **kwargs) -> HttpResponse:
-        key = f"{settings.AI_BLOB_S3_PREFIX}{self.team_id}/sha256/{hash}"
-        result = object_storage.read_object(key, bucket=settings.AI_BLOB_S3_BUCKET, missing_ok=True)
+        result = object_storage.read_object(
+            blob_key(self.team_id, hash), bucket=settings.AI_BLOB_S3_BUCKET, missing_ok=True
+        )
         if result is None:
             return HttpResponse(status=404)
         body, content_type = result
-        if content_type in INLINE_MIMES:
+        if _is_inline_image(content_type):
             response = HttpResponse(body, content_type=content_type)
         else:
             response = HttpResponse(body, content_type="application/octet-stream")

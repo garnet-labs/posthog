@@ -78,6 +78,22 @@ MAILJET_ENDPOINTS: dict[str, MailjetEndpointConfig] = {
         name="template",
         path="template",
     ),
+    # Property values per contact. Row `ID` equals `ContactID`. No server-side change filter exists,
+    # so this is full refresh only.
+    "contactdata": MailjetEndpointConfig(
+        name="contactdata",
+        path="contactdata",
+    ),
+    # `FromTS` filters on send time, which is never before `CreatedAt`, so a `CreatedAt` watermark
+    # loses no rows. Mailjet does not document `Sort=CreatedAt` here, so pages stay sorted by ID.
+    "messageinformation": MailjetEndpointConfig(
+        name="messageinformation",
+        path="messageinformation",
+        partition_key="CreatedAt",
+        sort="ID",
+        from_ts_field="CreatedAt",
+        incremental_fields=[_datetime_incremental_field("CreatedAt")],
+    ),
     "openinformation": MailjetEndpointConfig(
         name="openinformation",
         path="openinformation",
@@ -94,10 +110,66 @@ MAILJET_ENDPOINTS: dict[str, MailjetEndpointConfig] = {
         from_ts_field="ClickedAt",
         incremental_fields=[_datetime_incremental_field("ClickedAt")],
     ),
+    "bouncestatistics": MailjetEndpointConfig(
+        name="bouncestatistics",
+        path="bouncestatistics",
+        partition_key="BouncedAt",
+        sort="BouncedAt",
+        from_ts_field="BouncedAt",
+        incremental_fields=[_datetime_incremental_field("BouncedAt")],
+    ),
+    # Not offset-paginated like the rest: `/statcounters` takes a mandatory FromTS/ToTS window per
+    # request, so `mailjet.py` walks it window by window. One row per day for the whole API key.
+    "statcounters": MailjetEndpointConfig(
+        name="statcounters",
+        path="statcounters",
+        primary_key="Timeslice",
+        partition_key="Timeslice",
+        sort=None,
+        incremental_fields=[_datetime_incremental_field("Timeslice")],
+    ),
 }
 
-ENDPOINTS = tuple(MAILJET_ENDPOINTS.keys())
+STATCOUNTERS_ENDPOINT = "statcounters"
+# Event timing makes each day's counters final once the day ends, so an incremental sync only has
+# to re-read the last synced day. Message timing would keep changing old days as late opens and
+# clicks arrive.
+STATCOUNTERS_PARAMS: dict[str, str] = {
+    "CounterSource": "APIKey",
+    "CounterTiming": "Event",
+    "CounterResolution": "Day",
+}
+# Mailjet caps a Day-resolution window at 100 days; stay under it.
+STATCOUNTERS_WINDOW_DAYS = 90
+# Mailjet's current statistics system holds no data from before its April 2018 launch.
+STATCOUNTERS_EARLIEST_UNIX_TS = 1522540800  # 2018-04-01T00:00:00Z
+
+# The Event API pushes per-recipient engagement and delivery events. Mailjet exposes no list
+# endpoint for that stream — `/openinformation` and `/clickstatistics` cover opens and clicks
+# only, under different field names — so these rows can only ever arrive by webhook, and they
+# land in their own table rather than merging into a polled one.
+WEBHOOK_TABLE_NAME = "messageevent"
+
+# Every event type Mailjet's Event API can push. Each one is a separate `eventcallbackurl`
+# registration; all of them feed the single `messageevent` table.
+MAILJET_WEBHOOK_EVENTS: tuple[str, ...] = ("sent", "open", "click", "bounce", "blocked", "spam", "unsub")
+
+WEBHOOK_SCHEMA_NAMES: frozenset[str] = frozenset({WEBHOOK_TABLE_NAME})
+
+# Schema name -> the `schema_mapping` key the Hog template routes incoming events by.
+SCHEMA_TO_WEBHOOK_RESOURCE: dict[str, str] = {WEBHOOK_TABLE_NAME: WEBHOOK_TABLE_NAME}
+
+# Mailjet event payloads carry no event identifier, so the Hog template derives one by hashing
+# the raw delivery body. Retries (Mailjet re-POSTs every 30s for up to 24h until it gets a 200)
+# repeat the same body, so they collapse onto the same row.
+WEBHOOK_PRIMARY_KEY = "event_id"
+
+POLL_ENDPOINTS = tuple(MAILJET_ENDPOINTS.keys())
+
+ENDPOINTS = (*POLL_ENDPOINTS, WEBHOOK_TABLE_NAME)
 
 INCREMENTAL_FIELDS: dict[str, list[IncrementalField]] = {
     name: config.incremental_fields for name, config in MAILJET_ENDPOINTS.items()
 }
+# Webhook rows arrive as they happen, so there is no cursor to advance.
+INCREMENTAL_FIELDS[WEBHOOK_TABLE_NAME] = []

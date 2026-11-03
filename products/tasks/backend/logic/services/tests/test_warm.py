@@ -1,18 +1,37 @@
 from posthog.test.base import APIBaseTest
 from unittest.mock import patch
 
+from parameterized import parameterized
 from rest_framework.exceptions import PermissionDenied, Throttled
 
 from posthog.exceptions import QuotaLimitExceeded
 
-from products.tasks.backend.logic.services.warm import SandboxWarmer
+from products.tasks.backend.access import PostHogAIAccessDecision
+from products.tasks.backend.constants import DEFAULT_SANDBOX_WORKING_DIR
+from products.tasks.backend.logic.services.warm import SandboxWarmer, WarmSourceChanged
 from products.tasks.backend.models import Task, TaskRun
 
 WARM = "products.tasks.backend.logic.services.warm"
 _CAPS = SandboxWarmer.ORIGIN_PRODUCT_CAPS[Task.OriginProduct.POSTHOG_AI]
 
 
+def test_code_cloud_warm_pool_caps():
+    caps = SandboxWarmer.ORIGIN_PRODUCT_CAPS[Task.OriginProduct.USER_CREATED]
+
+    assert caps.per_user == 10
+    assert caps.per_org == 100
+
+
 class TestSandboxWarmerWarm(APIBaseTest):
+    def setUp(self) -> None:
+        super().setUp()
+        self.posthog_ai_access = PostHogAIAccessDecision.GRANDFATHERED
+        access_patcher = patch(
+            f"{WARM}.get_posthog_ai_access_decision", side_effect=lambda *_args, **_kwargs: self.posthog_ai_access
+        )
+        access_patcher.start()
+        self.addCleanup(access_patcher.stop)
+
     def _task(self, *, origin=Task.OriginProduct.POSTHOG_AI, created_by=None) -> Task:
         return Task.objects.create(
             team=self.team,
@@ -49,9 +68,12 @@ class TestSandboxWarmerWarm(APIBaseTest):
         assert kwargs["create_pr"] is False
         assert kwargs["posthog_mcp_scopes"] == "full"
 
-    def test_idempotent_when_non_terminal_run_exists(self):
+    @parameterized.expand([("empty_pool", 0), ("full_pool", _CAPS.per_user)])
+    def test_idempotent_when_non_terminal_run_exists(self, _name, other_warm_runs):
         task = self._task()
         existing = task.create_run(mode="interactive", extra_state={"await_user_message": True})
+        for _ in range(other_warm_runs):
+            self._warm_run_on_new_task()
 
         with (
             patch(f"{WARM}.execute_task_processing_workflow") as m_workflow,
@@ -67,7 +89,13 @@ class TestSandboxWarmerWarm(APIBaseTest):
 
     def test_rewarms_with_resume_after_terminal_run(self):
         task = self._task()
-        terminal = task.create_run(mode="interactive", extra_state={"snapshot_external_id": "snap-1"})
+        terminal = task.create_run(
+            mode="interactive",
+            extra_state={
+                "snapshot_external_id": "snap-1",
+                "snapshot_mount_path": DEFAULT_SANDBOX_WORKING_DIR,
+            },
+        )
         terminal.status = TaskRun.Status.COMPLETED
         terminal.save(update_fields=["status"])
 
@@ -86,6 +114,38 @@ class TestSandboxWarmerWarm(APIBaseTest):
         assert result.run.state["snapshot_external_id"] == "snap-1"
         m_workflow.assert_called_once()
 
+    def test_expected_resume_source_is_idempotent_and_rejects_a_stale_selection(self):
+        task = self._task()
+        terminal = task.create_run(mode="interactive")
+        terminal.status = TaskRun.Status.CANCELLED
+        terminal.save(update_fields=["status"])
+
+        with (
+            patch(f"{WARM}.execute_task_processing_workflow"),
+            patch(f"{WARM}.is_team_limited", return_value=False),
+            self.captureOnCommitCallbacks(execute=True),
+        ):
+            first = SandboxWarmer(task, user=self.user).warm(
+                extra_state={"model": "claude-sonnet-5"},
+                expected_resume_from_run_id=terminal.id,
+                required_existing_state={"model": "claude-sonnet-5"},
+            )
+            repeated = SandboxWarmer(task, user=self.user).warm(
+                extra_state={"model": "claude-sonnet-5"},
+                expected_resume_from_run_id=terminal.id,
+                required_existing_state={"model": "claude-sonnet-5"},
+            )
+
+            with self.assertRaises(WarmSourceChanged):
+                SandboxWarmer(task, user=self.user).warm(
+                    extra_state={"model": "claude-opus-5"},
+                    expected_resume_from_run_id=terminal.id,
+                    required_existing_state={"model": "claude-opus-5"},
+                )
+
+        assert repeated.run.id == first.run.id
+        assert task.runs.count() == 2
+
     def test_dispatch_is_deferred_to_commit(self):
         # No captureOnCommitCallbacks: the test transaction never commits, so the on_commit dispatch
         # must not fire — proving provisioning isn't done inside the atomic block.
@@ -93,6 +153,7 @@ class TestSandboxWarmerWarm(APIBaseTest):
         with (
             patch(f"{WARM}.execute_task_processing_workflow") as m_workflow,
             patch(f"{WARM}.is_team_limited", return_value=False),
+            patch("products.tasks.backend.models.settings.TEST", False),
         ):
             result = SandboxWarmer(task, user=self.user).warm()
             m_workflow.assert_not_called()
@@ -100,17 +161,40 @@ class TestSandboxWarmerWarm(APIBaseTest):
         assert result.just_created is True
         assert task.runs.count() == 1
 
-    def test_over_quota_raises_and_creates_no_run(self):
+    @parameterized.expand(
+        [
+            ("over_quota", PostHogAIAccessDecision.GRANDFATHERED, True, QuotaLimitExceeded),
+            ("posthog_ai_denied", PostHogAIAccessDecision.BETA_OFF, False, PermissionDenied),
+        ]
+    )
+    def test_refused_warm_creates_no_run(
+        self,
+        _name: str,
+        access: PostHogAIAccessDecision,
+        over_quota: bool,
+        expected_error: type[Exception],
+    ):
+        self.posthog_ai_access = access
         task = self._task()
         with (
             patch(f"{WARM}.execute_task_processing_workflow") as m_workflow,
-            patch(f"{WARM}.is_team_limited", return_value=True),
+            patch(f"{WARM}.is_team_limited", return_value=over_quota),
         ):
-            with self.assertRaises(QuotaLimitExceeded):
+            with self.assertRaises(expected_error):
                 SandboxWarmer(task, user=self.user).warm()
 
         assert task.runs.count() == 0
         m_workflow.assert_not_called()
+
+    def test_deactivated_organization_creates_no_run(self):
+        self.organization.is_active = False
+        self.organization.save()
+        task = self._task()
+
+        with self.assertRaises(PermissionDenied):
+            SandboxWarmer(task, user=self.user).warm()
+
+        assert task.runs.count() == 0
 
     def test_unregistered_origin_product_is_rejected(self):
         # Fail-closed: only origin products with a registered quota gate may warm.

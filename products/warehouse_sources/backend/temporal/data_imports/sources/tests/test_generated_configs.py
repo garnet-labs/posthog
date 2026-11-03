@@ -2,23 +2,14 @@ import pytest
 
 from products.warehouse_sources.backend.temporal.data_imports.sources import SourceRegistry
 from products.warehouse_sources.backend.temporal.data_imports.sources.generated_configs import get_config_for_source
-from products.warehouse_sources.backend.temporal.data_imports.sources.generated_configs.beamer import BeamerSourceConfig
 from products.warehouse_sources.backend.temporal.data_imports.sources.generated_configs.bigquery import (
     BigQuerySourceConfig,
 )
-from products.warehouse_sources.backend.temporal.data_imports.sources.generated_configs.chargebee import (
-    ChargebeeSourceConfig,
-)
-from products.warehouse_sources.backend.temporal.data_imports.sources.generated_configs.doit import DoItSourceConfig
-from products.warehouse_sources.backend.temporal.data_imports.sources.generated_configs.gitlab import GitLabSourceConfig
 from products.warehouse_sources.backend.temporal.data_imports.sources.generated_configs.googleads import (
     GoogleAdsSourceConfig,
 )
 from products.warehouse_sources.backend.temporal.data_imports.sources.generated_configs.googlesheets import (
     GoogleSheetsSourceConfig,
-)
-from products.warehouse_sources.backend.temporal.data_imports.sources.generated_configs.gorgias import (
-    GorgiasSourceConfig,
 )
 from products.warehouse_sources.backend.temporal.data_imports.sources.generated_configs.hubspot import (
     HubspotSourceConfig,
@@ -37,9 +28,6 @@ from products.warehouse_sources.backend.temporal.data_imports.sources.generated_
 from products.warehouse_sources.backend.temporal.data_imports.sources.generated_configs.salesforce import (
     SalesforceSourceConfig,
 )
-from products.warehouse_sources.backend.temporal.data_imports.sources.generated_configs.shopify import (
-    ShopifySourceConfig,
-)
 from products.warehouse_sources.backend.temporal.data_imports.sources.generated_configs.snowflake import (
     SnowflakeSourceConfig,
 )
@@ -56,29 +44,43 @@ from products.warehouse_sources.backend.temporal.data_imports.sources.generated_
 from products.warehouse_sources.backend.temporal.data_imports.sources.generated_configs.zendesk import (
     ZendeskSourceConfig,
 )
+from products.warehouse_sources.sources.beamer._config import BeamerSourceConfig
+from products.warehouse_sources.sources.chargebee._config import ChargebeeSourceConfig
+from products.warehouse_sources.sources.doit._config import DoItSourceConfig
+from products.warehouse_sources.sources.gitlab._config import GitLabSourceConfig
+from products.warehouse_sources.sources.gorgias._config import GorgiasSourceConfig
+from products.warehouse_sources.sources.shopify._config import ShopifySourceConfig
 
 
-def test_bigquery_config():
+# The form submits "temporary-dataset", but dataclasses.asdict() persists "temporary_dataset",
+# so a source that has been saved once is read back under the second spelling.
+@pytest.mark.parametrize("temporary_dataset_key", ["temporary-dataset", "temporary_dataset"])
+def test_bigquery_config(temporary_dataset_key: str):
     config = BigQuerySourceConfig.from_dict(
         {
-            "key_file": {
-                "project_id": "project_id",
-                "private_key_id": "private_key_id",
-                "private_key": "private_key",
-                "client_email": "client_email",
-                "token_uri": "token_uri",
+            "auth_type": {
+                "selection": "key_file",
+                "key_file": {
+                    "project_id": "project_id",
+                    "private_key_id": "private_key_id",
+                    "private_key": "private_key",
+                    "client_email": "client_email",
+                    "token_uri": "token_uri",
+                },
             },
             "dataset_id": "dataset_id",
-            "temporary-dataset": {"enabled": False, "temporary_dataset_id": ""},
+            temporary_dataset_key: {"enabled": False, "temporary_dataset_id": ""},
             "dataset_project": {"enabled": False, "dataset_project_id": ""},
         }
     )
 
-    assert config.key_file.project_id == "project_id"
-    assert config.key_file.private_key_id == "private_key_id"
-    assert config.key_file.private_key == "private_key"
-    assert config.key_file.client_email == "client_email"
-    assert config.key_file.token_uri == "token_uri"
+    assert config.auth_type.selection == "key_file"
+    assert config.auth_type.key_file is not None
+    assert config.auth_type.key_file.project_id == "project_id"
+    assert config.auth_type.key_file.private_key_id == "private_key_id"
+    assert config.auth_type.key_file.private_key == "private_key"
+    assert config.auth_type.key_file.client_email == "client_email"
+    assert config.auth_type.key_file.token_uri == "token_uri"
     assert config.dataset_id == "dataset_id"
     assert config.temporary_dataset is not None
     assert config.temporary_dataset.enabled is False
@@ -406,13 +408,39 @@ def test_stripe_config(config_dict, expected_auth_method_attrs):
         assert getattr(config.auth_method, attr) == expected
 
 
-def test_shopify_config():
-    config = ShopifySourceConfig.from_dict(
-        {"shopify_store_id": "store_id", "shopify_client_id": "client_id", "shopify_client_secret": "client_secret"}
-    )
+@pytest.mark.parametrize(
+    "stored,expected_auth_method_attrs",
+    [
+        (
+            {
+                "shopify_store_id": "store_id",
+                "auth_method": {
+                    "selection": "client_credentials",
+                    "shopify_client_id": "client_id",
+                    "shopify_client_secret": "client_secret",
+                },
+            },
+            {"shopify_client_id": "client_id", "shopify_client_secret": "client_secret"},
+        ),
+        (
+            {
+                "shopify_store_id": "store_id",
+                "auth_method": {"selection": "access_token", "shopify_access_token": "shpat_token"},
+            },
+            {"shopify_access_token": "shpat_token", "shopify_client_id": None},
+        ),
+    ],
+)
+def test_shopify_config(stored, expected_auth_method_attrs):
+    # These are the two shapes the `auth_method` backfill writes for sources connected before the
+    # select existed. `validate_dict` runs on update, so a rename on either side of that backfill
+    # blocks editing every Shopify source that already exists.
+    assert ShopifySourceConfig.validate_dict(stored) == (True, [])
+
+    config = ShopifySourceConfig.from_dict(stored)
     assert config.shopify_store_id == "store_id"
-    assert config.shopify_client_id == "client_id"
-    assert config.shopify_client_secret == "client_secret"
+    for attr, expected in expected_auth_method_attrs.items():
+        assert getattr(config.auth_method, attr) == expected
 
 
 def test_temporal_config():
@@ -428,7 +456,7 @@ def test_temporal_config():
         }
     )
     assert config.host == "host"
-    assert config.port == "22"
+    assert config.port == 22
     assert config.namespace == "namespace"
     assert config.encryption_key == "encryption_key"
     assert config.server_client_root_ca == "server_client_root_ca"
@@ -461,4 +489,4 @@ def test_get_config_for_source_resolves_every_registered_source():
     # source's module is missing/stale), resolution breaks for that source.
     for source_type in SourceRegistry.get_all_sources():
         config_cls = get_config_for_source(source_type)
-        assert config_cls.__name__ == f"{source_type.value}SourceConfig"
+        assert config_cls.__name__ == f"{source_type}SourceConfig"

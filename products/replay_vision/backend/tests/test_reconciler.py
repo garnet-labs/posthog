@@ -1,6 +1,8 @@
 import uuid
 import datetime as dt
+import dataclasses
 from collections.abc import Callable
+from contextlib import nullcontext
 from typing import Any
 
 import pytest
@@ -11,28 +13,36 @@ from django.utils import timezone
 
 from asgiref.sync import sync_to_async
 from parameterized import parameterized
+from prometheus_client import CollectorRegistry
 from temporalio.client import ScheduleOverlapPolicy, WorkflowExecutionStatus
 from temporalio.common import SearchAttributePair, TypedSearchAttributes
 from temporalio.exceptions import ApplicationError
 from temporalio.service import RPCError, RPCStatusCode
+from temporalio.testing import ActivityEnvironment
 
 from posthog.models import Organization, Team
 from posthog.temporal.common.search_attributes import POSTHOG_SCHEDULE_FINGERPRINT_KEY
 
+from products.replay_vision.backend.enqueue_claims import try_claim_enqueue_slot
 from products.replay_vision.backend.models.replay_observation import (
     ObservationStatus,
     ObservationTrigger,
     ReplayObservation,
 )
-from products.replay_vision.backend.models.replay_scanner import ReplayScanner, ScannerModel, ScannerType
+from products.replay_vision.backend.models.replay_scanner import ReplayScanner, ScannerModel, ScannerOrigin, ScannerType
 from products.replay_vision.backend.temporal.activities import (
+    complete_observation_requests_activity,
     delete_scanner_schedule_activity,
     list_enabled_scanners_activity,
     list_scanner_schedules_activity,
+    reap_backfill_schedules_activity,
+    reap_childless_inline_scanners_activity,
     reap_orphaned_observations_activity,
+    start_launched_scanners_activity,
     upsert_scanner_schedule_activity,
 )
 from products.replay_vision.backend.temporal.constants import (
+    INLINE_SCANNER_REAP_GRACE,
     OBSERVATION_ORPHAN_CUTOFF,
     RECONCILER_EXECUTION_TIMEOUT,
     RECONCILER_INTERVAL,
@@ -55,6 +65,14 @@ from products.replay_vision.backend.temporal.schedule import (
     compute_schedule_fingerprint,
     load_enabled_scanner_fingerprints,
 )
+from products.replay_vision.backend.tests.helpers import create_experiment
+
+
+def _live_activity_env() -> ActivityEnvironment:
+    env = ActivityEnvironment()
+    # The default start is the epoch, which would put every query budget measured from it in the past.
+    env.info = dataclasses.replace(env.info, started_time=dt.datetime.now(dt.UTC))
+    return env
 
 
 @pytest.fixture
@@ -70,7 +88,7 @@ def _make_scanner(team: Team, **overrides: Any) -> ReplayScanner:
         "name": "reconciler-scanner",
         "scanner_type": ScannerType.MONITOR,
         "scanner_config": {"prompt": "p"},
-        "model": ScannerModel.GEMINI_3_6_FLASH,
+        "model": ScannerModel.GEMINI_3_8_FLASH,
     }
     defaults.update(overrides)
     return ReplayScanner.objects.create(**defaults)
@@ -219,8 +237,17 @@ class _ReconcileMocks:
         self.reap_calls = 0
         self.upserted: list[uuid.UUID] = []
         self.deleted: list[uuid.UUID] = []
+        self.calls: list[Any] = []
 
     async def execute_activity(self, activity_fn: Any, activity_input: Any = None, **_: Any) -> Any:
+        self.calls.append(activity_fn)
+        if activity_fn in (
+            reap_childless_inline_scanners_activity,
+            reap_backfill_schedules_activity,
+            start_launched_scanners_activity,
+            complete_observation_requests_activity,
+        ):
+            return 0
         if activity_fn is reap_orphaned_observations_activity:
             self.reap_calls += 1
             if self.reap_error:
@@ -376,8 +403,20 @@ async def test_reconcile_workflow(_name: str, build: Callable[[], tuple[_Reconci
 
 
 @pytest.mark.asyncio
+async def test_reconcile_workflow_orders_sync_before_reapers() -> None:
+    # The reapers' combined start-to-close budget is larger than the workflow execution timeout, so
+    # running them ahead of the sync lets one slow reaper starve schedule sync on every tick.
+    sid = uuid.uuid4()
+    fp = compute_schedule_fingerprint({"sample_rate": 0.5})
+    mocks = _ReconcileMocks(enabled=_enabled((sid, 1, fp)), existing=_existing())
+    result = await _run_reconcile(mocks)
+    assert mocks.calls.index(list_enabled_scanners_activity) < mocks.calls.index(reap_orphaned_observations_activity)
+    assert result.upserted == [sid]
+
+
+@pytest.mark.asyncio
 async def test_reconcile_workflow_survives_reap_failure() -> None:
-    # The reaper is best-effort: its failure must not block schedule sync (and vice versa — it runs first).
+    # The reaper is best-effort: its failure must not block schedule sync, and vice versa.
     sid = uuid.uuid4()
     fp = compute_schedule_fingerprint({"sample_rate": 0.5})
     mocks = _ReconcileMocks(
@@ -500,6 +539,7 @@ async def test_reap_orphaned_observations_activity(org_team) -> None:
         }
 
     rows = await sync_to_async(_setup)()
+    pushed = CollectorRegistry()
     temporal = _StubReapTemporal(
         {"wf-gone-1": "not_found", "wf-timed-out": "closed", "wf-open": "open", "wf-err": "rpc_error"}
     )
@@ -508,7 +548,11 @@ async def test_reap_orphaned_observations_activity(org_team) -> None:
         "products.replay_vision.backend.temporal.activities.reap_orphaned_observations.async_connect",
         AsyncMock(return_value=temporal),
     ):
-        reaped = await reap_orphaned_observations_activity()
+        with patch(
+            "products.replay_vision.backend.temporal.metrics.pushed_metrics_registry",
+            lambda _job: nullcontext(pushed),
+        ):
+            reaped = await _live_activity_env().run(reap_orphaned_observations_activity)
 
     assert reaped == 3
     statuses = {
@@ -523,3 +567,113 @@ async def test_reap_orphaned_observations_activity(org_team) -> None:
         assert statuses[key].completed_at is None, key
     # The fresh row never reaches Temporal; the empty-workflow-id row is reaped without a describe.
     assert set(temporal.described) == {"wf-gone-1", "wf-timed-out", "wf-open", "wf-err"}
+    # The backlog is measured before reaping, so it counts every row the setup left in flight.
+    for status in ("pending", "running"):
+        assert pushed.get_sample_value("replay_vision_in_flight_observations", {"status": status}) == 3, status
+    oldest_pending = pushed.get_sample_value(
+        "replay_vision_oldest_in_flight_observation_age_seconds", {"status": "pending"}
+    )
+    assert oldest_pending is not None and oldest_pending >= stale.total_seconds()
+
+
+def _make_inline_scanner(team: Team, *, key: str, age: dt.timedelta) -> ReplayScanner:
+    scanner = ReplayScanner.all_origins.create(
+        team=team,
+        name="",
+        origin=ScannerOrigin.INLINE,
+        inline_key=key,
+        scanner_type=ScannerType.MONITOR,
+        scanner_config={"prompt": f"p-{key}"},
+        model=ScannerModel.GEMINI_3_8_FLASH,
+        enabled=False,
+        sampling_rate=0.0,
+    )
+    ReplayScanner.all_origins.filter(pk=scanner.pk).update(created_at=timezone.now() - age)
+    return scanner
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.asyncio
+async def test_reap_childless_inline_scanners_activity(org_team) -> None:
+    # An inline scan mints a scanner just before its scans start, so a scan that then fails to start
+    # leaves a permanent row nothing lists and nothing collects. Only childless rows go: one that
+    # produced an observation is somebody's answer.
+    _, team = org_team
+    grace = INLINE_SCANNER_REAP_GRACE + dt.timedelta(minutes=5)
+
+    def _setup() -> dict[str, ReplayScanner]:
+        rows = {
+            "childless_old": _make_inline_scanner(team, key="a", age=grace),
+            "childless_but_claimed": _make_inline_scanner(team, key="d", age=grace),
+            "childless_fresh": _make_inline_scanner(team, key="b", age=dt.timedelta(minutes=1)),
+            "has_observation": _make_inline_scanner(team, key="c", age=grace),
+            "configured": _make_scanner(team, name="kept-scanner"),
+        }
+        _make_observation(
+            rows["has_observation"],
+            session_id="s-1",
+            status=ObservationStatus.PENDING,
+            workflow_id="wf-inline",
+            age=dt.timedelta(0),
+        )
+        # A reused scanner whose scan has started but not yet persisted its row holds a claim, and
+        # nothing else distinguishes it from a dead one. Reaping it deletes the scanner out from under
+        # an accepted scan.
+        try_claim_enqueue_slot(
+            team_id=team.id,
+            scanner_id=rows["childless_but_claimed"].id,
+            workflow_id="wf-inflight",
+            team_in_flight_rows=0,
+            scanner_in_flight_rows=0,
+        )
+        # A configured scanner with no observations is not the reaper's business at any age.
+        ReplayScanner.all_origins.filter(pk=rows["configured"].pk).update(created_at=timezone.now() - grace)
+        return rows
+
+    rows = await sync_to_async(_setup)()
+
+    reaped = await _live_activity_env().run(reap_childless_inline_scanners_activity)
+
+    assert reaped == 1
+    surviving = await sync_to_async(
+        lambda: set(ReplayScanner.all_origins.values_list("id", flat=True)),
+    )()
+    assert rows["childless_old"].id not in surviving
+    for key in ("childless_fresh", "has_observation", "configured", "childless_but_claimed"):
+        assert rows[key].id in surviving, key
+
+
+@pytest.mark.django_db(transaction=True)
+@pytest.mark.asyncio
+async def test_start_launched_scanners_activity(org_team) -> None:
+    # The launch signal's receiver never fails a launch, so a failure there leaves the scanner off
+    # after the launch has committed. The reconciler starts it on its next tick. A scanner on a
+    # draft keeps waiting.
+    _, team = org_team
+
+    def _setup() -> tuple[ReplayScanner, ReplayScanner]:
+        launched = create_experiment(team, "launched-flag", launched=True, variants=["control", "test"])
+        draft = create_experiment(team, "draft-flag", variants=["control", "test"])
+
+        def waiting(name: str, experiment_id: int) -> ReplayScanner:
+            return _make_scanner(
+                team,
+                name=name,
+                scanner_type=ScannerType.EXPERIMENT,
+                enabled=False,
+                scanner_config={"prompt": "p", "experiment_id": experiment_id, "start_on_launch": True},
+            )
+
+        return waiting("missed-launch", launched.id), waiting("still-draft", draft.id)
+
+    missed, still_waiting = await sync_to_async(_setup)()
+
+    started = await _live_activity_env().run(start_launched_scanners_activity)
+
+    assert started == 1
+    await sync_to_async(missed.refresh_from_db)()
+    await sync_to_async(still_waiting.refresh_from_db)()
+    assert missed.enabled is True
+    assert "start_on_launch" not in missed.scanner_config
+    assert still_waiting.enabled is False
+    assert await _live_activity_env().run(start_launched_scanners_activity) == 0

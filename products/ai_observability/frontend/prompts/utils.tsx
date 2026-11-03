@@ -28,6 +28,19 @@ export function validatePromptName(name: string | undefined): string | undefined
     return undefined
 }
 
+// Search params owned by the prompt detail scene. Strip them from any URL that
+// leaves the scene (breadcrumb, list row links), otherwise a lingering ?edit or
+// ?version reopens the next prompt in the wrong view.
+const PROMPT_SCENE_SEARCH_PARAMS = ['edit', 'version', 'version_id', 'tab']
+
+export function stripPromptSceneSearchParams(searchParams: Record<string, any>): Record<string, any> {
+    const nextSearchParams = { ...searchParams }
+    for (const param of PROMPT_SCENE_SEARCH_PARAMS) {
+        delete nextSearchParams[param]
+    }
+    return nextSearchParams
+}
+
 export const PROMPT_LABEL_MAX_LENGTH = 128
 // Mirrors validate_prompt_label_name_value in posthog/api/llm_prompt_serializers.py; the backend stays authoritative.
 const PROMPT_LABEL_PATTERN = /^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/
@@ -81,16 +94,22 @@ export function openMoveLabelDialog({
     labelName,
     fromVersion,
     toVersion,
+    followedBy = [],
     onMove,
 }: {
     labelName: string
     fromVersion: number
     toVersion: number
+    followedBy?: string[]
     onMove: () => Promise<void>
 }): void {
+    const propagationNote =
+        followedBy.length > 0
+            ? ` This also updates the content of ${followedBy.join(', ')}, which reference${followedBy.length === 1 ? 's' : ''} this prompt through this label.`
+            : ''
     LemonDialog.open({
         title: 'Move label?',
-        description: `${labelName}: v${fromVersion} → v${toVersion}. Anything fetching this prompt by this label picks up the change within seconds.`,
+        description: `${labelName}: v${fromVersion} → v${toVersion}. Anything fetching this prompt by this label picks up the change within seconds.${propagationNote}`,
         shouldAwaitSubmit: true,
         primaryButton: {
             children: 'Move',

@@ -10,9 +10,9 @@ ACTIVE_VALUE_CONSTRAINT_NAME = "unique_active_custom_property_value"
 
 
 class CustomPropertyValue(TeamScopedRootMixin, UUIDModel, CreatedMetaFields):
-    team = models.ForeignKey("posthog.Team", on_delete=models.CASCADE, db_constraint=False)
+    team = models.ForeignKey("posthog.Team", on_delete=models.CASCADE, db_constraint=False, related_name="+")
     created_by = models.ForeignKey(
-        "posthog.User", on_delete=models.SET_NULL, null=True, blank=True, db_constraint=False
+        "posthog.User", on_delete=models.SET_NULL, null=True, blank=True, db_constraint=False, related_name="+"
     )
     definition = models.ForeignKey(
         "customer_analytics.CustomPropertyDefinition", on_delete=models.CASCADE, related_name="values"
@@ -31,6 +31,13 @@ class CustomPropertyValue(TeamScopedRootMixin, UUIDModel, CreatedMetaFields):
     value_datetime = models.DateTimeField(null=True, blank=True)
 
     class Meta:
+        indexes = [
+            models.Index(
+                fields=["team", "definition", "account"],
+                condition=Q(is_deleted=False),
+                name="cpv_active_team_definition_idx",
+            ),
+        ]
         constraints = [
             models.UniqueConstraint(
                 fields=["team", "account", "definition"],

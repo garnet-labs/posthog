@@ -1,23 +1,20 @@
 import { useActions, useValues } from 'kea'
-import { type MouseEvent, useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 
-import { IconGitBranch, IconRefresh } from '@posthog/icons'
+import { IconGitBranch } from '@posthog/icons'
 import {
     Button,
     Combobox,
     ComboboxContent,
     ComboboxEmpty,
-    ComboboxInput,
     ComboboxItem,
     ComboboxList,
-    ComboboxListFooter,
     ComboboxTrigger,
-    Tooltip,
-    TooltipContent,
-    TooltipTrigger,
 } from '@posthog/quill'
 
+import { ComboboxLoadMoreFooter, ComboboxSearchField } from './ComboboxSearchChrome'
 import { githubBranchSearchLogic } from './githubBranchSearchLogic'
+import { useGitHubDefaultBranch } from './useGitHubDefaultBranch'
 
 export interface GitHubBranchComboboxProps {
     integrationId: number
@@ -28,6 +25,10 @@ export interface GitHubBranchComboboxProps {
     onChange: (value: string | null) => void
     disabled?: boolean
     placeholder?: string
+    allowCustomValues?: boolean
+    triggerClassName?: string
+    contentSide?: 'top' | 'bottom'
+    contentClassName?: string
 }
 
 /** Sentinel item value for the "type a new branch name" action. */
@@ -47,28 +48,27 @@ export function GitHubBranchCombobox({
     onChange,
     disabled = false,
     placeholder = 'Select branch...',
+    allowCustomValues = true,
+    triggerClassName,
+    contentSide = 'bottom',
+    contentClassName,
 }: GitHubBranchComboboxProps): JSX.Element {
     const logic = githubBranchSearchLogic({ integrationId, repo })
-    const { branches, defaultBranch, loading, hasMore, searchQuery } = useValues(logic)
+    const { branches, loading, hasMore, searchQuery, error } = useValues(logic)
     const { setSearchQuery, loadMore, refresh } = useActions(logic)
 
     const triggerRef = useRef<HTMLButtonElement>(null)
     const [open, setOpen] = useState(false)
-
     const trimmedSearchQuery = searchQuery.trim()
     const showInlineLoadingState = open && loading
 
-    // Pre-select the repo's default branch once it's known and nothing is chosen yet (matches PostHog Desktop).
-    useEffect(() => {
-        if (!value && defaultBranch) {
-            onChange(defaultBranch)
-        }
-    }, [value, defaultBranch, onChange])
+    useGitHubDefaultBranch({ integrationId, repo, value, onChange })
 
     // Offer "Use <typed> as branch name" when the search doesn't match an existing branch — lets the agent
     // work on a brand-new branch.
     const createSentinel = CREATE_BRANCH_PREFIX + trimmedSearchQuery
-    const showCreateItem = trimmedSearchQuery.length > 0 && !loading && !branches.includes(trimmedSearchQuery)
+    const showCreateItem =
+        allowCustomValues && trimmedSearchQuery.length > 0 && !loading && !branches.includes(trimmedSearchQuery)
     const items = showCreateItem ? [...branches, createSentinel] : branches
 
     return (
@@ -87,8 +87,16 @@ export function GitHubBranchCombobox({
             open={open}
             onOpenChange={(nextOpen: boolean) => {
                 setOpen(nextOpen)
-                if (!nextOpen && trimmedSearchQuery.length > 0) {
+                if (!nextOpen) {
+                    return
+                }
+                // Reset back to the full list on the next open rather than on close, matching
+                // GitHubRepositoryCombobox: clearing the search while closing fetches an unfiltered page
+                // for a list nobody is looking at.
+                if (trimmedSearchQuery.length > 0) {
                     setSearchQuery('')
+                } else if (branches.length === 0 && !loading) {
+                    refresh()
                 }
             }}
             inputValue={searchQuery}
@@ -97,43 +105,29 @@ export function GitHubBranchCombobox({
         >
             <ComboboxTrigger
                 render={
-                    <Button ref={triggerRef} variant="outline" size="sm" disabled={disabled} aria-label="Branch">
+                    <Button
+                        ref={triggerRef}
+                        variant="outline"
+                        size="sm"
+                        disabled={disabled}
+                        aria-label="Branch"
+                        className={triggerClassName}
+                    >
                         <IconGitBranch className="shrink-0" />
                         <span className="min-w-0 truncate">{value || placeholder}</span>
                     </Button>
                 }
             />
-            <ComboboxContent anchor={triggerRef} side="bottom" sideOffset={6} className="min-w-[280px]">
-                <div className="flex min-w-0 items-center gap-1 pe-2">
-                    <div className="min-w-0 flex-1">
-                        <ComboboxInput placeholder="Search branches..." />
-                    </div>
-                    <Tooltip>
-                        <TooltipTrigger
-                            render={
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    disabled={disabled || loading}
-                                    aria-label="Refresh branches"
-                                    onMouseDown={(event: MouseEvent) => {
-                                        event.preventDefault()
-                                        event.stopPropagation()
-                                    }}
-                                    onClick={(event: MouseEvent) => {
-                                        event.preventDefault()
-                                        event.stopPropagation()
-                                        refresh()
-                                    }}
-                                >
-                                    <IconRefresh className={loading ? 'animate-spin' : undefined} />
-                                </Button>
-                            }
-                        />
-                        <TooltipContent>Refresh branches</TooltipContent>
-                    </Tooltip>
-                </div>
-                <ComboboxEmpty>{showInlineLoadingState ? 'Loading branches...' : 'No branches found.'}</ComboboxEmpty>
+            <ComboboxContent
+                anchor={triggerRef}
+                side={contentSide}
+                sideOffset={6}
+                className={contentClassName ?? 'min-w-[280px]'}
+            >
+                <ComboboxSearchField itemsLabel="branches" loading={loading} disabled={disabled} onRefresh={refresh} />
+                <ComboboxEmpty>
+                    {showInlineLoadingState ? 'Loading branches...' : (error ?? 'No branches found.')}
+                </ComboboxEmpty>
                 <ComboboxList>
                     {(item: string) =>
                         item.startsWith(CREATE_BRANCH_PREFIX) ? (
@@ -149,30 +143,13 @@ export function GitHubBranchCombobox({
                 </ComboboxList>
 
                 {hasMore && (
-                    <ComboboxListFooter>
-                        <div className="px-2 pb-2">
-                            <div className="px-1 pb-2 text-center text-muted text-xs">
-                                {`Showing ${branches.length}+ ${trimmedSearchQuery ? 'matches' : 'branches'}`}
-                            </div>
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                className="w-full justify-center"
-                                disabled={loading}
-                                onMouseDown={(event: MouseEvent) => {
-                                    event.preventDefault()
-                                    event.stopPropagation()
-                                }}
-                                onClick={(event: MouseEvent) => {
-                                    event.preventDefault()
-                                    event.stopPropagation()
-                                    loadMore()
-                                }}
-                            >
-                                Load more
-                            </Button>
-                        </div>
-                    </ComboboxListFooter>
+                    <ComboboxLoadMoreFooter
+                        loadedCount={branches.length}
+                        itemsLabel="branches"
+                        searching={!!trimmedSearchQuery}
+                        loading={loading}
+                        onLoadMore={loadMore}
+                    />
                 )}
             </ComboboxContent>
         </Combobox>

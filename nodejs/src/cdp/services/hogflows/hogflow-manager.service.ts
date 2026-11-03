@@ -3,10 +3,11 @@ import { Counter } from 'prom-client'
 import { HogFlow } from '~/cdp/schema/hogflow'
 import { PostgresRouter, PostgresUse } from '~/common/utils/db/postgres'
 import { parseJSON } from '~/common/utils/json-parse'
-import { LazyLoader } from '~/common/utils/lazy-loader'
+import { DEFAULT_LOADER_RETRY, LazyLoader } from '~/common/utils/lazy-loader'
 import { logger } from '~/common/utils/logger'
 import { captureException } from '~/common/utils/posthog'
 import { PubSub } from '~/common/utils/pubsub'
+import { validTeamIds } from '~/common/utils/team-manager'
 import { Team } from '~/types'
 
 import { EncryptedFields } from '../../utils/encryption-utils'
@@ -33,6 +34,10 @@ const HOG_FLOW_FIELDS = [
     'trigger_masking',
     'conversion',
     'exit_condition',
+    'email_sending_rate_limit',
+    'email_sending_paused_at',
+    'email_sending_paused_reason',
+    'email_sending_paused_by',
     'edges',
     'actions',
     'encrypted_inputs',
@@ -64,7 +69,7 @@ export class HogFlowManagerService {
             refreshBackgroundAgeMs: 30 * 1000,
             // Absorb transient Postgres blips inside a single load attempt so failed background
             // refreshes don't re-fire at caller QPS and hard-cap refreshes don't fail the batch.
-            loaderRetry: { retryIntervalMs: 250, retryJitterMs: 250, maxElapsedMs: 5000 },
+            loaderRetry: DEFAULT_LOADER_RETRY,
         }
 
         this.lazyLoaderByTeam = new LazyLoader({
@@ -151,7 +156,7 @@ export class HogFlowManagerService {
         const response = await this.postgres.query<HogFlowTeamInfo>(
             PostgresUse.COMMON_READ,
             `SELECT id, team_id, version FROM posthog_hogflow WHERE status='active' AND team_id = ANY($1)`,
-            [teamIds],
+            [validTeamIds(teamIds)],
             'fetchAllTeamHogFlows'
         )
 
@@ -197,7 +202,18 @@ export class HogFlowManagerService {
                     }
                 }
             }
-            this.mergeEncryptedInputs(item)
+            try {
+                this.mergeEncryptedInputs(item)
+            } catch (error) {
+                // A throw here would fail the batched load for every flow in it. Only this flow is left
+                // out, because serving it without its secrets would skip a webhook trigger's auth check.
+                logger.warn('[HogFlowManager]', 'Could not merge encrypted inputs - flow is left out', {
+                    hogFlowId: item.id,
+                    error: error instanceof Error ? error.message : 'Unknown error',
+                })
+                captureException(error)
+                return acc
+            }
             acc[item.id] = item
             return acc
         }, {})

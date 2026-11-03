@@ -1,7 +1,9 @@
 import uuid
-from datetime import date, datetime
+from contextlib import nullcontext
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
+import time_machine
 from posthog.test.base import BaseTest, ClickhouseTestMixin
 from unittest.mock import Mock, patch
 
@@ -9,7 +11,13 @@ from django.test import override_settings
 
 from parameterized import parameterized
 
-from posthog.schema import DateRange, MarketingAnalyticsDrillDownLevel, MarketingAnalyticsTableQuery
+from posthog.schema import (
+    CompareFilter,
+    DateRange,
+    MarketingAnalyticsDrillDownLevel,
+    MarketingAnalyticsTableQuery,
+    MarketingAnalyticsTableQueryResponse,
+)
 
 from posthog.hogql import ast
 from posthog.hogql.parser import parse_select
@@ -18,8 +26,11 @@ from posthog.hogql.query import execute_hogql_query
 
 from posthog.clickhouse.client.execute import sync_execute
 from posthog.clickhouse.preaggregation.marketing_costs_sql import DISTRIBUTED_MARKETING_COSTS_TABLE
+from posthog.clickhouse.query_tagging import Feature, tags_context
 from posthog.hogql_queries.utils.query_date_range import QueryDateRange
 
+from products.analytics_platform.backend.lazy_computation.lazy_computation_executor import LazyComputationResult
+from products.analytics_platform.backend.models.preaggregation_job import PreaggregationJob
 from products.marketing_analytics.backend.hogql_queries.adapters.base import (
     GoogleAdsConfig,
     MarketingSourceAdapter,
@@ -30,6 +41,7 @@ from products.marketing_analytics.backend.hogql_queries.adapters.google_ads impo
 from products.marketing_analytics.backend.hogql_queries.marketing_analytics_table_query_runner import (
     MarketingAnalyticsTableQueryRunner,
 )
+from products.marketing_analytics.backend.hogql_queries.marketing_lazy_precompute import REVALIDATION_TRIGGER
 from products.warehouse_sources.backend.facade.testing import create_data_warehouse_table_from_csv
 
 TEST_BUCKET = "test_marketing_costs"
@@ -150,6 +162,25 @@ class TestMarketingCostsPrecompute(ClickhouseTestMixin, BaseTest):
         # cost_date is a real per-day date (not the sentinel empty), enabling daily-window caching.
         assert all(r[self._col(cols, "cost_date")] is not None for r in rows)
 
+    @parameterized.expand([("ahead_of_utc", "Asia/Tokyo"), ("utc", "UTC"), ("behind_utc", "America/Los_Angeles")])
+    def test_daily_job_window_holds_only_its_own_cost_date(self, _name, team_timezone):
+        self.team.timezone = team_timezone
+        self.team.save()
+        mat = self._adapter().build_materialization_query("google_test")
+        assert mat is not None
+        # Run the AST directly, because a to_hogql round trip drops the window's UTC timezone.
+        mat_query = replace_placeholders(
+            mat,
+            {
+                "time_window_min": ast.Constant(value=datetime(2024, 3, 16, tzinfo=UTC)),
+                "time_window_max": ast.Constant(value=datetime(2024, 3, 17, tzinfo=UTC)),
+            },
+        )
+        result = execute_hogql_query(mat_query, self.team)
+        cols = list(result.columns or [])
+
+        assert {r[self._col(cols, "cost_date")] for r in result.results or []} == {date(2024, 3, 16)}
+
     @parameterized.expand(
         [
             ("stale_and_matured_job", "c1", "c1"),
@@ -222,6 +253,152 @@ class TestMarketingCostsPrecompute(ClickhouseTestMixin, BaseTest):
         total_cost = sum(float(r[self._col(result_cols, MarketingSourceAdapter.cost_field)]) for r in result_rows)
         assert total_cost == 150.0, f"expected latest job cost 150 (argMax), got {total_cost} (sum would be 250)"
 
+    @parameterized.expand(
+        [
+            ("match_key", "Camp 1", "c1", False, 150.0, 1),
+            ("campaign_name", "Old Name", "New Name", False, 300.0, 2),
+            ("campaign_name", "Old Name", "New Name", True, 150.0, 1),
+        ]
+    )
+    def test_native_read_dedups_when_label_changes_across_jobs(
+        self, label_column, pre_value, post_value, dedup_v2, expected_cost, expected_rows
+    ):
+        base = {
+            "source_id": "google_test",
+            "source_name": "google",
+            "grain": "campaign",
+            "match_key": "c1",
+            "campaign_id": "c1",
+            "campaign_name": "Camp 1",
+            "cost_date": date(2023, 1, 15),
+        }
+
+        def row(job_id, computed_at, **overrides):
+            cell = {**base, **overrides}
+            return (
+                self.team.pk,
+                job_id,
+                cell["source_id"],
+                cell["source_name"],
+                cell["grain"],
+                cell["match_key"],
+                cell["campaign_id"],
+                cell["campaign_name"],
+                "",
+                "",
+                "",
+                "",
+                cell["cost_date"],
+                150.0,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                computed_at,
+                date(2099, 1, 1),
+            )
+
+        rows = [
+            row(str(uuid.uuid4()), datetime(2023, 1, 16, 10, 0), **{label_column: pre_value}),
+            row(str(uuid.uuid4()), datetime(2023, 1, 17, 10, 0), **{label_column: post_value}),
+        ]
+        sync_execute(
+            f"INSERT INTO {DISTRIBUTED_MARKETING_COSTS_TABLE()} "
+            "(team_id, job_id, source_id, source_name, grain, match_key, campaign_id, campaign_name, "
+            "ad_group_id, ad_group_name, ad_id, ad_name, cost_date, cost, clicks, impressions, "
+            "reported_conversions, reported_conversion_value, computed_at, expires_at) VALUES",
+            rows,
+        )
+
+        date_range = DateRange(date_from="2023-01-01", date_to="2023-01-31")
+        runner = MarketingAnalyticsTableQueryRunner(
+            query=MarketingAnalyticsTableQuery(dateRange=date_range, limit=100, offset=0, properties=[]),
+            team=self.team,
+        )
+        self.team._ma_costs_dedup_v2 = dedup_v2  # type: ignore[attr-defined]
+        read = runner._costs_native_read_query(
+            [base["source_id"]],
+            MarketingAnalyticsDrillDownLevel.CAMPAIGN,
+            QueryDateRange(date_range=date_range, team=self.team, interval=None, now=datetime(2025, 1, 1)),
+        )
+        result_rows, result_cols = self._execute(read)
+
+        total_cost = sum(float(r[self._col(result_cols, MarketingSourceAdapter.cost_field)]) for r in result_rows)
+        assert total_cost == expected_cost, (
+            f"{label_column} changing across jobs with dedup_v2={dedup_v2}: expected {expected_cost}, got {total_cost}"
+        )
+        assert len(result_rows) == expected_rows, f"expected {expected_rows} row(s), got {len(result_rows)}"
+
+        if expected_rows == 1:
+            output_alias = {
+                "match_key": MarketingSourceAdapter.match_key_field,
+                "campaign_name": MarketingSourceAdapter.campaign_name_field,
+            }[label_column]
+            assert result_rows[0][self._col(result_cols, output_alias)] == post_value, (
+                f"deduped row should carry the latest {label_column} '{post_value}', not the stale '{pre_value}'"
+            )
+
+    @parameterized.expand([("plain", False, False), ("compare", True, False), ("unstamped_latest_day", False, True)])
+    def test_latest_day_stamp_comes_from_the_latest_day_window_not_the_oldest(
+        self, _name, compare, unstamped_latest_day
+    ):
+        warmed_at = datetime(2024, 3, 20, 12, tzinfo=UTC)
+        read_at = warmed_at + timedelta(days=3)
+        latest_day_window_start = datetime(2024, 3, 23, tzinfo=UTC)
+
+        def read(now: datetime, *, warmer: bool) -> MarketingAnalyticsTableQueryResponse:
+            with time_machine.travel(now, tick=False):
+                runner = MarketingAnalyticsTableQueryRunner(
+                    query=MarketingAnalyticsTableQuery(
+                        dateRange=DateRange(date_from="2024-03-01"),
+                        compareFilter=CompareFilter(compare=compare),
+                        limit=100,
+                        offset=0,
+                        properties=[],
+                    ),
+                    team=self.team,
+                )
+                runner.config.costs_precomputation_enabled = True
+                with (
+                    patch.object(MarketingSourceFactory, "create_adapters", lambda _self: [self._adapter()]),
+                    patch.object(MarketingSourceFactory, "get_valid_adapters", lambda _self, adapters: adapters),
+                    tags_context(feature=Feature.CACHE_WARMUP) if warmer else nullcontext(),
+                ):
+                    return runner.calculate()
+
+        read(warmed_at, warmer=True)
+        # Three days on, the warmer rebuilds only the windows past their TTL; older days keep their jobs.
+        read(read_at, warmer=True)
+        if unstamped_latest_day:
+            PreaggregationJob.objects.filter(team=self.team, time_range_start=latest_day_window_start).update(
+                computed_at=None
+            )
+        response = read(read_at, warmer=False)
+
+        assert response.latestDayComputedAt == (None if unstamped_latest_day else read_at.isoformat())
+        if not unstamped_latest_day:
+            assert response.dataComputedAt == warmed_at.isoformat()
+
+    @parameterized.expand([("user_read", None, True), ("on_demand_revalidation", REVALIDATION_TRIGGER, False)])
+    def test_on_demand_revalidation_never_builds_costs(self, _name, trigger, expect_costs_build):
+        # The Celery revalidation runs userless with warehouse access control bypassed, and a user read
+        # can trigger it. Cost rows it wrote would expose every source's spend to users denied a source.
+        runner = MarketingAnalyticsTableQueryRunner(
+            query=MarketingAnalyticsTableQuery(
+                dateRange=DateRange(date_from="2023-01-01", date_to="2023-01-31"), limit=100, offset=0, properties=[]
+            ),
+            team=self.team,
+        )
+        runner.config.costs_precomputation_enabled = True
+
+        with (
+            tags_context(trigger=trigger),
+            patch.object(runner, "_build_costs_from_precompute", return_value=None) as build_costs,
+        ):
+            runner.to_query()
+
+        assert build_costs.called is expect_costs_build
+
     def test_one_unmaterializable_source_does_not_force_all_to_s3(self):
         # One source materializes, one can't. The result must read the native table for the materialized
         # source and keep only the other on the live S3 union — not fall back to S3 for everything.
@@ -252,7 +429,7 @@ class TestMarketingCostsPrecompute(ClickhouseTestMixin, BaseTest):
             interval=None,
             now=datetime(2023, 2, 1),
         )
-        ready = Mock(ready=True, job_ids=["00000000-0000-0000-0000-000000000001"])
+        ready = LazyComputationResult(ready=True, job_ids=[uuid.UUID("00000000-0000-0000-0000-000000000001")])
         with (
             patch.object(MarketingSourceFactory, "create_adapters", lambda self: [good, bad]),
             patch.object(MarketingSourceFactory, "get_valid_adapters", lambda self, adapters: adapters),

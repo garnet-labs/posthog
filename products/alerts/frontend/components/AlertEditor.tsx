@@ -71,8 +71,10 @@ export interface AlertEditorActionsProps {
     hasChanges: boolean
     hasPendingChanges?: boolean
     leadingActions?: ReactNode
+    trailingActions?: ReactNode
     onSubmitAttempted?: () => void
     showNoChangesLabel?: boolean
+    noChangesReason?: string
 }
 
 export function AlertEditorActions({
@@ -81,11 +83,13 @@ export function AlertEditorActions({
     hasChanges,
     hasPendingChanges = false,
     leadingActions,
+    trailingActions,
     onSubmitAttempted,
     showNoChangesLabel = false,
+    noChangesReason = 'No changes to save',
 }: AlertEditorActionsProps): JSX.Element {
     const hasUnsavedChanges = hasChanges || hasPendingChanges
-    const disabledReason = isEditing && !hasUnsavedChanges ? 'No changes to save' : undefined
+    const disabledReason = isEditing && !hasUnsavedChanges ? noChangesReason : undefined
     let buttonLabel = 'Create alert'
     if (isEditing) {
         buttonLabel = showNoChangesLabel && !hasUnsavedChanges ? 'No changes' : 'Save'
@@ -93,16 +97,19 @@ export function AlertEditorActions({
 
     return (
         <>
-            {leadingActions ? <div className="flex-1">{leadingActions}</div> : null}
-            <LemonButton
-                type="primary"
-                htmlType="submit"
-                loading={isSubmitting}
-                disabledReason={disabledReason}
-                onClick={onSubmitAttempted}
-            >
-                {buttonLabel}
-            </LemonButton>
+            {leadingActions ? <div className="w-full sm:min-w-0 sm:flex-1">{leadingActions}</div> : null}
+            <div className="flex w-full items-center justify-end gap-2 sm:w-auto">
+                {trailingActions}
+                <LemonButton
+                    type="primary"
+                    htmlType="submit"
+                    loading={isSubmitting}
+                    disabledReason={disabledReason}
+                    onClick={onSubmitAttempted}
+                >
+                    {buttonLabel}
+                </LemonButton>
+            </div>
         </>
     )
 }
@@ -128,7 +135,7 @@ export function AlertEditor({
                 <AlertEditorHeader title={title} description={description} onBack={onBack} />
             </header>
             <section className={cn('p-4', contentClassName)}>{children}</section>
-            <footer className="flex flex-wrap items-center justify-end gap-2 border-t p-4">
+            <footer className="flex flex-col gap-2 border-t p-4 sm:flex-row sm:items-center sm:justify-end">
                 <AlertEditorActions {...actionsProps} />
             </footer>
         </div>
@@ -155,7 +162,11 @@ export function AlertEditorFormDetails({
         <div className="space-y-2">
             <div className="flex gap-4 items-center">
                 <LemonField className="flex-auto" name="name">
-                    <LemonInput placeholder="Alert name" data-attr={nameDataAttr} />
+                    <LemonInput
+                        placeholder="Alert name"
+                        data-attr={nameDataAttr}
+                        status={nameError ? 'danger' : undefined}
+                    />
                 </LemonField>
                 {enabled ? (
                     <LemonField name="enabled">

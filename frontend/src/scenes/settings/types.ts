@@ -1,7 +1,14 @@
 import { PlatformSupportConfig } from 'lib/components/SupportedPlatforms/types'
 import { EitherMembershipLevel, FEATURE_FLAGS } from 'lib/constants'
 
-import { AccessControlLevel, AccessControlResourceType, Realm, TeamPublicType, TeamType } from '~/types'
+import {
+    AccessControlLevel,
+    AccessControlResourceType,
+    AvailableFeature,
+    Realm,
+    TeamPublicType,
+    TeamType,
+} from '~/types'
 
 export type SettingsLogicProps = {
     logicKey?: string
@@ -16,18 +23,28 @@ export type SettingsLogicProps = {
 export const SettingLevelIds = ['environment', 'project', 'organization', 'user'] as const
 export type SettingLevelId = (typeof SettingLevelIds)[number]
 
+export const SettingLevelNames: Record<SettingLevelId, string> = {
+    environment: 'Environment',
+    project: 'Project',
+    organization: 'Organization',
+    user: 'User',
+} as const
+
 export type SettingSectionId =
     // Environment
     | 'environment-details'
     | 'environment-access-control'
     | 'environment-activity-logs'
+    | 'environment-ai-gateway-dev-mode'
     | 'environment-ai-observability'
     | 'environment-approvals'
     | 'environment-autocapture'
+    | 'environment-business-knowledge'
     | 'environment-conversations'
     | 'environment-csp-reporting'
     | 'environment-customer-analytics'
     | 'environment-customization'
+    | 'environment-data-quality'
     | 'environment-discussions'
     | 'environment-error-tracking'
     | 'environment-error-tracking-configuration'
@@ -45,6 +62,12 @@ export type SettingSectionId =
     | 'environment-revenue-analytics'
     | 'environment-secret-api-keys'
     | 'environment-surveys'
+    | 'environment-task-agent-instructions'
+    | 'environment-task-agents'
+    | 'environment-ai-subscriptions'
+    | 'environment-ai-usage'
+    | 'environment-ai-cloud-environments'
+    | 'environment-tracing'
     | 'environment-web-analytics'
     | 'environment-workflows'
     | 'environment-danger-zone'
@@ -55,9 +78,11 @@ export type SettingSectionId =
     | 'project-autocapture'
     | 'project-customization'
     | 'project-integrations'
+    | 'project-logs'
     | 'project-product-analytics'
     | 'project-replay'
     | 'project-surveys'
+    | 'project-web-analytics'
     | 'project-danger-zone'
     // Organization
     | 'organization-details'
@@ -70,13 +95,16 @@ export type SettingSectionId =
     | 'organization-oauth-apps'
     | 'organization-proxy'
     | 'organization-roles'
+    | 'organization-access-resolution'
     | 'organization-security'
+    | 'organization-ssf'
     | 'organization-startup-program'
     | 'organization-danger-zone'
     // User
     | 'user-profile'
     | 'user-api-keys'
     | 'user-connected-apps'
+    | 'user-ai-gateway-dev-mode'
     | 'user-customization'
     | 'user-feature-previews'
     | 'user-notifications'
@@ -98,33 +126,42 @@ export type SettingId =
     | 'approval-policies'
     | 'authentication-domains'
     | 'autocapture'
+    | 'enforce-verified-domains'
     | 'autocapture-data-attributes'
     | 'banner'
     | 'base-currency'
     | 'bounce-rate-duration'
     | 'bounce-rate-page-view-mode'
+    | 'business-knowledge-github-repos'
+    | 'business-knowledge-learn-from-support'
     | 'business-model'
     | 'change-password'
     | 'change-requests'
     | 'changelog'
     | 'channel-type'
     | 'connected-apps'
+    | 'ai-gateway-dev-mode'
+    | 'ai-gateway-dev-mode-team-usage'
     | 'conversations-ai'
     | 'conversations-channels'
     | 'conversations-general'
     | 'conversations-imports'
+    | 'conversations-macros'
     | 'conversations-notifications'
     | 'cookieless-server-hash-mode'
     | 'core-memory'
-    | 'correlation-analysis'
     | 'csp-reporting'
+    | 'custom-bot-definitions'
     | 'customer-analytics-accounts'
+    | 'customer-analytics-calendar-sync'
     | 'customer-analytics-dashboard-events'
     | 'customer-analytics-event-stream'
     | 'customer-analytics-group-properties'
     | 'customer-analytics-person-properties'
+    | 'customer-analytics-track-rules'
     | 'customer-analytics-usage-metrics'
     | 'customization-irl'
+    | 'data-quality-materialization-gate'
     | 'data-theme'
     | 'datacapture'
     | 'date-and-time'
@@ -148,10 +185,12 @@ export type SettingId =
     | 'error-tracking-auto-assignment'
     | 'error-tracking-custom-grouping'
     | 'error-tracking-exception-autocapture'
+    | 'error-tracking-general'
     | 'error-tracking-ingestion-controls'
     | 'error-tracking-integrations'
     | 'error-tracking-rate-limits'
     | 'error-tracking-releases'
+    | 'error-tracking-severity-rules'
     | 'error-tracking-spike-detection'
     | 'error-tracking-suppression-rules'
     | 'error-tracking-symbol-sets'
@@ -160,6 +199,8 @@ export type SettingId =
     | 'feature-flag-default-evaluation-contexts'
     | 'feature-flag-default-release-conditions'
     | 'feature-flag-evaluation-context-suggestions'
+    | 'feature-flag-require-tags'
+    | 'feature-flag-request-blocklist'
     | 'feature-flag-require-evaluation-contexts'
     | 'feature-flag-secure-api-key'
     | 'feature-flags-interface'
@@ -167,6 +208,8 @@ export type SettingId =
     | 'feature-previews-coming-soon'
     | 'group-analytics'
     | 'heatmaps'
+    | 'heatmap-screenshot-cookie'
+    | 'heatmaps-capture'
     | 'hedgehog-mode'
     | 'human-friendly-comparison-periods'
     | 'integration-error-tracking'
@@ -184,31 +227,39 @@ export type SettingId =
     | 'logs-distinct-id-attribute-key'
     | 'logs-drop-rules'
     | 'logs-json-parse'
+    | 'logs-json-parse-attribute'
     | 'logs-metric-rules'
+    | 'logs-pattern-message-keys'
     | 'logs-pii-scrub'
     | 'logs-retention'
     | 'logs-session-id-attribute-keys'
     | 'marketing-settings'
-    | 'mcp-hints'
     | 'mcp-servers-manage'
     | 'members'
+    | 'member-notifications'
     | 'notifications'
     | 'optout'
     | 'organization-admin-notice'
     | 'organization-ai-consent'
     | 'organization-ai-training-opt-out'
+    | 'organization-desktop-beta-terms'
     | 'organization-cimd-verification-tokens-list'
     | 'organization-default-role'
     | 'organization-delete'
     | 'organization-display-name'
+    | 'organization-events-retention'
     | 'organization-experiment-stats-method'
     | 'organization-id'
     | 'organization-integrations-list'
     | 'organization-ip-anonymization-default'
+    | 'organization-member-notice'
     | 'organization-oauth-apps-list'
     | 'organization-proxy'
     | 'organization-roles'
+    | 'organization-access-resolution-preview'
     | 'organization-security'
+    | 'organization-ssf'
+    | 'organization-mcp-access'
     | 'organization-personal-api-keys'
     | 'passkeys'
     | 'login-sessions'
@@ -218,11 +269,14 @@ export type SettingId =
     | 'personal-api-keys'
     | 'personal-integrations-github'
     | 'personal-integrations-slack'
+    | 'personal-integrations-posthog'
     | 'persons-join-mode'
     | 'reminders'
     | 'persons-on-events'
     | 'posthog-mcp-configure'
+    | 'profile-picture'
     | 'project-delete'
+    | 'project-events-retention'
     | 'project-move'
     | 'realtime-notifications'
     | 'replay'
@@ -241,14 +295,29 @@ export type SettingId =
     | 'revenue-analytics-external-data-sources'
     | 'revenue-analytics-filter-test-accounts'
     | 'revenue-base-currency'
-    | 'session-join-mode'
+    | 'saml-configuration'
+    | 'oidc-configuration'
+    | 'scim-configuration'
     | 'session-table-version'
-    | 'sidebar-auto-suggest'
     | 'snippet'
     | 'snippet-v2'
     | 'surveys-default-appearance'
     | 'surveys-interface'
+    | 'task-agent-my-instructions'
+    | 'task-agent-my-preference'
+    | 'ai-subscription-codex'
+    | 'task-agent-project-instructions'
+    | 'ai-usage-spend'
+    | 'ai-cloud-environments'
+    | 'ai-cloud-custom-images'
+    | 'task-comments-slack-dm'
+    | 'task-agent-other-settings'
+    | 'task-agent-new-task-defaults'
+    | 'task-agent-project-default'
     | 'theme'
+    | 'tracing-distinct-id-attribute-keys'
+    | 'tracing-retention'
+    | 'tracing-session-id-attribute-keys'
     | 'user-delete'
     | 'user-groups'
     | 'variables'
@@ -258,8 +327,13 @@ export type SettingId =
     | 'web-analytics-pre-aggregated-tables'
     | 'web-revenue-events'
     | 'web-vitals-autocapture'
+    | 'workflows-frequency-cap'
+    | 'workflows-ai-task-limits'
+    | 'workflows-replay-vision-limits'
     | 'workflows-email-tracking-consent'
+    | 'workflows-utm-defaults'
     | 'workflows-engagement-events'
+    | 'xaa-configuration'
 
 type FeatureFlagKey = keyof typeof FEATURE_FLAGS
 
@@ -288,6 +362,15 @@ export type Setting = {
      * can check if a team should have access to a setting and return false if not
      */
     allowForTeam?: (team: TeamType | TeamPublicType | null) => boolean
+
+    /**
+     * Shows the setting only to organization admins and owners.
+     * Use it for an organization-scoped API, because a project admin can be an ordinary organization member.
+     */
+    organizationAdminOnly?: boolean
+
+    /** Shows the setting only to PostHog staff. The API it calls must enforce the same check. */
+    staffOnly?: boolean
 
     /**
      * If true, this setting will be hidden when viewing all settings (no specific section selected),
@@ -319,6 +402,13 @@ export interface SettingSection extends Pick<Setting, 'flag'> {
     searchValue?: string
 
     /**
+     * Additional search terms that help users find this section and the settings inside it
+     * (e.g. ['usage', 'invoice'] on Billing). A section that is a top-level link has no settings
+     * to carry keywords of its own, so this is the only way to make it answer to a synonym.
+     */
+    keywords?: string[]
+
+    /**
      * If the setting is restricted, the resource type and minimum access level
      * that are required to access the setting
      */
@@ -341,10 +431,33 @@ export interface SettingSection extends Pick<Setting, 'flag'> {
     hideFromNavigation?: boolean
 
     /**
-     * When true, navigating to this section prompts for re-authentication if the sensitive
-     * session has expired — matching how user- and organization-level settings behave. Use for
-     * environment/project sections that manage credentials, which otherwise only surface the
-     * re-auth modal reactively when a write is attempted.
+     * Gate every setting in the section behind one billing feature. The section renders a single
+     * upsell when the feature is unavailable. Use this instead of a `PayGateMini` inside each
+     * setting's component, which stacks one identical upsell card per setting on the page.
      */
-    requiresReauthentication?: boolean
+    payGate?: SettingSectionPayGate
+
+    /**
+     * Where to send a reader who cannot open this section, shown as the next step when the section
+     * is gated off. `label` is user-facing copy.
+     */
+    unavailableFallback?: { sectionId: SettingSectionId; label: string }
+}
+
+/** Why a section the reader asked for is not there, and where to go instead. */
+export interface UnavailableSection {
+    id: SettingSectionId
+    title: JSX.Element | string
+    reason: 'not-enabled' | 'admin-only'
+    fallback: { sectionId: SettingSectionId; label: string } | null
+}
+
+export interface SettingSectionPayGate {
+    feature: AvailableFeature
+
+    /** Identifies this surface in pay gate analytics, since one feature can gate several places. */
+    featureDetail?: string
+
+    /** When true, impersonated staff see the settings rather than the upsell. */
+    bypassForImpersonation?: boolean
 }

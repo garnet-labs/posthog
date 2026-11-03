@@ -5,7 +5,7 @@ import posthog from 'posthog-js'
 
 import { lemonToast } from '@posthog/lemon-ui'
 
-import api from 'lib/api'
+import api, { ApiConfig } from 'lib/api'
 import { HealthIssueKind, KIND_LABELS } from 'scenes/health/healthCategories'
 import { SAMPLE_GLOBALS_CONTEXTS } from 'scenes/hog-functions/configuration/sampleGlobalsContexts'
 import {
@@ -24,6 +24,9 @@ import {
     PropertyFilterType,
     PropertyOperator,
 } from '~/types'
+
+import { hogFunctionsInvocationsCreate } from 'products/cdp/frontend/generated/api'
+import type { HogFunctionApi, HogFunctionInvocationApi } from 'products/cdp/frontend/generated/api.schemas'
 
 import type { CyclotronJobInputSchemaType, HogFunctionSubTemplateType } from '../../../../types'
 
@@ -82,6 +85,43 @@ function hasSubTemplateForDestination(
     return subTemplates?.some((t) => t.template_id === destination.templateId) ?? false
 }
 
+// Not every trigger has a sub-template for every destination (e.g. GitHub only
+// covers "issue created", not "issue reopened"). Entry points that lock the
+// trigger skip the trigger step, so the destination list is the only place left
+// to keep uncreatable combinations out of the wizard.
+function creatableDestinations(
+    triggerKey: HogFunctionSubTemplateIdType | null | undefined,
+    destinations: WizardDestination[]
+): WizardDestination[] {
+    if (!triggerKey) {
+        return destinations
+    }
+    return destinations.filter((destination) => hasSubTemplateForDestination(triggerKey, destination))
+}
+
+interface WizardUrlState {
+    step: WizardStep
+    destinationKey: string | null
+    triggerKey: HogFunctionSubTemplateIdType | null
+}
+
+// The wizard mirrors its position into the URL, so a link can point at a
+// destination/trigger pair that has no sub-template (hand-edited, or a pair that
+// used to exist). Rewind such a state to the last step that is still valid
+// instead of restoring into a configure step that can never be submitted.
+function sanitizeWizardState(state: WizardUrlState, allDestinations: WizardDestination[]): WizardUrlState {
+    const destination = allDestinations.find((d) => d.key === state.destinationKey) ?? null
+    if (!destination) {
+        return { step: WizardStep.Destination, destinationKey: null, triggerKey: null }
+    }
+    const triggerKey =
+        state.triggerKey && hasSubTemplateForDestination(state.triggerKey, destination) ? state.triggerKey : null
+    if (!triggerKey && state.step === WizardStep.Configure) {
+        return { step: WizardStep.Trigger, destinationKey: destination.key, triggerKey: null }
+    }
+    return { step: state.step, destinationKey: destination.key, triggerKey }
+}
+
 // Pre-applies `kind IN (selectedKinds)` as a top-level property filter on the
 // sub-template's filter group. A null or empty `selectedKinds` leaves filters
 // untouched (matches every kind). Used by the health-alerts family so a per-page
@@ -127,6 +167,84 @@ export function decorateAlertName(baseName: string, selectedKinds: string[] | nu
     return `${baseName}${formatKindsSuffix(selectedKinds)}`
 }
 
+function lastErrorLogMessage(logs: readonly unknown[]): string | null {
+    for (const entry of [...logs].reverse()) {
+        const { level, message } = (entry ?? {}) as { level?: unknown; message?: unknown }
+        if (typeof level === 'string' && level.toLowerCase() === 'error' && typeof message === 'string') {
+            return message
+        }
+    }
+    return null
+}
+
+// The test endpoint answers HTTP 200 when the destination rejects the message, and reports the
+// rejection in the logs. Returns the message to show, or null when the test went through.
+// A skipped result covers two cases: the filters excluded the event, or the inputs failed to
+// build. Only the second case writes an error log.
+export function testInvocationFailureMessage(result: Pick<HogFunctionInvocationApi, 'status' | 'logs'>): string | null {
+    if (result.status === 'success') {
+        return null
+    }
+    const reason = lastErrorLogMessage(result.logs)
+    if (reason) {
+        return `Test failed: ${reason}`
+    }
+    return result.status === 'skipped'
+        ? "Test not sent. The test event didn't match this alert's filters."
+        : 'Test failed. Check the destination settings and try again.'
+}
+
+export function buildAlertInputs(
+    inputsSchema: CyclotronJobInputSchemaType[] | null | undefined,
+    subTemplateInputs: Record<string, CyclotronJobInputType> | null | undefined,
+    inputValues: Record<string, CyclotronJobInputType>
+): Record<string, CyclotronJobInputType> {
+    const inputs: Record<string, CyclotronJobInputType> = {}
+    for (const schema of inputsSchema ?? []) {
+        if (schema.default !== undefined) {
+            inputs[schema.key] = { value: schema.default }
+        }
+    }
+    return { ...inputs, ...subTemplateInputs, ...inputValues }
+}
+
+export interface AlertHogFunctionConfiguration {
+    type: 'internal_destination'
+    template_id: string
+    name: string
+    description: string
+    filters: CyclotronJobFiltersType | null | undefined
+    enabled: true
+    masking: null
+    inputs: Record<string, CyclotronJobInputType>
+}
+
+/** The hog function an alert creates: an enabled internal destination with the template's merged inputs. */
+export function buildAlertHogFunctionConfiguration({
+    templateId,
+    name,
+    description,
+    filters,
+    inputs,
+}: {
+    templateId: string
+    name: string
+    description: string
+    filters: CyclotronJobFiltersType | null | undefined
+    inputs: Record<string, CyclotronJobInputType>
+}): AlertHogFunctionConfiguration {
+    return {
+        type: 'internal_destination',
+        template_id: templateId,
+        name,
+        description,
+        filters,
+        enabled: true,
+        masking: null,
+        inputs,
+    }
+}
+
 function extractDestinationKeyFromAlert(alert: HogFunctionType, allDestinations: WizardDestination[]): string | null {
     const templateId = alert.template?.id
     if (!templateId) {
@@ -146,6 +264,7 @@ export interface alertWizardLogicValues {
     alertCreated: boolean
     alertCreationView: AlertCreationView
     allDestinations: WizardDestination[]
+    availableDestinations: WizardDestination[]
     availableTriggers: WizardTrigger[]
     configuration: {
         inputs: Record<
@@ -272,10 +391,11 @@ export interface alertWizardLogicActions {
 export interface alertWizardLogicMeta {
     key: string
     __keaTypeGenInternalSelectorTypes: {
+        availableDestinations: (allDestinations: WizardDestination[]) => WizardDestination[]
         usedDestinationKeys: (existingAlerts: HogFunctionType[], allDestinations: WizardDestination[]) => Set<string>
         sortedDestinations: (
             usedDestinationKeys: Set<string>,
-            allDestinations: WizardDestination[]
+            availableDestinations: WizardDestination[]
         ) => WizardDestination[]
         primaryDestinations: (sortedDestinations: WizardDestination[]) => WizardDestination[]
         extraDestinations: (sortedDestinations: WizardDestination[]) => WizardDestination[]
@@ -458,7 +578,13 @@ export const alertWizardLogic = kea<alertWizardLogicType>([
         ],
     })),
 
-    selectors({
+    selectors(({ props: logicProps }) => ({
+        availableDestinations: [
+            (s) => [s.allDestinations],
+            (allDestinations: WizardDestination[]): WizardDestination[] =>
+                creatableDestinations(logicProps.presetTriggerKey, allDestinations),
+        ],
+
         usedDestinationKeys: [
             (s) => [s.existingAlerts, s.allDestinations],
             (existingAlerts: HogFunctionType[], allDestinations: WizardDestination[]): Set<string> => {
@@ -474,9 +600,9 @@ export const alertWizardLogic = kea<alertWizardLogicType>([
         ],
 
         sortedDestinations: [
-            (s) => [s.usedDestinationKeys, s.allDestinations],
-            (usedDestinationKeys: Set<string>, allDestinations: WizardDestination[]): WizardDestination[] => {
-                return [...allDestinations].sort((a, b) => {
+            (s) => [s.usedDestinationKeys, s.availableDestinations],
+            (usedDestinationKeys: Set<string>, availableDestinations: WizardDestination[]): WizardDestination[] => {
+                return [...availableDestinations].sort((a, b) => {
                     const aUsed = usedDestinationKeys.has(a.key) ? 1 : 0
                     const bUsed = usedDestinationKeys.has(b.key) ? 1 : 0
                     return bUsed - aUsed
@@ -547,7 +673,10 @@ export const alertWizardLogic = kea<alertWizardLogicType>([
                     (s) =>
                         s.required &&
                         !prefilledKeys.has(s.key) &&
-                        (s.type === 'integration' || s.type === 'integration_field' || s.type === 'string')
+                        (s.type === 'integration' ||
+                            s.type === 'integration_field' ||
+                            s.type === 'string' ||
+                            s.type === 'choice')
                 )
             },
         ],
@@ -559,7 +688,7 @@ export const alertWizardLogic = kea<alertWizardLogicType>([
                 inputs: inputValues,
             }),
         ],
-    }),
+    })),
 
     listeners(({ values, actions, props: logicProps }) => ({
         createAlertSuccess: () => {
@@ -619,17 +748,18 @@ export const alertWizardLogic = kea<alertWizardLogicType>([
                 return
             }
 
-            const mergedInputs: Record<string, any> = { ...subTemplate.inputs }
-            for (const [key, val] of Object.entries(values.inputValues)) {
-                mergedInputs[key] = val
-            }
-
             const selectedTemplate = values.selectedTemplate
             if (!selectedTemplate) {
                 lemonToast.error('Template not loaded yet')
                 actions.testConfigurationComplete()
                 return
             }
+
+            const mergedInputs = buildAlertInputs(
+                selectedTemplate.inputs_schema,
+                subTemplate.inputs,
+                values.inputValues
+            )
 
             const configuration: Record<string, any> = {
                 type: 'internal_destination',
@@ -669,20 +799,28 @@ export const alertWizardLogic = kea<alertWizardLogicType>([
             const sampleGlobalsLoader = logicProps.contextId ? SAMPLE_GLOBALS_CONTEXTS[logicProps.contextId] : undefined
             if (sampleGlobalsLoader) {
                 try {
-                    globals = await sampleGlobalsLoader(globals)
+                    globals = await sampleGlobalsLoader(
+                        globals,
+                        applyKindFilter(subTemplate.filters, values.selectedKinds)
+                    )
                 } catch {
                     // Fall back to the stub test event
                 }
             }
 
             try {
-                await api.hogFunctions.createTestInvocation('new', {
-                    configuration,
+                const result = await hogFunctionsInvocationsCreate(String(ApiConfig.getCurrentTeamId()), 'new', {
+                    configuration: configuration as HogFunctionApi,
                     globals,
                     mock_async_functions: false,
                 })
                 breakpoint()
-                lemonToast.success('Test invocation sent')
+                const failure = testInvocationFailureMessage(result)
+                if (failure) {
+                    lemonToast.error(failure)
+                } else {
+                    lemonToast.success('Test invocation sent')
+                }
             } catch (e: any) {
                 breakpoint()
                 lemonToast.error(e.detail || 'Test invocation failed')
@@ -709,29 +847,33 @@ export const alertWizardLogic = kea<alertWizardLogicType>([
                     return
                 }
 
-                const mergedInputs: Record<string, any> = { ...subTemplate.inputs }
-                for (const [key, val] of Object.entries(values.inputValues)) {
-                    mergedInputs[key] = val
+                const selectedTemplate = values.selectedTemplate
+                if (!selectedTemplate) {
+                    lemonToast.error('Template not loaded yet')
+                    return
                 }
+
+                const mergedInputs = buildAlertInputs(
+                    selectedTemplate.inputs_schema,
+                    subTemplate.inputs,
+                    values.inputValues
+                )
 
                 const filters = applyKindFilter(subTemplate.filters, values.selectedKinds)
                 const name = decorateAlertName(subTemplate.name ?? '', values.selectedKinds)
                 const description = decorateAlertName(subTemplate.description ?? '', values.selectedKinds)
 
-                const configuration: Record<string, any> = {
-                    type: 'internal_destination',
-                    template_id: destination.templateId,
+                const configuration = buildAlertHogFunctionConfiguration({
+                    templateId: destination.templateId,
                     name,
                     description,
                     filters,
-                    enabled: true,
-                    masking: null,
                     inputs: mergedInputs,
-                }
+                })
 
                 await api.hogFunctions.create(configuration)
                 posthog.capture('error_tracking_alert_created', {
-                    source: 'wizard',
+                    ui_source: 'wizard',
                     trigger_event: subTemplate.filters?.events?.[0]?.id ?? null,
                     subtemplate_id: triggerKey,
                     destination_key: destination.key,
@@ -798,11 +940,16 @@ export const alertWizardLogic = kea<alertWizardLogicType>([
             const wizardTrigger = searchParams.wizard_trigger as HogFunctionSubTemplateIdType | undefined
 
             if (wizardStep && values.alertCreationView !== AlertCreationView.Wizard) {
-                actions.restoreWizardState({
-                    step: wizardStep,
-                    destinationKey: wizardDest ?? null,
-                    triggerKey: wizardTrigger ?? null,
-                })
+                actions.restoreWizardState(
+                    sanitizeWizardState(
+                        {
+                            step: wizardStep,
+                            destinationKey: wizardDest ?? null,
+                            triggerKey: wizardTrigger ?? null,
+                        },
+                        values.availableDestinations
+                    )
+                )
             }
         },
     })),

@@ -7,7 +7,7 @@
 -- everything below.
 --
 -- Run these through the internal Metabase against "PostHog ClickHouse PROD <REGION>
--- Data Tier" (see the query-clickhouse-via-metabase skill):
+-- Data Tier" (see the querying-production-databases-via-metabase skill):
 --   hogli metabase:login --region us
 --   hogli metabase:databases --region us
 --   hogli metabase:query --region us --database-id <id> < this-file
@@ -53,7 +53,7 @@ ORDER BY hour;
 
 -- ---------------------------------------------------------------------------
 -- 2. Rollout verification: which path, pool, and ClickHouse identity is actually
---    serving notebook queries. The design doc's phase-1/phase-2 prerequisites
+--    serving notebook queries. The frame-store prerequisites
 --    (dedicated `notebooks` CH user, offline pool) fail *open* and silently — this
 --    is the ClickHouse-side confirmation that they engaged.
 --      user           — 'notebooks' once the dedicated CH user is provisioned, else the default
@@ -129,11 +129,11 @@ GROUP BY query_kind;
 -- 5. Parallel notebook queries per team — exact concurrency, not a rejection count.
 --    Prometheus only counts limiter *rejections*; this reconstructs actual occupancy
 --    by replaying each query as a +1 at its start and a -1 at its end and taking a
---    running sum. Compare the peak against the design doc's per-team ceiling of 2
+--    running sum. Compare the peak against the per-team ceiling of 2
 --    (MATERIALIZE_PER_TEAM_CONCURRENCY) and global 10.
 --    Swap `team_id` for `lc_user_id` to get the per-user view.
 --    Note: there is no notebook_short_id in the query tags today, so a per-notebook
---    breakdown is not possible — see the gaps list in sql_v2_observability.md.
+--    breakdown is not possible.
 -- ---------------------------------------------------------------------------
 WITH notebook_queries AS (
     SELECT
@@ -223,7 +223,7 @@ LIMIT 25;
 
 -- ---------------------------------------------------------------------------
 -- 8. Notebooks' share of the offline pool — the "am I hurting batch exports?"
---    question the design doc's pool-isolation decision rests on.
+--    question the pool-isolation decision rests on.
 -- ---------------------------------------------------------------------------
 SELECT
     toStartOfHour(event_time)                AS hour,
@@ -238,3 +238,57 @@ WHERE event_date >= today() - 3
   AND is_initial_query
 GROUP BY hour, bucket
 ORDER BY hour, bucket;
+
+
+-- ---------------------------------------------------------------------------
+-- 9. Transport A/B: worker relay (phase 1) vs ClickHouse writing S3 itself
+--    (phase 2), on identical work.
+--
+--    `query_kind` is the discriminator and needs no new instrumentation: the relay
+--    is a Select whose rows stream back through a worker, the CH-writes path is an
+--    `INSERT INTO FUNCTION s3(...)` that returns no result set.
+--
+--    `query_kind` alone is not enough to scope the arms, though. `lc_product =
+--    'notebooks'` also covers the direct lane (`sql_v2_direct.py`) and the data
+--    plane's inline transport, and both of those are Selects too. Without the
+--    workflow filter below they all land in the worker-relay arm and corrupt its
+--    counts, latency, and scan size. Only the materialize activity runs under
+--    `notebook-frame-materialize`, so that filter is what makes the two arms
+--    comparable rather than one arm plus everything else.
+--
+--    That difference is also why the delivered-size columns differ per mode, and why
+--    averaging the two together is wrong. A Select reports what it handed back in
+--    `result_bytes`/`result_rows`; an Insert leaves both at zero and reports what it
+--    pushed to S3 in `WriteBufferFromS3Bytes`/`written_rows`. `delivered_*` below
+--    coalesces the pair so one column is comparable across modes.
+--
+--    Read `scanned` as the control: the two modes run the same user query, so a
+--    materially different scan between them means the arms are not comparable
+--    (different date ranges, or ClickHouse cache state) and the latency delta is
+--    not yet evidence.
+-- ---------------------------------------------------------------------------
+SELECT
+    if(query_kind = 'Insert', 'ch_writes', 'worker_relay')      AS mode,
+    count()                                                     AS queries,
+    round(quantile(0.5)(query_duration_ms))                     AS p50_ms,
+    round(quantile(0.95)(query_duration_ms))                    AS p95_ms,
+    formatReadableSize(quantile(0.5)(read_bytes))               AS p50_scanned,
+    formatReadableSize(
+        quantile(0.5)(
+            if(query_kind = 'Insert',
+               ProfileEvents['WriteBufferFromS3Bytes'],
+               result_bytes)
+        )
+    )                                                           AS p50_delivered_bytes,
+    round(quantile(0.5)(
+        if(query_kind = 'Insert', written_rows, result_rows)
+    ))                                                          AS p50_delivered_rows,
+    round(quantile(0.95)(memory_usage) / 1e6)                   AS p95_memory_mb,
+    countIf(exception_code != 0)                                AS failures
+FROM query_log_archive
+WHERE event_date >= today() - 1
+  AND lc_product = 'notebooks'
+  AND is_initial_query
+  AND lc_temporal__workflow_type = 'notebook-frame-materialize'
+GROUP BY mode
+ORDER BY mode;

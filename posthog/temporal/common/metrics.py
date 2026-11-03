@@ -25,6 +25,30 @@ def get_metric_meter(additional_attributes: Attributes | None = None) -> MetricM
     return meter
 
 
+def record_schedule_to_start_latency(
+    histogram_name: str,
+    /,
+    scheduled_time: dt.datetime | None,
+    started_time: dt.datetime | None,
+    description: str,
+    attributes: Attributes | None = None,
+) -> None:
+    """Record the time an activity waited in the task queue to a histogram metric.
+
+    The worker clock can disagree with the server clock, so the raw difference can be negative.
+    Temporal raises on a negative metric value, so clamp it to zero. Like `ExecutionTimeRecorder`,
+    this is best-effort: a metric failure must never fail the activity.
+    """
+    if scheduled_time is None or started_time is None:
+        return
+    latency = max(started_time - scheduled_time, dt.timedelta(0))
+    try:
+        meter = get_metric_meter(attributes)
+        meter.create_histogram_timedelta(name=histogram_name, description=description, unit="ms").record(latency)
+    except Exception:
+        LOGGER.exception("Failed to record schedule-to-start latency to histogram '%s'", histogram_name)
+
+
 class ExecutionTimeRecorder:
     """Context manager to record execution time to a histogram metric."""
 
@@ -35,11 +59,13 @@ class ExecutionTimeRecorder:
         description: str | None = None,
         histogram_attributes: Attributes | None = None,
         log: bool = False,
+        histogram_recorder: typing.Callable[[float, Attributes], None] | None = None,
     ) -> None:
         self.histogram_name = histogram_name
         self.description = description
         self.histogram_attributes = histogram_attributes or {}
         self.log = log
+        self.histogram_recorder = histogram_recorder
         self._start_counter: float | None = None
         self._status_override: str | None = None
 
@@ -75,6 +101,8 @@ class ExecutionTimeRecorder:
             meter = get_metric_meter(attributes)
             hist = meter.create_histogram_timedelta(name=self.histogram_name, description=self.description, unit="ms")
             hist.record(value=delta)
+            if self.histogram_recorder is not None:
+                self.histogram_recorder(float(delta_milli_seconds), attributes)
         except Exception:
             LOGGER.exception("Failed to record execution time to histogram '%s'", self.histogram_name)
         if self.log:

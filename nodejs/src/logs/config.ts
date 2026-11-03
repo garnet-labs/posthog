@@ -4,6 +4,7 @@ import {
     KAFKA_LOGS_INGESTION,
     KAFKA_LOGS_INGESTION_DLQ,
     KAFKA_LOGS_INGESTION_OVERFLOW,
+    KAFKA_LOG_ENTRIES,
     KAFKA_TRACES_CLICKHOUSE,
     KAFKA_TRACES_INGESTION,
     KAFKA_TRACES_INGESTION_DLQ,
@@ -16,6 +17,8 @@ import { LogsProducerName, WARPSTREAM_INGESTION_PRODUCER, WARPSTREAM_LOGS_PRODUC
 export type LogsIngestionOutputsConfig = {
     LOGS_INGESTION_OUTPUT_APP_METRICS_TOPIC: string
     LOGS_INGESTION_OUTPUT_APP_METRICS_PRODUCER: LogsProducerName
+    LOGS_INGESTION_OUTPUT_LOG_ENTRIES_TOPIC: string
+    LOGS_INGESTION_OUTPUT_LOG_ENTRIES_PRODUCER: LogsProducerName
     LOGS_INGESTION_OUTPUT_LOGS_PRODUCER: LogsProducerName
     LOGS_INGESTION_OUTPUT_DLQ_PRODUCER: LogsProducerName
 }
@@ -24,6 +27,8 @@ export function getDefaultLogsIngestionOutputsConfig(): LogsIngestionOutputsConf
     return {
         LOGS_INGESTION_OUTPUT_APP_METRICS_TOPIC: KAFKA_APP_METRICS_2,
         LOGS_INGESTION_OUTPUT_APP_METRICS_PRODUCER: WARPSTREAM_INGESTION_PRODUCER,
+        LOGS_INGESTION_OUTPUT_LOG_ENTRIES_TOPIC: KAFKA_LOG_ENTRIES,
+        LOGS_INGESTION_OUTPUT_LOG_ENTRIES_PRODUCER: WARPSTREAM_INGESTION_PRODUCER,
         LOGS_INGESTION_OUTPUT_LOGS_PRODUCER: WARPSTREAM_LOGS_PRODUCER,
         LOGS_INGESTION_OUTPUT_DLQ_PRODUCER: WARPSTREAM_LOGS_PRODUCER,
     }
@@ -54,8 +59,34 @@ export type LogsIngestionConsumerConfig = {
     LOGS_METRICS_RULES_ENABLED_TEAMS: string
     /** When `true`, metric-rule evaluation and emission are skipped for every team. */
     LOGS_METRICS_RULES_KILLSWITCH: boolean
+    /** Comma-separated team IDs, or `*` for all teams, that also get the built-in default metric rules. Independent of `LOGS_METRICS_RULES_ENABLED_TEAMS`. */
+    LOGS_DEFAULT_METRIC_RULES_ENABLED_TEAMS: string
     /** capture-logs OTLP metrics endpoint (e.g. `http://capture-logs:3308/i/v1/metrics`); empty disables emission. */
     LOGS_METRICS_RULES_EXPORT_URL: string
+    /** Comma-separated team IDs, or `*` for all teams, or empty to disable per-row retention rule evaluation entirely. */
+    LOGS_RETENTION_ENABLED_TEAMS: string
+    /** Comma-separated team IDs, or `*` for all teams. A `backfill_days` message from any other team is dropped. */
+    LOGS_BACKFILL_ENABLED_TEAMS: string
+    /** When `true`, retention rules are never evaluated (rows keep the team default via the batch header). */
+    LOGS_RETENTION_KILLSWITCH: boolean
+    /** Comma-separated team IDs, or `*` for all teams. A `posthog-internal` batch from any other team is billed as normal. */
+    LOGS_INTERNAL_INGESTION_ENABLED_TEAMS: string
+    /** Secret. Comma-separated HMAC keys, newest first. Producers sign with the first key, and the consumer accepts any. */
+    LOGS_INTERNAL_INGESTION_SIGNING_KEYS: string
+    /** MUST be the in-cluster capture-logs service, never a public endpoint: the signature makes logs unbilled. Empty disables sending. */
+    LOGS_INTERNAL_PRODUCER_URL: string
+    /** Comma-separated team IDs, or `*` for all teams, whose internal logs a producer sends to the logs product. */
+    LOGS_INTERNAL_PRODUCER_TEAMS: string
+    /** Requests a producer keeps open at once. A batch over this cap waits in the buffer. */
+    LOGS_INTERNAL_PRODUCER_MAX_IN_FLIGHT: number
+    /** Bytes of records a producer holds while capture-logs is slow or down. A record that does not fit is dropped. */
+    LOGS_INTERNAL_PRODUCER_MAX_BUFFERED_BYTES: number
+    /** How long a producer retries one batch before it gives up on it. */
+    LOGS_INTERNAL_PRODUCER_RETRY_TIMEOUT_MS: number
+    /** Comma-separated team IDs, or `*` for all teams, or empty (default) to disable measure-only pattern masking. */
+    LOGS_PATTERN_MASKING_ENABLED_TEAMS: string
+    LOGS_JSON_ATTRIBUTE_PARSING_ENABLED_TEAMS: string
+    LOGS_JSON_ATTRIBUTE_EXTRACTION_ENABLED_TEAMS: string
     /**
      * When `true`, rows removed by drop rules are credited back to the billed usage metrics
      * (`bytes_ingested` / `records_ingested`). When `false` (default), the credit is only
@@ -63,6 +94,18 @@ export type LogsIngestionConsumerConfig = {
      * (shadow mode) — billing is unchanged.
      */
     LOGS_BILLING_PRORATE_ENABLED: boolean
+    /** Comma-separated team IDs, or `*` for all teams, or empty (default) to disable hog log transformations entirely. */
+    LOGS_TRANSFORMATIONS_ENABLED_TEAMS: string
+    /** When `true`, hog log transformations are skipped regardless of the allowlist. */
+    LOGS_TRANSFORMATIONS_KILLSWITCH: boolean
+    /** Hard per-record HogVM kill in milliseconds. */
+    LOGS_TRANSFORMATIONS_HOG_TIMEOUT_MS: number
+    /** Cumulative HogVM time budget per Kafka message; exhaustion skips remaining records (fail-open). */
+    LOGS_TRANSFORMATIONS_MESSAGE_BUDGET_MS: number
+    /** Cumulative HogVM time budget per consumer batch; bounds worst-case added batch latency. */
+    LOGS_TRANSFORMATIONS_BATCH_BUDGET_MS: number
+    /** Max failed invocations whose logs are captured, per function per message. */
+    LOGS_TRANSFORMATIONS_MAX_ERROR_LOGS_PER_FUNCTION: number
     REDIS_URL: string
     REDIS_POOL_MIN_SIZE: number
     REDIS_POOL_MAX_SIZE: number
@@ -92,7 +135,31 @@ export function getDefaultLogsIngestionConsumerConfig(): LogsIngestionConsumerCo
         LOGS_METRICS_RULES_ENABLED_TEAMS: isProdEnv() ? '' : '*',
         LOGS_METRICS_RULES_KILLSWITCH: false,
         LOGS_METRICS_RULES_EXPORT_URL: '',
+        LOGS_DEFAULT_METRIC_RULES_ENABLED_TEAMS: '',
+        // Off in prod until per-team rollout; on in dev for local end-to-end testing.
+        LOGS_RETENTION_ENABLED_TEAMS: isProdEnv() ? '' : '*',
+        LOGS_BACKFILL_ENABLED_TEAMS: isProdEnv() ? '' : '*',
+        LOGS_RETENTION_KILLSWITCH: false,
+        LOGS_INTERNAL_INGESTION_ENABLED_TEAMS: '',
+        LOGS_INTERNAL_INGESTION_SIGNING_KEYS: '',
+        LOGS_INTERNAL_PRODUCER_URL: '',
+        LOGS_INTERNAL_PRODUCER_TEAMS: '',
+        LOGS_INTERNAL_PRODUCER_MAX_IN_FLIGHT: 20,
+        LOGS_INTERNAL_PRODUCER_MAX_BUFFERED_BYTES: 64 * 1024 * 1024,
+        LOGS_INTERNAL_PRODUCER_RETRY_TIMEOUT_MS: 60_000,
+        // Off by default: enabling forces decode+re-encode for allowlisted teams.
+        LOGS_PATTERN_MASKING_ENABLED_TEAMS: '',
+        LOGS_JSON_ATTRIBUTE_PARSING_ENABLED_TEAMS: '',
+        LOGS_JSON_ATTRIBUTE_EXTRACTION_ENABLED_TEAMS: '',
         LOGS_BILLING_PRORATE_ENABLED: false,
+        LOGS_TRANSFORMATIONS_ENABLED_TEAMS: '',
+        LOGS_TRANSFORMATIONS_KILLSWITCH: false,
+        LOGS_TRANSFORMATIONS_HOG_TIMEOUT_MS: 10,
+        // A regex-heavy scrub measured ~95µs/record (see transformations/benchmarks/);
+        // 100ms covers one such function over a full ~1,100-record message.
+        LOGS_TRANSFORMATIONS_MESSAGE_BUDGET_MS: 100,
+        LOGS_TRANSFORMATIONS_BATCH_BUDGET_MS: 2000,
+        LOGS_TRANSFORMATIONS_MAX_ERROR_LOGS_PER_FUNCTION: 3,
         // Overlapping fields with CommonConfig, included for standalone usage
         // ok to connect to localhost over plaintext
         // nosemgrep: trailofbits.generic.redis-unencrypted-transport.redis-unencrypted-transport
@@ -120,6 +187,15 @@ export type TracesIngestionConsumerConfig = {
     TRACES_LIMITER_TTL_SECONDS: number
     TRACES_LIMITER_TEAM_BUCKET_SIZE_KB: string
     TRACES_LIMITER_TEAM_REFILL_RATE_KB_PER_SECOND: string
+    TRACES_METRICS_RULES_ENABLED_TEAMS: string
+    TRACES_METRICS_RULES_KILLSWITCH: boolean
+    TRACES_METRICS_RULES_EXPORT_URL: string
+    /** Comma-separated team IDs, or `*` for all teams, that also get the built-in default span metric rules. */
+    TRACES_DEFAULT_METRIC_RULES_ENABLED_TEAMS: string
+    /** Comma-separated team IDs, or `*` for all teams, or empty to disable per-row span retention rules. */
+    TRACES_RETENTION_ENABLED_TEAMS: string
+    /** When `true`, span retention rules are never evaluated (spans keep the team default via the batch header). */
+    TRACES_RETENTION_KILLSWITCH: boolean
     REDIS_URL: string
     REDIS_POOL_MIN_SIZE: number
     REDIS_POOL_MAX_SIZE: number
@@ -144,6 +220,15 @@ export function getDefaultTracesIngestionConsumerConfig(): TracesIngestionConsum
         TRACES_LIMITER_TTL_SECONDS: 60 * 60 * 24,
         TRACES_LIMITER_TEAM_BUCKET_SIZE_KB: '',
         TRACES_LIMITER_TEAM_REFILL_RATE_KB_PER_SECOND: '',
+        // Mirror the logs default: enabled for all teams on the dev stack so a span rule
+        // works out of the box locally, off in prod until explicitly enabled per team.
+        TRACES_METRICS_RULES_ENABLED_TEAMS: isProdEnv() ? '' : '*',
+        TRACES_METRICS_RULES_KILLSWITCH: false,
+        TRACES_METRICS_RULES_EXPORT_URL: '',
+        TRACES_DEFAULT_METRIC_RULES_ENABLED_TEAMS: '',
+        // Same rollout shape as the logs retention rules: on locally, off in prod until enabled per team.
+        TRACES_RETENTION_ENABLED_TEAMS: isProdEnv() ? '' : '*',
+        TRACES_RETENTION_KILLSWITCH: false,
         // Overlapping fields with CommonConfig, included for standalone usage
         // ok to connect to localhost over plaintext
         // nosemgrep: trailofbits.generic.redis-unencrypted-transport.redis-unencrypted-transport

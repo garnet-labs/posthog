@@ -1,8 +1,9 @@
-import { cleanup, fireEvent, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 
 import type { TooltipContext } from '../core/types'
 import { createDefaultTooltipAccessor, makeOverlayContext, renderOverlayInChart } from '../testing'
 import { DefaultTooltip } from './DefaultTooltip'
+import { TooltipSurface } from './TooltipSurface'
 
 const SCALES = { x: () => 0, y: (v: number) => v, yTicks: () => [] }
 
@@ -47,6 +48,11 @@ describe('DefaultTooltip', () => {
     it('formats values with default (no formatter)', () => {
         renderTooltip({})
         screen.getByText((19402).toLocaleString())
+    })
+
+    it('renders TooltipSurface outside a chart', () => {
+        render(<TooltipSurface>Outside a chart</TooltipSurface>)
+        screen.getByText('Outside a chart')
     })
 
     it('formats values with custom valueFormatter', () => {
@@ -262,6 +268,17 @@ describe('DefaultTooltip', () => {
                 { series: { key: 'b', label: 'Beta', data: [] }, value: 5, color: '#111', yPixel: 300 },
             ]
             renderTooltip({}, withYPixel, { hoverPosition: { x: 0, y: 290 } })
+            const closest = document.querySelectorAll<HTMLElement>('[data-closest="true"]')
+            expect(closest).toHaveLength(1)
+            expect(closest[0].querySelector('[data-attr="hog-chart-tooltip-series"]')?.textContent).toBe('Beta')
+        })
+
+        it('marks the hovered series row before using the cursor position', () => {
+            const withYPixel: TooltipContext['seriesData'] = [
+                { ...TWO_SERIES[0], yPixel: 0 },
+                { ...TWO_SERIES[1], yPixel: 300 },
+            ]
+            renderTooltip({}, withYPixel, { hoveredSeriesKey: 'b', hoverPosition: { x: 0, y: 0 } })
             const closest = document.querySelectorAll<HTMLElement>('[data-closest="true"]')
             expect(closest).toHaveLength(1)
             expect(closest[0].querySelector('[data-attr="hog-chart-tooltip-series"]')?.textContent).toBe('Beta')

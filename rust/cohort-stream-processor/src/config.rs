@@ -1,9 +1,10 @@
 //! Service configuration, loaded from environment variables via `envconfig`.
 
-use std::path::PathBuf;
+use std::num::{NonZeroU16, NonZeroUsize};
+use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 
-use anyhow::ensure;
+use anyhow::{ensure, Context};
 use common_database::PoolConfig;
 use common_kafka::config::KafkaConfig;
 use common_types::cohort::TeamAllowlist;
@@ -11,8 +12,12 @@ use envconfig::Envconfig;
 use rdkafka::ClientConfig;
 use tracing::warn;
 
-use crate::store::durability::DurabilityConfig;
+use crate::partitions::pacing::{AgeMs, Hysteresis, SeedPacingConfig, UsedPct};
+use crate::partitions::{PartitionOwnership, SplitClaim};
+use crate::store::durability::stage::staging_path;
+use crate::store::durability::{CheckpointLineage, DurabilityConfig, NotAnOrdinalPod, PodOrdinal};
 use crate::store::{OffloadConfig, OffloadMode, StoreConfig};
+use crate::workers::seed_run::RunBudget;
 use crate::workers::{CascadeConfig, EventNameGating, TransferRetryPolicy};
 
 const POOL_NAME: &str = "posthog_cohort";
@@ -72,12 +77,26 @@ pub struct Config {
     #[envconfig(default = "128")]
     pub partition_channel_buffer: usize,
 
-    /// Per-partition ceiling on un-drained events in a worker's channel — the binding intake bound
-    /// (the 128-slot buffer counts sub-batches, not the events inside them). Worst case in channels
-    /// ≈ `cap × owned_partitions × avg_event_bytes`. Tune down if soak RSS runs hot; too low churns
-    /// pause/resume.
+    /// Per-partition ceiling on un-drained events in a worker's **live** lane — the binding intake
+    /// bound (the 128-slot buffer counts sub-batches, not the events inside them). Seeds have their
+    /// own lane and their own cap, [`PARTITION_INTAKE_MAX_SEEDS`](Self::partition_intake_max_seeds).
+    /// Worst case in channels ≈ `cap × owned_partitions × avg_event_bytes`. Tune down if soak RSS
+    /// runs hot; too low churns pause/resume.
     #[envconfig(from = "PARTITION_INTAKE_MAX_EVENTS", default = "1024")]
     pub partition_intake_max_events: usize,
+
+    /// The seed lane's capacity, in seeds, for one partition worker. The lane holds one seed per
+    /// slot, so this value *is* the seed intake cap — there is no separate counter.
+    ///
+    /// The resident bound per partition is `cap + COHORT_SEED_APPLY_BATCH_MAX`: `recv_many` frees
+    /// the slots it takes at the start of a seed turn and the dispatcher refills them while the
+    /// turn runs, which is wanted — the next turn is already full when this one ends.
+    ///
+    /// Additive with the event cap, so a shutdown drain covers up to this many seeds
+    /// **plus** `PARTITION_INTAKE_MAX_EVENTS` events per partition. At the default that is about
+    /// four quanta of seeds, seconds of drain at the rates the apply path sustains.
+    #[envconfig(from = "PARTITION_INTAKE_MAX_SEEDS", default = "1024")]
+    pub partition_intake_max_seeds: usize,
 
     #[envconfig(default = "localhost:9092")]
     pub kafka_hosts: String,
@@ -98,17 +117,8 @@ pub struct Config {
     #[envconfig(default = "cohort-stream-processor")]
     pub kafka_consumer_group: String,
 
-    /// Start at the tail, not the topic's retention.
-    #[envconfig(default = "latest")]
-    pub kafka_consumer_offset_reset: String,
-
-    /// How long the broker waits for heartbeats before declaring this consumer dead. With static
-    /// membership, a restart within this window reclaims partitions with no rebalance.
-    #[envconfig(default = "60000")]
-    pub kafka_session_timeout_ms: u64,
-
-    /// `queued.max.messages.kbytes` (KB). For a `subscribe()` consumer this is an *aggregate* cap
-    /// across all partitions — the ceiling on librdkafka's fetch buffer. 128 MB.
+    /// `queued.max.messages.kbytes` (KB). For the events consumer this is an *aggregate* cap
+    /// across all its partitions — the ceiling on librdkafka's fetch buffer. 128 MB.
     #[envconfig(from = "COHORT_KAFKA_QUEUED_MAX_MESSAGES_KBYTES", default = "131072")]
     pub kafka_queued_max_messages_kbytes: u32,
 
@@ -250,8 +260,8 @@ pub struct Config {
     #[envconfig(from = "COHORT_REGISTER_TRANSFER_ENABLED", default = "false")]
     pub cohort_register_transfer_enabled: bool,
 
-    /// Admit and drain reconcile controls. Default off; enable only once every downstream consumer
-    /// tolerates completion markers. Register transfer is gated separately by
+    /// Admit and drain reconcile controls. Default off; enable only once `COHORT_RECONCILE_MARKERS_TOPIC`
+    /// exists in the environment, which startup asserts. Register transfer is gated separately by
     /// `COHORT_REGISTER_TRANSFER_ENABLED`.
     #[envconfig(from = "COHORT_SEED_RECONCILE_ENABLED", default = "false")]
     pub cohort_seed_reconcile_enabled: bool,
@@ -264,17 +274,93 @@ pub struct Config {
     #[envconfig(from = "COHORT_SEED_RECONCILE_TICK_INTERVAL_MS", default = "2000")]
     pub cohort_seed_reconcile_tick_interval_ms: u64,
 
-    /// Stable per-pod identity for `group.instance.id` + `client.id`, enabling static membership.
-    /// Read from `POD_NAME`, else `HOSTNAME`. Absent means no static membership.
+    /// Apply `person_property` seeds. Default off; while off they skip and commit, so a run
+    /// produced against a gate-off fleet has to be re-produced after enabling.
+    #[envconfig(from = "COHORT_SEED_PERSON_APPLY_ENABLED", default = "false")]
+    pub cohort_seed_person_apply_enabled: bool,
+
+    /// How far a person seed's scan instant must beat the stored record's stamp before it may
+    /// overwrite live-evaluated state (ms). Covers ClickHouse replication lag plus modest client
+    /// clock skew; ties go to live.
+    #[envconfig(from = "COHORT_SEED_PERSON_LIVE_MARGIN_MS", default = "900000")]
+    pub cohort_seed_person_live_margin_ms: i64,
+
+    /// Seeds one partition worker applies as a single run. `1` limits each run to one seed through
+    /// the same apply pipeline; it does not restore a different implementation.
+    #[envconfig(from = "COHORT_SEED_APPLY_BATCH_MAX", default = "256")]
+    pub cohort_seed_apply_batch_max: usize,
+
+    /// Store rows one run may touch: the stage-1 rows its seeds fold plus one stage-2 register per
+    /// cohort those leaves back. This bounds entry counts in the overlay, register read, recompute
+    /// set, and outputs. It is not a byte limit: behavioral row sizes grow with their windows.
+    /// Reads inside each composed evaluation scale with that cohort's tree and use the maintenance
+    /// lane's permits. A run closes before the seed that would exceed the budget; a seed heavier
+    /// than the whole budget still runs alone.
+    #[envconfig(from = "COHORT_SEED_APPLY_BATCH_MAX_ROWS", default = "4096")]
+    pub cohort_seed_apply_batch_max_rows: usize,
+
+    /// Live-priority gate: pause a seed partition once its live watermark age reaches this (ms).
+    /// `0` disables the trigger.
+    #[envconfig(from = "COHORT_SEED_LIVE_LAG_PAUSE_MS", default = "120000")]
+    pub cohort_seed_live_lag_pause_ms: i64,
+
+    /// Resume a live-lag-paused seed partition once its watermark age drops below this (ms).
+    /// Must be positive and below the pause threshold when the trigger is enabled.
+    #[envconfig(from = "COHORT_SEED_LIVE_LAG_RESUME_MS", default = "60000")]
+    pub cohort_seed_live_lag_resume_ms: i64,
+
+    /// Disk gate: pause all seed partitions once the store filesystem's used share reaches
+    /// this (%). `0` (the default) disables the trigger: pausing seeds cannot shrink a store
+    /// grown by the live path, so a threshold below the steady-state footprint would engage and
+    /// never release. Opt in per deployment once the utilization gauge has baseline history.
+    #[envconfig(from = "COHORT_SEED_DISK_PAUSE_PCT", default = "0")]
+    pub cohort_seed_disk_pause_pct: f64,
+
+    /// Resume disk-paused seed partitions once the used share drops below this (%). Must be
+    /// positive and below the pause threshold when the trigger is enabled.
+    #[envconfig(from = "COHORT_SEED_DISK_RESUME_PCT", default = "55")]
+    pub cohort_seed_disk_resume_pct: f64,
+
+    /// The StatefulSet pod name. Its ordinal suffix picks the partitions this pod owns and its
+    /// checkpoint lineage, and it names the Kafka clients. Absent outside Kubernetes.
     #[envconfig(from = "POD_NAME")]
     pub pod_name: Option<String>,
+
+    /// How many processor pods split the partitions. The pod with ordinal `i` owns every partition
+    /// `p` with `p mod COHORT_POD_COUNT = i`, on every input. It must divide
+    /// `COHORT_PARTITION_COUNT`. Set it with the StatefulSet's replica count.
+    #[envconfig(from = "COHORT_POD_COUNT", default = "1")]
+    pub cohort_pod_count: NonZeroU16,
+
+    /// The pod count before a reshard, which must divide `COHORT_POD_COUNT`. While it is set, each
+    /// pod whose ordinal is below it keeps its store, and every other pod takes its partitions over
+    /// from the pod that owned them. Remove it once the reshard is done.
+    #[envconfig(from = "COHORT_RESHARD_FROM_POD_COUNT")]
+    pub cohort_reshard_from_pod_count: Option<NonZeroU16>,
 
     #[envconfig(from = "HOSTNAME")]
     pub pod_hostname: Option<String>,
 
-    /// The shadow output topic for membership changes.
+    /// The output topic for membership changes. Defaulting to the shadow topic keeps the cut-over
+    /// a config-only change, so no code deploy can redirect production output.
     #[envconfig(default = "cohort_membership_changed_shadow")]
     pub cohort_membership_changed_topic: String,
+
+    /// Reconcile completion markers ride their own topic: the membership topic's consumers reject
+    /// any record without `person_id`/`status`, and the seeder's watcher tails this one end to end.
+    #[envconfig(default = "cohort_reconcile_markers")]
+    pub cohort_reconcile_markers_topic: String,
+
+    /// `message.timeout.ms` for the marker producer alone — much shorter than the shared 20 s. The
+    /// marker produce runs inline on a partition worker, so a broker that black-holes it stalls live
+    /// evaluation on that partition for the whole timeout, and the drain sweeper re-queues the job a
+    /// tick later and stalls it again. Half of `COHORT_SEED_RECONCILE_TICK_INTERVAL_MS`, so the
+    /// worker is free for events between attempts rather than held end to end, and still above the
+    /// ingestion cluster's p99 produce ack (~950 ms on prod-us) — below that, healthy tail produces
+    /// turn into spurious marker failures and bury the signal in
+    /// `cohort_reconcile_marker_produce_errors_total`.
+    #[envconfig(default = "1000")]
+    pub reconcile_marker_message_timeout_ms: u32,
 
     /// `murmur2_random` co-partitions a `person_id` key identically to the Node/Python producers.
     #[envconfig(default = "murmur2_random")]
@@ -375,6 +461,14 @@ pub struct Config {
     #[envconfig(from = "COHORT_MAX_BACKGROUND_JOBS", default = "0")]
     pub cohort_max_background_jobs: i32,
 
+    /// Size at which RocksDB rolls its info `LOG` file.
+    #[envconfig(from = "COHORT_MAX_LOG_FILE_SIZE_BYTES", default = "268435456")]
+    pub cohort_max_log_file_size_bytes: NonZeroUsize,
+
+    /// Number of info `LOG` files RocksDB keeps.
+    #[envconfig(from = "COHORT_KEEP_LOG_FILE_NUM", default = "10")]
+    pub cohort_keep_log_file_num: NonZeroUsize,
+
     /// TTL in days for `cf_person_records`: a compaction filter drops a person record whose
     /// `last_seen_ms` is older than this. `0` (the default) disables it — no filter is installed, so a
     /// persisted record never ages out. Attached to `cf_person_records` only; `cf_behavioral` eviction
@@ -409,19 +503,9 @@ pub struct Config {
 
     /// When on, reopen the existing store on restart instead of wiping it: recent Stage 1 state is
     /// restored and only the gap since the last committed offset is replayed (idempotent via per-key
-    /// `AppliedOffsets`). Refused alongside `cohort_cascade_enabled` — merge column families are not
-    /// restored yet. See [`Self::effective_wipe_on_start`].
+    /// `AppliedOffsets`). See [`Self::effective_wipe_on_start`].
     #[envconfig(from = "DURABLE_RESTORE_ENABLED", default = "false")]
     pub durable_restore_enabled: bool,
-
-    /// Operator assertion that this is a single-pod, static-membership shadow deploy. Default off.
-    ///
-    /// Required to run `DURABLE_RESTORE_ENABLED` together with `COHORT_CASCADE_ENABLED`: a single pod
-    /// with static membership reclaims its own partitions on a restart and never triggers a live
-    /// rebalance. `pod_identity()` cannot gate this because it is set on every k8s pod (single or
-    /// multi), so the single-vs-multi assertion needs its own flag.
-    #[envconfig(from = "DURABLE_RESTORE_SINGLE_POD", default = "false")]
-    pub durable_restore_single_pod: bool,
 
     /// Master gate for the whole-DB checkpoint + S3 backup/restore layer. Default off.
     #[envconfig(from = "CHECKPOINT_ENABLED", default = "false")]
@@ -437,8 +521,9 @@ pub struct Config {
     #[envconfig(default = "900000")]
     pub checkpoint_s3_upload_interval_ms: u64,
 
-    /// Base directory for local checkpoints. Must be a subtree separate from `store_path` on the same
-    /// filesystem (RocksDB refuses to checkpoint into its own directory and hard-links SSTs).
+    /// Base directory for local checkpoints. Must be an absolute path outside `store_path` and its
+    /// `<store_path>.restore` staging directory, on the same filesystem (RocksDB refuses to
+    /// checkpoint into its own directory and hard-links SSTs, and every boot deletes the stage).
     #[envconfig(default = "cohort-checkpoints")]
     pub checkpoint_local_dir: String,
 
@@ -485,7 +570,7 @@ pub struct Config {
     pub checkpoint_max_upload_buffers: usize,
 
     /// Retries per S3 operation before giving up.
-    #[envconfig(default = "3")]
+    #[envconfig(default = "10")]
     pub checkpoint_s3_max_retries: usize,
 
     /// Total timeout for one S3 operation including retries (secs).
@@ -503,17 +588,31 @@ pub struct Config {
     pub checkpoint_local_max_staleness_secs: u64,
 
     /// Hours prior to now the S3 importer searches for checkpoint attempts in a PVC-lost recovery.
-    #[envconfig(default = "24")]
+    /// Keep it below the `cohort_stream_events` retention by more than a restore's catch-up time: a
+    /// restore resumes about this far back, and a consumer that falls below the low watermark while
+    /// it catches up resets to `earliest` without a trace, so the events that retention deleted are
+    /// lost.
+    #[envconfig(default = "20")]
     pub checkpoint_import_window_hours: u32,
 
     /// Historical S3 checkpoint attempts to try (newest first) before giving up on import.
     #[envconfig(default = "10")]
     pub checkpoint_import_attempt_depth: usize,
 
-    /// Max time for a complete S3 checkpoint import — list + metadata + all files + fallbacks (secs).
-    /// Kept under `max.poll.interval.ms` so a long restore does not get the consumer kicked.
-    #[envconfig(default = "240")]
+    /// Max time to download one S3 checkpoint candidate's files (secs). A slower candidate fails and
+    /// ends the search, because older candidates are about as large. It bounds the size of a store
+    /// that can restore, so keep it above a full store volume at the volume's write throughput.
+    #[envconfig(default = "7200")]
     pub checkpoint_import_timeout_secs: u64,
+
+    /// Age of an upload chain past which the next upload is full (secs). Bounds how old the oldest
+    /// object a restore needs can be.
+    #[envconfig(default = "86400")]
+    pub checkpoint_full_upload_interval_secs: u64,
+
+    /// Average rate one upload may read from the store's disk (bytes per second).
+    #[envconfig(default = "67108864")]
+    pub checkpoint_upload_max_bytes_per_sec: u64,
 }
 
 /// librdkafka consumer fetch-queue bounds: an aggregate byte cap across all partitions and a
@@ -619,8 +718,73 @@ impl Config {
             .max(Duration::from_secs(1))
     }
 
+    /// The run ceilings the partition workers group seeds under. Validated at startup, so a
+    /// zero here is a bug rather than a config error.
+    pub fn seed_run_budget(&self) -> RunBudget {
+        RunBudget {
+            seeds: NonZeroUsize::new(self.cohort_seed_apply_batch_max).unwrap_or(NonZeroUsize::MIN),
+            rows: NonZeroUsize::new(self.cohort_seed_apply_batch_max_rows)
+                .unwrap_or(NonZeroUsize::MIN),
+        }
+    }
+
+    /// The seed lane's capacity for one partition worker. Validated at startup, so a zero here is
+    /// a bug rather than a config error.
+    pub fn seed_lane_cap(&self) -> NonZeroUsize {
+        NonZeroUsize::new(self.partition_intake_max_seeds).unwrap_or(NonZeroUsize::MIN)
+    }
+
     pub fn reconcile_tick_interval(&self) -> Duration {
         Duration::from_millis(self.cohort_seed_reconcile_tick_interval_ms)
+    }
+
+    /// The seed consumer's pacing gates. `0` on a pause threshold disables that trigger; an
+    /// enabled trigger requires `0 < resume < pause` (and `pause <= 100` for the disk share) so a
+    /// flapping or never-releasing pair is refused at startup.
+    pub fn seed_pacing_config(&self) -> anyhow::Result<SeedPacingConfig> {
+        let live_lag = if self.cohort_seed_live_lag_pause_ms == 0 {
+            None
+        } else {
+            ensure!(
+                self.cohort_seed_live_lag_pause_ms > 0,
+                "COHORT_SEED_LIVE_LAG_PAUSE_MS must be positive (0 disables the trigger).",
+            );
+            ensure!(
+                self.cohort_seed_live_lag_resume_ms > 0,
+                "COHORT_SEED_LIVE_LAG_RESUME_MS must be positive: a non-positive resume \
+                 threshold could never release the pause.",
+            );
+            Some(
+                Hysteresis::new(
+                    AgeMs(self.cohort_seed_live_lag_pause_ms),
+                    AgeMs(self.cohort_seed_live_lag_resume_ms),
+                )
+                .context(
+                    "COHORT_SEED_LIVE_LAG_RESUME_MS must be below COHORT_SEED_LIVE_LAG_PAUSE_MS",
+                )?,
+            )
+        };
+        let disk = if self.cohort_seed_disk_pause_pct == 0.0 {
+            None
+        } else {
+            ensure!(
+                self.cohort_seed_disk_pause_pct > 0.0 && self.cohort_seed_disk_pause_pct <= 100.0,
+                "COHORT_SEED_DISK_PAUSE_PCT must be within (0, 100] (0 disables the trigger).",
+            );
+            ensure!(
+                self.cohort_seed_disk_resume_pct > 0.0,
+                "COHORT_SEED_DISK_RESUME_PCT must be positive: a non-positive resume threshold \
+                 could never release the pause.",
+            );
+            Some(
+                Hysteresis::new(
+                    UsedPct(self.cohort_seed_disk_pause_pct),
+                    UsedPct(self.cohort_seed_disk_resume_pct),
+                )
+                .context("COHORT_SEED_DISK_RESUME_PCT must be below COHORT_SEED_DISK_PAUSE_PCT")?,
+            )
+        };
+        Ok(SeedPacingConfig { live_lag, disk })
     }
 
     pub fn checkpoint_interval(&self) -> Duration {
@@ -655,19 +819,22 @@ impl Config {
             max_upload_buffers: self.checkpoint_max_upload_buffers,
             checkpoint_import_timeout: Duration::from_secs(self.checkpoint_import_timeout_secs),
             local_checkpoint_max_staleness: self.checkpoint_local_max_staleness(),
+            full_upload_interval: Duration::from_secs(self.checkpoint_full_upload_interval_secs),
+            upload_max_bytes_per_sec: self.checkpoint_upload_max_bytes_per_sec,
         }
     }
 
-    /// Refuse unsafe durability startup combinations. Pure (no I/O), so unit-testable without a broker.
+    /// Refuse unsafe startup combinations (durability, reconcile, and pacing knobs). Pure
+    /// (no I/O), so unit-testable without a broker.
     ///
     /// Guards:
     /// - Reconcile scan and tick limits must be non-zero; a zero page would falsely certify an
     ///   unscanned snapshot, while Tokio rejects a zero timer interval.
     /// - `checkpoint_enabled` requires `durable_restore_enabled`: without it the restored DB is wiped
-    ///   on open, silently discarding the restore.
-    /// - `durable_restore_enabled` + `cohort_cascade_enabled` requires `durable_restore_single_pod`
-    ///   and a pod identity: `pod_identity()` alone is not a single-pod signal (set on every k8s pod).
-    pub fn validate_durability_startup(&self) -> anyhow::Result<()> {
+    ///   on open, silently discarding the restore. It also requires a bucket, non-zero knobs, an
+    ///   absolute checkpoint directory apart from the store, and a pod name with an ordinal, so a
+    ///   misconfigured pod fails at start instead of running without checkpoints.
+    pub fn validate_startup(&self) -> anyhow::Result<()> {
         ensure!(
             self.cohort_seed_reconcile_scan_page > 0,
             "COHORT_SEED_RECONCILE_SCAN_PAGE must be greater than zero.",
@@ -676,6 +843,44 @@ impl Config {
             self.cohort_seed_reconcile_tick_interval_ms > 0,
             "COHORT_SEED_RECONCILE_TICK_INTERVAL_MS must be greater than zero.",
         );
+        // A zero run ceiling would form no run at all, so every seed would be neither marked nor
+        // held and the partition would wedge behind the first one.
+        ensure!(
+            self.cohort_seed_apply_batch_max > 0,
+            "COHORT_SEED_APPLY_BATCH_MAX must be greater than zero (1 = one seed per run).",
+        );
+        ensure!(
+            self.cohort_seed_apply_batch_max_rows > 0,
+            "COHORT_SEED_APPLY_BATCH_MAX_ROWS must be greater than zero.",
+        );
+        // A zero-capacity mpsc channel panics on construction, and so does one above tokio's
+        // permit bound, so either would take the pod down at the first worker spawn.
+        ensure!(
+            self.partition_intake_max_seeds > 0,
+            "PARTITION_INTAKE_MAX_SEEDS must be greater than zero (it is the seed lane's capacity in seeds).",
+        );
+        ensure!(
+            self.partition_intake_max_seeds <= tokio::sync::Semaphore::MAX_PERMITS,
+            "PARTITION_INTAKE_MAX_SEEDS must not exceed {} (tokio's channel capacity bound).",
+            tokio::sync::Semaphore::MAX_PERMITS,
+        );
+
+        let pacing = self.seed_pacing_config()?;
+        // Idle partitions' watermarks advance only once per probe, so a pause threshold inside
+        // two probe intervals would flap on quiet partitions.
+        let idle_probe_ms =
+            i64::try_from(self.cohort_seed_watermark_idle_probe_interval_ms).unwrap_or(i64::MAX);
+        if pacing.live_lag.is_some()
+            && self.cohort_seed_live_lag_pause_ms <= idle_probe_ms.saturating_mul(2)
+        {
+            warn!(
+                cohort_seed_live_lag_pause_ms = self.cohort_seed_live_lag_pause_ms,
+                idle_probe_interval_ms = self.cohort_seed_watermark_idle_probe_interval_ms,
+                "COHORT_SEED_LIVE_LAG_PAUSE_MS within 2× the idle-probe interval: idle \
+                 partitions advance only per probe, so the live-lag gate may flap on quiet \
+                 partitions.",
+            );
+        }
 
         if self.cohort_seed_reconcile_enabled && !self.cohort_seed_consumer_enabled {
             warn!(
@@ -684,31 +889,40 @@ impl Config {
             );
         }
 
+        // A negative margin biases the person-seed verdict toward the seed, letting a stale scan
+        // overwrite fresher live state.
+        ensure!(
+            self.cohort_seed_person_live_margin_ms >= 0,
+            "COHORT_SEED_PERSON_LIVE_MARGIN_MS must not be negative.",
+        );
+
+        if self.cohort_seed_person_apply_enabled && !self.cohort_seed_consumer_enabled {
+            warn!(
+                "COHORT_SEED_PERSON_APPLY_ENABLED without COHORT_SEED_CONSUMER_ENABLED: no person \
+                 seeds can be consumed; enable the seed consumer or turn person apply off.",
+            );
+        }
+
+        // Seed redelivery repairs failed produces only when the register preserves the retired
+        // value. Legacy seed writers stored truth before producing, so a held seed replayed across
+        // that writer change can read an agreeing row and emit nothing. Reconcile must cover those
+        // deliveries, cohort edits, and live/merge produces whose state already committed.
+        if self.cohort_seed_person_apply_enabled && !self.cohort_seed_reconcile_enabled {
+            warn!(
+                "COHORT_SEED_PERSON_APPLY_ENABLED without COHORT_SEED_RECONCILE_ENABLED: a live \
+                 event that fails its produce, a cohort edited mid-run, and a merge apply that \
+                 fails its produce have no repair path. Failed deliveries from seed writers \
+                 that stored truth before producing also require reconcile.",
+            );
+        }
+
         ensure!(
             !self.checkpoint_enabled || self.durable_restore_enabled,
             "CHECKPOINT_ENABLED requires DURABLE_RESTORE_ENABLED: restoring a checkpoint without \
              reopen-live is meaningless.",
         );
-
-        if self.durable_restore_enabled && self.cohort_cascade_enabled {
-            let single_pod_static =
-                self.durable_restore_single_pod && self.pod_identity().is_some();
-            ensure!(
-                single_pod_static,
-                "DURABLE_RESTORE_ENABLED=true is unsafe with COHORT_CASCADE_ENABLED=true: merge \
-                 column families are not restored yet. Disable one of them, or set \
-                 DURABLE_RESTORE_SINGLE_POD=true on a single-pod static-membership (POD_NAME/HOSTNAME \
-                 set) shadow deploy.",
-            );
-            warn!(
-                durable_restore_single_pod = self.durable_restore_single_pod,
-                pod_identity = self.pod_identity().unwrap_or("<none>"),
-                "DURABLE_RESTORE_ENABLED + COHORT_CASCADE_ENABLED allowed on a single-pod \
-                 static-membership shadow. RESIDUALS deferred to Slice 3: multi-pod rebalance \
-                 F3-on-revoke and the post-join↔delete REVOKE race are NOT covered (single-pod \
-                 membership sidesteps them); merge column-family *content* resume after an S3 restore \
-                 is validated only on this shadow, NOT production multi-pod merge durability.",
-            );
+        if self.checkpoint_enabled {
+            self.validate_checkpoints()?;
         }
 
         // Not a refusal (dev runs with durability off), but a crash then loses applied tiles
@@ -724,6 +938,165 @@ impl Config {
         Ok(())
     }
 
+    fn validate_checkpoints(&self) -> anyhow::Result<()> {
+        ensure!(
+            !self.checkpoint_s3_bucket.is_empty(),
+            "CHECKPOINT_ENABLED requires CHECKPOINT_S3_BUCKET.",
+        );
+        let knobs: [(&str, u64); 13] = [
+            ("CHECKPOINT_INTERVAL_MS", self.checkpoint_interval_ms),
+            (
+                "CHECKPOINT_S3_UPLOAD_INTERVAL_MS",
+                self.checkpoint_s3_upload_interval_ms,
+            ),
+            (
+                "CHECKPOINT_FULL_UPLOAD_INTERVAL_SECS",
+                self.checkpoint_full_upload_interval_secs,
+            ),
+            (
+                "CHECKPOINT_MAX_CONCURRENT_UPLOADS",
+                self.checkpoint_max_concurrent_uploads as u64,
+            ),
+            (
+                "CHECKPOINT_MAX_CONCURRENT_DOWNLOADS",
+                self.checkpoint_max_concurrent_downloads as u64,
+            ),
+            (
+                "CHECKPOINT_MAX_UPLOAD_BUFFERS",
+                self.checkpoint_max_upload_buffers as u64,
+            ),
+            (
+                "CHECKPOINT_IMPORT_WINDOW_HOURS",
+                u64::from(self.checkpoint_import_window_hours),
+            ),
+            (
+                "CHECKPOINT_LOCAL_MAX_STALENESS_SECS",
+                self.checkpoint_local_max_staleness_secs,
+            ),
+            (
+                "CHECKPOINT_IMPORT_ATTEMPT_DEPTH",
+                self.checkpoint_import_attempt_depth as u64,
+            ),
+            (
+                "CHECKPOINT_S3_OPERATION_TIMEOUT_SECS",
+                self.checkpoint_s3_operation_timeout_secs,
+            ),
+            (
+                "CHECKPOINT_S3_ATTEMPT_TIMEOUT_SECS",
+                self.checkpoint_s3_attempt_timeout_secs,
+            ),
+            (
+                "CHECKPOINT_IMPORT_TIMEOUT_SECS",
+                self.checkpoint_import_timeout_secs,
+            ),
+            (
+                "CHECKPOINT_UPLOAD_MAX_BYTES_PER_SEC",
+                self.checkpoint_upload_max_bytes_per_sec,
+            ),
+        ];
+        for (name, value) in knobs {
+            ensure!(value > 0, "{name} must be greater than zero.");
+        }
+        let checkpoints = Path::new(&self.checkpoint_local_dir);
+        let store = Path::new(&self.store_path);
+        // `starts_with` compares path components, so a `..` could name the store or its staging
+        // directory under a spelling the checks below do not match.
+        let plain = |path: &Path| {
+            path.is_absolute() && !path.components().any(|part| part == Component::ParentDir)
+        };
+        ensure!(
+            plain(checkpoints) && plain(store),
+            "CHECKPOINT_LOCAL_DIR {checkpoints:?} and STORE_PATH {store:?} must be absolute paths \
+             without `..`.",
+        );
+        ensure!(
+            !checkpoints.starts_with(store) && !store.starts_with(checkpoints),
+            "CHECKPOINT_LOCAL_DIR {checkpoints:?} and STORE_PATH {store:?} must not contain one \
+             another: RocksDB refuses a checkpoint inside its own directory.",
+        );
+        let staging = staging_path(store);
+        ensure!(
+            !checkpoints.starts_with(&staging),
+            "CHECKPOINT_LOCAL_DIR {checkpoints:?} must not be inside {staging:?}, where a restore \
+             stages a checkpoint: every boot deletes that directory.",
+        );
+        self.checkpoint_lineage().context(
+            "POD_NAME must end in a StatefulSet ordinal, or be unset outside Kubernetes",
+        )?;
+        Ok(())
+    }
+
+    /// The ordinal at the end of `POD_NAME`, or `None` for a process without `POD_NAME` (a local
+    /// run or a test). `HOSTNAME` is not consulted: outside Kubernetes it names the machine, not a
+    /// StatefulSet pod.
+    fn pod_ordinal(&self) -> Result<Option<PodOrdinal>, NotAnOrdinalPod> {
+        self.pod_name
+            .as_deref()
+            .filter(|name| !name.is_empty())
+            .map(PodOrdinal::from_pod_name)
+            .transpose()
+    }
+
+    /// The checkpoint lineage of this pod, from its ordinal. A process without `POD_NAME` uses the
+    /// single pod's lineage.
+    pub fn checkpoint_lineage(&self) -> Result<CheckpointLineage, NotAnOrdinalPod> {
+        Ok(CheckpointLineage::new(
+            self.pod_ordinal()?.unwrap_or(PodOrdinal::STANDALONE),
+        ))
+    }
+
+    /// This pod's split and its place in a reshard: pod `ordinal` of `COHORT_POD_COUNT`, over
+    /// `COHORT_PARTITION_COUNT` partitions, resharded from `COHORT_RESHARD_FROM_POD_COUNT` pods
+    /// when that is set.
+    pub fn split_claim(&self) -> anyhow::Result<SplitClaim> {
+        ensure!(
+            self.cohort_reshard_from_pod_count.is_none()
+                || self.checkpoint_enabled
+                || !self.durable_restore_enabled,
+            "COHORT_RESHARD_FROM_POD_COUNT with DURABLE_RESTORE_ENABLED requires CHECKPOINT_ENABLED: \
+             without checkpoints each child starts empty while its parent deletes the partitions it \
+             gave away",
+        );
+        SplitClaim::new(
+            self.partition_ownership()?,
+            self.cohort_reshard_from_pod_count,
+        )
+        .context("COHORT_RESHARD_FROM_POD_COUNT must divide COHORT_POD_COUNT and be below it")
+    }
+
+    /// The partitions this pod owns. Only a single pod may run without `POD_NAME`: every pod
+    /// without it would take ordinal 0, and they would all own the same partitions.
+    fn partition_ownership(&self) -> anyhow::Result<PartitionOwnership> {
+        let ordinal = match self
+            .pod_ordinal()
+            .context("POD_NAME must end in a StatefulSet ordinal, or be unset outside Kubernetes")?
+        {
+            Some(ordinal) => ordinal,
+            None => {
+                ensure!(
+                    self.cohort_pod_count == NonZeroU16::MIN,
+                    "COHORT_POD_COUNT={} requires POD_NAME, so that each pod owns its own partitions",
+                    self.cohort_pod_count,
+                );
+                PodOrdinal::STANDALONE
+            }
+        };
+        PartitionOwnership::new(self.cohort_pod_count, ordinal, self.partition_count())
+            .with_context(|| {
+                format!(
+                    "COHORT_POD_COUNT={} must divide COHORT_PARTITION_COUNT={}, and the ordinal of \
+                     POD_NAME must be below it",
+                    self.cohort_pod_count, self.cohort_partition_count,
+                )
+            })
+    }
+
+    /// `COHORT_PARTITION_COUNT` as a slice id range. A count past `u16::MAX` fails the topic checks
+    /// at startup.
+    pub fn partition_count(&self) -> u16 {
+        u16::try_from(self.cohort_partition_count).unwrap_or(u16::MAX)
+    }
+
     /// Whether to wipe the store on start, folding in the durable-restore gate: keep the live store
     /// only when restore is on and one already exists on disk. Touches the filesystem (`.exists()`) —
     /// a one-shot decision evaluated once at store open.
@@ -732,7 +1105,7 @@ impl Config {
         self.wipe_store_on_start && !(self.durable_restore_enabled && db_dir_exists)
     }
 
-    pub fn store_config(&self) -> StoreConfig {
+    pub fn store_config(&self, ownership: PartitionOwnership) -> StoreConfig {
         if self.person_record_ttl_below_safe_floor() {
             warn!(
                 cohort_person_record_ttl_days = self.cohort_person_record_ttl_days,
@@ -753,7 +1126,10 @@ impl Config {
             compact_on_deletion: self.cohort_compact_on_deletion_enabled,
             periodic_compaction_seconds: self.cohort_periodic_compaction_seconds,
             max_background_jobs: self.cohort_max_background_jobs,
+            max_log_file_size_bytes: self.cohort_max_log_file_size_bytes,
+            keep_log_file_num: self.cohort_keep_log_file_num,
             person_record_ttl_days: self.cohort_person_record_ttl_days,
+            ownership,
             ..StoreConfig::default()
         }
     }
@@ -775,8 +1151,7 @@ impl Config {
         }
     }
 
-    /// Stable per-pod identity for static group membership, `POD_NAME` preferred over `HOSTNAME`.
-    /// `None` leaves static membership off.
+    /// Stable per-pod name for the Kafka `client.id`, `POD_NAME` preferred over `HOSTNAME`.
     pub fn pod_identity(&self) -> Option<&str> {
         [self.pod_name.as_deref(), self.pod_hostname.as_deref()]
             .into_iter()
@@ -784,28 +1159,10 @@ impl Config {
             .find(|id| !id.is_empty())
     }
 
-    /// Build the `rdkafka` client config for the `cohort_stream_events` group consumer.
-    ///
-    /// Auto-commit and auto-offset-store are off: the consume loop marks offsets only after a
-    /// sub-batch is routed and produced. `cooperative-sticky` + static membership ensure a
-    /// membership change revokes only the partitions that move.
+    /// Build the `rdkafka` client config for the `cohort_stream_events` consumer: the follower
+    /// config on the events group, with a bounded fetch buffer.
     pub fn consumer_client_config(&self) -> ClientConfig {
-        let mut config = ClientConfig::new();
-        config
-            .set("bootstrap.servers", &self.kafka_hosts)
-            .set("group.id", &self.kafka_consumer_group)
-            .set("enable.auto.commit", "false")
-            .set("enable.auto.offset.store", "false")
-            .set("auto.offset.reset", &self.kafka_consumer_offset_reset)
-            .set("partition.assignment.strategy", "cooperative-sticky")
-            .set("socket.timeout.ms", "10000")
-            .set(
-                "session.timeout.ms",
-                self.kafka_session_timeout_ms.to_string(),
-            )
-            .set("heartbeat.interval.ms", "5000")
-            .set("max.poll.interval.ms", "300000");
-
+        let mut config = self.follower_client_config(&self.kafka_consumer_group);
         // Bound librdkafka's fetch buffer: an aggregate byte ceiling plus a per-partition prefetch floor.
         let fetch = self.fetch_queue_config();
         config
@@ -814,33 +1171,19 @@ impl Config {
                 fetch.queued_max_messages_kbytes.to_string(),
             )
             .set("queued.min.messages", fetch.queued_min_messages.to_string());
-
-        // Static membership; an explicit `kafka_client_id` overrides `client.id` below.
-        if let Some(id) = self.pod_identity() {
-            config.set("group.instance.id", id).set("client.id", id);
-        }
-        if !self.kafka_client_id.is_empty() {
-            config.set("client.id", &self.kafka_client_id);
-        }
-        if !self.kafka_client_rack.is_empty() {
-            config.set("client.rack", &self.kafka_client_rack);
-        }
-        if self.kafka_tls {
-            config
-                .set("security.protocol", "ssl")
-                .set("enable.ssl.certificate.verification", "false");
-        }
         config
     }
 
-    /// Build the `rdkafka` client config for a merge-protocol follower consumer.
+    /// Build the `rdkafka` client config for a consumer of `group`: the events consumer or a
+    /// follower.
     ///
-    /// Followers never `subscribe()` — the events group's rebalance mirrors assignments onto them —
-    /// so there is no assignment strategy and no static membership; `group.id` exists only so
-    /// commits land on an observable group. `auto.offset.reset` is hard-coded to `earliest`: a
-    /// never-subscribing group is `Empty` to the broker, so its committed offsets are pruned after
-    /// `offsets.retention.minutes`, and a tail reset after pruning would silently skip the merge
-    /// backlog.
+    /// Auto-commit and auto-offset-store are off: a consume loop marks offsets only after its
+    /// messages are processed. Every consumer assigns itself the partitions this pod owns and never
+    /// joins its group, so `group.id` only names where its commits land. `auto.offset.reset` is
+    /// hard-coded to `earliest`: a group without members is `Empty` to the broker, which can expire
+    /// its committed offsets, and a tail reset would then silently skip the messages in between. It
+    /// sets no `group.instance.id`: librdkafka sends that id with every offset commit, and a broker
+    /// can refuse a commit that names a static member from a client outside the group.
     pub fn follower_client_config(&self, group: &str) -> ClientConfig {
         let mut config = ClientConfig::new();
         config
@@ -851,7 +1194,6 @@ impl Config {
             .set("auto.offset.reset", "earliest")
             .set("socket.timeout.ms", "10000");
 
-        // `client.id` for observability only; no `group.instance.id` (no membership to make static).
         if let Some(id) = self.pod_identity() {
             config.set("client.id", id);
         }
@@ -903,6 +1245,17 @@ impl Config {
             ..self.build_kafka_config()
         }
     }
+
+    /// Producer config for the reconcile-marker sink: the shared config with a shorter
+    /// `message.timeout.ms`. Same inline-on-a-worker reason as the transfer sink, except the retry
+    /// is the drain sweeper's rather than an inline loop, so an unreachable marker topic would
+    /// otherwise hold the worker for the full timeout on every tick.
+    pub fn build_marker_kafka_config(&self) -> KafkaConfig {
+        KafkaConfig {
+            kafka_message_timeout_ms: self.reconcile_marker_message_timeout_ms,
+            ..self.build_kafka_config()
+        }
+    }
 }
 
 #[cfg(test)]
@@ -925,13 +1278,13 @@ mod tests {
             cohort_event_name_gating_enabled: true,
             partition_channel_buffer: 128,
             partition_intake_max_events: 1024,
+            partition_intake_max_seeds: 1024,
             kafka_hosts: "localhost:9092".to_string(),
             kafka_tls: false,
             kafka_client_id: String::new(),
             kafka_client_rack: String::new(),
             cohort_stream_events_topic: "cohort_stream_events".to_string(),
             kafka_consumer_group: "cohort-stream-processor".to_string(),
-            kafka_consumer_offset_reset: "latest".to_string(),
             kafka_queued_max_messages_kbytes: 131_072,
             kafka_queued_min_messages: 2000,
             person_merge_events_topic: "person_merge_events".to_string(),
@@ -953,10 +1306,13 @@ mod tests {
             cohort_cascade_enabled: false,
             cohort_cascade_events_topic: "cohort_cascade_events".to_string(),
             kafka_cascade_consumer_group: "cohort-stream-cascade".to_string(),
-            kafka_session_timeout_ms: 60000,
             pod_name: None,
+            cohort_pod_count: NonZeroU16::MIN,
+            cohort_reshard_from_pod_count: None,
             pod_hostname: None,
             cohort_membership_changed_topic: "cohort_membership_changed_shadow".to_string(),
+            cohort_reconcile_markers_topic: "cohort_reconcile_markers".to_string(),
+            reconcile_marker_message_timeout_ms: 1000,
             kafka_producer_partitioner: "murmur2_random".to_string(),
             cohort_partition_count: 64,
             kafka_compression_codec: "none".to_string(),
@@ -978,12 +1334,13 @@ mod tests {
             cohort_compact_on_deletion_enabled: true,
             cohort_periodic_compaction_seconds: 0,
             cohort_max_background_jobs: 0,
+            cohort_max_log_file_size_bytes: NonZeroUsize::new(268_435_456).unwrap(),
+            cohort_keep_log_file_num: NonZeroUsize::new(10).unwrap(),
             cohort_person_record_ttl_days: 0,
             cohort_store_offload_mode: OffloadMode::All,
             cohort_store_event_read_permits: 16,
             cohort_store_maintenance_permits: 6,
             durable_restore_enabled: false,
-            durable_restore_single_pod: false,
             checkpoint_enabled: false,
             checkpoint_interval_ms: 300_000,
             checkpoint_s3_upload_interval_ms: 900_000,
@@ -998,13 +1355,15 @@ mod tests {
             checkpoint_max_concurrent_uploads: 40,
             checkpoint_max_concurrent_downloads: 40,
             checkpoint_max_upload_buffers: 40,
-            checkpoint_s3_max_retries: 3,
+            checkpoint_s3_max_retries: 10,
             checkpoint_s3_operation_timeout_secs: 120,
             checkpoint_s3_attempt_timeout_secs: 20,
             checkpoint_local_max_staleness_secs: 7200,
-            checkpoint_import_window_hours: 24,
+            checkpoint_import_window_hours: 20,
             checkpoint_import_attempt_depth: 10,
-            checkpoint_import_timeout_secs: 240,
+            checkpoint_import_timeout_secs: 7200,
+            checkpoint_full_upload_interval_secs: 86_400,
+            checkpoint_upload_max_bytes_per_sec: 64 * 1024 * 1024,
             cohort_seed_consumer_enabled: false,
             cohort_stream_seed_events_topic: "cohort_stream_seed_events".to_string(),
             kafka_seed_consumer_group: "cohort-stream-seeds".to_string(),
@@ -1014,6 +1373,14 @@ mod tests {
             cohort_seed_reconcile_enabled: false,
             cohort_seed_reconcile_scan_page: 256,
             cohort_seed_reconcile_tick_interval_ms: 2_000,
+            cohort_seed_person_apply_enabled: false,
+            cohort_seed_person_live_margin_ms: 900_000,
+            cohort_seed_apply_batch_max: 256,
+            cohort_seed_apply_batch_max_rows: 4096,
+            cohort_seed_live_lag_pause_ms: 120_000,
+            cohort_seed_live_lag_resume_ms: 60_000,
+            cohort_seed_disk_pause_pct: 60.0,
+            cohort_seed_disk_resume_pct: 55.0,
         }
     }
 
@@ -1039,11 +1406,24 @@ mod tests {
             defaults.reconcile_tick_interval(),
             Duration::from_millis(2_000)
         );
+        // The marker produce blocks a partition worker, so its timeout has to stay under the tick
+        // that re-queues it — at parity a black-holed topic occupies the worker end to end.
+        assert_eq!(
+            defaults
+                .build_marker_kafka_config()
+                .kafka_message_timeout_ms,
+            1000,
+        );
+        assert!(
+            u64::from(defaults.reconcile_marker_message_timeout_ms)
+                < defaults.reconcile_tick_interval().as_millis() as u64
+        );
 
         let env: std::collections::HashMap<String, String> = [
             ("COHORT_SEED_RECONCILE_ENABLED", "true"),
             ("COHORT_SEED_RECONCILE_SCAN_PAGE", "17"),
             ("COHORT_SEED_RECONCILE_TICK_INTERVAL_MS", "345"),
+            ("RECONCILE_MARKER_MESSAGE_TIMEOUT_MS", "125"),
         ]
         .into_iter()
         .map(|(key, value)| (key.to_string(), value.to_string()))
@@ -1052,6 +1432,10 @@ mod tests {
         assert!(config.cohort_seed_reconcile_enabled);
         assert_eq!(config.cohort_seed_reconcile_scan_page, 17);
         assert_eq!(config.reconcile_tick_interval(), Duration::from_millis(345));
+        assert_eq!(
+            config.build_marker_kafka_config().kafka_message_timeout_ms,
+            125,
+        );
     }
 
     #[test]
@@ -1059,7 +1443,7 @@ mod tests {
         let mut config = test_config();
         config.cohort_seed_reconcile_scan_page = 0;
         assert!(config
-            .validate_durability_startup()
+            .validate_startup()
             .unwrap_err()
             .to_string()
             .contains("COHORT_SEED_RECONCILE_SCAN_PAGE"),);
@@ -1067,10 +1451,52 @@ mod tests {
         config.cohort_seed_reconcile_scan_page = 1;
         config.cohort_seed_reconcile_tick_interval_ms = 0;
         assert!(config
-            .validate_durability_startup()
+            .validate_startup()
             .unwrap_err()
             .to_string()
             .contains("COHORT_SEED_RECONCILE_TICK_INTERVAL_MS"),);
+    }
+
+    /// A zero ceiling would form no run at all, so every seed would be neither marked nor held
+    /// and the partition would wedge behind the first one.
+    #[test]
+    fn seed_run_budget_rejects_zero_ceilings_and_maps_the_defaults() {
+        let defaults = test_config();
+        assert_eq!(defaults.seed_run_budget().seeds.get(), 256);
+        assert_eq!(defaults.seed_run_budget().rows.get(), 4096);
+
+        let mut config = test_config();
+        config.cohort_seed_apply_batch_max = 0;
+        assert!(config
+            .validate_startup()
+            .unwrap_err()
+            .to_string()
+            .contains("COHORT_SEED_APPLY_BATCH_MAX"),);
+
+        config.cohort_seed_apply_batch_max = 1;
+        config.cohort_seed_apply_batch_max_rows = 0;
+        assert!(config
+            .validate_startup()
+            .unwrap_err()
+            .to_string()
+            .contains("COHORT_SEED_APPLY_BATCH_MAX_ROWS"),);
+
+        // A zero-capacity seed lane would panic the first worker spawn, and so would one above
+        // tokio's channel bound, so both must be refused too.
+        config.cohort_seed_apply_batch_max_rows = 1;
+        for cap in [0, usize::MAX] {
+            config.partition_intake_max_seeds = cap;
+            assert!(config
+                .validate_startup()
+                .unwrap_err()
+                .to_string()
+                .contains("PARTITION_INTAKE_MAX_SEEDS"),);
+        }
+
+        // `1` is the documented hatch back to the per-seed apply, so it must start.
+        config.partition_intake_max_seeds = 1;
+        assert!(config.validate_startup().is_ok());
+        assert_eq!(config.seed_run_budget().seeds.get(), 1);
     }
 
     #[test]
@@ -1079,7 +1505,106 @@ mod tests {
         config.cohort_seed_reconcile_enabled = true;
         config.cohort_seed_consumer_enabled = false;
 
-        assert!(config.validate_durability_startup().is_ok());
+        assert!(config.validate_startup().is_ok());
+    }
+
+    #[test]
+    fn person_seed_knobs_default_dark_and_refuse_a_negative_live_margin() {
+        let defaults = Config::init_from_hashmap(&std::collections::HashMap::new()).unwrap();
+        assert!(!defaults.cohort_seed_person_apply_enabled);
+        assert_eq!(defaults.cohort_seed_person_live_margin_ms, 900_000);
+
+        let env: std::collections::HashMap<String, String> = [
+            ("COHORT_SEED_PERSON_APPLY_ENABLED", "true"),
+            ("COHORT_SEED_PERSON_LIVE_MARGIN_MS", "1234"),
+        ]
+        .into_iter()
+        .map(|(key, value)| (key.to_string(), value.to_string()))
+        .collect();
+        let config = Config::init_from_hashmap(&env).unwrap();
+        assert!(config.cohort_seed_person_apply_enabled);
+        assert_eq!(config.cohort_seed_person_live_margin_ms, 1234);
+
+        let mut negative = test_config();
+        negative.cohort_seed_person_live_margin_ms = -1;
+        assert!(negative
+            .validate_startup()
+            .unwrap_err()
+            .to_string()
+            .contains("COHORT_SEED_PERSON_LIVE_MARGIN_MS"));
+
+        // Apply-on without the consumer is a warning, not a refusal — same as reconcile.
+        let mut orphaned = test_config();
+        orphaned.cohort_seed_person_apply_enabled = true;
+        orphaned.cohort_seed_consumer_enabled = false;
+        assert!(orphaned.validate_startup().is_ok());
+    }
+
+    /// A flapping (inverted/equal) threshold pair or a never-releasing resume must be refused at
+    /// startup, not discovered as a wedged or flapping gate in production.
+    #[test]
+    fn seed_pacing_validation_rejects_inverted_equal_and_non_positive_thresholds() {
+        let defaults = test_config();
+        let pacing = defaults.seed_pacing_config().unwrap();
+        assert!(pacing.live_lag.is_some());
+        assert!(pacing.disk.is_some());
+
+        type Mutation = fn(&mut Config);
+        let cases: [(&str, Mutation); 6] = [
+            ("COHORT_SEED_LIVE_LAG_RESUME_MS must be below", |config| {
+                config.cohort_seed_live_lag_resume_ms = 120_000; // equal
+            }),
+            ("COHORT_SEED_LIVE_LAG_RESUME_MS must be below", |config| {
+                config.cohort_seed_live_lag_resume_ms = 240_000; // inverted
+            }),
+            (
+                "COHORT_SEED_LIVE_LAG_RESUME_MS must be positive",
+                |config| {
+                    config.cohort_seed_live_lag_resume_ms = -1;
+                },
+            ),
+            ("COHORT_SEED_LIVE_LAG_PAUSE_MS must be positive", |config| {
+                config.cohort_seed_live_lag_pause_ms = -1;
+            }),
+            ("COHORT_SEED_DISK_RESUME_PCT must be below", |config| {
+                config.cohort_seed_disk_resume_pct = 60.0; // equal
+            }),
+            ("COHORT_SEED_DISK_PAUSE_PCT must be within", |config| {
+                config.cohort_seed_disk_pause_pct = 101.0;
+            }),
+        ];
+        for (expected, mutate) in cases {
+            let mut config = test_config();
+            mutate(&mut config);
+            let err = config.validate_startup().unwrap_err().to_string();
+            assert!(err.contains(expected), "expected {expected:?} in {err:?}");
+        }
+    }
+
+    /// The env defaults must ship the disk gate dark: it can engage on deployments that already
+    /// run the seed consumer, and a threshold below the store's steady-state footprint would
+    /// never release.
+    #[test]
+    fn seed_pacing_env_defaults_enable_live_lag_and_disable_disk() {
+        let defaults = Config::init_from_hashmap(&std::collections::HashMap::new()).unwrap();
+        let pacing = defaults.seed_pacing_config().unwrap();
+        assert!(pacing.live_lag.is_some());
+        assert!(pacing.disk.is_none());
+    }
+
+    #[test]
+    fn seed_pacing_zero_pause_thresholds_disable_their_triggers() {
+        let mut config = test_config();
+        config.cohort_seed_live_lag_pause_ms = 0;
+        config.cohort_seed_disk_pause_pct = 0.0;
+        // Resume thresholds are irrelevant while disabled — even nonsense must not refuse boot.
+        config.cohort_seed_live_lag_resume_ms = -5;
+        config.cohort_seed_disk_resume_pct = -5.0;
+
+        let pacing = config.seed_pacing_config().unwrap();
+        assert!(pacing.live_lag.is_none());
+        assert!(pacing.disk.is_none());
+        assert!(config.validate_startup().is_ok());
     }
 
     #[test]
@@ -1109,20 +1634,8 @@ mod tests {
         assert_eq!(client.get("enable.auto.commit"), Some("false"));
         assert_eq!(client.get("enable.auto.offset.store"), Some("false"));
         assert_eq!(client.get("group.id"), Some("cohort-stream-processor"));
-        assert_eq!(client.get("auto.offset.reset"), Some("latest"));
+        assert_eq!(client.get("auto.offset.reset"), Some("earliest"));
         assert_eq!(client.get("bootstrap.servers"), Some("localhost:9092"));
-    }
-
-    #[test]
-    fn consumer_config_uses_cooperative_sticky_and_the_configured_session_timeout() {
-        let mut config = test_config();
-        config.kafka_session_timeout_ms = 45000;
-        let client = config.consumer_client_config();
-        assert_eq!(
-            client.get("partition.assignment.strategy"),
-            Some("cooperative-sticky"),
-        );
-        assert_eq!(client.get("session.timeout.ms"), Some("45000"));
     }
 
     #[test]
@@ -1137,6 +1650,8 @@ mod tests {
     fn intake_and_boot_ordering_knobs_default_and_override_from_env() {
         let defaults = Config::init_from_hashmap(&std::collections::HashMap::new()).unwrap();
         assert_eq!(defaults.partition_intake_max_events, 1024);
+        assert_eq!(defaults.partition_intake_max_seeds, 1024);
+        assert_eq!(defaults.seed_lane_cap().get(), 1024);
         assert_eq!(defaults.kafka_queued_max_messages_kbytes, 131_072);
         assert_eq!(defaults.kafka_queued_min_messages, 2000);
         assert_eq!(
@@ -1146,6 +1661,7 @@ mod tests {
 
         let env: std::collections::HashMap<String, String> = [
             ("PARTITION_INTAKE_MAX_EVENTS", "512"),
+            ("PARTITION_INTAKE_MAX_SEEDS", "64"),
             ("COHORT_KAFKA_QUEUED_MAX_MESSAGES_KBYTES", "65536"),
             ("COHORT_KAFKA_QUEUED_MIN_MESSAGES", "1000"),
             ("COHORT_FIRST_EVICTION_SWEEP_DELAY_MS", "30000"),
@@ -1155,6 +1671,7 @@ mod tests {
         .collect();
         let config = Config::init_from_hashmap(&env).unwrap();
         assert_eq!(config.partition_intake_max_events, 512);
+        assert_eq!(config.seed_lane_cap().get(), 64);
         assert_eq!(
             config.fetch_queue_config().queued_max_messages_kbytes,
             65536
@@ -1167,20 +1684,87 @@ mod tests {
     }
 
     #[test]
-    fn consumer_config_sets_static_membership_only_when_pod_identity_is_present() {
+    fn consumer_config_names_the_client_after_the_pod_without_a_static_member_id() {
         let mut config = test_config();
-        assert_eq!(
-            config.consumer_client_config().get("group.instance.id"),
-            None,
-        );
-
-        config.pod_hostname = Some("cohort-stream-processor-2".to_string());
+        config.pod_name = Some("cohort-stream-processor-2".to_string());
         let client = config.consumer_client_config();
-        assert_eq!(
-            client.get("group.instance.id"),
-            Some("cohort-stream-processor-2"),
-        );
+        assert_eq!(client.get("group.instance.id"), None);
         assert_eq!(client.get("client.id"), Some("cohort-stream-processor-2"));
+    }
+
+    #[test]
+    fn the_split_claim_comes_from_the_pod_count_the_pod_name_ordinal_and_the_reshard_marker() {
+        type Env = &'static [(&'static str, &'static str)];
+        let cases: [(Env, Result<&str, &str>); 9] = [
+            (&[], Ok("pod 0 of 1 over 64 partitions")),
+            (
+                &[
+                    ("COHORT_POD_COUNT", "2"),
+                    ("POD_NAME", "cohort-stream-processor-1"),
+                ],
+                Ok("pod 1 of 2 over 64 partitions"),
+            ),
+            (&[("COHORT_POD_COUNT", "4")], Err("requires POD_NAME")),
+            (
+                &[
+                    ("COHORT_POD_COUNT", "3"),
+                    ("POD_NAME", "cohort-stream-processor-0"),
+                ],
+                Err("evenly"),
+            ),
+            (
+                &[
+                    ("COHORT_POD_COUNT", "2"),
+                    ("POD_NAME", "cohort-stream-processor-2"),
+                ],
+                Err("not below"),
+            ),
+            (&[("POD_NAME", "cohort-stream-processor")], Err("POD_NAME")),
+            (
+                &[
+                    ("COHORT_POD_COUNT", "2"),
+                    ("COHORT_RESHARD_FROM_POD_COUNT", "1"),
+                    ("POD_NAME", "cohort-stream-processor-1"),
+                ],
+                Ok("pod 1 of 2 over 64 partitions, resharded from pod 0 of 1 over 64 partitions"),
+            ),
+            (
+                &[
+                    ("COHORT_POD_COUNT", "2"),
+                    ("COHORT_RESHARD_FROM_POD_COUNT", "1"),
+                    ("DURABLE_RESTORE_ENABLED", "true"),
+                    ("POD_NAME", "cohort-stream-processor-1"),
+                ],
+                Err("requires CHECKPOINT_ENABLED"),
+            ),
+            (
+                &[
+                    ("COHORT_POD_COUNT", "2"),
+                    ("COHORT_RESHARD_FROM_POD_COUNT", "4"),
+                    ("POD_NAME", "cohort-stream-processor-1"),
+                ],
+                Err("must raise the pod count"),
+            ),
+        ];
+        for (env, expected) in cases {
+            let env = env
+                .iter()
+                .map(|&(key, value)| (key.to_string(), value.to_string()))
+                .collect();
+            let claim = Config::init_from_hashmap(&env)
+                .unwrap()
+                .split_claim()
+                .map(|claim| claim.to_string())
+                .map_err(|err| format!("{err:#}"));
+            match (claim, expected) {
+                (Ok(claim), Ok(expected)) => assert_eq!(claim, expected, "{env:?}"),
+                (Err(err), Err(expected)) => assert!(err.contains(expected), "{env:?}: {err}"),
+                (actual, expected) => panic!("{env:?}: got {actual:?}, expected {expected:?}"),
+            }
+        }
+
+        let zero = [("COHORT_POD_COUNT".to_string(), "0".to_string())].into();
+        assert!(Config::init_from_hashmap(&zero).is_err());
     }
 
     #[test]
@@ -1203,18 +1787,17 @@ mod tests {
         config.pod_hostname = Some("hostname".to_string());
         config.kafka_client_id = "explicit-client".to_string();
         let client = config.consumer_client_config();
-        // Static membership still keyed on the pod identity, but client.id is the explicit override.
-        assert_eq!(client.get("group.instance.id"), Some("hostname"));
         assert_eq!(client.get("client.id"), Some("explicit-client"));
     }
 
     #[test]
     fn store_config_threads_the_wipe_on_start_flag() {
         let mut config = test_config();
+        let ownership = PartitionOwnership::single(64);
         config.wipe_store_on_start = true;
-        assert!(config.store_config().wipe_on_start);
+        assert!(config.store_config(ownership).wipe_on_start);
         config.wipe_store_on_start = false;
-        assert!(!config.store_config().wipe_on_start);
+        assert!(!config.store_config(ownership).wipe_on_start);
     }
 
     #[test]
@@ -1240,14 +1823,22 @@ mod tests {
             !defaults.cohort_wipe_on_schema_mismatch,
             "a schema mismatch must fail fast unless the operator opts in",
         );
-        assert!(!defaults.store_config().wipe_on_schema_mismatch);
+        assert!(
+            !defaults
+                .store_config(PartitionOwnership::single(64))
+                .wipe_on_schema_mismatch
+        );
 
         let enabled = Config::init_from_hashmap(&std::collections::HashMap::from([(
             "COHORT_WIPE_ON_SCHEMA_MISMATCH".to_owned(),
             "true".to_owned(),
         )]))
         .unwrap();
-        assert!(enabled.store_config().wipe_on_schema_mismatch);
+        assert!(
+            enabled
+                .store_config(PartitionOwnership::single(64))
+                .wipe_on_schema_mismatch
+        );
     }
 
     #[test]
@@ -1257,7 +1848,12 @@ mod tests {
             defaults.cohort_person_record_ttl_days, 0,
             "the person-record TTL defaults off (no compaction filter)",
         );
-        assert_eq!(defaults.store_config().person_record_ttl_days, 0);
+        assert_eq!(
+            defaults
+                .store_config(PartitionOwnership::single(64))
+                .person_record_ttl_days,
+            0
+        );
 
         let enabled = Config::init_from_hashmap(&std::collections::HashMap::from([(
             "COHORT_PERSON_RECORD_TTL_DAYS".to_owned(),
@@ -1266,7 +1862,9 @@ mod tests {
         .unwrap();
         assert_eq!(enabled.cohort_person_record_ttl_days, 30);
         assert_eq!(
-            enabled.store_config().person_record_ttl_days,
+            enabled
+                .store_config(PartitionOwnership::single(64))
+                .person_record_ttl_days,
             30,
             "the TTL reaches StoreConfig",
         );
@@ -1297,10 +1895,19 @@ mod tests {
     fn stats_knobs_default_on_and_thread_into_store_config() {
         let defaults = Config::init_from_hashmap(&std::collections::HashMap::new()).unwrap();
         assert!(defaults.store_statistics_enabled);
-        assert!(defaults.store_config().statistics_enabled);
+        assert!(
+            defaults
+                .store_config(PartitionOwnership::single(64))
+                .statistics_enabled
+        );
         assert_eq!(defaults.stats_publish_interval(), Duration::from_secs(15));
         assert_eq!(defaults.store_read_sample_ratio, 64);
-        assert_eq!(defaults.store_config().read_sample_ratio, 64);
+        assert_eq!(
+            defaults
+                .store_config(PartitionOwnership::single(64))
+                .read_sample_ratio,
+            64
+        );
 
         let env: std::collections::HashMap<String, String> = [
             ("COHORT_STORE_STATISTICS_ENABLED", "false"),
@@ -1313,13 +1920,17 @@ mod tests {
         let config = Config::init_from_hashmap(&env).unwrap();
         assert!(!config.store_statistics_enabled);
         assert!(
-            !config.store_config().statistics_enabled,
+            !config
+                .store_config(PartitionOwnership::single(64))
+                .statistics_enabled,
             "the flag reaches StoreConfig",
         );
         assert_eq!(config.stats_publish_interval(), Duration::from_secs(30));
         assert_eq!(config.store_read_sample_ratio, 8);
         assert_eq!(
-            config.store_config().read_sample_ratio,
+            config
+                .store_config(PartitionOwnership::single(64))
+                .read_sample_ratio,
             8,
             "the sample ratio reaches StoreConfig",
         );
@@ -1399,6 +2010,28 @@ mod tests {
     }
 
     #[test]
+    fn membership_topic_defaults_to_the_shadow_and_overrides_from_env() {
+        let defaults = Config::init_from_hashmap(&std::collections::HashMap::new()).unwrap();
+        assert_eq!(
+            defaults.cohort_membership_changed_topic, "cohort_membership_changed_shadow",
+            "a code deploy must not redirect membership output to the production topic",
+        );
+
+        let env: std::collections::HashMap<String, String> = [(
+            "COHORT_MEMBERSHIP_CHANGED_TOPIC",
+            "cohort_membership_changed",
+        )]
+        .into_iter()
+        .map(|(key, value)| (key.to_string(), value.to_string()))
+        .collect();
+        let config = Config::init_from_hashmap(&env).unwrap();
+        assert_eq!(
+            config.cohort_membership_changed_topic, "cohort_membership_changed",
+            "the cut-over must be reachable as a config-only change",
+        );
+    }
+
+    #[test]
     fn durable_restore_defaults_off_and_overrides_from_env() {
         let defaults = Config::init_from_hashmap(&std::collections::HashMap::new()).unwrap();
         assert!(
@@ -1415,74 +2048,16 @@ mod tests {
     }
 
     #[test]
-    fn durable_restore_single_pod_defaults_off_and_overrides_from_env() {
-        let defaults = Config::init_from_hashmap(&std::collections::HashMap::new()).unwrap();
-        assert!(
-            !defaults.durable_restore_single_pod,
-            "the single-pod assertion defaults off (inert)",
-        );
-
-        let env: std::collections::HashMap<String, String> =
-            [("DURABLE_RESTORE_SINGLE_POD", "true")]
-                .into_iter()
-                .map(|(key, value)| (key.to_string(), value.to_string()))
-                .collect();
-        let config = Config::init_from_hashmap(&env).unwrap();
-        assert!(config.durable_restore_single_pod);
-    }
-
-    #[test]
     fn durability_startup_guard_passes_for_the_default_config() {
-        assert!(test_config().validate_durability_startup().is_ok());
+        assert!(test_config().validate_startup().is_ok());
     }
 
     #[test]
-    fn durability_startup_guard_passes_for_a_plain_durable_restore() {
-        let mut config = test_config();
-        config.durable_restore_enabled = true;
-        assert!(config.validate_durability_startup().is_ok());
-    }
-
-    #[test]
-    fn durability_startup_guard_refuses_durable_plus_cascade_without_the_opt_in() {
+    fn durability_startup_guard_passes_for_durable_restore_with_cascades() {
         let mut config = test_config();
         config.durable_restore_enabled = true;
         config.cohort_cascade_enabled = true;
-        config.pod_name = Some("pod-0".to_string());
-        let err = config
-            .validate_durability_startup()
-            .expect_err("durable + cascade without the opt-in must be refused");
-        assert!(
-            err.to_string().contains("DURABLE_RESTORE_SINGLE_POD"),
-            "the refusal points the operator at the single-pod opt-in: {err}",
-        );
-    }
-
-    #[test]
-    fn durability_startup_guard_refuses_durable_plus_cascade_with_opt_in_but_no_pod_identity() {
-        let mut config = test_config();
-        config.durable_restore_enabled = true;
-        config.cohort_cascade_enabled = true;
-        config.durable_restore_single_pod = true;
-        config.pod_name = None;
-        config.pod_hostname = None;
-        assert!(
-            config.validate_durability_startup().is_err(),
-            "single-pod opt-in without a pod identity must still refuse the combo",
-        );
-    }
-
-    #[test]
-    fn durability_startup_guard_allows_durable_plus_cascade_with_opt_in_and_pod_identity() {
-        let mut config = test_config();
-        config.durable_restore_enabled = true;
-        config.cohort_cascade_enabled = true;
-        config.durable_restore_single_pod = true;
-        config.pod_name = Some("cohort-stream-processor-0".to_string());
-        assert!(
-            config.validate_durability_startup().is_ok(),
-            "durable + cascade is allowed on a single-pod static-membership deploy",
-        );
+        assert!(config.validate_startup().is_ok());
     }
 
     #[test]
@@ -1491,7 +2066,7 @@ mod tests {
         config.checkpoint_enabled = true;
         config.durable_restore_enabled = false;
         let err = config
-            .validate_durability_startup()
+            .validate_startup()
             .expect_err("checkpoint without durable restore must be refused");
         assert!(
             err.to_string().contains("DURABLE_RESTORE_ENABLED"),
@@ -1500,11 +2075,73 @@ mod tests {
     }
 
     #[test]
-    fn durability_startup_guard_allows_checkpoint_with_durable_restore() {
-        let mut config = test_config();
-        config.checkpoint_enabled = true;
-        config.durable_restore_enabled = true;
-        assert!(config.validate_durability_startup().is_ok());
+    fn checkpoints_start_only_with_a_bucket_nonzero_knobs_a_separate_absolute_dir_and_an_ordinal() {
+        fn enabled() -> Config {
+            let mut config = test_config();
+            config.checkpoint_enabled = true;
+            config.durable_restore_enabled = true;
+            config.checkpoint_s3_bucket = "bkt".to_string();
+            config.store_path = "/data/store".to_string();
+            config.checkpoint_local_dir = "/data/checkpoints".to_string();
+            config.pod_name = Some("cohort-stream-processor-2".to_string());
+            config
+        }
+        enabled().validate_startup().unwrap();
+
+        type Misconfigure = fn(&mut Config);
+        let cases: [(&str, Misconfigure, &str); 9] = [
+            (
+                "no bucket",
+                |c| c.checkpoint_s3_bucket.clear(),
+                "CHECKPOINT_S3_BUCKET",
+            ),
+            (
+                "a zero interval",
+                |c| c.checkpoint_interval_ms = 0,
+                "CHECKPOINT_INTERVAL_MS",
+            ),
+            (
+                "a relative checkpoint dir",
+                |c| c.checkpoint_local_dir = "checkpoints".to_string(),
+                "absolute",
+            ),
+            (
+                "a relative store path",
+                |c| c.store_path = "cohort-store".to_string(),
+                "absolute",
+            ),
+            (
+                "a checkpoint dir inside the store",
+                |c| c.checkpoint_local_dir = "/data/store/checkpoints".to_string(),
+                "contain",
+            ),
+            (
+                "a store inside the checkpoint dir",
+                |c| c.checkpoint_local_dir = "/data".to_string(),
+                "contain",
+            ),
+            (
+                "a checkpoint dir inside the restore's staging dir",
+                |c| c.checkpoint_local_dir = "/data/store.restore/checkpoints".to_string(),
+                "stages",
+            ),
+            (
+                "a checkpoint dir that reaches the staging dir through `..`",
+                |c| c.checkpoint_local_dir = "/data/../data/store.restore".to_string(),
+                "without `..`",
+            ),
+            (
+                "a pod name without an ordinal",
+                |c| c.pod_name = Some("cohort-stream-processor".to_string()),
+                "POD_NAME",
+            ),
+        ];
+        for (name, misconfigure, expected) in cases {
+            let mut config = enabled();
+            misconfigure(&mut config);
+            let err = config.validate_startup().expect_err(name);
+            assert!(format!("{err:#}").contains(expected), "{name}: {err:#}");
+        }
     }
 
     #[test]
@@ -1531,7 +2168,7 @@ mod tests {
             defaults.checkpoint_local_max_staleness(),
             Duration::from_secs(7200),
         );
-        assert_eq!(defaults.checkpoint_import_window_hours, 24);
+        assert_eq!(defaults.checkpoint_import_window_hours, 20);
         assert_eq!(defaults.checkpoint_import_attempt_depth, 10);
 
         let env: std::collections::HashMap<String, String> = [
@@ -1595,6 +2232,8 @@ mod tests {
         config.checkpoint_import_window_hours = 6;
         config.checkpoint_import_attempt_depth = 4;
         config.checkpoint_import_timeout_secs = 90;
+        config.checkpoint_full_upload_interval_secs = 3601;
+        config.checkpoint_upload_max_bytes_per_sec = 1024;
 
         let durability = config.durability_config();
         assert_eq!(durability.local_checkpoint_dir, "/data/ckpt");
@@ -1623,6 +2262,8 @@ mod tests {
             durability.checkpoint_import_timeout,
             Duration::from_secs(90)
         );
+        assert_eq!(durability.full_upload_interval, Duration::from_secs(3601));
+        assert_eq!(durability.upload_max_bytes_per_sec, 1024);
     }
 
     #[test]
@@ -1670,7 +2311,9 @@ mod tests {
             };
             assert_eq!(config.effective_wipe_on_start(), expected, "{why}");
             assert_eq!(
-                config.store_config().wipe_on_start,
+                config
+                    .store_config(PartitionOwnership::single(64))
+                    .wipe_on_start,
                 expected,
                 "store_config must thread the effective wipe: {why}",
             );
@@ -1682,7 +2325,7 @@ mod tests {
         let mut config = test_config();
         config.store_path = "/var/lib/cohort/state".to_string();
         assert_eq!(
-            config.store_config().path,
+            config.store_config(PartitionOwnership::single(64)).path,
             std::path::PathBuf::from("/var/lib/cohort/state"),
         );
     }
@@ -1837,6 +2480,10 @@ mod tests {
         let transfer = config.build_transfer_kafka_config();
         // Only `message.timeout.ms` differs; every other producer knob is inherited.
         assert_eq!(transfer.kafka_message_timeout_ms, 2000);
+        assert_eq!(
+            config.build_marker_kafka_config().kafka_message_timeout_ms,
+            1000,
+        );
         assert_eq!(shared.kafka_message_timeout_ms, 20_000);
         assert_eq!(
             transfer.kafka_producer_partitioner,
@@ -1898,9 +2545,8 @@ mod tests {
     }
 
     #[test]
-    fn follower_config_hard_codes_earliest_regardless_of_the_events_reset() {
-        let mut config = test_config();
-        config.kafka_consumer_offset_reset = "latest".to_string();
+    fn follower_config_hard_codes_earliest() {
+        let config = test_config();
         let client = config.follower_client_config("cohort-stream-merges");
         assert_eq!(client.get("auto.offset.reset"), Some("earliest"));
         assert_eq!(client.get("group.id"), Some("cohort-stream-merges"));
@@ -1957,6 +2603,8 @@ mod tests {
         assert!(defaults.cohort_compact_on_deletion_enabled);
         assert_eq!(defaults.cohort_periodic_compaction_seconds, 0);
         assert_eq!(defaults.cohort_max_background_jobs, 0);
+        assert_eq!(defaults.cohort_max_log_file_size_bytes.get(), 268_435_456);
+        assert_eq!(defaults.cohort_keep_log_file_num.get(), 10);
         assert_eq!(defaults.partition_channel_buffer, 128);
 
         let env: std::collections::HashMap<String, String> = [
@@ -1965,6 +2613,8 @@ mod tests {
             ("COHORT_COMPACT_ON_DELETION_ENABLED", "false"),
             ("COHORT_PERIODIC_COMPACTION_SECONDS", "3600"),
             ("COHORT_MAX_BACKGROUND_JOBS", "2"),
+            ("COHORT_MAX_LOG_FILE_SIZE_BYTES", "1048576"),
+            ("COHORT_KEEP_LOG_FILE_NUM", "3"),
             ("PARTITION_CHANNEL_BUFFER", "256"),
         ]
         .into_iter()
@@ -1976,6 +2626,8 @@ mod tests {
         assert!(!config.cohort_compact_on_deletion_enabled);
         assert_eq!(config.cohort_periodic_compaction_seconds, 3600);
         assert_eq!(config.cohort_max_background_jobs, 2);
+        assert_eq!(config.cohort_max_log_file_size_bytes.get(), 1_048_576);
+        assert_eq!(config.cohort_keep_log_file_num.get(), 3);
         assert_eq!(config.partition_channel_buffer, 256);
     }
 
@@ -1987,13 +2639,17 @@ mod tests {
         config.cohort_compact_on_deletion_enabled = false;
         config.cohort_periodic_compaction_seconds = 3600;
         config.cohort_max_background_jobs = 2;
+        config.cohort_max_log_file_size_bytes = NonZeroUsize::new(1_048_576).unwrap();
+        config.cohort_keep_log_file_num = NonZeroUsize::new(3).unwrap();
 
-        let store = config.store_config();
+        let store = config.store_config(PartitionOwnership::single(64));
         assert_eq!(store.block_cache_bytes, 3_221_225_472);
         assert!(!store.tuned_block_options);
         assert!(!store.compact_on_deletion);
         assert_eq!(store.periodic_compaction_seconds, 3600);
         assert_eq!(store.max_background_jobs, 2);
+        assert_eq!(store.max_log_file_size_bytes.get(), 1_048_576);
+        assert_eq!(store.keep_log_file_num.get(), 3);
     }
 
     #[test]

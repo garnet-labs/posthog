@@ -13,6 +13,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from posthog.api.mixins import ValidatedRequest, validated_request
+from posthog.api.pagination import page_link, previous_offset
 from posthog.api.routing import TeamAndOrgViewSetMixin
 from posthog.event_usage import report_user_action
 from posthog.models.user import User
@@ -25,6 +26,7 @@ from products.mcp_analytics.backend.models import MCPAnalyticsSubmission
 from .serializers import (
     MCP_SESSION_LIST_DEFAULT_LIMIT,
     MCP_SESSION_LIST_MAX_LIMIT,
+    MCPActivityOverviewQuerySerializer,
     MCPActivityOverviewSerializer,
     MCPAnalyticsSubmissionSerializer,
     MCPFeedbackCreateSerializer,
@@ -54,7 +56,7 @@ class MCPAnalyticsPagination(LimitOffsetPagination):
 
 
 class MCPSessionPagination(LimitOffsetPagination):
-    """Returns ``{results, has_next}`` instead of a count-based envelope. The list is an
+    """Returns ``{next, previous, results, has_next}`` without a ``count``. The list is an
     on-the-fly ClickHouse aggregate with no cheap total, so ``has_next`` comes from the
     logic layer over-fetching one row rather than a count query.
     """
@@ -62,14 +64,33 @@ class MCPSessionPagination(LimitOffsetPagination):
     default_limit = MCP_SESSION_LIST_DEFAULT_LIMIT
     max_limit = MCP_SESSION_LIST_MAX_LIMIT
 
-    def get_paginated_response(self, data: Any, *, has_next: bool = False) -> Response:
-        return Response({"results": data, "has_next": has_next})
+    def get_page_response(self, request: Request, data: Any, *, offset: int, limit: int, has_next: bool) -> Response:
+        return Response(
+            {
+                "next": page_link(request, self.offset_query_param, offset + limit) if has_next else None,
+                "previous": page_link(request, self.offset_query_param, previous_offset(offset, limit)),
+                "results": data,
+                "has_next": has_next,
+            }
+        )
 
     def get_paginated_response_schema(self, schema: dict) -> dict:
         return {
             "type": "object",
-            "required": ["results", "has_next"],
+            "required": ["next", "previous", "results", "has_next"],
             "properties": {
+                "next": {
+                    "type": "string",
+                    "format": "uri",
+                    "nullable": True,
+                    "description": "URL of the next page, or null on the last page.",
+                },
+                "previous": {
+                    "type": "string",
+                    "format": "uri",
+                    "nullable": True,
+                    "description": "URL of the previous page, or null on the first page.",
+                },
                 "results": schema,
                 "has_next": {
                     "type": "boolean",
@@ -81,12 +102,8 @@ class MCPSessionPagination(LimitOffsetPagination):
 
 class BaseMCPAnalyticsSubmissionViewSet(TeamAndOrgViewSetMixin, viewsets.GenericViewSet):
     serializer_class = MCPAnalyticsSubmissionSerializer
-    # Alpha product: gated behind the mcp-analytics feature flag at the API layer (matching
-    # the UI flag) rather than hidden behind a staff-only lock. create -> write, list -> read
-    # map to the default scope actions.
+    # create -> write, list -> read map to the default scope actions.
     scope_object = "mcp_analytics"
-    posthog_feature_flag = "mcp-analytics"
-    permission_classes = [PostHogFeatureFlagPermission]
     pagination_class = MCPAnalyticsPagination
     user_action_name: str = ""
 
@@ -105,17 +122,20 @@ class BaseMCPAnalyticsSubmissionViewSet(TeamAndOrgViewSetMixin, viewsets.Generic
         report_user_action(
             cast(User, request.user),
             self.user_action_name,
-            {
-                "submission_id": str(submission.id),
-                "kind": submission.kind,
-                "attempted_tool": submission.attempted_tool,
-                "mcp_client_name": submission.mcp_client_name,
-                "mcp_session_id_present": bool(submission.mcp_session_id),
-                "mcp_trace_id_present": bool(submission.mcp_trace_id),
-            },
+            self._submission_event_properties(submission),
             team=self.team,
             request=request,
         )
+
+    def _submission_event_properties(self, submission: contracts.Submission) -> dict[str, Any]:
+        return {
+            "submission_id": str(submission.id),
+            "kind": submission.kind,
+            "attempted_tool": submission.attempted_tool,
+            "mcp_client_name": submission.mcp_client_name,
+            "mcp_session_id_present": bool(submission.mcp_session_id),
+            "mcp_trace_id_present": bool(submission.mcp_trace_id),
+        }
 
     def _list_response(self, request: Request, kind: enums.SubmissionKind) -> Response:
         paginator = self.pagination_class()
@@ -166,8 +186,6 @@ class MCPSessionViewSet(TeamAndOrgViewSetMixin, viewsets.GenericViewSet):
     # APIScopePermission/AccessControlPermission would otherwise reject viewer-level access.
     scope_object_read_actions = ["list", "retrieve", "tool_calls", "activity_overview", "intent_digest"]
     scope_object_write_actions = ["generate_intent"]
-    posthog_feature_flag = "mcp-analytics"
-    permission_classes = [PostHogFeatureFlagPermission]
     pagination_class = MCPSessionPagination
 
     def dangerously_get_queryset(self) -> QuerySet:
@@ -192,11 +210,17 @@ class MCPSessionViewSet(TeamAndOrgViewSetMixin, viewsets.GenericViewSet):
             order_by=params["order_by"],
             date_from=params.get("date_from") or None,
             date_to=params.get("date_to") or None,
+            has_errors=params["has_errors"],
+            properties=params["properties"],
+            filter_test_accounts=params["filter_test_accounts"],
+            user=cast(User, request.user),
         )
         serializer = self.get_serializer(page.results, many=True)
         # Instantiate the concrete class (not self.pagination_class()) so the typed
-        # get_paginated_response(has_next=...) is visible to the type checker.
-        return MCPSessionPagination().get_paginated_response(serializer.data, has_next=page.has_next)
+        # get_page_response(...) is visible to the type checker.
+        return MCPSessionPagination().get_page_response(
+            request, serializer.data, offset=params["offset"], limit=params["limit"], has_next=page.has_next
+        )
 
     @validated_request(
         query_serializer=MCPSessionToolCallsQuerySerializer,
@@ -213,9 +237,14 @@ class MCPSessionViewSet(TeamAndOrgViewSetMixin, viewsets.GenericViewSet):
             limit=params["limit"],
             offset=params["offset"],
             date_from=params.get("date_from"),
+            properties=params["properties"],
+            filter_test_accounts=params["filter_test_accounts"],
+            user=cast(User, request.user),
         )
         serializer = MCPToolCallSerializer(page.results, many=True)
-        return MCPSessionPagination().get_paginated_response(serializer.data, has_next=page.has_next)
+        return MCPSessionPagination().get_page_response(
+            request, serializer.data, offset=params["offset"], limit=params["limit"], has_next=page.has_next
+        )
 
     @extend_schema(
         operation_id="mcp_analytics_sessions_generate_intent",
@@ -259,8 +288,10 @@ class MCPSessionViewSet(TeamAndOrgViewSetMixin, viewsets.GenericViewSet):
         operation_id="mcp_analytics_sessions_intent_digest",
         description=(
             "Generate (or return the cached) LLM digest of what agents are trying to do with this MCP server, "
-            "derived from the most recent recorded $mcp_intents across all sessions. Content-addressed cache: "
-            "only regenerates when new intents arrive. Powers the dashboard's low-volume activity stage."
+            "derived from the most recent recorded $mcp_intents across all sessions: a one-sentence summary "
+            "plus semantic themes, each sized and attributed to tools from the intents themselves. Cached by "
+            "intent corpus and by recency, so repeated calls are cheap and a busy server regenerates at a "
+            "bounded rate. Powers the dashboard's activity tab."
         ),
         request=None,
         responses={
@@ -279,18 +310,25 @@ class MCPSessionViewSet(TeamAndOrgViewSetMixin, viewsets.GenericViewSet):
             )
         return Response(MCPIntentDigestSerializer(digest).data)
 
-    @extend_schema(
+    @validated_request(
+        query_serializer=MCPActivityOverviewQuerySerializer,
+        responses={200: OpenApiResponse(response=MCPActivityOverviewSerializer)},
         operation_id="mcp_analytics_sessions_activity_overview",
         description=(
             "Aggregate counters, top tools, agent clients, and the most recent tool calls for the last 30 days, "
-            "computed in one request. Powers the dashboard's activity view; always computed fresh so polling "
-            "callers watch data arrive."
+            "computed in one request. Powers the dashboard's activity view. Results are cached for up to 5 minutes, "
+            "or 20 seconds when the caller has property restrictions. An empty result is never cached."
         ),
-        responses={200: MCPActivityOverviewSerializer},
     )
     @action(detail=False, methods=["get"], url_path="activity_overview", pagination_class=None)
-    def activity_overview(self, request: Request, *args: Any, **kwargs: Any) -> Response:
-        overview = api.get_activity_overview(self.team)
+    def activity_overview(self, request: ValidatedRequest, *args: Any, **kwargs: Any) -> Response:
+        params = request.validated_query_data
+        overview = api.get_activity_overview(
+            self.team,
+            properties=params["properties"],
+            filter_test_accounts=params["filter_test_accounts"],
+            user=cast(User, request.user),
+        )
         return Response(MCPActivityOverviewSerializer(overview).data)
 
 
@@ -301,7 +339,7 @@ class MCPIntentClusterViewSet(TeamAndOrgViewSetMixin, viewsets.GenericViewSet):
     # the write scope; the snapshot read stays on the read scope.
     scope_object_read_actions = ["list", "retrieve"]
     scope_object_write_actions = ["recompute"]
-    posthog_feature_flag = "mcp-analytics"
+    posthog_feature_flag = contracts.MCP_ANALYTICS_INTENT_ROUTING_FEATURE_FLAG
     permission_classes = [PostHogFeatureFlagPermission]
     pagination_class = None
 
@@ -315,10 +353,24 @@ class MCPIntentClusterViewSet(TeamAndOrgViewSetMixin, viewsets.GenericViewSet):
             "Return the most recent intent cluster snapshot for the current project. "
             "Returns an empty IDLE snapshot when no clustering run has happened yet."
         ),
+        parameters=[
+            OpenApiParameter(
+                name="tool",
+                type=str,
+                location=OpenApiParameter.QUERY,
+                required=False,
+                description=(
+                    "Narrow the response to one tool: its pivot entry, the clusters it serves or switches "
+                    "with, and the overlap pairs it belongs to. Coverage meta stays whole-snapshot. Use "
+                    "this for single-tool views so they don't download every cluster and pivot to render "
+                    "one row. An unknown tool returns empty sections, not a 404."
+                ),
+            )
+        ],
         responses={200: MCPIntentClusterSnapshotSerializer},
     )
     def list(self, request: Request, *args: Any, **kwargs: Any) -> Response:
-        snapshot = api.get_intent_cluster_snapshot(self.team)
+        snapshot = api.get_intent_cluster_snapshot(self.team, tool=request.query_params.get("tool") or None)
         serializer = self.get_serializer(snapshot)
         return Response(serializer.data)
 
@@ -340,7 +392,9 @@ class MCPIntentClusterViewSet(TeamAndOrgViewSetMixin, viewsets.GenericViewSet):
 
 
 class MCPMissingCapabilityViewSet(BaseMCPAnalyticsSubmissionViewSet):
-    user_action_name = "mcp analytics missing capability reported"
+    def _report_submission_created(self, request: Request, submission: contracts.Submission) -> None:
+        distinct_id = str(getattr(request.user, "distinct_id", "") or f"mcp-missing-capability-{self.team.id}")
+        api.capture_missing_capability_event(self.team, distinct_id, submission)
 
     @validated_request(
         request_serializer=MCPMissingCapabilityCreateSerializer,

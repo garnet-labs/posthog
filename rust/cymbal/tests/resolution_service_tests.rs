@@ -1,6 +1,6 @@
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
-    Arc,
+    Arc, Mutex,
 };
 use std::time::Duration;
 
@@ -20,15 +20,19 @@ use cymbal_proto::cymbal::resolution::v1::cymbal_resolution_server::CymbalResolu
 use cymbal_proto::cymbal::resolution::v1::{
     resolve_outcome, ErrorKind, ResolveItem, ResolveOutcome, SubscribeRequest,
 };
+use cymbal_proto::CYMBAL_RESOLUTION_MAX_MESSAGE_SIZE_BYTES;
 use futures::StreamExt;
 use tokio::sync::Semaphore;
 use tonic::transport::{Channel, Server};
 use tonic::Request;
+use uuid::Uuid;
 
 #[derive(Default)]
 struct FakeResolver {
     fail_unhandled: bool,
     resolved_frames: Vec<Frame>,
+    release_id: Option<Uuid>,
+    release_refs: Arc<Mutex<Vec<String>>>,
 }
 
 #[async_trait]
@@ -61,6 +65,15 @@ impl SymbolResolver for FakeResolver {
         _minified_name: &str,
     ) -> Result<String, ResolveError> {
         unreachable!("fake resolver does not need dart name resolution for these tests")
+    }
+
+    async fn latest_release_id(
+        &self,
+        _team_id: TeamId,
+        symbol_set_refs: &[String],
+    ) -> Result<Option<Uuid>, UnhandledError> {
+        *self.release_refs.lock().expect("release refs poisoned") = symbol_set_refs.to_vec();
+        Ok(self.release_id)
     }
 }
 
@@ -167,7 +180,11 @@ async fn spawn_test_channel(service: CymbalResolutionService) -> Channel {
 
     tokio::spawn(async move {
         Server::builder()
-            .add_service(CymbalResolutionServer::new(service))
+            .add_service(
+                CymbalResolutionServer::new(service)
+                    .max_decoding_message_size(CYMBAL_RESOLUTION_MAX_MESSAGE_SIZE_BYTES)
+                    .max_encoding_message_size(CYMBAL_RESOLUTION_MAX_MESSAGE_SIZE_BYTES),
+            )
             .serve_with_incoming(incoming)
             .await
             .expect("test gRPC server exits cleanly");
@@ -201,7 +218,9 @@ async fn resolve_items_with_accepted(
     items: Vec<ResolveItem>,
 ) -> Vec<ResolveOutcome> {
     let channel = spawn_test_channel(service).await;
-    let mut client = CymbalResolutionClient::new(channel);
+    let mut client = CymbalResolutionClient::new(channel)
+        .max_decoding_message_size(CYMBAL_RESOLUTION_MAX_MESSAGE_SIZE_BYTES)
+        .max_encoding_message_size(CYMBAL_RESOLUTION_MAX_MESSAGE_SIZE_BYTES);
     let response = client
         .resolve(Request::new(futures::stream::iter(items)))
         .await
@@ -291,6 +310,27 @@ async fn bidi_resolve_stream_resolves_multiple_items_and_echoes_ids() {
 }
 
 #[tokio::test]
+async fn bidi_resolve_stream_accepts_messages_larger_than_tonic_default() {
+    let service = make_service(FakeResolver::default());
+    let mut exc = raw_exception("RuntimeError");
+    exc.exception_message = "x".repeat(5 * 1024 * 1024);
+    let item = make_item(41, &exc);
+
+    assert!(item.exception_json.len() > 4 * 1024 * 1024);
+    assert!(item.exception_json.len() < CYMBAL_RESOLUTION_MAX_MESSAGE_SIZE_BYTES);
+
+    let outcomes = resolve_items(service, vec![item]).await;
+
+    assert_eq!(outcomes.len(), 1);
+    let resolve_outcome::Result::Done(done) = outcome_result(&outcomes[0]) else {
+        panic!("expected Done outcome, got {:?}", outcomes[0]);
+    };
+    let resolved: Exception =
+        serde_json::from_slice(&done.resolved_exception_json).expect("valid resolved exception");
+    assert_eq!(resolved.exception_message.len(), 5 * 1024 * 1024);
+}
+
+#[tokio::test]
 async fn admitted_items_emit_accepted_before_terminal_outcome() {
     let service = make_service(FakeResolver::default());
     let exc = raw_exception("RuntimeError");
@@ -316,8 +356,8 @@ async fn raw_frames_are_resolved_into_done_payload() {
     let mut resolver_frame = sample_resolved_frame(&raw_frame);
     resolver_frame.frame_id = raw_frame.frame_id(123, 99, &[]);
     let service = make_service(FakeResolver {
-        fail_unhandled: false,
         resolved_frames: vec![resolver_frame],
+        ..Default::default()
     });
     let mut exc = raw_exception("RuntimeError");
     exc.stack = Some(Stacktrace::Raw {
@@ -340,6 +380,53 @@ async fn raw_frames_are_resolved_into_done_payload() {
     )
     .expect("deserialize expected wire frame");
     assert_eq!(frames, vec![expected_wire_frame]);
+}
+
+#[tokio::test]
+async fn the_release_rides_the_outcome_and_is_looked_up_by_distinct_symbol_set_ref() {
+    let release_id = Uuid::from_u128(7);
+    let release_refs = Arc::new(Mutex::new(Vec::new()));
+    let service = make_service(FakeResolver {
+        release_id: Some(release_id),
+        release_refs: release_refs.clone(),
+        ..Default::default()
+    });
+    let mut exc = raw_exception("RuntimeError");
+    // Two frames from one chunk and one from another: the lookup sees each ref once.
+    exc.stack = Some(Stacktrace::Raw {
+        frames: vec![
+            js_raw_frame("chunk-a"),
+            js_raw_frame("chunk-a"),
+            js_raw_frame("chunk-b"),
+        ],
+    });
+
+    let outcomes = resolve_items(service, vec![make_item(1, &exc)]).await;
+    let resolve_outcome::Result::Done(done) = outcome_result(&outcomes[0]) else {
+        panic!("expected Done outcome, got {:?}", outcomes[0]);
+    };
+
+    assert_eq!(done.release_id, release_id.to_string());
+    assert_eq!(
+        *release_refs.lock().expect("release refs poisoned"),
+        vec!["chunk-a".to_string(), "chunk-b".to_string()]
+    );
+}
+
+#[tokio::test]
+async fn no_bound_release_leaves_the_outcome_release_id_empty() {
+    let service = make_service(FakeResolver::default());
+    let mut exc = raw_exception("RuntimeError");
+    exc.stack = Some(Stacktrace::Raw {
+        frames: vec![sample_raw_frame()],
+    });
+
+    let outcomes = resolve_items(service, vec![make_item(1, &exc)]).await;
+    let resolve_outcome::Result::Done(done) = outcome_result(&outcomes[0]) else {
+        panic!("expected Done outcome, got {:?}", outcomes[0]);
+    };
+
+    assert!(done.release_id.is_empty());
 }
 
 #[tokio::test]
@@ -507,6 +594,19 @@ fn java_exception_for_overload() -> Exception {
     }
 }
 
+fn js_raw_frame(chunk_id: &str) -> RawFrame {
+    let json = serde_json::json!({
+        "platform": "web:javascript",
+        "filename": "a.js",
+        "function": "f",
+        "in_app": true,
+        "lineno": 1,
+        "colno": 1,
+        "chunk_id": chunk_id,
+    });
+    serde_json::from_value(json).expect("valid raw frame")
+}
+
 fn sample_raw_frame() -> RawFrame {
     let json = serde_json::json!({
         "platform": "web:javascript",
@@ -537,7 +637,6 @@ fn sample_resolved_frame(raw_frame: &RawFrame) -> Frame {
         junk_drawer: None,
         code_variables: None,
         context: None,
-        release: None,
     }
 }
 

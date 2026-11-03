@@ -2,21 +2,17 @@ from typing import TYPE_CHECKING, Optional, cast
 
 import structlog
 
-if TYPE_CHECKING:
-    from posthog.cdp.templates.hog_function_template import HogFunctionTemplateDC
+from products.warehouse_sources.backend.facade.codebase_detection import detect
 
-from posthog.schema import (
+if TYPE_CHECKING:
+    from products.cdp.backend.templates.hog_function_template import HogFunctionTemplateDC
+
+from products.warehouse_sources.backend.facade.source_config import (
     DataWarehouseSourceCategory,
-    ExternalDataSourceType as SchemaExternalDataSourceType,
     ReleaseStatus,
     SourceConfig,
     SourceFieldInputConfig,
     SourceFieldInputConfigType,
-)
-
-from products.warehouse_sources.backend.temporal.data_imports.pipelines.pipeline.typings import (
-    SourceInputs,
-    SourceResponse,
 )
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.base import (
     ExternalWebhookInfo,
@@ -35,6 +31,7 @@ from products.warehouse_sources.backend.temporal.data_imports.sources.common.sch
     SourceSchema,
     build_endpoint_schemas,
 )
+from products.warehouse_sources.backend.temporal.data_imports.sources.common.typings import SourceInputs, SourceResponse
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.webhook_s3 import WebhookSourceManager
 from products.warehouse_sources.backend.temporal.data_imports.sources.generated_configs.instantly import (
     InstantlySourceConfig,
@@ -66,6 +63,10 @@ class InstantlySource(
     ResumableSource[InstantlySourceConfig, InstantlyResumeConfig],
     WebhookSource[InstantlySourceConfig],
 ):
+    codebase_detection = detect(
+        env=("^INSTANTLY_API_KEY$", "^INSTANTLY_API_BASE_URL$"), npm=("@instantlyai/sdk", "@instantlyai/cli")
+    )
+
     lists_tables_without_credentials = True  # static endpoint catalog — safe for public docs
     supported_versions = ("v2",)
     default_version = "v2"
@@ -78,10 +79,10 @@ class InstantlySource(
     @property
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
-            name=SchemaExternalDataSourceType.INSTANTLY,
+            name=ExternalDataSourceType.INSTANTLY,
             category=DataWarehouseSourceCategory.SALES,
             label="Instantly",
-            releaseStatus=ReleaseStatus.ALPHA,
+            releaseStatus=ReleaseStatus.GA,
             caption="""Sync campaigns, leads, emails, sending accounts, and analytics from Instantly into the PostHog Data warehouse.
 
 Create an API key under **Settings → Integrations → API keys** in Instantly. The API requires the Growth plan or above.

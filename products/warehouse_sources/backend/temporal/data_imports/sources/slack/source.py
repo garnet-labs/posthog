@@ -1,22 +1,24 @@
+from dataclasses import field
 from typing import TYPE_CHECKING, Optional, cast
 
-if TYPE_CHECKING:
-    from posthog.cdp.templates.hog_function_template import HogFunctionTemplateDC
-    from posthog.models.integration import Integration
+from products.warehouse_sources.backend.facade.codebase_detection import detect
 
-from posthog.schema import (
+if TYPE_CHECKING:
+    from posthog.integrations import IntegrationRecord
+
+    from products.cdp.backend.templates.hog_function_template import HogFunctionTemplateDC
+
+from temporalio import activity
+
+from posthog.dataclasses import frozen
+
+from products.warehouse_sources.backend.facade.source_config import (
     DataWarehouseSourceCategory,
-    ExternalDataSourceType as SchemaExternalDataSourceType,
     ReleaseStatus,
     SourceConfig,
     SourceFieldInputConfig,
     SourceFieldInputConfigType,
     SourceFieldSwitchGroupConfig,
-)
-
-from products.warehouse_sources.backend.temporal.data_imports.pipelines.pipeline.typings import (
-    SourceInputs,
-    SourceResponse,
 )
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.base import (
     FieldType,
@@ -32,6 +34,7 @@ from products.warehouse_sources.backend.temporal.data_imports.sources.common.mix
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.registry import SourceRegistry
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.resumable import ResumableSourceManager
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.schema import SourceSchema
+from products.warehouse_sources.backend.temporal.data_imports.sources.common.typings import SourceInputs, SourceResponse
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.webhook_s3 import WebhookSourceManager
 from products.warehouse_sources.backend.temporal.data_imports.sources.generated_configs.slack import SlackSourceConfig
 from products.warehouse_sources.backend.temporal.data_imports.sources.slack.settings import ENDPOINTS
@@ -46,9 +49,95 @@ from products.warehouse_sources.backend.temporal.data_imports.sources.slack.slac
 )
 from products.warehouse_sources.backend.types import ExternalDataSourceType
 
+# Joining is one rate-limited call per channel, so a large workspace can't finish in one pass. The setup
+# wizard and a manual refresh discover schemas inside a web request, which the gateway ends at 120
+# seconds. The discovery activity times out at 10 minutes and runs again every few hours.
+_REQUEST_JOIN_BUDGET_SECONDS = 30.0
+_ACTIVITY_JOIN_BUDGET_SECONDS = 300.0
+
+
+@frozen
+class SlackAccess:
+    """Resolved Slack credentials: the token, the user scoping private-channel discovery,
+    and the id keying the per-workspace channel-list cache."""
+
+    access_token: str = field(repr=False)  # secret: keep out of repr/logs
+    authed_user_id: str | None
+    cache_id: str
+
 
 @SourceRegistry.register
 class SlackSource(ResumableSource[SlackSourceConfig, SlackResumeConfig], WebhookSource[SlackSourceConfig], OAuthMixin):
+    codebase_detection = detect(
+        env=(
+            "^SLACK_(BOT|APP|SIGNING|CLIENT)_",
+            "^SLACK_WEBHOOK_URL$",
+            "^SLACK_TOKEN$",
+            "^SLACK_API_TOKEN$",
+            "^SLACK_STATE_SECRET$",
+            "^SLACK_SCOPES$",
+            "^SLACK_USER_SCOPES$",
+            "^SLACK_REDIRECT_URI$",
+            "^SLACK_REDIRECT_URI_PATH$",
+            "^SLACK_INSTALL_PATH$",
+            "^SLACK_VERIFICATION_TOKEN$",
+            "^SLACK_SERVICE_TOKEN$",
+            "^SLACK_CHANNEL_ID$",
+            "^HUBOT_SLACK_TOKEN$",
+            "^LOG_SLACK_WEBHOOK_URL$",
+        ),
+        npm=(
+            "@slack/web-api",
+            "@slack/bolt",
+            "@slack/webhook",
+            "@slack/socket-mode",
+            "@slack/oauth",
+            "@slack/rtm-api",
+            "@slack/types",
+            "@slack/events-api",
+            "@slack/interactive-messages",
+            "@slack/client",
+            "@slack/cli-hooks",
+            "@slack/deno-slack-sdk",
+            "hubot-slack",
+            "@vercel/slack-bolt",
+            "@chat-adapter/slack",
+        ),
+        pypi=("slack-sdk", "slack-bolt", "slackclient", "slackeventsapi", "slack-cli-hooks", "slack-discovery-sdk"),
+        cargo=("slack-morphism",),
+        composer=("laravel/slack-notification-channel", "jolicode/slack-php-api", "maknz/slack", "alek13/slack"),
+        go=("github.com/slack-go/slack", "github.com/nlopes/slack"),
+        hex=("slack",),
+        maven=(
+            "com.slack.api:slack-api-client",
+            "com.slack.api:bolt",
+            "com.slack.api:bolt-aws-lambda",
+            "com.slack.api:bolt-google-cloud-functions",
+            "com.slack.api:bolt-helidon",
+            "com.slack.api:bolt-http4k",
+            "com.slack.api:bolt-jakarta-jetty",
+            "com.slack.api:bolt-jakarta-servlet",
+            "com.slack.api:bolt-jakarta-socket-mode",
+            "com.slack.api:bolt-jetty",
+            "com.slack.api:bolt-ktor",
+            "com.slack.api:bolt-micronaut",
+            "com.slack.api:bolt-servlet",
+            "com.slack.api:bolt-socket-mode",
+            "com.slack.api:slack-api-client-kotlin-extension",
+            "com.slack.api:slack-api-model",
+            "com.slack.api:slack-api-model-kotlin-extension",
+            "com.slack.api:slack-app-backend",
+            "com.slack.api:slack-jakarta-socket-mode-client",
+            "com.github.seratch:jslack",
+            "com.github.seratch:jslack-api-client",
+            "com.github.seratch:jslack-api-model",
+            "com.github.seratch:jslack-app-backend",
+            "com.github.seratch:jslack-lightning",
+        ),
+        rubygems=("slack-ruby-client", "slack-notifier", "slack-ruby-bot-server"),
+    )
+    setup_requires_ui = True
+
     api_docs_url = "https://api.slack.com/web"
 
     @property
@@ -73,14 +162,11 @@ class SlackSource(ResumableSource[SlackSourceConfig, SlackResumeConfig], Webhook
         return WebhookSourceManager(inputs, inputs.logger)
 
     @staticmethod
-    def _get_authed_user_id(integration: "Integration") -> str | None:
+    def _get_authed_user_id(integration: "IntegrationRecord") -> str | None:
         return (integration.config or {}).get("authed_user", {}).get("id")
 
-    def _resolve_access_token(self, config: SlackSourceConfig, team_id: int) -> tuple[str, str | None, str]:
+    def _resolve_access_token(self, config: SlackSourceConfig, team_id: int) -> SlackAccess:
         """Resolve credentials, preferring the bring-your-own bot token.
-
-        Returns ``(access_token, authed_user_id, cache_id)``. ``authed_user_id`` scopes private-channel
-        discovery to a single user; ``cache_id`` keys the per-workspace channel-list cache.
 
         - A ``slack_access_token`` means the customer's own Slack app. The token is stored on the
           source itself, so it stays within Slack's API terms for internal apps. ``auth.test`` gives
@@ -92,7 +178,11 @@ class SlackSource(ResumableSource[SlackSourceConfig, SlackResumeConfig], Webhook
         """
         if config.slack_access_token:
             access_token = config.slack_access_token
-            return access_token, auth_test_user_id(access_token), manual_cache_id(access_token)
+            return SlackAccess(
+                access_token=access_token,
+                authed_user_id=auth_test_user_id(access_token),
+                cache_id=manual_cache_id(access_token),
+            )
 
         if not config.slack_integration_id:
             raise ValueError("Slack access token not found")
@@ -101,7 +191,11 @@ class SlackSource(ResumableSource[SlackSourceConfig, SlackResumeConfig], Webhook
         oauth_token = integration.access_token
         if not oauth_token:
             raise ValueError("Slack access token not found")
-        return oauth_token, self._get_authed_user_id(integration), str(integration.id)
+        return SlackAccess(
+            access_token=oauth_token,
+            authed_user_id=self._get_authed_user_id(integration),
+            cache_id=str(integration.id),
+        )
 
     def create_webhook(
         self, config: SlackSourceConfig, webhook_url: str, team_id: int, api_version: str | None = None
@@ -122,7 +216,7 @@ class SlackSource(ResumableSource[SlackSourceConfig, SlackResumeConfig], Webhook
     @property
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
-            name=SchemaExternalDataSourceType.SLACK,
+            name=ExternalDataSourceType.SLACK,
             category=DataWarehouseSourceCategory.COMMUNICATION,
             caption="""Sync Slack channels, users, and messages into PostHog by connecting your own Slack app.
 
@@ -184,6 +278,7 @@ Invite the bot to any channel whose messages you want to sync (`/invite @PostHog
                     ),
                     SourceFieldSwitchGroupConfig(
                         name="join_public_channels",
+                        sync_setting=True,
                         label="Automatically join public channels",
                         caption="On by default: the bot joins every public channel so their new messages sync without inviting it to each one. Turn it off to pick channels manually. Private channels always need a manual invite. Uses the `channels:join` scope, which the manifest above already includes.",
                         default=True,
@@ -264,7 +359,8 @@ Prefer a manifest? Paste this when creating the app — it wires the request URL
             "invalid_auth": "Your Slack token is invalid. Please reconnect the source.",
             "account_inactive": "Your Slack account is inactive. Please reconnect the source.",
             "token_revoked": "Your Slack token has been revoked. Please reconnect the source.",
-            "missing_scope": "Your Slack integration is missing required scopes. Please reconnect the source.",
+            "missing_scope": "Your Slack app is missing scopes PostHog needs. Add the bot scopes from the setup manifest, reinstall the app to your workspace, then try again.",
+            "not_allowed_token_type": "This Slack token type isn't supported. Please paste the Bot User OAuth Token (starts with xoxb-) from your Slack app's Install App page.",
             "not_in_channel": "The Slack bot is not a member of this channel. Please invite the bot to the channel and try again.",
             "channel_not_found": "This Slack channel was not found. It may have been deleted or the bot lacks permission to access it.",
             "Integration not found": "Your Slack integration was not found. Please reconnect the source.",
@@ -290,13 +386,24 @@ Prefer a manifest? Paste this when creating the app — it wires the request URL
             for name, endpoint_config in ENDPOINTS.items()
         ]
 
-        access_token, authed_user, cache_id = self._resolve_access_token(config, team_id)
+        access = self._resolve_access_token(config, team_id)
         # Only the bring-your-own path can auto-join — the legacy shared app lacks channels:join.
         # Joining is idempotent and only touches public channels the bot isn't in, so running it on
         # each discovery/refresh also picks up channels created since the last pass.
         if config.slack_access_token and config.join_public_channels and config.join_public_channels.enabled:
-            join_public_channels(access_token, cache_id, authed_user)
-        channels = get_channels(cache_id, access_token, authed_user, force_refresh=force_refresh)
+            # The discovery activity runs as soon as a source is created, with the larger budget, so it
+            # joins what a request pass leaves.
+            join_public_channels(
+                access.access_token,
+                access.cache_id,
+                access.authed_user_id,
+                time_budget_seconds=_ACTIVITY_JOIN_BUDGET_SECONDS
+                if activity.in_activity()
+                else _REQUEST_JOIN_BUDGET_SECONDS,
+            )
+        channels = get_channels(
+            access.cache_id, access.access_token, access.authed_user_id, force_refresh=force_refresh
+        )
         for ch in channels:
             if ch["id"] in ENDPOINTS:
                 continue
@@ -322,9 +429,9 @@ Prefer a manifest? Paste this when creating the app — it wires the request URL
         self, config: SlackSourceConfig, team_id: int, schema_name: Optional[str] = None, api_version: str | None = None
     ) -> tuple[bool, str | None]:
         try:
-            access_token, _authed_user, _cache_id = self._resolve_access_token(config, team_id)
+            access = self._resolve_access_token(config, team_id)
 
-            is_valid, error_code = validate_slack_credentials(access_token)
+            is_valid, error_code = validate_slack_credentials(access.access_token)
             if is_valid:
                 return True, None
 
@@ -349,7 +456,7 @@ Prefer a manifest? Paste this when creating the app — it wires the request URL
         resumable_source_manager: ResumableSourceManager[SlackResumeConfig],
         inputs: SourceInputs,
     ) -> SourceResponse:
-        access_token, authed_user, cache_id = self._resolve_access_token(config, inputs.team_id)
+        access = self._resolve_access_token(config, inputs.team_id)
 
         # For channel schemas, the schema name is the channel ID itself
         channel_id = inputs.schema_name if inputs.schema_name not in ENDPOINTS else None
@@ -357,8 +464,8 @@ Prefer a manifest? Paste this when creating the app — it wires the request URL
         webhook_source_manager = self.get_webhook_source_manager(inputs)
 
         return slack_source(
-            access_token=access_token,
-            cache_id=cache_id,
+            access_token=access.access_token,
+            cache_id=access.cache_id,
             endpoint=inputs.schema_name,
             team_id=inputs.team_id,
             job_id=inputs.job_id,
@@ -370,5 +477,5 @@ Prefer a manifest? Paste this when creating the app — it wires the request URL
             incremental_field=inputs.incremental_field,
             channel_id=channel_id,
             webhook_source_manager=webhook_source_manager,
-            authed_user=authed_user,
+            authed_user=access.authed_user_id,
         )

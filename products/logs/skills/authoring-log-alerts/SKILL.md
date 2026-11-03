@@ -113,7 +113,7 @@ for the reasoning:
 | `window_minutes`      | `5`                                         | Allowed: 5, 10, 15, 30, 60. Must match what you passed to the script. |
 | `evaluation_periods`  | `3`                                         | M in N-of-M.                                                          |
 | `datapoints_to_alarm` | `2`                                         | N in N-of-M. 2-of-3 reduces flap from a single noisy bucket.          |
-| `cooldown_minutes`    | `30`                                        | Minimum time between repeat fires.                                    |
+| `cooldown_minutes`    | `30`                                        | Minimum time between notifications (fire or resolve).                 |
 
 Call `posthog:logs-alerts-simulate-create` with these settings and `date_from: "-7d"`. The response gives you `fire_count`
 and `resolve_count`.
@@ -193,3 +193,8 @@ Report what you did, in this shape:
 - Total simulate calls made, total alerts created.
 
 The user should be able to read this and decide whether to disable any drafts before they go live.
+
+## Related skills
+
+- **`investigating-logs`** — characterize a service's baseline before alerting on it, and investigate firings after
+- **`authoring-error-tracking-alerts`** — alert on exceptions rather than log lines

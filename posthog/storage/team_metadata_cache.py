@@ -54,6 +54,7 @@ from posthog.caching.flags_redis_cache import FLAGS_DEDICATED_CACHE_ALIAS
 from posthog.metrics import TOMBSTONE_COUNTER
 from posthog.models.team.team import Team
 from posthog.storage.cache_expiry_manager import (
+    CacheRefreshCounts,
     cleanup_stale_expiry_tracking as cleanup_generic,
     get_teams_with_expiring_caches as get_teams_generic,
     refresh_expiring_caches as refresh_generic,
@@ -64,7 +65,11 @@ from posthog.storage.hypercache_manager import (
     get_cache_stats as get_cache_stats_generic,
 )
 
-from products.feature_flags.backend.models.team_feature_flags_config import TeamFeatureFlagsConfig
+from products.feature_flags.backend.models.team_feature_flag_policy_config import TeamFeatureFlagPolicyConfig
+from products.feature_flags.backend.models.team_feature_flags_config import (
+    PropertyMatchingVersion,
+    TeamFeatureFlagsConfig,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -155,7 +160,27 @@ def _serialize_team_field(field: str, value: Any) -> Any:
     return value
 
 
-def _serialize_team_to_metadata(team: Team, minimal_flag_called_events: bool | None = None) -> dict[str, Any]:
+REQUEST_BLOCKLIST_FIELDS = ("flags_blocked_hosts", "flags_blocked_ips")
+
+
+def _load_request_blocklists(team_ids: list[int]) -> dict[int, dict[str, list[str]]]:
+    """Map each team id to its request blocklist cache fields, with empty lists when it has no policy row."""
+    blocklists: dict[int, dict[str, list[str]]] = {
+        team_id: {"flags_blocked_hosts": [], "flags_blocked_ips": []} for team_id in team_ids
+    }
+    for team_id, blocked_hosts, blocked_ips in TeamFeatureFlagPolicyConfig.objects.filter(
+        team_id__in=team_ids
+    ).values_list("team_id", "blocked_hosts", "blocked_ips"):
+        blocklists[team_id] = {"flags_blocked_hosts": blocked_hosts, "flags_blocked_ips": blocked_ips}
+    return blocklists
+
+
+def _serialize_team_to_metadata(
+    team: Team,
+    minimal_flag_called_events: bool | None = None,
+    property_matching_version: int | None = None,
+    request_blocklist: dict[str, list[str]] | None = None,
+) -> dict[str, Any]:
     """
     Serialize a Team object to metadata dictionary.
 
@@ -163,6 +188,10 @@ def _serialize_team_to_metadata(team: Team, minimal_flag_called_events: bool | N
         team: Team object with organization and project already loaded
         minimal_flag_called_events: Pre-fetched value from TeamFeatureFlagsConfig, to let
             batch callers avoid an N+1 query. If None, this looks it up itself.
+        property_matching_version: Pre-fetched property matching semantics version. If None,
+            this looks it up with the other feature flags config value.
+        request_blocklist: Pre-fetched entry from _load_request_blocklists. If None, this
+            looks it up itself.
 
     Returns:
         Dictionary containing full team metadata
@@ -175,19 +204,26 @@ def _serialize_team_to_metadata(team: Team, minimal_flag_called_events: bool | N
     metadata["organization_name"] = team.organization.name if team.organization else None
     metadata["project_name"] = team.project.name if team.project else None
 
-    if minimal_flag_called_events is None:
+    if minimal_flag_called_events is None or property_matching_version is None:
         # Deliberately not team.teamfeatureflagsconfig: the reverse O2O accessor gets
         # cache-populated as a side effect of register_team_extension_signal's
         # get_or_create(team=instance, ...) at team-creation time, so an already-loaded
         # Team object can carry a stale cached value if the config row changes after
         # the Team was loaded. An explicit query is always fresh.
-        minimal_flag_called_events = (
+        config_values = (
             TeamFeatureFlagsConfig.objects.filter(team_id=team.id)
-            .values_list("minimal_flag_called_events", flat=True)
+            .values_list("minimal_flag_called_events", "property_matching_version")
             .first()
-            or False
         )
-    metadata["minimal_flag_called_events"] = minimal_flag_called_events
+        if config_values is not None:
+            minimal_flag_called_events = config_values[0]
+            property_matching_version = config_values[1]
+    metadata["minimal_flag_called_events"] = minimal_flag_called_events or False
+    metadata["property_matching_version"] = property_matching_version or PropertyMatchingVersion.LEGACY
+
+    if request_blocklist is None:
+        request_blocklist = _load_request_blocklists([team.id])[team.id]
+    metadata.update(request_blocklist)
 
     return metadata
 
@@ -206,14 +242,19 @@ def _batch_load_team_metadata(teams: list[Team]) -> dict[int, dict[str, Any]]:
     Returns:
         Dict mapping team_id -> metadata dict
     """
-    minimal_flag_called_events_by_team = dict(
-        TeamFeatureFlagsConfig.objects.filter(team_id__in=[team.id for team in teams]).values_list(
-            "team_id", "minimal_flag_called_events"
-        )
-    )
+    config_by_team_id = {
+        team_id: (minimal_flag_called_events, property_matching_version)
+        for team_id, minimal_flag_called_events, property_matching_version in TeamFeatureFlagsConfig.objects.filter(
+            team_id__in=[team.id for team in teams]
+        ).values_list("team_id", "minimal_flag_called_events", "property_matching_version")
+    }
+    blocklist_by_team_id = _load_request_blocklists([team.id for team in teams])
     return {
         team.id: _serialize_team_to_metadata(
-            team, minimal_flag_called_events=minimal_flag_called_events_by_team.get(team.id, False)
+            team,
+            minimal_flag_called_events=config_by_team_id.get(team.id, (False, PropertyMatchingVersion.LEGACY))[0],
+            property_matching_version=config_by_team_id.get(team.id, (False, PropertyMatchingVersion.LEGACY))[1],
+            request_blocklist=blocklist_by_team_id[team.id],
         )
         for team in teams
     }
@@ -331,11 +372,19 @@ def verify_team_metadata(
 
     # Compare only fields we care about (defined in TEAM_METADATA_FIELDS + derived fields).
     # This allows removing fields from the cache without triggering unnecessary fixes.
-    fields_to_check = set(TEAM_METADATA_FIELDS) | {"organization_name", "project_name", "minimal_flag_called_events"}
+    fields_to_check = set(TEAM_METADATA_FIELDS) | {
+        "organization_name",
+        "project_name",
+        "minimal_flag_called_events",
+        "property_matching_version",
+        *REQUEST_BLOCKLIST_FIELDS,
+    }
     diffs = []
     for key in fields_to_check:
         db_val = db_data.get(key)
-        cached_val = cached_data.get(key)
+        # A blob without the blocklist keys reads the same as empty lists in the flags service,
+        # so it only needs a fix when the team actually has entries.
+        cached_val = cached_data.get(key, [] if key in REQUEST_BLOCKLIST_FIELDS else None)
         if db_val != cached_val:
             diffs.append({"field": key, "db_value": db_val, "cached_value": cached_val})
 
@@ -450,7 +499,7 @@ def get_teams_with_expiring_caches(ttl_threshold_hours: int = 24, limit: int = 5
     return get_teams_generic(TEAM_HYPERCACHE_MANAGEMENT_CONFIG, ttl_threshold_hours, limit)
 
 
-def refresh_expiring_caches(ttl_threshold_hours: int = 24, limit: int = 5000) -> tuple[int, int]:
+def refresh_expiring_caches(ttl_threshold_hours: int = 24, limit: int = 5000) -> CacheRefreshCounts:
     """
     Refresh caches that are expiring soon to prevent cache misses.
 
@@ -468,7 +517,7 @@ def refresh_expiring_caches(ttl_threshold_hours: int = 24, limit: int = 5000) ->
         limit: Maximum number of teams to refresh per run (default 5000)
 
     Returns:
-        Tuple of (successful_refreshes, failed_refreshes)
+        CacheRefreshCounts with successful and failed refresh counts
     """
     return refresh_generic(TEAM_HYPERCACHE_MANAGEMENT_CONFIG, ttl_threshold_hours, limit)
 

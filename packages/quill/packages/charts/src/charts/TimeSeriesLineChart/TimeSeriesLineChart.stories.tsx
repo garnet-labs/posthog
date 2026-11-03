@@ -22,7 +22,7 @@ import {
     PERCENTAGE_SERIES,
     SERIES,
 } from '../time-series-fixtures'
-import { TimeSeriesLineChart } from './TimeSeriesLineChart'
+import { TimeSeriesLineChart, type TimeSeriesLineChartConfig } from './TimeSeriesLineChart'
 
 const meta: Meta = {
     title: 'Components/HogCharts/TimeSeriesLineChart',
@@ -142,7 +142,7 @@ interface DateAxisCellProps {
     title: string
     labels: string[]
     series: Series[]
-    interval: TimeInterval
+    interval?: TimeInterval
     timezone: string
 }
 
@@ -230,6 +230,23 @@ export const StartAtZero: Story = {
                 title="startAtZero: false (floated)"
                 series={OFFSET_SERIES}
                 config={{ suffix: ' ms', startAtZero: false }}
+            />
+        </div>
+    ),
+}
+
+/** `min` / `max` pin either end of the axis. Either may be omitted to keep the automatic bound, so
+ *  a lone `min` reads as "only show me above this". */
+export const YAxisRange: Story = {
+    render: () => (
+        // eslint-disable-next-line react/forbid-dom-props
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, auto)', gap: 24 }}>
+            <YFormatCell title="automatic" series={OFFSET_SERIES} config={{ suffix: ' ms' }} />
+            <YFormatCell title="min: 800" series={OFFSET_SERIES} config={{ suffix: ' ms', min: 800 }} />
+            <YFormatCell
+                title="min: 800, max: 1000"
+                series={OFFSET_SERIES}
+                config={{ suffix: ' ms', min: 800, max: 1000 }}
             />
         </div>
     ),
@@ -333,9 +350,9 @@ export const ComparisonOf: Story = {
 
 export const DateAxis: Story = {
     render: () => {
-        const cells: { interval: TimeInterval; labels: string[]; series: Series[]; title: string }[] = [
+        const cells: { interval?: TimeInterval; labels: string[]; series: Series[]; title: string }[] = [
             { interval: 'hour', labels: HOURLY_LABELS, series: HOURLY_SERIES, title: 'hour' },
-            { interval: 'day', labels: DAILY_LABELS, series: DAILY_SERIES, title: 'day' },
+            { labels: DAILY_LABELS, series: DAILY_SERIES, title: 'day (inferred)' },
             { interval: 'month', labels: MONTHLY_LABELS, series: MONTHLY_SERIES, title: 'month' },
         ]
         return (
@@ -354,6 +371,52 @@ export const DateAxis: Story = {
                                 timezone={timezone}
                             />
                         ))}
+                    </div>
+                ))}
+            </div>
+        )
+    },
+}
+
+const SPARSE_HOURS = [0, 1, 2, 3, 4, 5, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+const SPARSE_LABELS = SPARSE_HOURS.map((h) => `2026-03-01T${String(h).padStart(2, '0')}:00:00Z`)
+const SPARSE_SERIES: Series[] = [
+    {
+        key: 'rps',
+        label: 'Requests',
+        data: SPARSE_HOURS.map((h) => (h === 15 ? NaN : 200 + 60 * Math.sin(h / 3))),
+        fill: { opacity: 0.2 },
+    },
+]
+const WHOLE_DAY = [Date.parse('2026-03-01T00:00:00Z'), Date.parse('2026-03-02T00:00:00Z')] as const
+
+export const TimeScale: Story = {
+    render: () => {
+        const theme = useReactiveTheme()
+        const cells: { title: string; config: TimeSeriesLineChartConfig }[] = [
+            { title: 'index (default)', config: {} },
+            { title: "xScale: 'time'", config: { xScale: 'time' } },
+            { title: "xScale: 'time', xDomain: whole day", config: { xScale: 'time', xDomain: WHOLE_DAY } },
+            { title: "xScale: 'time', connectNulls", config: { xScale: 'time', connectNulls: true } },
+        ]
+        return (
+            // eslint-disable-next-line react/forbid-dom-props
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, auto)', gap: 24 }}>
+                {cells.map(({ title, config }) => (
+                    <div key={title}>
+                        <div>{title}</div>
+                        <Stage width={360} height={200}>
+                            <TimeSeriesLineChart
+                                series={SPARSE_SERIES}
+                                labels={SPARSE_LABELS}
+                                theme={theme}
+                                config={{
+                                    xAxis: { timezone: 'UTC', interval: 'hour' },
+                                    yAxis: { showGrid: true },
+                                    ...config,
+                                }}
+                            />
+                        </Stage>
                     </div>
                 ))}
             </div>

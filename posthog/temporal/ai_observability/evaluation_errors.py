@@ -1,8 +1,9 @@
 """Shared taxonomy for evaluation execution errors.
 
-The split between user-actionable and PostHog-owned errors is load-bearing:
-user errors disable the evaluation without failing the Temporal activity, while
-PostHog-owned errors still raise so Temporal/Grafana stays useful.
+The split between user-actionable and PostHog-owned errors is load-bearing: most user errors
+disable the evaluation without failing the Temporal activity, while PostHog-owned errors still
+raise so Temporal/Grafana stays useful. `hog_input_error` is the one user error that disables
+nothing — it describes a single unit, not the evaluation.
 """
 
 from dataclasses import dataclass
@@ -10,7 +11,7 @@ from typing import Literal
 
 from temporalio.exceptions import ApplicationError
 
-from posthog.temporal.ai_observability.evaluation_types import EvaluationActivityResult
+from posthog.temporal.ai_observability.evaluation_types import EvaluationActivityResult, build_skipped_evaluation_result
 
 from products.ai_observability.backend.models.evaluations import EvaluationStatusReason
 from products.ai_observability.backend.models.provider_keys import LLMProviderKey
@@ -30,6 +31,14 @@ class EvaluationErrorSpec:
 
 
 USER_ERROR_SPECS: dict[str, EvaluationErrorSpec] = {
+    "endpoint_blocked": EvaluationErrorSpec(
+        error_type="endpoint_blocked",
+        owner="user",
+        safe_message="The judge endpoint is not allowed. Check the connection settings.",
+        status_reason=EvaluationStatusReason.PROVIDER_KEY_INVALID,
+        disables_evaluation=True,
+        provider_key_state=LLMProviderKey.State.ERROR,
+    ),
     "provider_key_required": EvaluationErrorSpec(
         error_type="provider_key_required",
         owner="user",
@@ -47,7 +56,7 @@ USER_ERROR_SPECS: dict[str, EvaluationErrorSpec] = {
     "key_invalid": EvaluationErrorSpec(
         error_type="key_invalid",
         owner="user",
-        safe_message="The provider API key is disabled. Re-validate or replace the key.",
+        safe_message="The provider API key cannot be used. Re-validate or replace the key.",
         status_reason=EvaluationStatusReason.PROVIDER_KEY_INVALID,
         disables_evaluation=True,
     ),
@@ -97,12 +106,40 @@ USER_ERROR_SPECS: dict[str, EvaluationErrorSpec] = {
         status_reason=EvaluationStatusReason.MODEL_NOT_FOUND,
         disables_evaluation=True,
     ),
+    "model_not_supported": EvaluationErrorSpec(
+        error_type="model_not_supported",
+        owner="user",
+        safe_message="The selected model does not support chat completions. Choose a chat model before re-enabling.",
+        status_reason=EvaluationStatusReason.MODEL_NOT_SUPPORTED,
+        disables_evaluation=True,
+    ),
     "hog_error": EvaluationErrorSpec(
         error_type="hog_error",
         owner="user",
         safe_message="The Hog evaluation code failed. Fix the code before re-enabling this evaluation.",
         status_reason=EvaluationStatusReason.HOG_ERROR,
         disables_evaluation=True,
+    ),
+    # A user-actionable spec that neither disables the evaluation nor sets a status reason:
+    # a single unit carried data the Hog source could not handle, which says nothing about whether
+    # the evaluation works on the next one. What keeps the workflow off `disable_evaluation_activity`
+    # is the result omitting `terminal_user_error` (see `is_terminal_user_error_result`); the unset
+    # `status_reason` is a second guard behind that.
+    "hog_input_error": EvaluationErrorSpec(
+        error_type="hog_input_error",
+        owner="user",
+        safe_message="The evaluation code could not handle the data for this run, so it was skipped.",
+    ),
+    "score_out_of_bounds": EvaluationErrorSpec(
+        error_type="score_out_of_bounds",
+        owner="user",
+        safe_message="The score was outside the configured bounds, so this run was skipped. Check the score limits.",
+    ),
+    # Unlike `rate_limit`, this limit can clear on the next run, so the evaluation stays enabled.
+    "rate_limit_retries_exhausted": EvaluationErrorSpec(
+        error_type="rate_limit_retries_exhausted",
+        owner="user",
+        safe_message="The provider kept rate limiting your API key, so this run was skipped. Raise the key's limits or lower the sampling percentage.",
     ),
 }
 
@@ -161,23 +198,25 @@ def terminal_user_error_result(
     spec: EvaluationErrorSpec,
     message: str | None,
     allows_na: bool,
+    output_type: str = "boolean",
     provider: str | None = None,
     model: str | None = None,
     key_id: str | None = None,
     is_byok: bool = False,
 ) -> EvaluationActivityResult:
     result: EvaluationActivityResult = {
-        "result_type": "boolean",
-        "verdict": None,
-        "reasoning": spec.safe_message if not message else message,
+        **build_skipped_evaluation_result(
+            output_type=output_type,
+            allows_na=allows_na,
+            reasoning=spec.safe_message if not message else message,
+            skip_reason=spec.error_type,
+            verdict=None,
+        ),
         "input_tokens": 0,
         "output_tokens": 0,
         "total_tokens": 0,
         "is_byok": is_byok,
         "key_id": key_id,
-        "allows_na": allows_na,
-        "skipped": True,
-        "skip_reason": spec.error_type,
         "terminal_user_error": True,
         "status_reason": spec.status_reason,
     }
@@ -187,8 +226,6 @@ def terminal_user_error_result(
         result["model"] = model
     if spec.provider_key_state:
         result["provider_key_state"] = spec.provider_key_state
-    if allows_na:
-        result["applicable"] = False
     return result
 
 
@@ -196,6 +233,7 @@ def terminal_user_error_result_from_application_error(
     error: ApplicationError,
     *,
     allows_na: bool,
+    output_type: str = "boolean",
     provider: str | None = None,
     model: str | None = None,
     key_id: str | None = None,
@@ -215,6 +253,7 @@ def terminal_user_error_result_from_application_error(
         spec=spec,
         message=error.message,
         allows_na=allows_na,
+        output_type=output_type,
         provider=str(detail_provider) if detail_provider else provider,
         model=str(detail_model) if detail_model else model,
         key_id=str(detail_key_id) if detail_key_id else key_id,
@@ -222,13 +261,19 @@ def terminal_user_error_result_from_application_error(
     )
 
 
-def status_reason_detail_for_terminal_user_error(spec: EvaluationErrorSpec, message: str | None) -> str | None:
-    if spec.error_type != "hog_error" or not message:
+def truncate_error_detail(message: str | None) -> str | None:
+    """Bound a raw execution error before it reaches a status reason or a user-visible result."""
+    if not message:
         return None
-
     if len(message) <= MAX_STATUS_REASON_DETAIL_LENGTH:
         return message
     return f"{message[: MAX_STATUS_REASON_DETAIL_LENGTH - 3]}..."
+
+
+def status_reason_detail_for_terminal_user_error(spec: EvaluationErrorSpec, message: str | None) -> str | None:
+    if spec.error_type != "hog_error":
+        return None
+    return truncate_error_detail(message)
 
 
 def is_terminal_user_error_result(result: EvaluationActivityResult) -> bool:

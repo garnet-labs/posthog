@@ -1,15 +1,15 @@
 import typing
 from abc import ABC
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
+from functools import cached_property
 from math import ceil
 from time import perf_counter
-from typing import Optional, Union
+from typing import Any, Optional, Union
 from zoneinfo import ZoneInfo
 
 from django.conf import settings
 
 import structlog
-import posthoganalytics
 from prometheus_client import Counter
 from structlog.contextvars import bound_contextvars
 
@@ -20,10 +20,13 @@ from posthog.schema import (
     EventPropertyFilter,
     PersonPropertyFilter,
     SessionPropertyFilter,
+    WebAgentAnalyticsQuery,
+    WebBotsTableQuery,
     WebExternalClicksTableQuery,
     WebGoalsQuery,
     WebNotableChangesQuery,
     WebOverviewQuery,
+    WebPageDirectoryQuery,
     WebPageURLSearchQuery,
     WebStatsTableQuery,
     WebVitalsPathBreakdownQuery,
@@ -32,7 +35,7 @@ from posthog.schema import (
 from posthog.hogql import ast
 from posthog.hogql.errors import QueryError
 from posthog.hogql.parser import parse_expr, parse_select
-from posthog.hogql.property import action_to_expr, apply_path_cleaning, property_to_expr
+from posthog.hogql.property import action_to_expr, apply_path_cleaning, get_property_type, property_to_expr
 from posthog.hogql.query import execute_hogql_query
 
 from posthog.caching.insights_api import BASE_MINIMUM_INSIGHT_REFRESH_INTERVAL, REDUCED_MINIMUM_INSIGHT_REFRESH_INTERVAL
@@ -42,10 +45,15 @@ from posthog.hogql_queries.utils.query_compare_to_date_range import QueryCompare
 from posthog.hogql_queries.utils.query_date_range import QueryDateRange
 from posthog.hogql_queries.utils.query_previous_period_date_range import QueryPreviousPeriodDateRange
 from posthog.models import User
-from posthog.models.filters.mixins.utils import cached_property
-from posthog.rbac.user_access_control import UserAccessControl
 
+from products.access_control.backend.facade.user_access_control import UserAccessControl
 from products.actions.backend.models.action import Action
+from products.web_analytics.backend.hogql_queries.first_pageview_attribution import first_pageview_session_filter_expr
+from products.web_analytics.backend.hogql_queries.first_pageview_flag import (
+    evaluate_team_rollout_flag,
+    first_pageview_attribution_enabled,
+    rewritable_session_filters,
+)
 from products.web_analytics.backend.hogql_queries.metrics import (
     WEB_ANALYTICS_QUERY_COUNTER,
     WEB_ANALYTICS_QUERY_DURATION,
@@ -55,6 +63,7 @@ from products.web_analytics.backend.hogql_queries.traffic_type import get_traffi
 from products.web_analytics.backend.hogql_queries.web_lazy_precompute_common import (
     compute_filters_eligibility_hash,
     is_precompute_enabled_for_team,
+    is_team_above_volume_floor,
 )
 
 logger = structlog.get_logger(__name__)
@@ -84,6 +93,9 @@ WebQueryNode = Union[
     WebStatsTableQuery,
     WebGoalsQuery,
     WebExternalClicksTableQuery,
+    WebAgentAnalyticsQuery,
+    WebPageDirectoryQuery,
+    WebBotsTableQuery,
     WebVitalsPathBreakdownQuery,
     WebPageURLSearchQuery,
     WebNotableChangesQuery,
@@ -100,6 +112,44 @@ class WebAnalyticsQueryRunner(AnalyticsQueryRunner[WAR], ABC):
     # SAMPLE clauses nor scale results.
     query: WebQueryNode
     query_type: type[WebQueryNode]
+    bypass_warehouse_access_control: bool = False
+    # The oldest `computed_at` across every lazy precompute ensure that this runner served from.
+    # A response that combines several windows (current and compare periods) is only as fresh as its stalest window.
+    lazy_precompute_computed_at: Optional[datetime] = None
+
+    def __init__(self, *args: Any, bypass_warehouse_access_control: bool = False, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.bypass_warehouse_access_control = bypass_warehouse_access_control
+
+    def record_lazy_precompute_computed_at(self, computed_at: datetime) -> None:
+        if self.lazy_precompute_computed_at is None or computed_at < self.lazy_precompute_computed_at:
+            self.lazy_precompute_computed_at = computed_at
+
+    def lazy_precompute_stale(self) -> Optional[bool]:
+        # The lazy modules mark serve-stale reads via tag_queries(precompute_stale=True)
+        # before executing the read; surfacing it on the response lets clients (and the
+        # frontend's 'query completed' telemetry) see it too. None when served fresh.
+        return True if get_query_tag_value("precompute_stale") else None
+
+    def lazy_precompute_computed_at_iso(self) -> Optional[str]:
+        if self.lazy_precompute_computed_at is None:
+            return None
+        return self.lazy_precompute_computed_at.astimezone(UTC).isoformat()
+
+    def get_cache_payload(self) -> dict:
+        payload = super().get_cache_payload()
+        # The base fingerprint does not see a warehouse table that a test-account filter reads through a join,
+        # so a bypass run and a user run would share one cache entry. The separate key stops a user who is
+        # denied that table from reading a result that a bypass run computed.
+        if self.bypass_warehouse_access_control:
+            payload["bypass_warehouse_access_control"] = True
+        return payload
+
+    def single_flight_variant(self) -> str:
+        variant = super().single_flight_variant()
+        if self.bypass_warehouse_access_control:
+            return f"{variant}:bypass_warehouse_access_control"
+        return variant
 
     def query_strategy(self) -> str | None:
         return None
@@ -258,43 +308,10 @@ class WebAnalyticsQueryRunner(AnalyticsQueryRunner[WAR], ABC):
         # path for everyone on a team, so the rollout unit is the team, not the user.
         return percent > 0 and self.team.pk % 100 < percent
 
-    def _evaluate_team_rollout_flag(self, flag_key: str, failure_log_event: str) -> bool:
-        """Evaluate a team-scoped rollout flag locally — fails closed on flag-service errors.
-
-        A raised exception here must never fail the query: evaluation failure degrades
-        to the flag-off path. For optimization flags that is merely the slower query
-        shape; for result-changing flags (first-pageview attribution) it silently
-        restores the old semantics, so both the exception and the None-return cases
-        (local evaluation unavailable) are logged to keep a fleet-wide fallback
-        visible during rollout.
-        """
-        try:
-            enabled = posthoganalytics.feature_enabled(
-                flag_key,
-                str(self.team.uuid),
-                groups={
-                    "organization": str(self.team.organization_id),
-                    "project": str(self.team.id),
-                },
-                group_properties={
-                    "organization": {"id": str(self.team.organization_id)},
-                    "project": {"id": str(self.team.id)},
-                },
-                only_evaluate_locally=True,
-                send_feature_flag_events=False,
-            )
-            if enabled is None:
-                logger.warning(failure_log_event, reason="feature_enabled_returned_none", team_id=self.team.pk)
-                return False
-            return bool(enabled)
-        except Exception as e:
-            logger.warning(failure_log_event, error=e, team_id=self.team.pk)
-            return False
-
     @cached_property
     def _session_id_set_flag_enabled(self) -> bool:
-        return self._evaluate_team_rollout_flag(
-            SESSION_ID_SET_FEATURE_FLAG_KEY, "web_analytics_session_id_set_flag_evaluation_failed"
+        return evaluate_team_rollout_flag(
+            self.team, SESSION_ID_SET_FEATURE_FLAG_KEY, "web_analytics_session_id_set_flag_evaluation_failed"
         )
 
     def _session_id_set_common_eligibility(self) -> bool:
@@ -349,6 +366,7 @@ WHERE and(
                 query=count_query,
                 team=self.team,
                 user=self.user,
+                bypass_warehouse_access_control=self.bypass_warehouse_access_control,
                 timings=self.timings,
                 modifiers=self.modifiers,
                 limit_context=self.limit_context,
@@ -470,10 +488,72 @@ WHERE and(
         return None
 
     @cached_property
+    def _first_pageview_attribution_enabled(self) -> bool:
+        return first_pageview_attribution_enabled(self.team)
+
+    @cached_property
+    def rewritten_first_pageview_filters(self) -> list[SessionPropertyFilter]:
+        """Session-property filters this query serves with first-pageview semantics.
+
+        Empty unless the flag is on, so every gate keyed on this is a no-op while
+        it is off. The list scan runs before the flag so a query carrying no
+        drill-down filter never reaches the flag service.
+        """
+        rewritable = rewritable_session_filters(getattr(self.query, "properties", None))
+        if not rewritable or not self._first_pageview_attribution_enabled:
+            return []
+        return rewritable
+
+    @cached_property
+    def effective_query_properties(
+        self,
+    ) -> list[Union[EventPropertyFilter, PersonPropertyFilter, SessionPropertyFilter, CohortPropertyFilter]]:
+        """Rewritten session filters are dropped here because
+        `first_pageview_filter_exprs` carries them instead.
+        """
+        rewritten = {id(p) for p in self.rewritten_first_pageview_filters}
+        return [p for p in (getattr(self.query, "properties", None) or []) if id(p) not in rewritten]
+
+    @cached_property
     def property_filters_without_pathname(
         self,
     ) -> list[Union[EventPropertyFilter, PersonPropertyFilter, SessionPropertyFilter, CohortPropertyFilter]]:
         return [p for p in self.query.properties if p.key != "$pathname"]
+
+    @cached_property
+    def first_pageview_filter_exprs(self) -> list[ast.Expr]:
+        """Events-side predicates replacing the rewritten session filters.
+
+        Every events scan that turns user filters into a WHERE clause must
+        include these alongside `effective_query_properties`, or that scan
+        silently ignores the drill-down filter the rest of the scene is applying
+        and its tile disagrees with the row the user clicked.
+        """
+        return [
+            first_pageview_session_filter_expr(
+                p,
+                team=self.team,
+                inside_periods=self._periods_expression(),
+                event_where=self.event_type_expr,
+                session_id_present=self.events_session_id_present,
+                outer_session_id=ast.Field(chain=["events", "$session_id"]),
+                modifiers=self.modifiers,
+                timings=self.timings,
+            )
+            for p in self.rewritten_first_pageview_filters
+        ]
+
+    def all_properties(self) -> ast.Expr:
+        return property_to_expr(
+            [*self.effective_query_properties, *self.first_pageview_filter_exprs, *self._test_account_filters],
+            team=self.team,
+        )
+
+    def session_properties(self) -> ast.Expr:
+        properties = [
+            p for p in self.effective_query_properties + self._test_account_filters if get_property_type(p) == "session"
+        ]
+        return property_to_expr(properties, team=self.team, scope="event")
 
     @cached_property
     def conversion_goal_expr(self) -> Optional[ast.Expr]:
@@ -486,15 +566,18 @@ WHERE and(
                 raise QueryError(
                     f"Conversion goal action with id={self.query.conversionGoal.actionId} not found in this project."
                 )
-            return action_to_expr(action)
+            goal_expr = action_to_expr(action)
         elif isinstance(self.query.conversionGoal, CustomEventConversionGoal):
-            return ast.CompareOperation(
+            goal_expr = ast.CompareOperation(
                 left=ast.Field(chain=["events", "event"]),
                 op=ast.CompareOperationOp.Eq,
                 right=ast.Constant(value=self.query.conversionGoal.customEventName),
             )
         else:
             return None
+        if self.query.conversionGoal.properties:
+            return ast.And(exprs=[goal_expr, property_to_expr(self.query.conversionGoal.properties, team=self.team)])
+        return goal_expr
 
     @cached_property
     def conversion_count_expr(self) -> Optional[ast.Expr]:
@@ -643,7 +726,12 @@ WHERE and(
         )
 
     def events_where(self):
-        properties = [self.events_where_data_range(), self.query.properties, self._test_account_filters]
+        properties = [
+            self.events_where_data_range(),
+            self.effective_query_properties,
+            self.first_pageview_filter_exprs,
+            self._test_account_filters,
+        ]
 
         return property_to_expr(
             properties,
@@ -703,6 +791,7 @@ WHERE and(
         return get_traffic_type_expr(
             user_agent_expr or ast.Field(chain=["events", "properties", "$raw_user_agent"]),
             ip_expr or ast.Field(chain=["events", "properties", "$ip"]),
+            modifiers=self.modifiers,
         )
 
     def _get_traffic_category_expr(
@@ -711,16 +800,26 @@ WHERE and(
         return get_traffic_category_expr(
             user_agent_expr or ast.Field(chain=["events", "properties", "$raw_user_agent"]),
             ip_expr or ast.Field(chain=["events", "properties", "$ip"]),
+            modifiers=self.modifiers,
         )
 
-    def get_cache_key(self) -> str:
-        original = super().get_cache_key()
+    def get_cache_key_variant(self) -> str:
         # Precompute enrollment is part of the key so flipping the rollout flag
         # invalidates cached results: with default-on reads, disabling the flag
         # (the kill switch) must not keep serving cached precompute-produced
         # responses until they stale out.
         precompute = is_precompute_enabled_for_team(self.team)
-        return f"{original}_{self.team.path_cleaning_filters}_pc{int(precompute)}"
+        # The volume-floor verdict is part of the key too: a team crossing below
+        # the floor switches to the live path, so a precompute-produced response
+        # under the old key must not keep serving until it stales out. Only read
+        # the floor when precompute is on — otherwise it can't change the result.
+        above_floor = precompute and is_team_above_volume_floor(self.team.pk)
+        variant = f"_{self.team.path_cleaning_filters}_pc{int(precompute)}_vf{int(above_floor)}"
+        # A rewritten filter selects a different population for the same query, so
+        # rewritten and entry-attributed runs must not share cache entries.
+        if self.rewritten_first_pageview_filters:
+            variant = f"{variant}_fpfilters"
+        return variant
 
     @cached_property
     def events_session_property(self):

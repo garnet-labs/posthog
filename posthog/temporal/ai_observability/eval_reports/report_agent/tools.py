@@ -9,41 +9,58 @@ InjectedState, but whole-key replacement does not.
 
 import re
 import json
+import time
+import random
+from collections.abc import Callable, Container, Iterable, Sequence
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, Literal, TypeVar
 
 from django.db.models import Q
 
 import structlog
+from clickhouse_driver.errors import NetworkError, SocketTimeoutError
 from langchain_core.tools import BaseTool, tool
 from langgraph.prebuilt import InjectedState
 
 from posthog.hogql import ast
+from posthog.hogql.context import HogQLContext
+from posthog.hogql.database.database import Database
 
-from posthog.temporal.ai_observability.eval_reports.output_types import (
-    EvaluationReportOutcomeDefinition,
-    get_outcome_definition,
-)
+from posthog.dataclasses import frozen
+from posthog.errors import CH_TRANSIENT_ERRORS
 from posthog.temporal.ai_observability.eval_reports.report_agent.schema import (
     MAX_REPORT_SECTIONS,
     Citation,
+    EvalReportGenerationStatus,
     ReportSection,
-    calculate_boolean_pass_rate,
+    calculate_pass_rate,
     calculate_result_rates,
+    citation_wrappers,
     normalize_metrics_payload,
     normalize_report_content_payload,
 )
+from posthog.temporal.ai_observability.eval_reports.report_agent.state import REPORT_RUN_HANDLE_KEY
 from posthog.temporal.ai_observability.eval_reports.targets import (
     GENERATION_TARGET,
+    SESSION_ID_ALLOWLIST_KEY,
+    SESSION_TARGET,
+    TRACE_ID_ALLOWLIST_KEY,
     TRACE_TARGET,
+    get_target_descriptor,
     resolve_evaluation_target,
     target_event_predicate,
 )
+from posthog.temporal.ai_observability.sentiment.extraction import truncate_to_head_tail
 from posthog.temporal.ai_observability.trace_summarization.constants import (
     MAX_TRACE_EVENTS_LIMIT,
     MAX_TRACE_PROPERTIES_SIZE,
 )
 from posthog.temporal.ai_observability.trace_summarization.fetch_and_format import _fetch_and_format_trace
+
+from products.ai_observability.backend.models.evaluation_outcomes import (
+    EvaluationReportOutcomeDefinition,
+    get_outcome_definition,
+)
 
 if TYPE_CHECKING:
     from posthog.models import Team
@@ -54,53 +71,124 @@ logger = structlog.get_logger(__name__)
 # so they use bounded validation and always flow through AST constants instead.
 _UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
+# Capture the token inside any inline-code span, so the guard can tell an ID
+# apart from prose regardless of how many backticks or spaces wrap it. The class
+# excludes only the backtick, so the run to the next one is unambiguous and the
+# scan stays linear. A class that also matched the surrounding whitespace makes
+# every split of a whitespace run a candidate, and the agent writes the input.
+_BACKTICKED_TOKEN_RE = re.compile(r"`` `([^`]*)` ``|`+([^`]*)`+")
+
+# Match a canonical UUID anywhere it is used as a whole token. Opaque IDs are not
+# UUID-shaped, so the guard also checks the session's handled-ID allowlists.
+_UUID_SHAPE_RE = re.compile(
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+    re.IGNORECASE,
+)
+
 _TARGET_ID_EXPRESSION = "coalesce(nullIf(properties.$ai_target_id, ''), properties.$ai_target_event_id)"
-_MAX_TRACE_ID_LENGTH = 255
+_MAX_OPAQUE_ID_LENGTH = 255
 _MAX_TRACE_SAMPLE_IDS = 10
 _MAX_TRACE_SAMPLE_CHARS = 3_000
 _MAX_TRACE_DETAIL_CHARS = 12_000
 
 
 def _target_id_key(state: dict) -> str:
-    return "trace_id" if resolve_evaluation_target(state.get("evaluation_target")) == TRACE_TARGET else "generation_id"
+    return get_target_descriptor(state.get("evaluation_target")).id_key
 
 
-def _normalize_trace_id(trace_id: object) -> str | None:
-    """Validate an opaque trace ID without assuming it is a UUID."""
-    if not isinstance(trace_id, str):
+def _normalize_opaque_id(value: object) -> str | None:
+    """Validate an opaque trace or session ID without assuming it is a UUID."""
+    if not isinstance(value, str):
         return None
-    if not trace_id.strip() or len(trace_id) > _MAX_TRACE_ID_LENGTH:
+    if not value.strip() or len(value) > _MAX_OPAQUE_ID_LENGTH:
         return None
-    if any(ord(character) < 32 or ord(character) == 127 for character in trace_id):
+    if any(ord(character) < 32 or ord(character) == 127 for character in value):
         return None
-    return trace_id
+    return value
 
 
-def _remember_returned_trace_ids(state: dict, target_ids: list[object]) -> None:
-    if resolve_evaluation_target(state.get("evaluation_target")) != TRACE_TARGET:
+def _remember_ids(state: dict, allowlist_key: str | None, ids: list[object]) -> None:
+    """Record IDs a query returned so detail tools can later accept them."""
+    if allowlist_key is None:
         return
 
-    allowlist = state.get("trace_id_allowlist")
+    allowlist = state.get(allowlist_key)
     if not isinstance(allowlist, list):
         return
 
-    known_trace_ids = set(allowlist)
-    for target_id in target_ids:
-        trace_id = _normalize_trace_id(target_id)
-        if trace_id is not None and trace_id not in known_trace_ids:
-            allowlist.append(trace_id)
-            known_trace_ids.add(trace_id)
+    known_ids = set(allowlist)
+    for candidate in ids:
+        normalized = _normalize_opaque_id(candidate)
+        if normalized is not None and normalized not in known_ids:
+            allowlist.append(normalized)
+            known_ids.add(normalized)
 
 
-def _is_returned_trace_id(state: dict, trace_id: str) -> bool:
-    allowlist = state.get("trace_id_allowlist")
-    return isinstance(allowlist, list) and trace_id in allowlist
+def _remember_returned_target_ids(state: dict, target_ids: list[object]) -> None:
+    _remember_ids(state, get_target_descriptor(state.get("evaluation_target")).allowlist_key, target_ids)
+
+
+def _is_allowlisted(state: dict, allowlist_key: str, value: str) -> bool:
+    allowlist = state.get(allowlist_key)
+    return isinstance(allowlist, list) and value in allowlist
+
+
+def _handled_ids(state: dict) -> set[str]:
+    """Return every identifier this run handed the agent: target IDs and run handles.
+
+    The agent state and the finished agent result are the same mapping, so the
+    in-loop guard and the final validation key on one definition of a handled ID.
+    A run handle is not UUID-shaped, so without it here the guard reads a backticked
+    handle as prose and ships an internal token to the reader.
+    """
+    handled: set[str] = set()
+    for allowlist_key in (TRACE_ID_ALLOWLIST_KEY, SESSION_ID_ALLOWLIST_KEY):
+        allowlist = state.get(allowlist_key)
+        if isinstance(allowlist, list):
+            handled.update(value for value in allowlist if isinstance(value, str))
+    handles = state.get(REPORT_RUN_HANDLE_KEY)
+    if isinstance(handles, dict):
+        handled.update(handle for handle in handles if isinstance(handle, str))
+    return handled
+
+
+def _report_run_handle(state: dict, run_id: str) -> str:
+    """Return the short handle the agent uses for a past run, minting one on first sight.
+
+    A run UUID looks like a citable ID to the model but can never be cited, so handing it
+    over invites backticked prose the guard then has to treat as a dead identifier.
+    """
+    handles = state.get(REPORT_RUN_HANDLE_KEY)
+    if not isinstance(handles, dict):
+        return run_id
+    for handle, known_run_id in handles.items():
+        if known_run_id == run_id:
+            return handle
+    handle = f"run_{len(handles) + 1}"
+    handles[handle] = run_id
+    return handle
+
+
+def _resolve_report_run_handle(state: dict, handle: str) -> str | None:
+    """Return the run UUID a handle stands for, or None when the handle is unknown."""
+    handles = state.get(REPORT_RUN_HANDLE_KEY)
+    if isinstance(handles, dict) and handle in handles:
+        return handles[handle]
+    # A raw UUID still resolves, so a run started before handles existed keeps working.
+    return handle if _UUID_RE.fullmatch(handle or "") else None
 
 
 def _report_run_target_filter(evaluation_target: str) -> Q:
-    if resolve_evaluation_target(evaluation_target) == TRACE_TARGET:
-        return Q(content__evaluation_target=TRACE_TARGET)
-    return Q(content__evaluation_target=GENERATION_TARGET) | Q(content__evaluation_target__isnull=True)
+    target = resolve_evaluation_target(evaluation_target)
+    if target == GENERATION_TARGET:
+        # Generation reports predate the field, so rows written before it existed are theirs.
+        return Q(content__evaluation_target=GENERATION_TARGET) | Q(content__evaluation_target__isnull=True)
+    return Q(content__evaluation_target=target)
+
+
+def _completed_report_run_filter() -> Q:
+    unavailable = EvalReportGenerationStatus.METRICS_UNAVAILABLE.value
+    return Q(content__generation_status__isnull=True) | ~Q(content__generation_status=unavailable)
 
 
 def _ch_ts(iso_str: str) -> datetime:
@@ -123,9 +211,12 @@ _TARGET_LOOKUP_TS_START_SENTINEL = "2020-01-01T00:00:00+00:00"
 _TARGET_LOOKUP_TS_END_SENTINEL = "2099-01-01T00:00:00+00:00"
 
 
-def _resolve_output_type(output_type: str | None) -> tuple[str, EvaluationReportOutcomeDefinition]:
-    normalized_output_type = output_type or "boolean"
-    return normalized_output_type, get_outcome_definition(normalized_output_type)
+def _definition_from_state(state: dict) -> tuple[str, EvaluationReportOutcomeDefinition]:
+    """Resolve the report's output type and outcome definition. The only reader of the state's polarity."""
+    output_type = state.get("output_type") or "boolean"
+    return output_type, get_outcome_definition(
+        output_type, true_is_failure=bool(state.get("true_is_failure")), output_config=state.get("output_config")
+    )
 
 
 def _summary_select_sql(definition: EvaluationReportOutcomeDefinition) -> str:
@@ -153,20 +244,14 @@ def _summary_value_as_int(value: int | float | str | None) -> int:
     return int(value) if value is not None else 0
 
 
-def _outcome_for_result(output_type: str, result: object, applicable: object = None) -> str | None:
-    if output_type == "sentiment":
-        return result if isinstance(result, str) and result in ("positive", "neutral", "negative") else None
-    if applicable is False:
-        return "na"
-    outcomes_by_result: dict[object, str] = {True: "pass", False: "fail"}
-    try:
-        return outcomes_by_result.get(result)
-    except TypeError:
-        return None
+@frozen
+class TimestampWindow:
+    ts_start: datetime
+    ts_end: datetime
 
 
-def _widened_ts_window(state: dict) -> tuple[datetime, datetime]:
-    """Return (ts_start, ts_end) datetimes widened for target lookups.
+def _widened_ts_window(state: dict) -> TimestampWindow:
+    """Return the (ts_start, ts_end) window widened for target lookups.
 
     Target events can predate their evaluations, so widen the start by 7 days.
     End is period_end + 1 day for evaluation lag. Falls back to wide sentinel
@@ -180,7 +265,58 @@ def _widened_ts_window(state: dict) -> tuple[datetime, datetime]:
         ts_end = _ch_ts((datetime.fromisoformat(state["period_end"]) + timedelta(days=1)).isoformat())
     except (ValueError, TypeError, KeyError):
         ts_end = _ch_ts(_TARGET_LOOKUP_TS_END_SENTINEL)
-    return ts_start, ts_end
+    return TimestampWindow(ts_start=ts_start, ts_end=ts_end)
+
+
+# Query timeouts and per-query memory limits need a narrower query, so retrying
+# them without changing the query only adds load.
+RETRIABLE_CH_ERRORS = (*CH_TRANSIENT_ERRORS, NetworkError, SocketTimeoutError)
+_CH_QUERY_MAX_RETRIES = 3
+_CH_QUERY_BASE_DELAY_SECONDS = 8.0
+
+T = TypeVar("T")
+
+
+def _is_retriable_ch_error(error: Exception) -> bool:
+    return isinstance(error, RETRIABLE_CH_ERRORS)
+
+
+def _execute_ch_query_with_retry(
+    run_query: Callable[[], T],
+    *,
+    query_type: str,
+    max_retries: int = _CH_QUERY_MAX_RETRIES,
+    base_delay: float = _CH_QUERY_BASE_DELAY_SECONDS,
+) -> T:
+    """Run a ClickHouse-backed callable, retrying transient errors with exponential backoff + jitter.
+
+    The report agent runs synchronously in a worker thread while the activity's
+    Heartbeater keeps heartbeating on the event loop, so a plain blocking sleep
+    here does not risk a heartbeat timeout. Non-transient errors propagate
+    immediately so genuine bugs still fail loudly.
+    """
+    for attempt in range(max_retries + 1):
+        try:
+            return run_query()
+        except Exception as error:
+            if not _is_retriable_ch_error(error):
+                raise
+            if attempt >= max_retries:
+                raise
+            # Jitter prevents concurrent report workers from retrying together.
+            max_delay = base_delay * (2**attempt)
+            delay = random.uniform(max_delay / 2, max_delay)
+            logger.warning(
+                "llma_eval_reports_clickhouse_retry",
+                error=str(error),
+                error_type=type(error).__name__,
+                delay=round(delay, 1),
+                attempt=attempt + 1,
+                max_retries=max_retries,
+                query_type=query_type,
+            )
+            time.sleep(delay)
+    raise AssertionError("unreachable: retry loop must return or re-raise")
 
 
 def _execute_hogql(team_id: int, query_str: str, placeholders: dict | None = None) -> list[list]:
@@ -201,11 +337,20 @@ def _execute_hogql(team_id: int, query_str: str, placeholders: dict | None = Non
     query = parse_select(query_str)
 
     with tags_context(product=Product.LLM_ANALYTICS, feature=Feature.ENRICHMENT, team_id=team_id):
-        result = execute_hogql_query(
+        result = _execute_ch_query_with_retry(
+            lambda: execute_hogql_query(
+                query_type="EvalReportAgent",
+                query=query,
+                placeholders=placeholders or {},
+                team=team,
+                context=HogQLContext(
+                    team_id=team.pk,
+                    team=team,
+                    database=Database.create_for_posthog_tables(team),
+                    restricted_properties=set(),
+                ),
+            ),
             query_type="EvalReportAgent",
-            query=query,
-            placeholders=placeholders or {},
-            team=team,
         )
 
     return result.results or []
@@ -214,10 +359,11 @@ def _execute_hogql(team_id: int, query_str: str, placeholders: dict | None = Non
 def _execute_hogql_via_ai_events(team: "Team", query_str: str, placeholders: dict | None = None) -> list[list]:
     """Execute a HogQL query written against `posthog.ai_events` with the events-table fallback.
 
-    Use this only for queries that read heavy columns (`input`, `output`,
-    `output_choices`, `input_state`, `output_state`, `tools`) — those live only
-    on the dedicated `ai_events` table, not in `events.properties`. Other queries
-    should keep using `_execute_hogql` against `events`.
+    Use this for queries that read heavy columns (`input`, `output`, `output_choices`,
+    `input_state`, `output_state`, `tools`), which live only on the dedicated `ai_events`
+    table and not in `events.properties`, or that filter on a column `ai_events` indexes
+    and `events` does not (`session_id` carries a bloom filter). Everything else should
+    keep using `_execute_hogql` against `events`.
     """
     from posthog.hogql.parser import parse_select
 
@@ -230,12 +376,17 @@ def _execute_hogql_via_ai_events(team: "Team", query_str: str, placeholders: dic
     # internally but not `feature`, so supply it here to keep these eval-report
     # agent reads attributed to background enrichment.
     with tags_context(product=Product.LLM_ANALYTICS, feature=Feature.ENRICHMENT, team_id=team.pk):
-        result = query_ai_events(
-            query=query,
-            placeholders=placeholders or {},
-            team=team,
+        result = _execute_ch_query_with_retry(
+            lambda: query_ai_events(
+                query=query,
+                placeholders=placeholders or {},
+                team=team,
+                query_type="EvalReportAgent",
+                fall_back_to_events=True,
+                posthog_tables_only=True,
+                bypass_property_access_control=True,
+            ),
             query_type="EvalReportAgent",
-            fall_back_to_events=True,
         )
 
     return result.results or []
@@ -285,9 +436,114 @@ def _period_summary_dict(
         "result_counts": result_counts,
         "result_rates": result_rates,
     }
-    if output_type == "boolean":
-        summary["pass_rate"] = calculate_boolean_pass_rate(result_counts, empty_as_none=empty_rates_as_none)
+    if output_type in ("boolean", "numeric", "categorical"):
+        summary["pass_rate"] = calculate_pass_rate(
+            result_counts, empty_as_none=empty_rates_as_none or output_type in ("numeric", "categorical")
+        )
     return summary
+
+
+@frozen
+class JudgeModelSummary:
+    period: Literal["current_period", "previous_period"]
+    model: str
+    first_run_at: str
+    last_run_at: str
+    result_counts: dict[str, int]
+    total_runs: int
+
+
+def _fetch_judge_model_summary(
+    team_id: int,
+    evaluation_id: str,
+    ts_prev_start: datetime,
+    ts_start: datetime,
+    ts_end: datetime,
+    definition: EvaluationReportOutcomeDefinition,
+    evaluation_target: str,
+) -> list[JudgeModelSummary]:
+    """Group outcome counts by judge model for the previous and current periods.
+
+    A judge model switch moves the outcome rates on its own, so the agent needs the
+    split to tell a model change apart from a change in traffic. Results without a
+    model (Hog evaluations, skips that never reached a provider) are left out.
+
+    Run times come from the execution start, not the event timestamp, because a
+    backfilled result carries the timestamp of the generation it grades.
+    """
+    rows = _execute_hogql(
+        team_id,
+        f"""
+        SELECT
+            if(timestamp >= {{ts_start}}, 'current_period', 'previous_period') as period,
+            coalesce(properties.$ai_model, '') as model,
+            min(coalesce(toDateTime(properties.$ai_evaluation_start_time), timestamp)) as first_run_at,
+            max(coalesce(toDateTime(properties.$ai_evaluation_start_time), timestamp)) as last_run_at,
+            {_summary_select_sql(definition)}
+        FROM events
+        WHERE event = '$ai_evaluation'
+            AND properties.$ai_evaluation_id = {{evaluation_id}}
+            AND {definition.event_predicate}
+            AND {target_event_predicate(evaluation_target)}
+            AND timestamp >= {{ts_prev_start}}
+            AND timestamp < {{ts_end}}
+        GROUP BY period, model
+        ORDER BY period, first_run_at, model
+        """,
+        placeholders={
+            "evaluation_id": ast.Constant(value=evaluation_id),
+            "ts_prev_start": ast.Constant(value=ts_prev_start),
+            "ts_start": ast.Constant(value=ts_start),
+            "ts_end": ast.Constant(value=ts_end),
+        },
+    )
+    summaries = []
+    for row in rows:
+        period, model, first_run_at, last_run_at = row[:4]
+        if not model or period not in ("current_period", "previous_period"):
+            continue
+        result_counts, total = _parse_summary_row(definition, row[4:])
+        summaries.append(
+            JudgeModelSummary(
+                period=period,
+                model=str(model),
+                first_run_at=str(first_run_at),
+                last_run_at=str(last_run_at),
+                result_counts=result_counts,
+                total_runs=total,
+            )
+        )
+    return summaries
+
+
+_MAX_REPORTED_BACKFILLS = 5
+
+
+def _fetch_overlapping_backfills(
+    team_id: int, evaluation_id: str, ts_prev_start: datetime, ts_end: datetime
+) -> list[dict[str, str | None]]:
+    """Return backfills whose window overlaps the previous or current period.
+
+    A backfill writes results into past windows after the fact, so a report written
+    while one ran saw partial counts for that window.
+    """
+    from products.ai_observability.backend.models.evaluation_backfill import EvaluationBackfill
+
+    backfills = (
+        EvaluationBackfill.objects.for_team(team_id)
+        .filter(evaluation_id=evaluation_id, window_start__lt=ts_end, window_end__gt=ts_prev_start)
+        .order_by("-created_at")[:_MAX_REPORTED_BACKFILLS]
+    )
+    return [
+        {
+            "status": backfill.status,
+            "window_start": backfill.window_start.isoformat(),
+            "window_end": backfill.window_end.isoformat(),
+            "created_at": backfill.created_at.isoformat(),
+            "finished_at": backfill.finished_at.isoformat() if backfill.finished_at else None,
+        }
+        for backfill in backfills
+    ]
 
 
 @tool
@@ -297,16 +553,19 @@ def get_summary_metrics(
     """Get outcome counts and rates for the current and previous periods.
 
     Returns current and previous period statistics for comparison. Call this first
-    to understand the baseline. Note: these numbers are also computed mechanically
-    after you finish and attached to the report as `metrics` — you don't need to
-    restate them in your sections, just reference them analytically.
+    to understand the baseline. Each period lists `judge_models` with per-model
+    counts, rates, and first/last run times when the evaluation records a judge
+    model. `backfills` lists backfills whose window overlaps either period.
+    Note: these numbers are also computed mechanically after you finish and
+    attached to the report as `metrics` — you don't need to restate them in your
+    sections, just reference them analytically.
     """
     team_id = state["team_id"]
     evaluation_id = state["evaluation_id"]
     ts_start = _ch_ts(state["period_start"])
     ts_end = _ch_ts(state["period_end"])
     ts_prev_start = _ch_ts(state["previous_period_start"])
-    output_type, definition = _resolve_output_type(state.get("output_type"))
+    output_type, definition = _definition_from_state(state)
     evaluation_target = resolve_evaluation_target(state.get("evaluation_target"))
 
     result_counts, total = _fetch_period_summary(
@@ -316,14 +575,33 @@ def get_summary_metrics(
         team_id, evaluation_id, ts_prev_start, ts_start, definition, evaluation_target
     )
 
-    result = {
+    result: dict = {
         "output_type": output_type,
         "current_period": _period_summary_dict(output_type, result_counts, total),
         "previous_period": _period_summary_dict(
             output_type, previous_result_counts, previous_total, empty_rates_as_none=True
         ),
     }
+    judge_models = _fetch_judge_model_summary(
+        team_id, evaluation_id, ts_prev_start, ts_start, ts_end, definition, evaluation_target
+    )
+    for model in judge_models:
+        result[model.period].setdefault("judge_models", []).append(
+            {
+                "model": model.model,
+                "first_run_at": model.first_run_at,
+                "last_run_at": model.last_run_at,
+                **_period_summary_dict(output_type, model.result_counts, model.total_runs),
+            }
+        )
+    backfills = _fetch_overlapping_backfills(team_id, evaluation_id, ts_prev_start, ts_end)
+    if backfills:
+        result["backfills"] = backfills
     return json.dumps(result, indent=2)
+
+
+# A week of hourly buckets already passes HogQL's default limit of 100 rows.
+_MAX_DISTRIBUTION_BUCKETS = 1000
 
 
 @tool
@@ -334,6 +612,8 @@ def get_result_distribution_over_time(
     """Get time-series outcome counts and rates bucketed by hour or day.
 
     Use this to spot trends, anomalies, or degradations over the report period.
+    Each bucket includes `judge_model_runs` (runs per judge model) when the
+    evaluation records a judge model, so a model switch shows up in the series.
 
     Args:
         bucket: Time bucket size - "hour" or "day" (default "hour")
@@ -342,7 +622,7 @@ def get_result_distribution_over_time(
     evaluation_id = state["evaluation_id"]
     ts_start = _ch_ts(state["period_start"])
     ts_end = _ch_ts(state["period_end"])
-    output_type, definition = _resolve_output_type(state.get("output_type"))
+    output_type, definition = _definition_from_state(state)
     evaluation_target = resolve_evaluation_target(state.get("evaluation_target"))
 
     # Whitelisted truncation function — `bucket` is an LLM-controlled arg, so pick
@@ -354,6 +634,7 @@ def get_result_distribution_over_time(
         f"""
         SELECT
             {trunc_fn}(timestamp) as bucket,
+            sumMap(map(coalesce(properties.$ai_model, ''), 1)) as judge_model_runs,
             {_summary_select_sql(definition)}
         FROM events
         WHERE event = '$ai_evaluation'
@@ -364,6 +645,7 @@ def get_result_distribution_over_time(
             AND timestamp < {{ts_end}}
         GROUP BY bucket
         ORDER BY bucket
+        LIMIT {_MAX_DISTRIBUTION_BUCKETS}
         """,
         placeholders={
             "evaluation_id": ast.Constant(value=evaluation_id),
@@ -374,13 +656,30 @@ def get_result_distribution_over_time(
 
     result = []
     for row in rows:
-        result_counts, total = _parse_summary_row(definition, row[1:])
-        result.append({"bucket": str(row[0]), **_period_summary_dict(output_type, result_counts, total)})
+        result_counts, total = _parse_summary_row(definition, row[2:])
+        entry = {"bucket": str(row[0]), **_period_summary_dict(output_type, result_counts, total)}
+        judge_model_runs = {str(model): int(runs) for model, runs in (row[1] or {}).items() if model}
+        if judge_model_runs:
+            entry["judge_model_runs"] = judge_model_runs
+        result.append(entry)
 
     return json.dumps(result, indent=2)
 
 
 _LIST_ALL_MAX_RESULTS = 500
+_MAX_EVAL_RESULTS_CHARS = 30_000
+
+
+def _eval_result_count_within_budget(rendered_rows: Iterable[str]) -> int:
+    # Reserve space for the header or JSON envelope without cutting category lists.
+    remaining_chars = _MAX_EVAL_RESULTS_CHARS - 256
+    count = 0
+    for row in rendered_rows:
+        remaining_chars -= len(row) + 2
+        if remaining_chars < 0:
+            break
+        count += 1
+    return count
 
 
 @tool
@@ -390,10 +689,12 @@ def list_all_eval_results(
 ) -> str:
     """Get a compact overview of evaluation results in the period.
 
-    Returns up to 500 results as condensed rows: outcome, target ID, and
-    truncated reasoning. When there are more than 500 results, returns a random
-    sample. Use this as your first scan to spot patterns before drilling into
-    specific examples with the target-specific detail tool.
+    Returns up to 500 results as condensed rows with outcome and target ID,
+    with fewer rows when needed to fit the response size limit.
+    Boolean results include truncated reasoning, while sentiment results include
+    scores without classifier reasoning. When there are more than 500 results,
+    returns a random sample. Use this as your first scan to spot patterns before
+    drilling into specific examples with the target-specific detail tool.
 
     Args:
         max_reasoning_length: Truncate reasoning strings to this many characters (default 80)
@@ -402,7 +703,7 @@ def list_all_eval_results(
     evaluation_id = state["evaluation_id"]
     ts_start = _ch_ts(state["period_start"])
     ts_end = _ch_ts(state["period_end"])
-    output_type, definition = _resolve_output_type(state.get("output_type"))
+    output_type, definition = _definition_from_state(state)
     evaluation_target = resolve_evaluation_target(state.get("evaluation_target"))
 
     shared_placeholders = {
@@ -454,24 +755,33 @@ def list_all_eval_results(
         """,
         placeholders=shared_placeholders,
     )
-    _remember_returned_trace_ids(state, [row[0] for row in rows if row])
-
     max_reasoning_length = min(max(20, max_reasoning_length), 200)
     lines = []
     for row in rows:
         target_id = str(row[0]) if row[0] else "?"
-        outcome = _outcome_for_result(output_type, row[1], row[2]) or "?"
-        score = f" ({row[3]:.2f})" if isinstance(row[3], int | float) else ""
-        reasoning = (row[4] or "")[:max_reasoning_length]
-        if row[4] and len(row[4]) > max_reasoning_length:
-            reasoning += "..."
-        lines.append(f"{outcome}{score} | {target_id} | {reasoning}")
+        outcome = definition.label_for(row[1], row[2]) or "?"
+        score = ""
+        if isinstance(row[3], int | float):
+            score = f" ({row[3]})" if output_type == "numeric" else f" ({row[3]:.2f})"
+        if output_type == "categorical":
+            score = f" ({json.dumps(row[1])})"
+        fields = [f"{outcome}{score}", target_id]
+        if output_type != "sentiment":
+            reasoning = (row[4] or "")[:max_reasoning_length]
+            if row[4] and len(row[4]) > max_reasoning_length:
+                reasoning += "..."
+            fields.append(reasoning)
+        lines.append(" | ".join(fields))
 
-    if is_sampled:
+    result_count = _eval_result_count_within_budget(lines)
+    _remember_returned_target_ids(state, [row[0] for row in rows[:result_count]])
+    if result_count < len(lines):
+        header = f"Total: {total_count} results (showing {result_count}; response size limit)\n"
+    elif is_sampled:
         header = f"Total: {total_count} results (showing random sample of {len(lines)})\n"
     else:
         header = f"Total: {len(lines)} results\n"
-    return header + "\n".join(lines)
+    return header + "\n".join(lines[:result_count])
 
 
 @tool
@@ -479,22 +789,39 @@ def sample_eval_results(
     state: Annotated[dict, InjectedState],
     outcome: str = "all",
     limit: int = 50,
+    order_by: Literal["recent", "score"] = "recent",
 ) -> str:
-    """Sample evaluation runs with target ID, outcome, score, and reasoning.
+    """Sample evaluation runs with target ID and outcome.
 
-    Call multiple times with different filters to understand patterns.
+    Boolean and numeric results include reasoning. Score ordering returns the worst
+    numeric scores or the highest-confidence sentiment labels first.
+    Returns JSON with results and a truncated flag. Large rows reduce the sample
+    to fit the response size limit; each returned row retains all its categories.
 
     Args:
         outcome: "all" or one of the output type's supported outcomes
         limit: Maximum number of results to return (default 50)
+        order_by: "recent" or "score"; score ordering supports numeric and sentiment results
     """
     limit = min(max(1, limit), 500)
     team_id = state["team_id"]
     evaluation_id = state["evaluation_id"]
     ts_start = _ch_ts(state["period_start"])
     ts_end = _ch_ts(state["period_end"])
-    output_type, definition = _resolve_output_type(state.get("output_type"))
+    output_type, definition = _definition_from_state(state)
     evaluation_target = resolve_evaluation_target(state.get("evaluation_target"))
+    if order_by == "score" and output_type not in ("sentiment", "numeric"):
+        return json.dumps({"error": "Score ordering is only available for sentiment and numeric results"})
+    score_direction = (
+        "ASC"
+        if definition.numeric_config
+        and definition.numeric_config.passing_rule
+        and definition.numeric_config.passing_rule.operator == "gte"
+        else "DESC"
+    )
+    order_clause = (
+        f"ORDER BY score {score_direction}, timestamp DESC" if order_by == "score" else "ORDER BY timestamp DESC"
+    )
 
     # Whitelisted filter fragment: outcome predicates come only from the trusted
     # outcome definition, never directly from the LLM-controlled argument.
@@ -522,7 +849,7 @@ def sample_eval_results(
             AND timestamp >= {{ts_start}}
             AND timestamp < {{ts_end}}
             {filter_clause}
-        ORDER BY timestamp DESC
+        {order_clause}
         LIMIT {{limit}}
         """,
         placeholders={
@@ -532,21 +859,31 @@ def sample_eval_results(
             "limit": ast.Constant(value=limit),
         },
     )
-    _remember_returned_trace_ids(state, [row[0] for row in rows if row])
-
     target_id_key = _target_id_key(state)
     result = []
     for row in rows:
         entry = {
             target_id_key: str(row[0]) if row[0] else "",
-            "outcome": _outcome_for_result(output_type, row[1], row[3]),
-            "reasoning": row[2] or "",
+            "outcome": definition.label_for(row[1], row[3]),
         }
-        if output_type == "sentiment":
+        if output_type in ("sentiment", "numeric"):
             entry["score"] = row[4]
+        if output_type == "categorical":
+            entry["categories"] = row[1]
+        if output_type != "sentiment":
+            entry["reasoning"] = row[2] or ""
         result.append(entry)
 
-    return json.dumps(result, indent=2)
+    result_count = _eval_result_count_within_budget(json.dumps(entry) for entry in result)
+    _remember_returned_target_ids(state, [row[0] for row in rows[:result_count]])
+    truncated = result_count < len(result)
+    response: dict[str, object] = {"results": result[:result_count], "truncated": truncated}
+    if truncated:
+        response["notice"] = (
+            f"Showing {result_count} of {len(result)} fetched results due to the response size limit. "
+            "Use get_summary_metrics for aggregate counts and pass rates."
+        )
+    return json.dumps(response)
 
 
 @tool
@@ -554,11 +891,13 @@ def sample_generation_details(
     state: Annotated[dict, InjectedState],
     generation_ids: list[str],
 ) -> str:
-    """Get full $ai_generation event data for specific generations.
+    """Get $ai_generation previews and token usage for specific generations.
 
-    Returns input, output, model, tokens, AND trace_id for verification before
-    citing in the report. **Always call this before add_citation** so you have
-    the trace_id to pass in.
+    Input previews keep the head and tail within 500 characters. Output previews
+    keep the first 500 characters. Returns the stored input's full character count
+    as input_length, model, token counts including cache usage, and trace_id for
+    verification before citing in the report.
+    **Always call this before add_citation** so you have the trace_id to pass in.
 
     Args:
         generation_ids: List of generation IDs to look up (max 20)
@@ -587,12 +926,12 @@ def sample_generation_details(
     from posthog.models import Team
 
     team = Team.objects.get(id=state["team_id"])
-    ts_start, ts_end = _widened_ts_window(state)
+    window = _widened_ts_window(state)
     trace_id_by_uuid = resolve_trace_ids_for_generation_uuids(
         team=team,
         generation_uuids=ids_to_fetch,
-        ts_start=ts_start,
-        ts_end=ts_end,
+        ts_start=window.ts_start,
+        ts_end=window.ts_end,
         query_type="EvalReportAgentTraceIdResolve",
     )
     trace_ids = sorted({tid for tid in trace_id_by_uuid.values() if tid})
@@ -618,7 +957,9 @@ def sample_generation_details(
             properties.$ai_tools_called as tools_called,
             properties.$ai_tool_call_count as tool_call_count,
             input_state,
-            output_state
+            output_state,
+            cache_read_input_tokens,
+            cache_creation_input_tokens
         FROM posthog.ai_events AS ai_events
         WHERE event = '$ai_generation'
             AND trace_id IN {trace_ids}
@@ -634,15 +975,18 @@ def sample_generation_details(
 
     result = []
     for row in rows:
-        input_text = str(row[2])[:500] if row[2] else ""
+        input_text = str(row[2]) if row[2] else ""
         output_text = str(row[3])[:500] if row[3] else ""
         entry: dict = {
             "generation_id": str(row[0]) if row[0] else "",
             "model": str(row[1]) if row[1] else "",
-            "input_preview": input_text,
+            "input_preview": truncate_to_head_tail(input_text, max_chars=500, head_chars=250),
+            "input_length": len(input_text),
             "output_preview": output_text,
             "input_tokens": row[4],
             "output_tokens": row[5],
+            "cache_read_input_tokens": row[13],
+            "cache_creation_input_tokens": row[14],
             "trace_id": str(row[6]) if row[6] else "",
         }
         if row[7]:  # is_error
@@ -653,12 +997,48 @@ def sample_generation_details(
             entry["tools_called"] = str(row[9])
             entry["tool_call_count"] = row[10]
         if row[11]:  # input_state
-            entry["input_state_preview"] = str(row[11])[:500]
+            entry["input_state_preview"] = truncate_to_head_tail(str(row[11]), max_chars=500, head_chars=250)
         if row[12]:  # output_state
             entry["output_state_preview"] = str(row[12])[:500]
         result.append(entry)
 
     return json.dumps(result, indent=2)
+
+
+def _label_generation_evals(
+    eval_rows: Sequence[Sequence[object]],
+    detector_evaluation_ids: Container[str],
+    evaluation_output_configs: dict[str, dict] | None = None,
+) -> list[dict]:
+    """Label every evaluation on one generation, each by its own polarity."""
+    labeled = []
+    for row in eval_rows:
+        output_type = str(row[1]) if row[1] else "boolean"
+        evaluation_id = str(row[0]) if row[0] else ""
+        try:
+            definition = get_outcome_definition(
+                output_type,
+                true_is_failure=evaluation_id in detector_evaluation_ids,
+                output_config=(evaluation_output_configs or {}).get(evaluation_id),
+            )
+        except ValueError:
+            continue
+        if output_type == "categorical":
+            raw_result = row[8]
+        else:
+            raw_result = row[7] if output_type == "numeric" else row[3] if output_type == "sentiment" else row[2]
+        entry = {
+            "evaluation_id": evaluation_id,
+            "output_type": output_type,
+            "outcome": "skipped" if row[9] in (True, "true") else definition.label_for(raw_result, row[6]),
+            "reasoning": row[5] or "",
+        }
+        if output_type in ("sentiment", "numeric"):
+            entry["score"] = row[7] if output_type == "numeric" else row[4]
+        if output_type == "categorical":
+            entry["categories"] = raw_result
+        labeled.append(entry)
+    return labeled
 
 
 @tool
@@ -684,18 +1064,18 @@ def get_generation_detail(
     from posthog.models import Team
 
     team = Team.objects.get(id=team_id)
-    ts_start, ts_end = _widened_ts_window(state)
+    window = _widened_ts_window(state)
     shared_placeholders = {
         "generation_id": ast.Constant(value=generation_id),
-        "ts_start": ast.Constant(value=ts_start),
-        "ts_end": ast.Constant(value=ts_end),
+        "ts_start": ast.Constant(value=window.ts_start),
+        "ts_end": ast.Constant(value=window.ts_end),
     }
 
     trace_id_by_uuid = resolve_trace_ids_for_generation_uuids(
         team=team,
         generation_uuids=[generation_id],
-        ts_start=ts_start,
-        ts_end=ts_end,
+        ts_start=window.ts_start,
+        ts_end=window.ts_end,
         query_type="EvalReportAgentTraceIdResolve",
     )
     trace_id = trace_id_by_uuid.get(generation_id)
@@ -734,7 +1114,9 @@ def get_generation_detail(
             properties.$ai_tool_call_count as tool_call_count,
             tools as tools_available,
             input_state,
-            output_state
+            output_state,
+            cache_read_input_tokens,
+            cache_creation_input_tokens
         FROM posthog.ai_events AS ai_events
         WHERE event = '$ai_generation'
             AND trace_id = {trace_id}
@@ -760,7 +1142,10 @@ def get_generation_detail(
             properties.$ai_sentiment_label as sentiment_label,
             properties.$ai_sentiment_score as sentiment_score,
             properties.$ai_evaluation_reasoning as reasoning,
-            properties.$ai_evaluation_applicable as applicable
+            properties.$ai_evaluation_applicable as applicable,
+            toFloat(properties.$ai_evaluation_numeric_result) as numeric_score,
+            JSONExtract(ifNull(properties.$ai_evaluation_categorical_result, '[]'), 'Array(String)') as categories,
+            properties.$ai_evaluation_skipped as skipped
         FROM events
         WHERE event = '$ai_evaluation'
             AND properties.$ai_target_event_id = {generation_id}
@@ -772,23 +1157,9 @@ def get_generation_detail(
         placeholders=shared_placeholders,
     )
 
-    evals = []
-    for er in eval_rows:
-        output_type = str(er[1]) if er[1] else "boolean"
-        try:
-            get_outcome_definition(output_type)
-        except ValueError:
-            continue
-        raw_result = er[3] if output_type == "sentiment" else er[2]
-        entry = {
-            "evaluation_id": str(er[0]) if er[0] else "",
-            "output_type": output_type,
-            "outcome": _outcome_for_result(output_type, raw_result, er[6]),
-            "reasoning": er[5] or "",
-        }
-        if output_type == "sentiment":
-            entry["score"] = er[4]
-        evals.append(entry)
+    evals = _label_generation_evals(
+        eval_rows, set(state.get("detector_evaluation_ids") or []), state.get("evaluation_output_configs")
+    )
 
     result: dict = {
         "generation_id": str(row[0]) if row[0] else "",
@@ -798,6 +1169,8 @@ def get_generation_detail(
         "output": str(row[4]) if row[4] else "",
         "input_tokens": row[5],
         "output_tokens": row[6],
+        "cache_read_input_tokens": row[19],
+        "cache_creation_input_tokens": row[20],
         "cost": row[7],
         "latency": row[8],
         "trace_id": str(row[9]) if row[9] else "",
@@ -846,13 +1219,13 @@ def get_generation_text_repr(
         return json.dumps({"error": "Invalid generation ID format"})
 
     team = Team.objects.get(id=state["team_id"])
-    ts_start, ts_end = _widened_ts_window(state)
+    window = _widened_ts_window(state)
 
     trace_id_by_uuid = resolve_trace_ids_for_generation_uuids(
         team=team,
         generation_uuids=[generation_id],
-        ts_start=ts_start,
-        ts_end=ts_end,
+        ts_start=window.ts_start,
+        ts_end=window.ts_end,
         query_type="EvalReportAgentTraceIdResolve",
     )
     trace_id = trace_id_by_uuid.get(generation_id)
@@ -910,11 +1283,11 @@ def get_generation_text_repr(
 
 
 def _fetch_trace_detail(state: dict, trace_id: object, max_length: int) -> dict:
-    normalized_trace_id = _normalize_trace_id(trace_id)
+    normalized_trace_id = _normalize_opaque_id(trace_id)
     if normalized_trace_id is None:
         return {"error": "Invalid trace ID"}
 
-    if not _is_returned_trace_id(state, normalized_trace_id):
+    if not _is_allowlisted(state, TRACE_ID_ALLOWLIST_KEY, normalized_trace_id):
         return {
             "trace_id": normalized_trace_id,
             "error": "Trace ID is not available for this evaluation report",
@@ -931,6 +1304,7 @@ def _fetch_trace_detail(state: dict, trace_id: object, max_length: int) -> dict:
             max_length=max_length,
             max_trace_events=MAX_TRACE_EVENTS_LIMIT,
             max_raw_trace_size=MAX_TRACE_PROPERTIES_SIZE,
+            bypass_property_access_control=True,
         )
     except Exception as error:
         logger.exception(
@@ -972,7 +1346,7 @@ def sample_trace_details(
     details: list[dict] = []
     seen: set[str] = set()
     for trace_id in trace_ids[:_MAX_TRACE_SAMPLE_IDS]:
-        normalized_trace_id = _normalize_trace_id(trace_id)
+        normalized_trace_id = _normalize_opaque_id(trace_id)
         if normalized_trace_id is None:
             details.append({"error": "Invalid trace ID"})
             continue
@@ -999,6 +1373,161 @@ def get_trace_detail(
     return json.dumps(_fetch_trace_detail(state, trace_id, _MAX_TRACE_DETAIL_CHARS), indent=2)
 
 
+_MAX_SESSION_SAMPLE_IDS = 5
+_MAX_SESSION_SAMPLE_TRACES = 10
+_MAX_SESSION_DETAIL_TRACES = 50
+# A session's own events can start long before the evaluation that graded it, and the report period
+# only locates evaluation events, so `_widened_ts_window`'s 7-day backoff for evaluation lag is
+# nowhere near enough to cover a long session's head. `session_id` carries a bloom filter, so the
+# extra width is cheap.
+#
+# This widens up to the ai_events retention, not past it. A session still running after its oldest
+# events aged out of ai_events keeps its head clipped: `query_ai_events` only falls back to the
+# shared events table when the primary returns zero rows, and a session with any recent trace
+# returns some. Those traces are then absent from the map and unciteable. Reaching them would mean
+# querying `events` for session structure, which has no session_id index — not worth it for a
+# background report, but the limit is real rather than solved here.
+_SESSION_EXTRA_LOOKBACK_DAYS = 30
+
+# The placeholder is deliberately not named `session_id`: on the events fallback the column
+# rewriter descends into placeholders and would rewrite `{session_id}` into
+# `{properties.$ai_session_id}`, which then has no matching key and fails substitution.
+_SESSION_TRACES_SQL = """
+SELECT
+    trace_id,
+    count() AS event_count,
+    countIf(event = '$ai_generation') AS generation_count,
+    min(timestamp) AS first_seen,
+    max(timestamp) AS last_seen
+FROM posthog.ai_events AS ai_events
+WHERE session_id = {target_session_id}
+    AND isNotNull(trace_id)
+    AND trace_id != ''
+    AND timestamp >= {ts_start}
+    AND timestamp <= {ts_end}
+GROUP BY trace_id
+ORDER BY first_seen
+LIMIT {limit}
+"""
+
+
+def _fetch_session_detail(state: dict, session_id: object, max_traces: int) -> dict:
+    """Summarize one session as its ordered traces, and unlock those traces for inspection.
+
+    Returns structure rather than content on purpose: a session's full transcript is far
+    larger than the trace renderings the agent already has tools for, so this hands back a
+    map and lets the agent spend its context on the traces that look worth reading.
+    """
+    from posthog.models import Team
+
+    normalized_session_id = _normalize_opaque_id(session_id)
+    if normalized_session_id is None:
+        return {"error": "Invalid session ID"}
+
+    if not _is_allowlisted(state, SESSION_ID_ALLOWLIST_KEY, normalized_session_id):
+        return {
+            "session_id": normalized_session_id,
+            "error": "Session ID is not available for this evaluation report",
+        }
+
+    window = _widened_ts_window(state)
+    ts_start = window.ts_start - timedelta(days=_SESSION_EXTRA_LOOKBACK_DAYS)
+
+    try:
+        team = Team.objects.get(id=state["team_id"])
+        rows = _execute_hogql_via_ai_events(
+            team,
+            _SESSION_TRACES_SQL,
+            placeholders={
+                "target_session_id": ast.Constant(value=normalized_session_id),
+                "ts_start": ast.Constant(value=ts_start),
+                "ts_end": ast.Constant(value=window.ts_end),
+                "limit": ast.Constant(value=max_traces + 1),
+            },
+        )
+    except Exception as error:
+        logger.exception(
+            "llma_eval_reports_session_detail_failed",
+            session_id=normalized_session_id,
+            team_id=state["team_id"],
+            error_type=type(error).__name__,
+        )
+        return {"session_id": normalized_session_id, "error": "Session could not be inspected"}
+
+    if not rows:
+        return {"session_id": normalized_session_id, "error": "Session not found"}
+
+    truncated = len(rows) > max_traces
+    rows = rows[:max_traces]
+    # The agent may only open traces this session actually contains, so record them before returning.
+    _remember_ids(state, TRACE_ID_ALLOWLIST_KEY, [row[0] for row in rows])
+
+    traces = [
+        {
+            "trace_id": str(row[0]),
+            "event_count": int(row[1] or 0),
+            "generation_count": int(row[2] or 0),
+            "first_seen": str(row[3]),
+            "last_seen": str(row[4]),
+        }
+        for row in rows
+    ]
+    detail: dict = {
+        "session_id": normalized_session_id,
+        "trace_count": len(traces),
+        "event_count": sum(trace["event_count"] for trace in traces),
+        "traces": traces,
+    }
+    if truncated:
+        detail["truncated"] = f"Showing the first {max_traces} traces of this session, ordered by start time."
+    return detail
+
+
+@tool
+def sample_session_details(
+    state: Annotated[dict, InjectedState],
+    session_ids: list[str],
+) -> str:
+    """Inspect the shape of a small set of session evaluation targets.
+
+    Each session is summarized as its ordered traces, with event and generation counts
+    and timestamps. At most 5 sessions and 10 traces per session are returned. Session
+    IDs are opaque strings and do not need to be UUIDs. Call `get_session_detail` for
+    a fuller trace list, and `get_trace_detail` to read a specific trace.
+
+    Args:
+        session_ids: Session IDs returned by sample_eval_results (max 5)
+    """
+    details: list[dict] = []
+    seen: set[str] = set()
+    for session_id in session_ids[:_MAX_SESSION_SAMPLE_IDS]:
+        normalized_session_id = _normalize_opaque_id(session_id)
+        if normalized_session_id is None:
+            details.append({"error": "Invalid session ID"})
+            continue
+        if normalized_session_id in seen:
+            continue
+        seen.add(normalized_session_id)
+        details.append(_fetch_session_detail(state, normalized_session_id, _MAX_SESSION_SAMPLE_TRACES))
+    return json.dumps(details, indent=2)
+
+
+@tool
+def get_session_detail(
+    state: Annotated[dict, InjectedState],
+    session_id: str,
+) -> str:
+    """Map one session in full: every trace it contains, in order, up to 50.
+
+    Use this to understand how a session unfolded, then call `get_trace_detail(trace_id)`
+    on the traces that look relevant to read what actually happened inside them.
+
+    Args:
+        session_id: Session ID returned by sample_eval_results
+    """
+    return json.dumps(_fetch_session_detail(state, session_id, _MAX_SESSION_DETAIL_TRACES), indent=2)
+
+
 @tool
 def list_recent_report_runs(
     state: Annotated[dict, InjectedState],
@@ -1007,7 +1536,8 @@ def list_recent_report_runs(
 ) -> str:
     """List metadata for previous report runs of this evaluation.
 
-    Returns a compact index: run_id, period, title, outcome rates, total runs.
+    Returns a compact index: run_id (a short handle, not a UUID), period, title,
+    outcome rates, total runs.
     No full content — use this to discover which past runs look interesting,
     then call `get_report_run(run_id)` to pull the full narrative for the ones
     worth reading. This two-step pattern keeps context small when scanning a
@@ -1040,6 +1570,7 @@ def list_recent_report_runs(
         period_end__gte=since,
     )
     runs = runs.filter(_report_run_target_filter(evaluation_target))
+    runs = runs.filter(_completed_report_run_filter())
     runs = runs.order_by("-period_end")[:limit]
 
     result = []
@@ -1053,7 +1584,7 @@ def list_recent_report_runs(
         normalized_metrics = normalize_metrics_payload({**metadata, **metrics})
         output_type = normalized_metrics["output_type"]
         entry = {
-            "run_id": str(run.id),
+            "run_id": _report_run_handle(state, str(run.id)),
             "period_start": str(run.period_start),
             "period_end": str(run.period_end),
             "title": content.get("title", ""),
@@ -1063,8 +1594,16 @@ def list_recent_report_runs(
         }
         if "result_rates" in normalized_metrics:
             entry["result_rates"] = normalized_metrics["result_rates"]
-        if output_type == "boolean" and "pass_rate" in normalized_metrics:
+        if output_type in ("boolean", "numeric", "categorical") and "pass_rate" in normalized_metrics:
             entry["pass_rate"] = normalized_metrics["pass_rate"]
+        if output_type in ("numeric", "categorical"):
+            config = normalized_metrics.get("output_config") or {}
+            previous_rule = config.get("passing_rule")
+            current_rule = (state.get("output_config") or {}).get("passing_rule")
+            entry["output_config"] = config
+            entry["passing_rule_matches_current"] = (
+                previous_rule == current_rule if previous_rule and current_rule else None
+            )
         result.append(entry)
 
     return json.dumps(result, indent=2, default=str)
@@ -1082,18 +1621,20 @@ def get_report_run(
     sections, citations, metrics).
 
     Args:
-        run_id: The report run UUID, from list_recent_report_runs.
+        run_id: The run handle from list_recent_report_runs, e.g. "run_1".
     """
     from products.ai_observability.backend.models.evaluation_reports import EvaluationReportRun
 
-    if not _UUID_RE.fullmatch(run_id or ""):
-        return json.dumps({"error": "Invalid run_id format"})
+    resolved_run_id = _resolve_report_run_handle(state, run_id)
+    if resolved_run_id is None:
+        return json.dumps({"error": f"Unknown run handle {run_id!r}. Use one returned by list_recent_report_runs."})
 
     # Scope to the current evaluation so the agent can't read runs from another eval.
     evaluation_id = state["evaluation_id"]
     evaluation_target = resolve_evaluation_target(state.get("evaluation_target"))
-    runs = EvaluationReportRun.objects.filter(id=run_id, report__evaluation_id=evaluation_id)
+    runs = EvaluationReportRun.objects.filter(id=resolved_run_id, report__evaluation_id=evaluation_id)
     runs = runs.filter(_report_run_target_filter(evaluation_target))
+    runs = runs.filter(_completed_report_run_filter())
     try:
         run = runs.get()
     except EvaluationReportRun.DoesNotExist:
@@ -1104,7 +1645,7 @@ def get_report_run(
 
     return json.dumps(
         {
-            "run_id": str(run.id),
+            "run_id": _report_run_handle(state, str(run.id)),
             "period_start": str(run.period_start),
             "period_end": str(run.period_end),
             "content": content,
@@ -1133,7 +1674,7 @@ def get_top_outcome_reasons(
     evaluation_id = state["evaluation_id"]
     ts_start = _ch_ts(state["period_start"])
     ts_end = _ch_ts(state["period_end"])
-    output_type, definition = _resolve_output_type(state.get("output_type"))
+    output_type, definition = _definition_from_state(state)
     evaluation_target = resolve_evaluation_target(state.get("evaluation_target"))
     selected_outcome = outcome or ("negative" if output_type == "sentiment" else "fail")
     outcome_predicate = definition.outcome_predicates.get(selected_outcome)
@@ -1201,11 +1742,95 @@ def set_title(
     clean = (title or "").strip()
     if not clean:
         return "Error: title cannot be empty"
+    dead = _dead_backticked_ids(clean, [], _handled_ids(state))
+    if dead:
+        return _plain_text_id_error("report title", dead)
     # Clip to a sensible max so it doesn't blow up email subject lines.
     if len(clean) > 200:
         clean = clean[:197] + "..."
     state["report"].title = clean
     return f"Title set: {clean!r}"
+
+
+def _span_token(match: re.Match[str]) -> str:
+    """The candidate identifier inside an inline-code span, whichever branch matched.
+
+    The `` `id` `` wrapper the renderer links holds backticks of its own, so it needs a
+    branch to itself. The general branch stops at the inner pair and skips over the ID.
+    """
+    inner = match.group(1) if match.group(1) is not None else match.group(2)
+    return inner.strip()
+
+
+def _dead_backticked_ids(text: str, citations: list[Citation], handled_ids: set[str]) -> list[str]:
+    """Return backticked IDs in `text` that no report renderer turns into a link.
+
+    A renderer links an exactly-cited ID in any wrapper `citation_wrappers` names. An
+    ID is any backticked token the session handled (its query allowlists) or a
+    canonical UUID; other backticked spans are prose and stay untouched.
+    """
+    cited_ids = {citation.cited_id() for citation in citations}
+    dead: list[str] = []
+    for match in _BACKTICKED_TOKEN_RE.finditer(text):
+        token = _span_token(match)
+        if _is_dead_id_span(match.group(0), token, cited_ids, handled_ids) and token not in dead:
+            dead.append(token)
+    return dead
+
+
+def _is_dead_id_span(span: str, token: str, cited_ids: Container[str], handled_ids: Container[str]) -> bool:
+    """Is this inline-code span an ID that no report renderer turns into a link?"""
+    if token not in handled_ids and _UUID_SHAPE_RE.fullmatch(token) is None:
+        return False
+    return not (token in cited_ids and span in citation_wrappers(token))
+
+
+def strip_dead_backticked_ids(text: str, citations: list[Citation], handled_ids: set[str]) -> str:
+    """Unwrap every dead backticked ID in `text`, leaving the ID as plain prose.
+
+    This is what the tool errors ask the agent to do itself. Applying it before delivery
+    keeps a whole report's analysis instead of trading it for a deterministic stub.
+    """
+    cited_ids = {citation.cited_id() for citation in citations}
+
+    def unwrap(match: re.Match[str]) -> str:
+        token = _span_token(match)
+        if _is_dead_id_span(match.group(0), token, cited_ids, handled_ids):
+            return token
+        return match.group(0)
+
+    return _BACKTICKED_TOKEN_RE.sub(unwrap, text)
+
+
+def _dead_backticked_ids_in_report(
+    titles: Iterable[str], bodies: Iterable[str], citations: list[Citation], handled_ids: set[str]
+) -> list[str]:
+    """Return the dead backticked IDs across a report's titles and bodies, in first-seen order.
+
+    Only a section body is run through citation linking. Every title reaches the reader
+    as plain text — an email subject, a Slack header, a heading — so a backticked ID in a
+    title is dead even when that ID is cited.
+    """
+    no_citations: list[Citation] = []
+    checks: list[tuple[str, list[Citation]]] = [
+        *((title, no_citations) for title in titles),
+        *((body, citations) for body in bodies),
+    ]
+    dead: list[str] = []
+    for text, text_citations in checks:
+        for token in _dead_backticked_ids(text, text_citations, handled_ids):
+            if token not in dead:
+                dead.append(token)
+    return dead
+
+
+def _plain_text_id_error(surface: str, dead: list[str]) -> str:
+    """Explain to the agent that an ID in a plain-text surface can never become a link."""
+    preview = ", ".join(f"`{token}`" for token in dead[:3])
+    return (
+        f"Error: the {surface} renders as plain text, so these backticked IDs stay dead: {preview}. "
+        f"Take the backticks off the {surface} and discuss the ID in a section body instead."
+    )
 
 
 @tool
@@ -1244,6 +1869,18 @@ def add_section(
             f"Error: maximum of {MAX_REPORT_SECTIONS} sections reached. "
             "Merge your content into existing sections rather than fragmenting further."
         )
+    handled_ids = _handled_ids(state)
+    dead_in_title = _dead_backticked_ids(clean_title, [], handled_ids)
+    if dead_in_title:
+        return _plain_text_id_error("section title", dead_in_title)
+    dead = _dead_backticked_ids(clean_content, state["report"].citations, handled_ids)
+    if dead:
+        preview = ", ".join(f"`{token}`" for token in dead[:3])
+        return (
+            f"Error: the following backticked IDs will not render as citation links: {preview}. "
+            "Cite each generation, trace, or session with add_citation, then use one pair of backticks around the exact cited ID. "
+            "An ID you read in a prior report belongs to another period and cannot be cited here. Remove its backticks."
+        )
     state["report"].sections.append(ReportSection(title=clean_title, content=clean_content))
     return f"Section {len(state['report'].sections)}/{MAX_REPORT_SECTIONS} added: {clean_title!r} ({len(clean_content)} chars)"
 
@@ -1252,42 +1889,73 @@ def add_section(
 add_section.__doc__ = (add_section.__doc__ or "").replace("{max_sections}", str(MAX_REPORT_SECTIONS))
 
 
+def _validate_citation_ids(
+    state: dict, target: str, generation_id: str, trace_id: str, session_id: str
+) -> str | Citation:
+    """Return the citation to store, or an error string explaining what the agent got wrong."""
+    if target != GENERATION_TARGET and generation_id:
+        return f"Error: generation_id must be empty for {target}-target citations"
+    if target != SESSION_TARGET and session_id:
+        return f"Error: session_id must be empty for {target}-target citations"
+
+    if target == GENERATION_TARGET and not _UUID_RE.fullmatch(generation_id or ""):
+        return f"Error: generation_id {generation_id!r} is not a canonical UUID"
+
+    normalized_trace_id = _normalize_opaque_id(trace_id)
+    # Session citations point at the session; naming a trace inside it is optional extra precision.
+    if normalized_trace_id is None and target != SESSION_TARGET:
+        return "Error: trace_id is empty, too long, or contains control characters"
+    if normalized_trace_id is not None and target != GENERATION_TARGET:
+        if not _is_allowlisted(state, TRACE_ID_ALLOWLIST_KEY, normalized_trace_id):
+            return "Error: trace_id was not returned by an evaluation query for this report"
+
+    normalized_session_id = ""
+    if target == SESSION_TARGET:
+        candidate = _normalize_opaque_id(session_id)
+        if candidate is None:
+            return "Error: session_id is empty, too long, or contains control characters"
+        if not _is_allowlisted(state, SESSION_ID_ALLOWLIST_KEY, candidate):
+            return "Error: session_id was not returned by an evaluation query for this report"
+        normalized_session_id = candidate
+
+    return Citation(
+        generation_id=generation_id,
+        trace_id=normalized_trace_id or "",
+        session_id=normalized_session_id,
+    )
+
+
 @tool
 def add_citation(
     state: Annotated[dict, InjectedState],
-    generation_id: str,
-    trace_id: str,
-    reason: str,
+    generation_id: str = "",
+    trace_id: str = "",
+    reason: str = "",
+    session_id: str = "",
 ) -> str:
-    """Cite a specific trace that supports a finding in the report.
+    """Cite a specific example that supports a finding in the report.
 
     Citations are structured references that downstream consumers (signals, inbox,
     coding agents) can filter on without parsing prose. Verify the target with the
-    target-specific detail tool before citing it. Trace-level citations leave
-    generation_id empty.
+    target-specific detail tool before citing it. Pass the ID of the unit this
+    evaluation runs on, and leave the IDs for other targets empty.
 
     Args:
-        generation_id: UUID of the $ai_generation event, or empty for a trace target.
-        trace_id: Opaque ID of the cited trace.
+        generation_id: UUID of the $ai_generation event. Generation targets only.
+        trace_id: Opaque ID of the cited trace. Required for generation and trace
+            targets; optional on a session target to point at one trace inside it.
         reason: Short free-form reason for the citation, e.g. "high_cost",
             "refusal", "regression_at_14:00", "empty_output".
+        session_id: Opaque ID of the cited session. Session targets only.
     """
-    evaluation_target = resolve_evaluation_target(state.get("evaluation_target"))
-    if evaluation_target == TRACE_TARGET and generation_id:
-        return "Error: generation_id must be empty for trace-target citations"
-    if evaluation_target == GENERATION_TARGET and not _UUID_RE.fullmatch(generation_id or ""):
-        return f"Error: generation_id {generation_id!r} is not a canonical UUID"
-    normalized_trace_id = _normalize_trace_id(trace_id)
-    if normalized_trace_id is None:
-        return "Error: trace_id is empty, too long, or contains control characters"
-    if evaluation_target == TRACE_TARGET and not _is_returned_trace_id(state, normalized_trace_id):
-        return "Error: trace_id was not returned by an evaluation query for this report"
-    clean_reason = (reason or "").strip()[:200]
-    state["report"].citations.append(
-        Citation(generation_id=generation_id, trace_id=normalized_trace_id, reason=clean_reason)
-    )
-    cited_id = generation_id or normalized_trace_id
-    return f"Citation {len(state['report'].citations)} added: {cited_id[:32]} ({clean_reason!r})"
+    target = resolve_evaluation_target(state.get("evaluation_target"))
+    citation = _validate_citation_ids(state, target, generation_id, trace_id, session_id)
+    if isinstance(citation, str):
+        return citation
+
+    citation.reason = (reason or "").strip()[:200]
+    state["report"].citations.append(citation)
+    return f"Citation {len(state['report'].citations)} added: {citation.cited_id()[:32]} ({citation.reason!r})"
 
 
 _COMMON_OVERVIEW_TOOLS: list[BaseTool] = [
@@ -1299,23 +1967,28 @@ _COMMON_OVERVIEW_TOOLS: list[BaseTool] = [
 _COMMON_FOLLOWUP_TOOLS: list[BaseTool] = [
     list_recent_report_runs,
     get_report_run,
-    get_top_outcome_reasons,
 ]
 
-_GENERATION_DETAIL_TOOLS: list[BaseTool] = [sample_generation_details, get_generation_detail, get_generation_text_repr]
-_TRACE_DETAIL_TOOLS: list[BaseTool] = [sample_trace_details, get_trace_detail]
 _OUTPUT_TOOLS: list[BaseTool] = [
     set_title,
     add_section,
     add_citation,
 ]
 
+# Session reports keep the trace tools: a session is a bag of traces, so the way to read one is
+# to map it and then open the traces that matter.
+_DETAIL_TOOLS_BY_TARGET: dict[str, list[BaseTool]] = {
+    GENERATION_TARGET: [sample_generation_details, get_generation_detail, get_generation_text_repr],
+    TRACE_TARGET: [sample_trace_details, get_trace_detail],
+    SESSION_TARGET: [sample_session_details, get_session_detail, get_trace_detail],
+}
 
-def get_eval_report_tools(evaluation_target: str) -> list[BaseTool]:
-    """Return the shared report tools plus only the details relevant to this target."""
-    target = resolve_evaluation_target(evaluation_target)
-    detail_tools = _TRACE_DETAIL_TOOLS if target == TRACE_TARGET else _GENERATION_DETAIL_TOOLS
-    return [*_COMMON_OVERVIEW_TOOLS, *detail_tools, *_COMMON_FOLLOWUP_TOOLS, *_OUTPUT_TOOLS]
+
+def get_eval_report_tools(evaluation_target: str, output_type: str = "boolean") -> list[BaseTool]:
+    """Return the shared report tools plus only the tools relevant to this evaluation."""
+    detail_tools = _DETAIL_TOOLS_BY_TARGET[resolve_evaluation_target(evaluation_target)]
+    reasoning_tools = [] if output_type == "sentiment" else [get_top_outcome_reasons]
+    return [*_COMMON_OVERVIEW_TOOLS, *detail_tools, *_COMMON_FOLLOWUP_TOOLS, *reasoning_tools, *_OUTPUT_TOOLS]
 
 
 # Preserve the original export for callers that build generation report agents directly.

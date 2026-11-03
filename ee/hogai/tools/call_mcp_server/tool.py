@@ -9,10 +9,10 @@ from pydantic import BaseModel, Field, ValidationError
 from posthog.schema import AssistantTool
 
 from posthog.models import Team, User
-from posthog.security.url_validation import is_url_allowed
 from posthog.sync import database_sync_to_async
 
 from products.mcp_store.backend.oauth import is_token_expiring
+from products.mcp_store.backend.url_policy import check_mcp_url_policy
 
 from ee.hogai.context.context import AssistantContextManager
 from ee.hogai.tool import MaxTool
@@ -24,6 +24,7 @@ from .installations import (
     _get_cached_tools,
     _get_installations,
     _get_tool_approval_states,
+    _get_unlisted_tool_state,
     _mark_needs_reauth_sync,
     _refresh_token_sync,
 )
@@ -84,7 +85,8 @@ class CallMCPServerTool(MaxTool):
     _installations: list
     _installations_by_url: dict[str, dict]
     _server_headers: dict[str, dict[str, str]]
-    # {server_url: {tool_name: approval_state}} — lazily populated to minimize DB reads; also seeded by _get_cached_tool_list to avoid double lookup when calling __list_tools__
+    # {server_url: {tool_name: effective_state}} — lazily populated via
+    # _get_approval_states so every path holds gateway-policy-resolved states.
     _approval_cache: dict[str, dict[str, str]]
 
     @classmethod
@@ -136,13 +138,26 @@ class CallMCPServerTool(MaxTool):
         if cached is not None:
             return cached
         inst = self._get_installation(server_url)
-        states = await database_sync_to_async(_get_tool_approval_states)(str(inst["id"]))
+        states = await database_sync_to_async(_get_tool_approval_states)(
+            str(inst["id"]),
+            self._team.id,
+            inst.get("gateway_server_id"),
+            self._user,
+        )
         self._approval_cache[server_url] = states
         return states
 
     async def _resolve_approval_state(self, server_url: str, tool_name: str) -> str:
         states = await self._get_approval_states(server_url)
-        return states.get(tool_name, _APPROVAL_DEFAULT)
+        if tool_name in states:
+            return states[tool_name]
+        inst = self._get_installation(server_url)
+        gateway_server_id = inst.get("gateway_server_id")
+        state = await database_sync_to_async(_get_unlisted_tool_state)(
+            str(inst["id"]), self._team.id, gateway_server_id, self._user, tool_name
+        )
+        states[tool_name] = state
+        return state
 
     async def is_dangerous_operation(
         self, *, server_url: str, tool_name: str, arguments: dict | None = None, **_kwargs
@@ -195,9 +210,10 @@ class CallMCPServerTool(MaxTool):
         rows = await database_sync_to_async(_get_cached_tools)(str(inst["id"]))
         if not rows:
             return None
-        approval_states = {row["name"]: row["approval_state"] for row in rows}
-        # Seed the approval cache so a subsequent `tools/call` doesn't re-query.
-        self._approval_cache.setdefault(server_url, dict(approval_states))
+        # Resolve through the gateway policy engine (and warm the shared cache),
+        # never the raw per-installation flags — a team ceiling or org rule must
+        # gate the cached list exactly like a fresh tools/list.
+        approval_states = await self._get_approval_states(server_url)
         return self._format_tool_list(server_url, rows, approval_states)
 
     async def _call_server(self, server_url: str, tool_name: str, arguments: dict | None) -> str:
@@ -210,7 +226,7 @@ class CallMCPServerTool(MaxTool):
 
     async def _attempt_call(self, server_url: str, tool_name: str, arguments: dict | None) -> str:
         headers = self._server_headers.get(server_url)
-        client = MCPClient(server_url, headers=headers)
+        client = MCPClient(server_url, headers=headers, team_id=self._team.id)
         try:
             # We build up and tear down the client session with every request.
             # This lets us use the same code in cloud, our backend, and when proxying via the server.
@@ -297,7 +313,7 @@ class CallMCPServerTool(MaxTool):
                 f"Server URL '{server_url}' is not in the user's installed MCP servers. "
                 f"Allowed URLs: {', '.join(sorted(self._allowed_server_urls))}"
             )
-        allowed, error = is_url_allowed(server_url)
+        allowed, error = check_mcp_url_policy(server_url, self._team.id)
         if not allowed:
             raise MaxToolFatalError(f"MCP server URL blocked by security policy")
 
@@ -334,7 +350,7 @@ class CallMCPServerTool(MaxTool):
 
         inst["sensitive_configuration"] = updated
         self._installations_by_url[server_url] = inst
-        self._server_headers[server_url] = {"Authorization": f"Bearer {updated['access_token']}"}
+        self._server_headers.setdefault(server_url, {}).update({"Authorization": f"Bearer {updated['access_token']}"})
 
     def _get_installation(self, server_url: str) -> dict:
         inst = self._installations_by_url.get(server_url)

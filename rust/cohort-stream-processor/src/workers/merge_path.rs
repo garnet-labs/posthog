@@ -37,6 +37,8 @@ use crate::producer::{
 use crate::stage1::transition::LeafTransition;
 use crate::store::{BehavioralKey, PendingTransferKey, ReadLane, StoreHandle};
 use crate::sweep::EvictionQueue;
+use crate::workers::person_seed_path::PersonSeedDeps;
+use crate::workers::seed_run::RunBudget;
 use crate::workers::stage2_path::compose_stage2;
 use crate::workers::worker::{
     affected_leaves, first_cascades, produce_cascades, produce_membership, transition_metric_label,
@@ -136,6 +138,10 @@ pub struct MergeWorkerDeps {
     pub register_transfer_enabled: bool,
     /// Reconcile admission and the pod-wide scheduler wake-up count.
     pub reconcile: ReconcileDeps,
+    /// Person-property seed admission and its live-priority margin.
+    pub person_seed: PersonSeedDeps,
+    /// Ceilings the partition workers group a channel batch's seeds into runs under.
+    pub seed_budget: RunBudget,
 }
 
 impl MergeWorkerDeps {
@@ -157,11 +163,14 @@ impl MergeWorkerDeps {
             live_watermarks: Arc::new(LiveWatermarks::new()),
             register_transfer_enabled: false,
             reconcile: ReconcileDeps::default(),
+            person_seed: PersonSeedDeps::default(),
+            seed_budget: RunBudget::default(),
         })
     }
 }
 
 #[allow(clippy::too_many_arguments)]
+#[hotpath::measure]
 pub(crate) async fn handle_merge(
     partition_id: u16,
     handle: &StoreHandle,
@@ -336,6 +345,7 @@ pub(crate) async fn handle_merge(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[hotpath::measure]
 pub(crate) async fn handle_apply(
     partition_id: u16,
     handle: &StoreHandle,
@@ -494,6 +504,7 @@ const REDRIVE_MAX_ATTEMPTS_PER_TICK: usize = 8;
 /// the next few ticks' worth of work staged without copying the whole outbox each tick.
 const SCAN_PENDING_TRANSFERS_LIMIT: usize = REDRIVE_MAX_ATTEMPTS_PER_TICK * 8;
 
+#[hotpath::measure]
 pub(crate) async fn handle_redrive(
     partition_id: u16,
     handle: &StoreHandle,
@@ -909,6 +920,8 @@ mod tests {
             live_watermarks: Arc::new(crate::partitions::watermarks::LiveWatermarks::new()),
             register_transfer_enabled: false,
             reconcile: ReconcileDeps::default(),
+            person_seed: PersonSeedDeps::default(),
+            seed_budget: RunBudget::default(),
         }
     }
 

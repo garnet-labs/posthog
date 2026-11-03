@@ -57,7 +57,6 @@ export function draftInsightListItem(draft: DraftInsightQuery, currentUser: User
         deleted: false,
         saved: false,
         is_sample: false,
-        dashboards: null,
         dashboard_tiles: null,
         last_refresh: null,
         created_at: timestamp,
@@ -65,7 +64,8 @@ export function draftInsightListItem(draft: DraftInsightQuery, currentUser: User
         updated_at: timestamp,
         last_modified_at: timestamp,
         last_modified_by: user,
-        last_viewed_at: null,
+        // The draft has no InsightViewed record, but its author saw it when they last edited it
+        last_viewed_at: timestamp,
         tags: [],
         favorited: false,
         user_access_level: AccessControlLevel.Viewer,

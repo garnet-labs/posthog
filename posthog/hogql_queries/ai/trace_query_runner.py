@@ -24,7 +24,12 @@ from posthog.hogql_queries.ai.sentiment_evaluations import (
     get_sentiment_for_generation,
     load_generation_sentiment_evaluations_for_traces,
 )
-from posthog.hogql_queries.ai.utils import merge_heavy_properties, parse_ai_property_value
+from posthog.hogql_queries.ai.utils import (
+    filled_property_filters,
+    merge_heavy_properties,
+    parse_ai_property_value,
+    timestamp_bound_as_hogql,
+)
 from posthog.hogql_queries.query_runner import AnalyticsQueryRunner
 from posthog.hogql_queries.utils.query_date_range import QueryDateRange
 
@@ -49,11 +54,20 @@ TRACE_FIELDS_MAPPING: dict[str, str] = {
 
 class TraceQueryDateRange(QueryDateRange):
     """
-    Extends the QueryDateRange to include a capture range of 10 minutes before and after the date range.
-    It's a naive assumption that a trace finishes generating within 10 minutes of the first event so we can apply the date filters.
+    Provides a bounded capture range for the shared-events fallback.
+
+    The dedicated table is ordered by `(team_id, trace_id, timestamp)`, so an exact trace lookup
+    does not need timestamp bounds. Shared events is ordered by day and event, so its fallback
+    stays time-bounded.
     """
 
+    # Backward buffer: clock skew / the small negative anchor the frontend applies to date_from.
     CAPTURE_RANGE_MINUTES = 10
+    # Forward buffer: an upper bound on a single trace's duration. A trace that maps to a chat can
+    # stay open across days, so a sub-day bound silently truncates it.
+    FORWARD_CAPTURE_RANGE_MINUTES = 7 * 24 * 60
+    # Callers name calendar days: the trace detail tool takes a date-only `date_to`.
+    CALENDAR_DAY_DATE_TO_IS_INCLUSIVE = True
 
     def date_from_for_filtering(self) -> datetime:
         return super().date_from()
@@ -65,26 +79,48 @@ class TraceQueryDateRange(QueryDateRange):
         return super().date_from() - timedelta(minutes=self.CAPTURE_RANGE_MINUTES)
 
     def date_to(self) -> datetime:
-        return super().date_to() + timedelta(minutes=self.CAPTURE_RANGE_MINUTES)
+        return super().date_to() + timedelta(minutes=self.FORWARD_CAPTURE_RANGE_MINUTES)
+
+    def date_to_for_filtering_as_hogql(self) -> ast.Expr:
+        return timestamp_bound_as_hogql(self.date_to_for_filtering())
 
 
 class TraceQueryRunner(AnalyticsQueryRunner[TraceQueryResponse]):
     query: TraceQuery
     cached_response: CachedTraceQueryResponse
 
-    def __init__(self, *args: Any, **kwargs: Any):
+    def __init__(
+        self,
+        *args: Any,
+        bound_events_to_date_range: bool = False,
+        posthog_tables_only: bool = False,
+        bypass_property_access_control: bool = False,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(*args, **kwargs)
+        # The trace view wants the whole trace whatever the date picker says, so the default reads
+        # `ai_events` unbounded. A caller that grades a trace "as of" an instant opts in here, which
+        # holds the event rows to `dateRange.date_to` before the SQL aggregates the totals.
+        self._bound_events_to_date_range = bound_events_to_date_range
+        # See query_ai_events. The trace view keeps the full catalog because its property filters
+        # and modifiers can reference warehouse tables and group types.
+        self._posthog_tables_only = posthog_tables_only
+        self._bypass_property_access_control = bypass_property_access_control
 
     def _calculate(self):
         query_result = query_ai_events(
             query=self._build_query(),
-            placeholders={"filter_conditions": self._get_where_clause()},
+            placeholders={"filter_conditions": self._get_where_clause(include_timestamp_bounds=False)},
             team=self.team,
+            user=self.user,
             query_type=NodeKind.TRACE_QUERY,
             fall_back_to_events=True,
+            fallback_placeholders={"filter_conditions": self._get_where_clause()},
             timings=self.timings,
             modifiers=self.modifiers,
             limit_context=self.limit_context,
+            posthog_tables_only=self._posthog_tables_only,
+            bypass_property_access_control=self._bypass_property_access_control,
         )
 
         columns: list[str] = query_result.columns or []
@@ -92,6 +128,7 @@ class TraceQueryRunner(AnalyticsQueryRunner[TraceQueryResponse]):
         if self.query.includeSentiment and query_result.results:
             sentiment_lookup = load_generation_sentiment_evaluations_for_traces(
                 team=self.team,
+                user=self.user,
                 trace_ids=[self.query.traceId],
                 timings=self.timings,
                 modifiers=self.modifiers,
@@ -129,41 +166,63 @@ class TraceQueryRunner(AnalyticsQueryRunner[TraceQueryResponse]):
                     argMin(deduped.distinct_id, deduped.timestamp)
                 ) AS first_distinct_id,
                 round(
-                    CASE
-                        -- If all events with latency are generations, sum them all
-                        WHEN countIf(deduped.latency > 0 AND deduped.event != '$ai_generation') = 0
-                             AND countIf(deduped.latency > 0 AND deduped.event = '$ai_generation') > 0
-                        THEN sumIf(deduped.latency,
-                                   deduped.event = '$ai_generation' AND deduped.latency > 0
-                             )
-                        -- Otherwise sum the direct children of the trace
-                        ELSE sumIf(deduped.latency,
-                                   deduped.parent_id IS NULL
-                                   OR deduped.parent_id = deduped.trace_id
-                             )
-                    END, 2
+                    coalesce(
+                        -- The root $ai_trace event reports the wall-clock latency of the whole
+                        -- trace, so its children are already inside that number. Same rule as
+                        -- products/ai_observability/backend/queries/sessions.sql.
+                        nullIf(maxIf(deduped.latency, deduped.event = '$ai_trace' AND deduped.latency > 0), 0),
+                        CASE
+                            -- If all events with latency are generations, sum them all
+                            WHEN countIf(deduped.latency > 0 AND deduped.event != '$ai_generation') = 0
+                                 AND countIf(deduped.latency > 0 AND deduped.event = '$ai_generation') > 0
+                            THEN sumIf(deduped.latency,
+                                       deduped.event = '$ai_generation' AND deduped.latency > 0
+                                 )
+                            -- Otherwise sum the direct children of the trace
+                            ELSE sumIf(deduped.latency,
+                                       deduped.parent_id IS NULL
+                                       OR deduped.parent_id = deduped.trace_id
+                                 )
+                        END
+                    ), 2
                 ) AS total_latency,
-                nullIf(sumIf(deduped.input_tokens,
-                      deduped.event IN ('$ai_generation', '$ai_embedding')
-                ), 0) AS input_tokens,
-                nullIf(sumIf(deduped.output_tokens,
-                      deduped.event IN ('$ai_generation', '$ai_embedding')
-                ), 0) AS output_tokens,
-                nullIf(round(
-                    sumIf(deduped.input_cost_usd,
-                          deduped.event IN ('$ai_generation', '$ai_embedding')
-                    ), 10
-                ), 0) AS input_cost,
-                nullIf(round(
-                    sumIf(deduped.output_cost_usd,
-                          deduped.event IN ('$ai_generation', '$ai_embedding')
-                    ), 10
-                ), 0) AS output_cost,
-                nullIf(round(
-                    sumIf(deduped.total_cost_usd,
-                          deduped.event IN ('$ai_generation', '$ai_embedding')
-                    ), 10
-                ), 0) AS total_cost,
+                -- NULL means no event carried the field, 0 is a reported zero.
+                -- nullIf(sum, 0) would collapse a real zero into NULL.
+                if(countIf(isNotNull(deduped.input_tokens)
+                           AND deduped.event IN ('$ai_generation', '$ai_embedding')) > 0,
+                   sumIf(deduped.input_tokens,
+                         deduped.event IN ('$ai_generation', '$ai_embedding')
+                   ),
+                   NULL
+                ) AS input_tokens,
+                if(countIf(isNotNull(deduped.output_tokens)
+                           AND deduped.event IN ('$ai_generation', '$ai_embedding')) > 0,
+                   sumIf(deduped.output_tokens,
+                         deduped.event IN ('$ai_generation', '$ai_embedding')
+                   ),
+                   NULL
+                ) AS output_tokens,
+                if(countIf(isNotNull(deduped.input_cost_usd)
+                           AND deduped.event IN ('$ai_generation', '$ai_embedding')) > 0,
+                   round(sumIf(deduped.input_cost_usd,
+                               deduped.event IN ('$ai_generation', '$ai_embedding')
+                   ), 10),
+                   NULL
+                ) AS input_cost,
+                if(countIf(isNotNull(deduped.output_cost_usd)
+                           AND deduped.event IN ('$ai_generation', '$ai_embedding')) > 0,
+                   round(sumIf(deduped.output_cost_usd,
+                               deduped.event IN ('$ai_generation', '$ai_embedding')
+                   ), 10),
+                   NULL
+                ) AS output_cost,
+                if(countIf(isNotNull(deduped.total_cost_usd)
+                           AND deduped.event IN ('$ai_generation', '$ai_embedding')) > 0,
+                   round(sumIf(deduped.total_cost_usd,
+                               deduped.event IN ('$ai_generation', '$ai_embedding')
+                   ), 10),
+                   NULL
+                ) AS total_cost,
                 arrayDistinct(
                     arraySort(
                         x -> x.3,
@@ -212,16 +271,22 @@ class TraceQueryRunner(AnalyticsQueryRunner[TraceQueryResponse]):
         )
         return cast(ast.SelectQuery, query)
 
-    def get_cache_payload(self):
-        return {
+    def get_cache_payload(self) -> dict[str, Any]:
+        payload = {
             **super().get_cache_payload(),
             # When the response schema changes, increment this version to invalidate the cache.
-            "schema_version": 10,
+            "schema_version": 11,
+            # Not part of the query schema, but it changes the rows the response is built from, so
+            # a bounded and an unbounded read of the same trace must not share a cache entry.
+            "bound_events_to_date_range": self._bound_events_to_date_range,
         }
+        if self._bypass_property_access_control:
+            payload["bypass_property_access_control"] = True
+        return payload
 
     @cached_property
     def _date_range(self):
-        # Minute-level precision for 10m capture range
+        # Minute-level precision for the capture range buffers
         return TraceQueryDateRange(self.query.dateRange, self.team, IntervalType.MINUTE, datetime.now())
 
     def cache_target_age(self, last_refresh: Optional[datetime], lazy: bool = False) -> Optional[datetime]:
@@ -230,19 +295,35 @@ class TraceQueryRunner(AnalyticsQueryRunner[TraceQueryResponse]):
 
         return last_refresh + timedelta(minutes=1)
 
-    def _get_where_clause(self) -> ast.Expr:
-        where_exprs: list[ast.Expr] = [
-            ast.CompareOperation(
-                op=ast.CompareOperationOp.GtEq,
-                left=ast.Field(chain=["ai_events", "timestamp"]),
-                right=self._date_range.date_from_as_hogql(),
-            ),
-            ast.CompareOperation(
-                op=ast.CompareOperationOp.LtEq,
-                left=ast.Field(chain=["ai_events", "timestamp"]),
-                right=self._date_range.date_to_as_hogql(),
-            ),
-        ]
+    def _get_where_clause(self, *, include_timestamp_bounds: bool = True) -> ast.Expr:
+        where_exprs: list[ast.Expr] = []
+        if include_timestamp_bounds:
+            where_exprs.extend(
+                [
+                    ast.CompareOperation(
+                        op=ast.CompareOperationOp.GtEq,
+                        left=ast.Field(chain=["ai_events", "timestamp"]),
+                        right=self._date_range.date_from_as_hogql(),
+                    ),
+                    ast.CompareOperation(
+                        op=ast.CompareOperationOp.LtEq,
+                        left=ast.Field(chain=["ai_events", "timestamp"]),
+                        right=self._date_range.date_to_as_hogql(),
+                    ),
+                ]
+            )
+
+        if self._bound_events_to_date_range:
+            # `date_to_as_hogql` above carries the 7 day forward buffer, which is wider than the
+            # caller's bound, so the exact upper bound is added as its own clause. Only the upper
+            # bound: a lower bound would drop the early events of the trace.
+            where_exprs.append(
+                ast.CompareOperation(
+                    op=ast.CompareOperationOp.LtEq,
+                    left=ast.Field(chain=["ai_events", "timestamp"]),
+                    right=self._date_range.date_to_for_filtering_as_hogql(),
+                )
+            )
 
         where_exprs.append(
             ast.CompareOperation(
@@ -252,9 +333,10 @@ class TraceQueryRunner(AnalyticsQueryRunner[TraceQueryResponse]):
             ),
         )
 
-        if self.query.properties:
+        properties = filled_property_filters(self.query.properties)
+        if properties:
             with self.timings.measure("property_filters"):
-                for prop in self.query.properties:
+                for prop in properties:
                     where_exprs.append(property_to_expr(prop, self.team))
 
         return ast.And(exprs=where_exprs)

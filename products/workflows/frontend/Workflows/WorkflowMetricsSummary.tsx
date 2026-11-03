@@ -7,11 +7,14 @@ import { LemonLabel, LemonTable, LemonTableColumns, LemonTag, Link, SpinnerOverl
 import { getColorVar } from 'lib/colors'
 import { type AppMetricsTimeSeriesResponse } from 'lib/components/AppMetrics/appMetricsLogic'
 import { AppMetricsTrends } from 'lib/components/AppMetrics/AppMetricsTrends'
-import { AppMetricSummary } from 'lib/components/AppMetrics/AppMetricSummary'
-import { humanFriendlyNumber } from 'lib/utils/numbers'
+import { type ExpandableConfig } from 'lib/lemon-ui/LemonTable'
+import { humanFriendlyNumber, percentage } from 'lib/utils/numbers'
 
+import { EmailLinksTable } from './EmailLinksTable'
+import { WorkflowMetricCard } from './WorkflowMetricCard'
 import {
     type EmailMetric,
+    type EmailMetricName,
     type EmailMetricRow,
     METRIC_COLORS,
     type PushMetricRow,
@@ -21,10 +24,34 @@ import {
     type WorkflowMetricsSummaryLogicProps,
 } from './workflowMetricsSummaryLogic'
 
+const TRACKED_SENDS_TOOLTIP =
+    'Untracked sends can never record opens or clicks, so engagement is shown against tracked sends (sent minus untracked). Counts and rates compare activity within the selected date range, so opens of emails sent before the range can push a rate above 100%.'
+
+const ISSUE_RATES_TOOLTIP =
+    'Bounces and spam complaints are shown as a share of emails sent. A prevented bounce, a send with no email address, or a frequency-capped send is skipped before it is sent, so it is shown as a share of every send the step attempted (sent plus skipped).'
+
+// Opens and clicks are only possible on tracked sends, so pair the raw count with the denominator it
+// should be read against, plus the rate over that denominator. A step with no tracked sends shows a
+// dash instead of a rate.
+function trackedEngagementColumn(value: number, row: EmailMetricRow): JSX.Element {
+    return (
+        <span>
+            {value.toLocaleString()}
+            {row.untracked > 0 && (
+                <span className="text-muted"> of {row.trackedSends.toLocaleString()} tracked sends</span>
+            )}
+            <span className="text-muted">
+                {' '}
+                ({row.trackedSends > 0 ? `${((value / row.trackedSends) * 100).toFixed(1)}%` : '-'})
+            </span>
+        </span>
+    )
+}
+
 interface WorkflowMetricsSummaryProps extends WorkflowMetricsSummaryLogicProps {
     onSelectAction?: (actionId: string) => void
     /** Drill a per-email metric into its filtered logs (only bounced/blocked have a log filter). */
-    onMetricClick?: (metricKey: EmailMetric) => void
+    onMetricClick?: (metricKey: EmailMetricName) => void
 }
 
 export function WorkflowMetricsSummary({
@@ -43,6 +70,7 @@ export function WorkflowMetricsSummary({
         workflowSummaryTrends,
         emailMetricsRows,
         emailTotalsByActionIdLoading,
+        emailLinkTotalsByActionId,
         pushMetricsRows,
         pushTotalsByActionIdLoading,
         conversionRate,
@@ -84,58 +112,75 @@ export function WorkflowMetricsSummary({
                 title: 'Opened',
                 key: 'opened',
                 align: 'right',
-                tooltip:
-                    'Untracked sends can never record opens or clicks, so opens are shown against tracked deliveries (delivered minus untracked).',
-                render: (_, row) => (
-                    <span>
-                        {row.opened.toLocaleString()}
-                        {row.untracked > 0 && row.delivered - row.untracked > 0 && (
-                            <span className="text-muted">
-                                {' '}
-                                of {(row.delivered - row.untracked).toLocaleString()} tracked
-                            </span>
-                        )}
-                    </span>
-                ),
+                tooltip: TRACKED_SENDS_TOOLTIP,
+                render: (_, row) => trackedEngagementColumn(row.opened, row),
             },
             {
                 title: 'Clicked',
                 key: 'clicked',
                 align: 'right',
-                render: (_, row) => (
-                    <span>
-                        {row.linkClicked.toLocaleString()}
-                        {row.untracked > 0 && row.delivered - row.untracked > 0 && (
-                            <span className="text-muted">
-                                {' '}
-                                of {(row.delivered - row.untracked).toLocaleString()} tracked
-                            </span>
-                        )}
-                    </span>
-                ),
+                tooltip: TRACKED_SENDS_TOOLTIP,
+                render: (_, row) => trackedEngagementColumn(row.linkClicked, row),
             },
             {
                 title: 'Issues',
                 key: 'issues',
+                tooltip: ISSUE_RATES_TOOLTIP,
                 render: (_, row) => {
-                    const issues = [
+                    // A prevented bounce, a missing recipient, or a frequency-capped send is skipped
+                    // before the provider sees it, so none is part of `sent` and their rates read
+                    // against everything the step attempted to send.
+                    const attempted = row.sent + row.bouncePrevented + row.missingRecipient + row.frequencyCapped
+                    const classifiedBounces = row.bouncedHard + row.bouncedSoft + row.bouncedUnknown
+                    const bounceIssues: { label: string; value: number; metric: EmailMetricName }[] = [
+                        { label: 'hard bounced', value: row.bouncedHard, metric: 'email_bounced_hard' },
+                        { label: 'soft bounced', value: row.bouncedSoft, metric: 'email_bounced_transient' },
+                        {
+                            label: 'bounced, type unknown',
+                            value: row.bouncedUnknown,
+                            metric: 'email_bounced_undetermined',
+                        },
+                        // The rollup and its per-type rows are written together, so this is normally
+                        // zero. Showing any remainder keeps the tags adding up to the rollup.
                         {
                             label: 'bounced',
-                            value: row.bounced,
-                            type: 'danger' as const,
-                            metric: 'email_bounced' as EmailMetric,
+                            value: Math.max(0, row.bounced - classifiedBounces),
+                            metric: 'email_bounced',
                         },
+                    ]
+                    const issues = [
+                        ...bounceIssues.map((bounce) => ({
+                            ...bounce,
+                            total: row.sent,
+                            type: 'danger' as const,
+                        })),
                         {
-                            label: 'blocked',
-                            value: row.blocked,
+                            label: 'marked as spam',
+                            value: row.markedAsSpam,
+                            total: row.sent,
                             type: 'danger' as const,
                             metric: 'email_blocked' as EmailMetric,
                         },
                         {
                             label: 'bounce prevented',
                             value: row.bouncePrevented,
+                            total: attempted,
                             type: 'warning' as const,
                             metric: 'email_bounce_prevented' as EmailMetric,
+                        },
+                        {
+                            label: 'no email address',
+                            value: row.missingRecipient,
+                            total: attempted,
+                            type: 'warning' as const,
+                            metric: 'email_missing_recipient' as EmailMetric,
+                        },
+                        {
+                            label: 'frequency capped',
+                            value: row.frequencyCapped,
+                            total: attempted,
+                            type: 'warning' as const,
+                            metric: 'message_frequency_capped' as EmailMetric,
                         },
                     ].filter((issue) => issue.value > 0)
                     if (issues.length === 0) {
@@ -151,6 +196,7 @@ export function WorkflowMetricsSummary({
                                     forceClickable={!!onMetricClick}
                                 >
                                     {issue.value.toLocaleString()} {issue.label}
+                                    {issue.total > 0 ? ` (${percentage(issue.value / issue.total, 1)})` : ''}
                                 </LemonTag>
                             ))}
                         </div>
@@ -170,6 +216,16 @@ export function WorkflowMetricsSummary({
         ]
     }, [onSelectAction, onMetricClick, viewMetricsColumn])
 
+    const emailExpandable: ExpandableConfig<EmailMetricRow> = useMemo(
+        () => ({
+            rowExpandable: (row: EmailMetricRow) => (emailLinkTotalsByActionId[row.id]?.length ?? 0) > 0,
+            expandedRowRender: (row: EmailMetricRow) => (
+                <EmailLinksTable links={emailLinkTotalsByActionId[row.id] ?? []} embedded />
+            ),
+        }),
+        [emailLinkTotalsByActionId]
+    )
+
     const pushColumns: LemonTableColumns<PushMetricRow> = useMemo(() => {
         return [
             {
@@ -180,6 +236,7 @@ export function WorkflowMetricsSummary({
             { title: 'Sent', key: 'sent', align: 'right', render: (_, row) => row.sent.toLocaleString() },
             { title: 'Skipped', key: 'skipped', align: 'right', render: (_, row) => row.skipped.toLocaleString() },
             { title: 'Failed', key: 'failed', align: 'right', render: (_, row) => row.failed.toLocaleString() },
+            { title: 'Opened', key: 'opened', align: 'right', render: (_, row) => row.opened.toLocaleString() },
             ...(onSelectAction
                 ? [
                       {
@@ -207,9 +264,7 @@ export function WorkflowMetricsSummary({
                             ) : inProgressTotal === 0 ? (
                                 <LemonLabel className="text-muted text-md mb-2">No workflows in progress</LemonLabel>
                             ) : (
-                                <div className="text-6xl text-muted-foreground mb-2">
-                                    {humanFriendlyNumber(inProgressTotal)}
-                                </div>
+                                <div className="text-6xl mb-2">{humanFriendlyNumber(inProgressTotal)}</div>
                             )}
                         </div>
                     </div>
@@ -235,13 +290,16 @@ export function WorkflowMetricsSummary({
                     const sentSeries = (previous?: boolean): AppMetricsTimeSeriesResponse | null => {
                         if (hasEmail && hasPush) {
                             // Split the combined "Messages sent" tile into Emails + Push lines. The headline
-                            // number stays their sum (AppMetricSummary totals across series); the sparkline
+                            // number stays their sum (the metric card totals across series); the sparkline
                             // and its tooltip break the total down by channel.
                             const emailSeries = getSingleTrendSeries('email_sent', previous)
                             const pushSeries = getSingleTrendSeries('push_sent', previous)
-                            const labels = emailSeries?.labels ?? pushSeries?.labels ?? []
+                            const source = emailSeries ?? pushSeries
+                            if (!source) {
+                                return null
+                            }
                             return {
-                                labels,
+                                ...source,
                                 series: [
                                     { name: 'Emails sent', values: emailSeries?.series[0]?.values ?? [] },
                                     { name: 'Push notifications sent', values: pushSeries?.series[0]?.values ?? [] },
@@ -267,7 +325,7 @@ export function WorkflowMetricsSummary({
                           : withDisplayName(getSingleTrendSeries(metricName, true), name)
 
                     return (
-                        <AppMetricSummary
+                        <WorkflowMetricCard
                             key={summaryMetric}
                             name={name}
                             description={description}
@@ -299,7 +357,7 @@ export function WorkflowMetricsSummary({
                                 ) : conversionStats.started === 0 ? (
                                     <LemonLabel className="text-muted text-md mb-2">No workflows started</LemonLabel>
                                 ) : (
-                                    <div className="text-6xl text-muted-foreground mb-2">
+                                    <div className="text-6xl mb-2">
                                         {`${(Math.min(conversionRate, 1) * 100).toFixed(1)}%`}
                                     </div>
                                 )}
@@ -329,6 +387,7 @@ export function WorkflowMetricsSummary({
                         loading={emailTotalsByActionIdLoading}
                         rowKey="id"
                         size="small"
+                        expandable={emailExpandable}
                     />
                 </div>
             ) : null}

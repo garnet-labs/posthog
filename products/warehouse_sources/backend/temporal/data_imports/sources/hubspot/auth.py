@@ -1,9 +1,9 @@
-from django.conf import settings
-
 import requests
 import structlog
 from tenacity import RetryCallState, retry, retry_if_exception_type, stop_after_attempt, wait_exponential_jitter
 
+from products.warehouse_sources.backend.logic.source_inputs import SourceInputsStore
+from products.warehouse_sources.backend.temporal.data_imports.sources.common import credentials_service
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.http import make_tracked_session
 
 logger = structlog.get_logger(__name__)
@@ -52,6 +52,15 @@ def _error_message_from_response(res: requests.Response) -> str:
         return res.text
 
 
+def _hubspot_app_credentials() -> dict[str, str]:
+    """PostHog's own HubSpot app id and secret, as the token endpoint wants them named."""
+    resolved = credentials_service.get_secrets(["HUBSPOT_APP_CLIENT_ID", "HUBSPOT_APP_CLIENT_SECRET"])
+    return {
+        "client_id": resolved["HUBSPOT_APP_CLIENT_ID"],
+        "client_secret": resolved["HUBSPOT_APP_CLIENT_SECRET"],
+    }
+
+
 @retry(
     # A 429/5xx from HubSpot's OAuth token endpoint is transient. The data-fetch paths already
     # back off and retry on HubspotRetryableError; this refresh is also reached at source-setup
@@ -67,8 +76,7 @@ def hubspot_refresh_access_token(refresh_token: str, source_id: str | None = Non
         "https://api.hubapi.com/oauth/v1/token",
         data={
             "grant_type": "refresh_token",
-            "client_id": settings.HUBSPOT_APP_CLIENT_ID,
-            "client_secret": settings.HUBSPOT_APP_CLIENT_SECRET,
+            **_hubspot_app_credentials(),
             "refresh_token": refresh_token,
         },
     )
@@ -108,15 +116,14 @@ def _update_source_job_inputs(source_id: str, access_token: str) -> None:
 
     try:
         source = ExternalDataSource.objects.get(id=source_id)
-        job_inputs = source.job_inputs or {}
+        job_inputs = SourceInputsStore.load(source)
 
         # Only persist for legacy sources that store credentials directly in job_inputs
         if "hubspot_integration_id" in job_inputs:
             return
 
         job_inputs["hubspot_secret_key"] = access_token
-        source.job_inputs = job_inputs
-        source.save(update_fields=["job_inputs"])
+        SourceInputsStore.save(source, job_inputs, extra_update_fields=())
     except Exception:
         logger.exception("Failed to update job_inputs after HubSpot token refresh", source_id=source_id)
 
@@ -126,8 +133,7 @@ def get_hubspot_access_token_from_code(code: str, redirect_uri: str) -> tuple[st
         "https://api.hubapi.com/oauth/v1/token",
         data={
             "grant_type": "authorization_code",
-            "client_id": settings.HUBSPOT_APP_CLIENT_ID,
-            "client_secret": settings.HUBSPOT_APP_CLIENT_SECRET,
+            **_hubspot_app_credentials(),
             "redirect_uri": redirect_uri,
             "code": code,
         },

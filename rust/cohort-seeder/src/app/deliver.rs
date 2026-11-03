@@ -1,9 +1,9 @@
 //! App layer, Kafka produce sequencing: the two-phase enqueue/await split. Depends on `domain`,
 //! `kafka`, `store`, and `app::settings`; never imported by a lower layer.
 //!
-//! The sequence `enqueue_tiles → store.mark_produced → await_deliveries` (composed by `execute`) is
-//! byte-equivalent to the former monolithic produce: enqueue every tile honoring the in-flight bound
-//! and draining overflow acks before the mark, then drain the remaining acks after it, folding all
+//! The sequence `enqueue_tiles → store.mark_produced → await_deliveries` (composed by
+//! `execute`) enqueues every tile its run has no newer day for, honoring the in-flight bound and
+//! draining overflow acks before the mark, then drains the remaining acks after it, folding all
 //! delivery high-water marks into one accumulator carried across the mark by [`InFlight`].
 
 use std::collections::VecDeque;
@@ -14,14 +14,17 @@ use rdkafka::error::KafkaError;
 use rdkafka::producer::DeliveryFuture;
 use tokio_util::sync::CancellationToken;
 
-use crate::domain::{CancelCause, EnqueuedChunk, Halted, ProduceHwms, ProducedChunk, ScannedChunk};
+use crate::domain::{
+    CancelCause, EnqueuedChunk, Halted, ProduceHwms, ProducedChunk, ScannedChunk, StreamedChunk,
+};
 use crate::kafka::pacing::TilePacer;
 use crate::kafka::producer::{EnqueueError, SeedTileProducer};
 use crate::observability::metrics::{
-    PRODUCE_ACK_SECONDS, TILES_PRODUCED, TILE_PRODUCE_ERRORS, TILE_PRODUCE_QUEUE_FULL,
+    PRODUCE_ACK_SECONDS, TILE_PRODUCE_ERRORS, TILE_PRODUCE_QUEUE_FULL,
 };
 use crate::store::chunks::ChunkStoreError;
 
+use super::newest_day::NewestDayIndex;
 use super::settings::ProducerSettings;
 
 /// The ceiling the queue-full backoff doubles up to; also clamps [`ProducerSettings`] at construction.
@@ -34,66 +37,110 @@ pub(super) struct InFlight {
     hwms: ProduceHwms,
 }
 
-/// Phase one (pre-mark): pace and enqueue every tile honoring the in-flight bound, draining overflow
-/// acks into the HWMs. Returns the still-`scanning` chunk (for the store's mark) plus the in-flight
-/// deliveries. Every error hands the [`ScannedChunk`] back so the caller can release or fail it.
-pub(super) async fn enqueue_tiles(
-    producer: &SeedTileProducer,
-    chunk: ScannedChunk,
+impl InFlight {
+    pub(super) fn new(max_inflight: usize) -> Self {
+        Self {
+            pending: VecDeque::with_capacity(max_inflight),
+            hwms: ProduceHwms::default(),
+        }
+    }
+}
+
+/// The per-message enqueue step both produce paths share: pacer waited exactly once per message
+/// (never re-waited in the queue-full loop), backoff reset per message with the queue-full counter
+/// emitted before each backoff wait, then pop-then-observe at the in-flight `>=` bound.
+pub(super) async fn enqueue_one(
+    enqueue: impl Fn() -> Result<DeliveryFuture, EnqueueError>,
+    inflight: &mut InFlight,
     pacer: &TilePacer,
     settings: ProducerSettings,
     lease_cancel: &CancellationToken,
     shutdown: &CancellationToken,
-) -> Result<(ScannedChunk, InFlight), Halted<ScannedChunk, ProduceError>> {
-    let mut pending = VecDeque::with_capacity(settings.max_inflight.get());
-    let mut hwms = ProduceHwms::default();
-
-    for tile in chunk.tiles() {
-        if let Err(cause) = wait_for_pacer(pacer, shutdown, lease_cancel).await {
-            return Err(Halted::cancelled(chunk, cause));
-        }
-        let mut backoff = settings.queue_full_backoff;
-        loop {
-            match producer.enqueue(tile) {
-                Ok(delivery) => {
-                    pending.push_back(PendingDelivery {
-                        delivery,
-                        sent_at: Instant::now(),
-                    });
-                    break;
-                }
-                Err(EnqueueError::QueueFull) => {
-                    counter!(TILE_PRODUCE_QUEUE_FULL).increment(1);
-                    if let Err(cause) = wait_for_backoff(backoff, shutdown, lease_cancel).await {
-                        return Err(Halted::cancelled(chunk, cause));
-                    }
-                    backoff = next_queue_full_backoff(backoff);
-                }
-                Err(EnqueueError::Fatal(error)) => {
-                    counter!(TILE_PRODUCE_ERRORS).increment(1);
-                    return Err(Halted::failed(chunk, ProduceError::Enqueue(error)));
-                }
+) -> Result<(), ProduceStop> {
+    wait_for_pacer(pacer, shutdown, lease_cancel)
+        .await
+        .map_err(ProduceStop::Cancelled)?;
+    let mut backoff = settings.queue_full_backoff;
+    loop {
+        match enqueue() {
+            Ok(delivery) => {
+                inflight.pending.push_back(PendingDelivery {
+                    delivery,
+                    sent_at: Instant::now(),
+                });
+                break;
             }
-        }
-
-        if pending.len() >= settings.max_inflight.get() {
-            let delivery = pending
-                .pop_front()
-                .expect("the in-flight bound guarantees one delivery");
-            if let Err(stop) =
-                observe_delivery_before_mark(delivery, &mut hwms, shutdown, lease_cancel).await
-            {
+            Err(EnqueueError::QueueFull) => {
+                counter!(TILE_PRODUCE_QUEUE_FULL).increment(1);
+                wait_for_backoff(backoff, shutdown, lease_cancel)
+                    .await
+                    .map_err(ProduceStop::Cancelled)?;
+                backoff = next_queue_full_backoff(backoff);
+            }
+            Err(EnqueueError::Fatal(error)) => {
                 counter!(TILE_PRODUCE_ERRORS).increment(1);
-                return Err(stop.into_halted(chunk));
+                return Err(ProduceStop::Failed(ProduceError::Enqueue(error)));
             }
         }
     }
 
-    Ok((chunk, InFlight { pending, hwms }))
+    if inflight.pending.len() >= settings.max_inflight.get() {
+        let delivery = inflight
+            .pending
+            .pop_front()
+            .expect("the in-flight bound guarantees one delivery");
+        if let Err(stop) =
+            observe_delivery_before_mark(delivery, &mut inflight.hwms, shutdown, lease_cancel).await
+        {
+            counter!(TILE_PRODUCE_ERRORS).increment(1);
+            return Err(stop);
+        }
+    }
+    Ok(())
 }
 
-/// Phase two (post-mark): drain the remaining acks into the HWMs, fold them onto the marked chunk,
-/// and emit `TILES_PRODUCED`. A delivery failure hands the [`EnqueuedChunk`] back for fail-on-retry.
+/// Phase one (pre-mark): pace and enqueue every tile `newest_day` has no newer day for, honoring the
+/// in-flight bound and draining overflow acks into the HWMs. Returns the still-`scanning` chunk (for
+/// the store's mark) with the count sent, plus the in-flight deliveries. Every error hands the
+/// [`ScannedChunk`] back so the caller can release or fail it.
+pub(super) async fn enqueue_tiles(
+    producer: &SeedTileProducer,
+    chunk: ScannedChunk,
+    newest_day: &NewestDayIndex,
+    pacer: &TilePacer,
+    settings: ProducerSettings,
+    lease_cancel: &CancellationToken,
+    shutdown: &CancellationToken,
+) -> Result<(StreamedChunk, InFlight), Halted<ScannedChunk, ProduceError>> {
+    let mut inflight = InFlight::new(settings.max_inflight.get());
+    let mut sent = 0;
+    for tile in chunk.tiles() {
+        // Checked before the pacer, so a newer day another chunk records while this one waits
+        // still skips this chunk's remaining tiles for that person. A skipped tile takes no pacer
+        // token, so the task budget makes it yield.
+        if newest_day.has_newer_day(tile) {
+            tokio::task::coop::consume_budget().await;
+            continue;
+        }
+        if let Err(stop) = enqueue_one(
+            || producer.enqueue(tile),
+            &mut inflight,
+            pacer,
+            settings,
+            lease_cancel,
+            shutdown,
+        )
+        .await
+        {
+            return Err(stop.into_halted(chunk));
+        }
+        sent += 1;
+    }
+    Ok((chunk.into_streamed(sent), inflight))
+}
+
+/// Phase two (post-mark): drain the remaining acks into the HWMs and fold them onto the marked
+/// chunk. A delivery failure hands the [`EnqueuedChunk`] back for fail-on-retry.
 pub(super) async fn await_deliveries(
     enqueued: EnqueuedChunk,
     inflight: InFlight,
@@ -111,9 +158,7 @@ pub(super) async fn await_deliveries(
         }
     }
 
-    let produced = enqueued.into_produced(hwms);
-    counter!(TILES_PRODUCED).increment(produced.tiles_produced());
-    Ok(produced)
+    Ok(enqueued.into_produced(hwms))
 }
 
 struct PendingDelivery {
@@ -121,14 +166,14 @@ struct PendingDelivery {
     sent_at: Instant,
 }
 
-/// A stop signal from awaiting one delivery: a cancellation cause or a terminal delivery error.
-enum ProduceStop {
+/// A stop signal from one produce step: a cancellation cause or a terminal delivery error.
+pub(super) enum ProduceStop {
     Cancelled(CancelCause),
     Failed(ProduceError),
 }
 
 impl ProduceStop {
-    fn into_halted<S>(self, state: S) -> Halted<S, ProduceError> {
+    pub(super) fn into_halted<S>(self, state: S) -> Halted<S, ProduceError> {
         match self {
             Self::Cancelled(cause) => Halted::cancelled(state, cause),
             Self::Failed(error) => Halted::failed(state, error),

@@ -14,9 +14,10 @@ from posthog.schema import PropertyGroupFilterValue
 from posthog.api.mixins import ValidatedRequest, validated_request
 from posthog.api.routing import TeamAndOrgViewSetMixin
 from posthog.api.utils import action
-from posthog.event_usage import groups
+from posthog.event_usage import get_request_analytics_properties, groups
 
 from products.error_tracking.backend.facade import api as error_tracking_api
+from products.error_tracking.backend.presentation.views.issues import AssigneeType
 
 logger = structlog.get_logger(__name__)
 
@@ -58,7 +59,7 @@ class ErrorTrackingGroupingRuleAssigneeIdField(serializers.Field):
 
 class ErrorTrackingGroupingRuleAssigneeRequestSerializer(serializers.Serializer):
     type = serializers.ChoiceField(
-        choices=["user", "role"],
+        choices=AssigneeType.choices,
         help_text="Assignee type. Use `user` for a user ID or `role` for a role UUID.",
     )
     id = ErrorTrackingGroupingRuleAssigneeIdField(
@@ -139,8 +140,16 @@ class ErrorTrackingGroupingRuleListResponseSerializer(serializers.Serializer):
     results = ErrorTrackingGroupingRuleSerializer(many=True)
 
 
+class ErrorTrackingGroupingRuleReorderRequestSerializer(serializers.Serializer):
+    orders = serializers.DictField(
+        child=serializers.IntegerField(),
+        help_text="Mapping from grouping rule UUID to its new evaluation order.",
+    )
+
+
 class ErrorTrackingGroupingRuleViewSet(TeamAndOrgViewSetMixin, viewsets.GenericViewSet):
     scope_object = "error_tracking"
+    scope_object_write_actions = ["create", "update", "partial_update", "destroy", "reorder"]
     serializer_class = ErrorTrackingGroupingRuleSerializer
     # The list endpoint returns all rules unpaginated ({"results": [...]}); without this the
     # default paginator makes the schema advertise limit/offset params the view doesn't honor.
@@ -168,6 +177,8 @@ class ErrorTrackingGroupingRuleViewSet(TeamAndOrgViewSetMixin, viewsets.GenericV
             raise NotFound()
         posthoganalytics.capture(
             "error_tracking_grouping_rule_edited",
+            distinct_id=request.user.pk,
+            properties={**get_request_analytics_properties(request)},
             groups=groups(self.team.organization, self.team),
         )
         return Response({"ok": True}, status=status.HTTP_204_NO_CONTENT)
@@ -191,6 +202,8 @@ class ErrorTrackingGroupingRuleViewSet(TeamAndOrgViewSetMixin, viewsets.GenericV
             raise NotFound()
         posthoganalytics.capture(
             "error_tracking_grouping_rule_deleted",
+            distinct_id=request.user.pk,
+            properties={**get_request_analytics_properties(request)},
             groups=groups(self.team.organization, self.team),
         )
         return Response(status=status.HTTP_204_NO_CONTENT)
@@ -211,10 +224,13 @@ class ErrorTrackingGroupingRuleViewSet(TeamAndOrgViewSetMixin, viewsets.GenericV
             raise ValidationError(str(err)) from err
         posthoganalytics.capture(
             "error_tracking_grouping_rule_created",
+            distinct_id=request.user.pk,
+            properties={**get_request_analytics_properties(request)},
             groups=groups(self.team.organization, self.team),
         )
         return Response(self.get_serializer(rule).data, status=status.HTTP_201_CREATED)
 
+    @extend_schema(request=ErrorTrackingGroupingRuleReorderRequestSerializer, responses={204: None})
     @action(methods=["PATCH"], detail=False)
     def reorder(self, request, **kwargs) -> Response:
         orders: dict[str, int] = request.data.get("orders", {})

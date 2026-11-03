@@ -36,6 +36,7 @@ export const cohortsCreateBodyNameMax = 400
 export const cohortsCreateBodyDescriptionMax = 1000
 
 export const cohortsCreateBodyCreateStaticPersonIdsDefault = []
+export const cohortsCreateBodyCreateStaticPersonIdsMax = 1000
 
 export const CohortsCreateBody = /* @__PURE__ */ zod.object({
     name: zod.string().max(cohortsCreateBodyNameMax).nullish(),
@@ -48,6 +49,7 @@ export const CohortsCreateBody = /* @__PURE__ */ zod.object({
                 properties: zod
                     .record(zod.string(), zod.unknown())
                     .describe('Deep\/recursive schema (opaque in Zod — use TypeScript types for full shape)'),
+                filterTestAccounts: zod.union([zod.boolean(), zod.null()]).optional(),
             }),
             zod.null(),
         ])
@@ -69,7 +71,11 @@ export const CohortsCreateBody = /* @__PURE__ */ zod.object({
             'Type of cohort based on filter complexity\n\n\* `static` - static\n\* `person_property` - person_property\n\* `behavioral` - behavioral\n\* `realtime` - realtime\n\* `analytical` - analytical'
         ),
     _create_in_folder: zod.string().optional(),
-    _create_static_person_ids: zod.array(zod.string()).default(cohortsCreateBodyCreateStaticPersonIdsDefault),
+    _create_static_person_ids: zod
+        .array(zod.string())
+        .max(cohortsCreateBodyCreateStaticPersonIdsMax)
+        .default(cohortsCreateBodyCreateStaticPersonIdsDefault)
+        .describe('Person UUIDs to add to a new static cohort.'),
 })
 
 export const cohortsUpdateBodyNameMax = 400
@@ -77,6 +83,7 @@ export const cohortsUpdateBodyNameMax = 400
 export const cohortsUpdateBodyDescriptionMax = 1000
 
 export const cohortsUpdateBodyCreateStaticPersonIdsDefault = []
+export const cohortsUpdateBodyCreateStaticPersonIdsMax = 1000
 
 export const CohortsUpdateBody = /* @__PURE__ */ zod.object({
     name: zod.string().max(cohortsUpdateBodyNameMax).nullish(),
@@ -89,6 +96,7 @@ export const CohortsUpdateBody = /* @__PURE__ */ zod.object({
                 properties: zod
                     .record(zod.string(), zod.unknown())
                     .describe('Deep\/recursive schema (opaque in Zod — use TypeScript types for full shape)'),
+                filterTestAccounts: zod.union([zod.boolean(), zod.null()]).optional(),
             }),
             zod.null(),
         ])
@@ -110,7 +118,11 @@ export const CohortsUpdateBody = /* @__PURE__ */ zod.object({
             'Type of cohort based on filter complexity\n\n\* `static` - static\n\* `person_property` - person_property\n\* `behavioral` - behavioral\n\* `realtime` - realtime\n\* `analytical` - analytical'
         ),
     _create_in_folder: zod.string().optional(),
-    _create_static_person_ids: zod.array(zod.string()).default(cohortsUpdateBodyCreateStaticPersonIdsDefault),
+    _create_static_person_ids: zod
+        .array(zod.string())
+        .max(cohortsUpdateBodyCreateStaticPersonIdsMax)
+        .default(cohortsUpdateBodyCreateStaticPersonIdsDefault)
+        .describe('Person UUIDs to add to a new static cohort.'),
 })
 
 export const cohortsPartialUpdateBodyNameMax = 400
@@ -118,6 +130,7 @@ export const cohortsPartialUpdateBodyNameMax = 400
 export const cohortsPartialUpdateBodyDescriptionMax = 1000
 
 export const cohortsPartialUpdateBodyCreateStaticPersonIdsDefault = []
+export const cohortsPartialUpdateBodyCreateStaticPersonIdsMax = 1000
 
 export const CohortsPartialUpdateBody = /* @__PURE__ */ zod.object({
     name: zod.string().max(cohortsPartialUpdateBodyNameMax).nullish(),
@@ -130,6 +143,7 @@ export const CohortsPartialUpdateBody = /* @__PURE__ */ zod.object({
                 properties: zod
                     .record(zod.string(), zod.unknown())
                     .describe('Deep\/recursive schema (opaque in Zod — use TypeScript types for full shape)'),
+                filterTestAccounts: zod.union([zod.boolean(), zod.null()]).optional(),
             }),
             zod.null(),
         ])
@@ -151,11 +165,23 @@ export const CohortsPartialUpdateBody = /* @__PURE__ */ zod.object({
             'Type of cohort based on filter complexity\n\n\* `static` - static\n\* `person_property` - person_property\n\* `behavioral` - behavioral\n\* `realtime` - realtime\n\* `analytical` - analytical'
         ),
     _create_in_folder: zod.string().optional(),
-    _create_static_person_ids: zod.array(zod.string()).default(cohortsPartialUpdateBodyCreateStaticPersonIdsDefault),
+    _create_static_person_ids: zod
+        .array(zod.string())
+        .max(cohortsPartialUpdateBodyCreateStaticPersonIdsMax)
+        .default(cohortsPartialUpdateBodyCreateStaticPersonIdsDefault)
+        .describe('Person UUIDs to add to a new static cohort.'),
 })
 
+export const cohortsAddPersonsToStaticCohortPartialUpdateBodyPersonIdsMax = 1000
+
 export const CohortsAddPersonsToStaticCohortPartialUpdateBody = /* @__PURE__ */ zod.object({
-    person_ids: zod.array(zod.uuid()).optional().describe('List of person UUIDs to add to the cohort'),
+    person_ids: zod
+        .array(zod.uuid())
+        .max(cohortsAddPersonsToStaticCohortPartialUpdateBodyPersonIdsMax)
+        .optional()
+        .describe(
+            'Person UUIDs to add to the cohort (the `id` column of the persons table, not distinct IDs). At most 1000 per request.'
+        ),
 })
 
 export const CohortsRemovePersonFromStaticCohortPartialUpdateBody = /* @__PURE__ */ zod.object({

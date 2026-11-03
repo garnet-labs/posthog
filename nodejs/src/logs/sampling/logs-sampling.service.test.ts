@@ -2,9 +2,10 @@ import avro from 'avsc'
 
 import type { RedisClientPipeline, RedisV2 } from '~/common/redis/redis-v2'
 import { type LogRecord, decodeLogRecords, encodeLogRecords } from '~/logs/log-record-avro'
-import type { LogsSettings } from '~/types'
+import { type DropStats, runPipelineStages } from '~/logs/pipeline/log-processing-pipeline'
 
 import { compileRuleSet } from './compile-rules'
+import type { CompiledRuleSet } from './evaluate'
 import { LogsSamplingService } from './logs-sampling.service'
 
 const LOG_RECORD_AVRO = avro.Type.forSchema({
@@ -29,8 +30,6 @@ const LOG_RECORD_AVRO = avro.Type.forSchema({
     ],
 })
 
-const logsSettings: LogsSettings = { json_parse_logs: false, pii_scrub_logs: false }
-
 function baseLog(uuid: string, serviceName: string, bytesUncompressed: number | null = null): LogRecord {
     return {
         uuid,
@@ -52,6 +51,22 @@ function baseLog(uuid: string, serviceName: string, bytesUncompressed: number | 
 }
 
 describe('LogsSamplingService', () => {
+    // Decodes the buffer and runs the sampling stage over the records, mirroring what the pipeline
+    // does around it. Returns the drop accounting plus the survivors so assertions read as before.
+    async function sampleBuffer(
+        service: LogsSamplingService,
+        buffer: Buffer,
+        ruleSet: CompiledRuleSet,
+        teamId?: number,
+        headerBytesUncompressed = 0
+    ): Promise<{ kept: LogRecord[]; allDropped: boolean } & DropStats> {
+        const [, , records] = await decodeLogRecords(buffer)
+        const { kept, stats } = await runPipelineStages(records, [
+            service.makeSamplingStage(ruleSet, teamId, headerBytesUncompressed),
+        ])
+        return { ...stats, kept, allDropped: kept.length === 0 }
+    }
+
     it('batches rate_limit lines and drops when tokensBefore is below pending count', async () => {
         const ruleSet = compileRuleSet([
             {
@@ -80,7 +95,7 @@ describe('LogsSamplingService', () => {
         }
 
         const service = new LogsSamplingService(mockRedis, 60)
-        const result = await service.processBuffer(buffer, logsSettings, ruleSet, 99)
+        const result = await sampleBuffer(service, buffer, ruleSet, 99)
 
         expect(result.recordsDropped).toBe(1)
         expect(result.recordsDroppedByRuleId.get('rl-1')).toBe(1)
@@ -89,8 +104,7 @@ describe('LogsSamplingService', () => {
         expect(result.bytesDroppedByRuleId.get('rl-1')).toBe(100)
         expect(result.allDropped).toBe(false)
 
-        const [, , kept] = await decodeLogRecords(result.value)
-        expect(kept).toHaveLength(2)
+        expect(result.kept).toHaveLength(2)
     })
 
     it('attributes per-row bytes to the dropping rule and contributes 0 for null bytes_uncompressed', async () => {
@@ -123,7 +137,7 @@ describe('LogsSamplingService', () => {
         }
 
         const service = new LogsSamplingService(mockRedis, 60)
-        const result = await service.processBuffer(buffer, logsSettings, ruleSet, 99)
+        const result = await sampleBuffer(service, buffer, ruleSet, 99)
 
         expect(result.recordsDropped).toBe(2)
         // Only the row with a populated bytes_uncompressed contributes to the byte sum;
@@ -162,20 +176,19 @@ describe('LogsSamplingService', () => {
         }
 
         const service = new LogsSamplingService(mockRedis, 60)
-        const result = await service.processBuffer(buffer, logsSettings, ruleSet, 99)
+        const result = await sampleBuffer(service, buffer, ruleSet, 99)
 
         expect(result.recordsDropped).toBe(1)
         expect(result.recordsDroppedByRuleId.get('rl-kb')).toBe(1)
         expect(result.bytesDropped).toBe(500)
         expect(result.bytesDroppedByRuleId.get('rl-kb')).toBe(500)
-        // Billing pro-rate weights are customer-content bytes (body + attributes + event_name),
-        // independent of the per-row bytes_uncompressed field used for rate limiting:
-        // rows a,b = body 'x' (1 each); dropped row c = body(1) + attrs 'k'+'vv'(3) + 'evt'(3) = 7.
-        expect(result.contentBytesTotal).toBe(9)
-        expect(result.contentBytesDropped).toBe(7)
+        // Billing pro-rate weights are sender-content bytes, independent of the per-row
+        // bytes_uncompressed field used for rate limiting: rows a,b = body 'x' + severity 'info' (5 each);
+        // dropped row c = 5 + attrs 'k'+'vv'(3) + 'evt'(3) = 11.
+        expect(result.contentBytesTotal).toBe(21)
+        expect(result.contentBytesDropped).toBe(11)
 
-        const [, , kept] = await decodeLogRecords(result.value)
-        expect(kept).toHaveLength(2)
+        expect(result.kept).toHaveLength(2)
     })
 
     it('KB-mode treats null bytes_uncompressed as zero-cost (in-flight producer rollout)', async () => {
@@ -208,18 +221,17 @@ describe('LogsSamplingService', () => {
         }
 
         const service = new LogsSamplingService(mockRedis, 60)
-        const result = await service.processBuffer(buffer, logsSettings, ruleSet, 99)
+        const result = await sampleBuffer(service, buffer, ruleSet, 99)
 
         expect(result.recordsDropped).toBe(1)
         expect(result.bytesDropped).toBe(1000)
         expect(result.bytesDroppedByRuleId.get('rl-kb')).toBe(1000)
         // Content weights don't depend on the per-row bytes_uncompressed field at all:
-        // the null-field row still weighs its body bytes (1 each, 3 rows, 1 dropped).
-        expect(result.contentBytesTotal).toBe(3)
-        expect(result.contentBytesDropped).toBe(1)
+        // the null-field row still weighs its body and severity (5 each, 3 rows, 1 dropped).
+        expect(result.contentBytesTotal).toBe(15)
+        expect(result.contentBytesDropped).toBe(5)
 
-        const [, , kept] = await decodeLogRecords(result.value)
-        expect(kept).toHaveLength(2)
+        expect(result.kept).toHaveLength(2)
     })
 
     it('KB-mode meters each row against its pro-rata share of the batch header, not per-row bytes_uncompressed', async () => {
@@ -239,9 +251,9 @@ describe('LogsSamplingService', () => {
         // 4 (admit), 4+8=12 (admit), 12+12=24 > 12 (drop row c). Metering on the raw
         // bytes_uncompressed sum (900 each) would have dropped every row.
         const buffer = await encodeLogRecords(LOG_RECORD_AVRO, 'zstandard', [
-            { ...baseLog('a', 'api', 900), body: 'aa' },
-            { ...baseLog('b', 'api', 900), body: 'bbbb' },
-            { ...baseLog('c', 'api', 900), body: 'cccccc' },
+            { ...baseLog('a', 'api', 900), body: 'aa', severity_text: null },
+            { ...baseLog('b', 'api', 900), body: 'bbbb', severity_text: null },
+            { ...baseLog('c', 'api', 900), body: 'cccccc', severity_text: null },
         ])
 
         const checkRateLimitV3 = jest.fn()
@@ -255,7 +267,7 @@ describe('LogsSamplingService', () => {
         }
 
         const service = new LogsSamplingService(mockRedis, 60)
-        const result = await service.processBuffer(buffer, logsSettings, ruleSet, 99, 24)
+        const result = await sampleBuffer(service, buffer, ruleSet, 99, 24)
 
         // The batch is metered at the header pro-rata total (= header bytes), not Σ bytes_uncompressed.
         // Args are [key, now, cost, bucketSize, refillRate, ttl]; cost is index 2.
@@ -265,8 +277,7 @@ describe('LogsSamplingService', () => {
         // The dropped-bytes metric still reports the row's real bytes_uncompressed.
         expect(result.bytesDropped).toBe(900)
 
-        const [, , kept] = await decodeLogRecords(result.value)
-        expect(kept).toHaveLength(2)
+        expect(result.kept).toHaveLength(2)
     })
 
     it('fail-open keeps all rate_limit lines when Redis pipeline returns null', async () => {
@@ -288,14 +299,13 @@ describe('LogsSamplingService', () => {
         }
 
         const service = new LogsSamplingService(mockRedis, 60)
-        const result = await service.processBuffer(buffer, logsSettings, ruleSet, 1)
+        const result = await sampleBuffer(service, buffer, ruleSet, 1)
 
         expect(result.recordsDropped).toBe(0)
         expect(result.recordsDroppedByRuleId.size).toBe(0)
         expect(result.bytesDropped).toBe(0)
         expect(result.bytesDroppedByRuleId.size).toBe(0)
 
-        const [, , kept] = await decodeLogRecords(result.value)
-        expect(kept).toHaveLength(2)
+        expect(result.kept).toHaveLength(2)
     })
 })

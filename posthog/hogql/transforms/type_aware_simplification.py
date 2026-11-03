@@ -2,17 +2,19 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Callable
 from datetime import date, datetime, timedelta
 from typing import cast
-from uuid import UUID
 
 from posthog.hogql import ast
 from posthog.hogql.base import _T_AST
 from posthog.hogql.constants import HogQLDialect
 from posthog.hogql.context import HogQLContext
+from posthog.hogql.observability import record_type_simplification
 from posthog.hogql.type_system import (
     RuntimeType,
     constant_type_from_runtime_type,
+    convert_literal_to_runtime_type,
     parse_sql_runtime_type,
     runtime_type_from_constant_type,
 )
@@ -93,36 +95,48 @@ class TypeAwareSimplifier(CloningVisitor):
         source_type = runtime_type_from_constant_type(expr_type)
         target_type = parse_sql_runtime_type(node.type_name, dialect=self.dialect)
         if _is_redundant_cast(source_type=source_type, target_type=target_type):
+            self._record("redundant_cast")
             return node.expr
         folded_constant = _fold_constant_cast(node.expr, target_type, allow_numeric=False)
         if folded_constant is not None:
+            self._record("constant_fold")
             return folded_constant
         return node
 
     def visit_arithmetic_operation(self, node: ast.ArithmeticOperation) -> ast.Expr:
         node = cast(ast.ArithmeticOperation, super().visit_arithmetic_operation(node))
-        return (
-            _fold_numeric_arithmetic_operation(node, self.context)
-            or _fold_temporal_interval_arithmetic_operation(node)
-            or node
+        folded = _fold_numeric_arithmetic_operation(node, self.context) or _fold_temporal_interval_arithmetic_operation(
+            node
         )
+        if folded is not None:
+            self._record("constant_fold")
+            return folded
+        return node
 
     def visit_call(self, node: ast.Call) -> ast.Expr:
         node = cast(ast.Call, super().visit_call(node))
         normalized_name = node.name.lower()
 
         if normalized_name in {"assumenotnull", "tonullable"}:
-            return self._simplify_nullability_call(node, normalized_name)
+            simplified = self._simplify_nullability_call(node, normalized_name)
+            if simplified is not node:
+                self._record("nullability_wrapper")
+            return simplified
 
         if normalized_name in {"ifnull", "coalesce"}:
-            return self._simplify_null_fallback_call(node, normalized_name)
+            simplified = self._simplify_null_fallback_call(node, normalized_name)
+            if simplified is not node:
+                self._record("null_fallback")
+            return simplified
 
         folded_json = _fold_literal_json_call(node, self.dialect)
         if folded_json is not None:
+            self._record("json_fold")
             return folded_json
 
         folded_conversion = _fold_constant_conversion_call(node, self.dialect)
         if folded_conversion is not None:
+            self._record("constant_fold")
             return folded_conversion
 
         if len(node.args) != 1:
@@ -135,9 +149,13 @@ class TypeAwareSimplifier(CloningVisitor):
         source_type = runtime_type_from_constant_type(arg_type)
         target_type = _conversion_call_target_type(normalized_name, source_type)
         if target_type is not None and _is_redundant_cast(source_type=source_type, target_type=target_type):
+            self._record("redundant_cast")
             return node.args[0]
 
         return node
+
+    def _record(self, kind: str) -> None:
+        record_type_simplification(self.dialect, kind)
 
     def _simplify_nullability_call(self, node: ast.Call, normalized_name: str) -> ast.Expr:
         if len(node.args) != 1:
@@ -357,7 +375,7 @@ def _fold_constant_cast(source: ast.Expr, target_type: RuntimeType, allow_numeri
     if not allow_numeric and target_type.family in {"integer", "float", "decimal"}:
         return None
 
-    converted_value = _convert_literal_to_runtime_type(source.value, target_type)
+    converted_value = convert_literal_to_runtime_type(source.value, target_type)
     if converted_value is None:
         return None
 
@@ -365,53 +383,31 @@ def _fold_constant_cast(source: ast.Expr, target_type: RuntimeType, allow_numeri
     return ast.Constant(value=converted_value, type=constant_type, start=source.start, end=source.end)
 
 
-def _convert_literal_to_runtime_type(value: object, target_type: RuntimeType) -> object | None:
-    try:
-        if target_type.family == "integer":
-            if isinstance(value, bool):
-                return None
-            if isinstance(value, int):
-                return value
-            if isinstance(value, str):
-                return int(value)
-            return None
-        if target_type.family == "float":
-            if isinstance(value, bool):
-                return None
-            if isinstance(value, (int, float, str)):
-                result = float(value)
-                return result if math.isfinite(result) else None
-            return None
-        if target_type.family == "boolean":
-            if isinstance(value, bool):
-                return value
-            if isinstance(value, int) and value in (0, 1):
-                return bool(value)
-            if isinstance(value, str) and value.lower() in {"true", "false"}:
-                return value.lower() == "true"
-            return None
-        if target_type.family == "uuid":
-            if isinstance(value, UUID):
-                return value
-            if isinstance(value, str):
-                return UUID(value)
-            return None
-        if target_type.family == "date":
-            if isinstance(value, datetime):
-                return value.date()
-            if isinstance(value, date):
-                return value
-            if isinstance(value, str):
-                return date.fromisoformat(value)
-            return None
-    except (TypeError, ValueError, OverflowError):
-        return None
-    return None
-
-
 def _fold_literal_json_call(node: ast.Call, dialect: HogQLDialect) -> ast.Constant | None:
     normalized_name = node.name.lower()
-    if normalized_name not in {
+    if normalized_name not in _LITERAL_JSON_FUNCTIONS or not node.args:
+        return None
+    document = _literal_json_document(node.args[0])
+    if document is _JSON_PATH_MISSING:
+        return None
+    path_and_type = _literal_json_path_and_type(node, normalized_name, dialect)
+    if path_and_type is None:
+        return None
+    path, target_type = path_and_type
+    path_value = _literal_json_path_value(document, path)
+    if path_value is _JSON_PATH_MISSING:
+        return None
+
+    if normalized_name == "jsonextract":
+        return _fold_typed_json_extract(node, path_value, target_type)
+
+    return _LITERAL_JSON_VALUE_FOLDERS[normalized_name](node, path_value)
+
+
+_JSON_PATH_MISSING = object()
+
+_LITERAL_JSON_FUNCTIONS = frozenset(
+    {
         "jsonextract",
         "jsonextractuint",
         "jsonextractint",
@@ -422,95 +418,105 @@ def _fold_literal_json_call(node: ast.Call, dialect: HogQLDialect) -> ast.Consta
         "jsonhas",
         "jsonlength",
         "jsonarraylength",
-    }:
-        return None
-    if not node.args:
-        return None
+    }
+)
 
-    raw_json = _constant_string_value(node.args[0])
+
+def _literal_json_document(node: ast.Expr) -> object:
+    raw_json = _constant_string_value(node)
     if raw_json is None:
-        return None
-
+        return _JSON_PATH_MISSING
     try:
-        document = json.loads(raw_json)
+        return json.loads(raw_json)
     except json.JSONDecodeError:
-        return None
+        return _JSON_PATH_MISSING
 
-    if normalized_name == "jsonextract":
+
+def _literal_json_path_and_type(
+    node: ast.Call, normalized_name: str, dialect: HogQLDialect
+) -> tuple[list[str | int], RuntimeType | None] | None:
+    if normalized_name != "jsonextract":
+        path_args = node.args[1:]
+        target_type = None
+    else:
         if len(node.args) < 2:
             return None
         type_name = _constant_string_value(node.args[-1])
         if type_name is None:
             return None
-        target_type = parse_sql_runtime_type(type_name, dialect=dialect)
         path_args = node.args[1:-1]
-    else:
-        target_type = None
-        path_args = node.args[1:]
+        target_type = parse_sql_runtime_type(type_name, dialect=dialect)
 
     path = [_constant_json_path_component(arg) for arg in path_args]
     if any(component is None for component in path):
         return None
+    return cast(list[str | int], path), target_type
 
-    path_value = _literal_json_path_value(document, cast(list[str | int], path))
-    if path_value is _JSON_PATH_MISSING:
+
+def _fold_typed_json_extract(
+    node: ast.Call, path_value: object, target_type: RuntimeType | None
+) -> ast.Constant | None:
+    if target_type is None:
         return None
-
-    if normalized_name == "jsonhas":
-        return ast.Constant(value=1, type=ast.IntegerType(nullable=False), start=node.start, end=node.end)
-
-    if normalized_name in {"jsonlength", "jsonarraylength"}:
-        if isinstance(path_value, (dict, list)):
-            return ast.Constant(
-                value=len(path_value), type=ast.IntegerType(nullable=False), start=node.start, end=node.end
-            )
+    converted_value = _convert_json_literal_to_runtime_type(path_value, target_type)
+    if converted_value is None:
         return None
+    return _json_constant(node, converted_value, constant_type_from_runtime_type(target_type.with_nullable(False)))
 
-    if normalized_name == "jsonextractraw":
-        return ast.Constant(
-            value=json.dumps(path_value, separators=(",", ":")),
-            type=ast.StringType(nullable=False),
-            start=node.start,
-            end=node.end,
-        )
 
-    if normalized_name == "jsonextractstring":
-        if isinstance(path_value, str):
-            return ast.Constant(value=path_value, type=ast.StringType(nullable=False), start=node.start, end=node.end)
+def _fold_json_has(node: ast.Call, _: object) -> ast.Constant:
+    return _json_constant(node, 1, ast.IntegerType(nullable=False))
+
+
+def _fold_json_length(node: ast.Call, value: object) -> ast.Constant | None:
+    if not isinstance(value, (dict, list)):
         return None
+    return _json_constant(node, len(value), ast.IntegerType(nullable=False))
 
-    if normalized_name in {"jsonextractuint", "jsonextractint"}:
-        if isinstance(path_value, int) and not isinstance(path_value, bool):
-            return ast.Constant(value=path_value, type=ast.IntegerType(nullable=False), start=node.start, end=node.end)
+
+def _fold_json_raw(node: ast.Call, value: object) -> ast.Constant:
+    return _json_constant(node, json.dumps(value, separators=(",", ":")), ast.StringType(nullable=False))
+
+
+def _fold_json_string(node: ast.Call, value: object) -> ast.Constant | None:
+    if not isinstance(value, str):
         return None
+    return _json_constant(node, value, ast.StringType(nullable=False))
 
-    if normalized_name == "jsonextractfloat":
-        if isinstance(path_value, (int, float)) and not isinstance(path_value, bool):
-            return ast.Constant(
-                value=float(path_value), type=ast.FloatType(nullable=False), start=node.start, end=node.end
-            )
+
+def _fold_json_integer(node: ast.Call, value: object) -> ast.Constant | None:
+    if not isinstance(value, int) or isinstance(value, bool):
         return None
+    return _json_constant(node, value, ast.IntegerType(nullable=False))
 
-    if normalized_name == "jsonextractbool":
-        if isinstance(path_value, bool):
-            return ast.Constant(value=path_value, type=ast.BooleanType(nullable=False), start=node.start, end=node.end)
+
+def _fold_json_float(node: ast.Call, value: object) -> ast.Constant | None:
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
         return None
-
-    if normalized_name == "jsonextract" and target_type is not None:
-        converted_value = _convert_json_literal_to_runtime_type(path_value, target_type)
-        if converted_value is None:
-            return None
-        return ast.Constant(
-            value=converted_value,
-            type=constant_type_from_runtime_type(target_type.with_nullable(False)),
-            start=node.start,
-            end=node.end,
-        )
-
-    return None
+    return _json_constant(node, float(value), ast.FloatType(nullable=False))
 
 
-_JSON_PATH_MISSING = object()
+def _fold_json_boolean(node: ast.Call, value: object) -> ast.Constant | None:
+    if not isinstance(value, bool):
+        return None
+    return _json_constant(node, value, ast.BooleanType(nullable=False))
+
+
+def _json_constant(node: ast.Call, value: object, constant_type: ast.ConstantType) -> ast.Constant:
+    return ast.Constant(value=value, type=constant_type, start=node.start, end=node.end)
+
+
+_LITERAL_JSON_VALUE_FOLDERS: dict[str, Callable[[ast.Call, object], ast.Constant | None]] = {
+    "jsonhas": _fold_json_has,
+    "jsonlength": _fold_json_length,
+    "jsonarraylength": _fold_json_length,
+    "jsonextractraw": _fold_json_raw,
+    "jsonextractstring": _fold_json_string,
+    "jsonextractuint": _fold_json_integer,
+    "jsonextractint": _fold_json_integer,
+    "jsonextractfloat": _fold_json_float,
+    "jsonextractbool": _fold_json_boolean,
+}
 
 
 def _literal_json_path_value(document: object, path: list[str | int]) -> object:
@@ -518,8 +524,8 @@ def _literal_json_path_value(document: object, path: list[str | int]) -> object:
     for component in path:
         if isinstance(current, dict) and isinstance(component, str) and component in current:
             current = current[component]
-        elif isinstance(current, list) and isinstance(component, int) and 0 <= component < len(current):
-            current = current[component]
+        elif isinstance(current, list) and isinstance(component, int) and 0 < component <= len(current):
+            current = current[component - 1]
         else:
             return _JSON_PATH_MISSING
     return current

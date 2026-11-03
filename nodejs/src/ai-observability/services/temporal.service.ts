@@ -5,18 +5,21 @@ import {
     TLSConfig,
     WorkflowExecutionAlreadyStartedError,
     WorkflowHandle,
+    WorkflowStartOptions,
 } from '@temporalio/client'
 import * as crypto from 'crypto'
 import fs from 'fs/promises'
+import { LRUCache } from 'lru-cache'
 import { Counter } from 'prom-client'
 
 import { EncryptionCodec } from '~/common/temporal/codec'
 import { isDevEnv } from '~/common/utils/env-utils'
+import { parseJSON } from '~/common/utils/json-parse'
 import { logger } from '~/common/utils/logger'
 
 import { RawKafkaEvent } from '../../types'
 import { AIObservabilityConfig } from '../config'
-import { EvaluationTargetConfig, ResolvedSettleConfig } from '../types'
+import { EvaluationTarget, EvaluationTargetConfig, ResolvedSettleConfig } from '../types'
 
 export type TemporalServiceConfig = Pick<
     AIObservabilityConfig,
@@ -31,6 +34,75 @@ export type TemporalServiceConfig = Pick<
 >
 
 const EVALUATION_TASK_QUEUE = isDevEnv() ? 'development-task-queue' : 'llm-analytics-evals-task-queue'
+
+export const EVENT_REFERENCE_THRESHOLD_BYTES = 1024 * 1024
+
+export const EVENT_REFERENCE_START_DELAY = '30 seconds'
+
+export interface EventReference {
+    uuid: string
+    team_id: number
+    timestamp: string
+    trace_id: string | null
+    awaiting_ingestion: true
+}
+
+export type WorkflowEventPayload = 'inline' | 'reference'
+
+export interface WorkflowEventStart {
+    eventData: RawKafkaEvent | EventReference
+    payload: WorkflowEventPayload
+    startOptions: Pick<WorkflowStartOptions, 'startDelay'>
+}
+
+export function asciiEscapedJsonSize(value: unknown): number {
+    const json = JSON.stringify(value)
+    let size = json.length
+    for (let i = 0; i < json.length; i++) {
+        if (json.charCodeAt(i) > 0x7f) {
+            size += 5
+        }
+    }
+    return size
+}
+
+function readTraceId(event: RawKafkaEvent): string | null {
+    let traceId: unknown
+    try {
+        traceId = parseJSON(event.properties ?? '{}')?.$ai_trace_id
+    } catch {
+        return null
+    }
+    if (typeof traceId === 'number' && Number.isFinite(traceId)) {
+        return String(traceId)
+    }
+    return typeof traceId === 'string' && traceId !== '' ? traceId : null
+}
+
+function toEventReference(event: RawKafkaEvent): EventReference {
+    const reference: EventReference = {
+        uuid: event.uuid,
+        team_id: event.team_id,
+        timestamp: event.timestamp,
+        trace_id: readTraceId(event),
+        awaiting_ingestion: true,
+    }
+    if (asciiEscapedJsonSize(reference) > EVENT_REFERENCE_THRESHOLD_BYTES) {
+        return { ...reference, trace_id: null }
+    }
+    return reference
+}
+
+export function toWorkflowEventStart(event: RawKafkaEvent): WorkflowEventStart {
+    if (asciiEscapedJsonSize(event) <= EVENT_REFERENCE_THRESHOLD_BYTES) {
+        return { eventData: event, payload: 'inline', startOptions: {} }
+    }
+    return {
+        eventData: toEventReference(event),
+        payload: 'reference',
+        startOptions: { startDelay: EVENT_REFERENCE_START_DELAY },
+    }
+}
 
 const EVALUATION_WORKFLOW_PREFIXES = {
     hog: 'llma-hog-eval',
@@ -57,41 +129,83 @@ export const DEFAULT_TRACE_EVALUATION_WINDOW_SECONDS = 30 * 60
 export const DEFAULT_TRACE_EVALUATION_QUIET_PERIOD_SECONDS = 5 * 60
 export const DEFAULT_TRACE_EVALUATION_MAX_AGE_SECONDS = 2 * 60 * 60
 
-export function resolveSettleConfig(targetConfig: EvaluationTargetConfig | null | undefined): ResolvedSettleConfig {
+// Sessions have no strategy-less legacy rows — validate_target_config persists a complete config —
+// so these only ever fill a field the API somehow omitted, and must not be the trace values.
+export const DEFAULT_SESSION_EVALUATION_WINDOW_SECONDS = 30 * 60
+export const DEFAULT_SESSION_EVALUATION_QUIET_PERIOD_SECONDS = 60 * 60
+export const DEFAULT_SESSION_EVALUATION_MAX_AGE_SECONDS = 24 * 60 * 60
+
+const SETTLE_DEFAULTS = {
+    trace: {
+        window: DEFAULT_TRACE_EVALUATION_WINDOW_SECONDS,
+        quiet: DEFAULT_TRACE_EVALUATION_QUIET_PERIOD_SECONDS,
+        maxAge: DEFAULT_TRACE_EVALUATION_MAX_AGE_SECONDS,
+    },
+    session: {
+        window: DEFAULT_SESSION_EVALUATION_WINDOW_SECONDS,
+        quiet: DEFAULT_SESSION_EVALUATION_QUIET_PERIOD_SECONDS,
+        maxAge: DEFAULT_SESSION_EVALUATION_MAX_AGE_SECONDS,
+    },
+} as const
+
+export function resolveSettleConfig(
+    targetConfig: EvaluationTargetConfig | null | undefined,
+    target: EvaluationTarget = 'trace'
+): ResolvedSettleConfig {
+    const defaults = target === 'session' ? SETTLE_DEFAULTS.session : SETTLE_DEFAULTS.trace
     if (targetConfig?.strategy === 'inactivity') {
         return {
             strategy: 'inactivity',
-            quiet_period_seconds: targetConfig.quiet_period_seconds ?? DEFAULT_TRACE_EVALUATION_QUIET_PERIOD_SECONDS,
-            max_age_seconds: targetConfig.max_age_seconds ?? DEFAULT_TRACE_EVALUATION_MAX_AGE_SECONDS,
+            quiet_period_seconds: targetConfig.quiet_period_seconds ?? defaults.quiet,
+            max_age_seconds: targetConfig.max_age_seconds ?? defaults.maxAge,
         }
     }
     return {
         strategy: 'fixed_window',
-        window_seconds: targetConfig?.window_seconds ?? DEFAULT_TRACE_EVALUATION_WINDOW_SECONDS,
+        window_seconds: targetConfig?.window_seconds ?? defaults.window,
     }
 }
 
 const temporalWorkflowsStarted = new Counter({
     name: 'evaluation_run_workflows_started',
     help: 'Number of evaluation run workflows started',
-    labelNames: ['status'],
+    labelNames: ['status', 'payload'],
 })
 
+// A skip only delays the retry of a failed run: a running workflow ignores the start, and a
+// completed one rejects it. Keep the window short so that delay stays short.
+const AGGREGATE_START_DEDUP_TTL_MS = 60_000
+const AGGREGATE_START_DEDUP_MAX_ENTRIES = 50_000
+
+export interface AggregateEvaluationStart {
+    evaluationId: string
+    event: RawKafkaEvent
+    target: 'trace' | 'session'
+    traceId: string
+    sessionId: string | null
+    aiSessionId: string | null
+    settle: ResolvedSettleConfig
+}
+
 /**
- * Trace ids are user-controlled and unbounded; Temporal workflow ids are capped at 1000
- * bytes. Hash anything suspiciously long so the workflow id stays valid while remaining
+ * Trace and session ids are user-controlled and unbounded; Temporal workflow ids are capped at
+ * 1000 bytes. Hash anything suspiciously long so the workflow id stays valid while remaining
  * deterministic for dedup.
  */
-export function workflowSafeTraceId(traceId: string): string {
-    if (traceId.length <= 128) {
-        return traceId
+export function workflowSafeId(id: string): string {
+    if (id.length <= 128) {
+        return id
     }
-    return crypto.createHash('md5').update(traceId).digest('hex')
+    return crypto.createHash('md5').update(id).digest('hex')
 }
 
 export class TemporalService {
     private client?: Client
     private connecting?: Promise<Client>
+    private recentAggregateStarts = new LRUCache<string, Promise<WorkflowHandle | null>>({
+        max: AGGREGATE_START_DEDUP_MAX_ENTRIES,
+        ttl: AGGREGATE_START_DEDUP_TTL_MS,
+    })
 
     constructor(private config: TemporalServiceConfig) {}
 
@@ -200,12 +314,14 @@ export class TemporalService {
         }
         const prefix = getEvaluationWorkflowPrefix(evaluationRuntime)
         const workflowId = `${prefix}-${evaluationId}-${event.uuid}-ingestion`
+        const { eventData, payload, startOptions } = toWorkflowEventStart(event)
 
         const handle = await client.workflow.start('run-evaluation', {
+            ...startOptions,
             args: [
                 {
                     evaluation_id: evaluationId,
-                    event_data: event,
+                    event_data: eventData,
                 },
             ],
             taskQueue: EVALUATION_TASK_QUEUE,
@@ -215,7 +331,7 @@ export class TemporalService {
             workflowTaskTimeout: '2 minutes',
         })
 
-        temporalWorkflowsStarted.labels({ status: 'success' }).inc()
+        temporalWorkflowsStarted.labels({ status: 'success', payload }).inc()
 
         logger.debug('Started evaluation run workflow', {
             workflowId,
@@ -228,26 +344,52 @@ export class TemporalService {
     }
 
     /**
-     * Start (or join) the settle-then-evaluate workflow for (evaluation, trace).
+     * Start (or join) the settle-then-evaluate workflow for (evaluation, unit), where the unit is
+     * a trace or an $ai_session_id session.
      *
-     * The workflow id deliberately excludes the event uuid: the first matching generation of a
-     * trace creates the workflow and every later one lands on it as a no-op (USE_EXISTING while
-     * pending/running). The workflow discovers further trace activity itself by polling
-     * ClickHouse, so ingestion volume never reaches Temporal beyond this one dedup'd start.
-     * Once a run completed, ALLOW_DUPLICATE_FAILED_ONLY rejects new starts — a trace is
-     * evaluated at most once per evaluation, which also caps the damage from runaway shared
-     * trace ids ("0", "fixed_id", ...). Returns null when the trace was already evaluated.
+     * The workflow id deliberately excludes the event uuid: the first matching generation of the
+     * unit creates the workflow and every later one lands on it as a no-op (USE_EXISTING while
+     * pending/running). For a session that means every trace of the session collapses onto one
+     * workflow. The workflow discovers further activity itself by polling ClickHouse, so ingestion
+     * volume never reaches Temporal beyond this one dedup'd start. Once a run completed,
+     * ALLOW_DUPLICATE_FAILED_ONLY rejects new starts — a unit is evaluated at most once per
+     * evaluation for as long as the closed workflow stays inside Temporal's retention window,
+     * which also caps the damage from runaway shared ids ("0", "fixed_id", ...). Returns null when
+     * the unit was already evaluated.
+     *
+     * Each of those no-op starts still costs Temporal a failed create and a conflict lookup, and
+     * concurrent starts on one id queue behind each other. So repeat starts for an id inside a short
+     * window reuse the first start and do not call Temporal.
      */
-    async startAggregateEvaluationWorkflow(
-        evaluationId: string,
-        event: RawKafkaEvent,
-        traceId: string,
-        sessionId: string | null,
-        settle: ResolvedSettleConfig
-    ): Promise<WorkflowHandle | null> {
-        const client = await this.ensureConnected()
+    async startAggregateEvaluationWorkflow(options: AggregateEvaluationStart): Promise<WorkflowHandle | null> {
+        const { evaluationId, target, traceId, aiSessionId } = options
+        const workflowId =
+            target === 'session'
+                ? `llma-session-eval-${evaluationId}-${workflowSafeId(aiSessionId ?? '')}`
+                : `llma-trace-eval-${evaluationId}-${workflowSafeId(traceId)}`
 
-        const workflowId = `llma-trace-eval-${evaluationId}-${workflowSafeTraceId(traceId)}`
+        const recentStart = this.recentAggregateStarts.get(workflowId)
+        if (recentStart) {
+            temporalWorkflowsStarted.labels({ status: 'deduplicated' }).inc()
+            return await recentStart
+        }
+
+        const start = this.requestAggregateEvaluationWorkflow(workflowId, options)
+        this.recentAggregateStarts.set(workflowId, start)
+        start.catch(() => {
+            if (this.recentAggregateStarts.peek(workflowId) === start) {
+                this.recentAggregateStarts.delete(workflowId)
+            }
+        })
+        return await start
+    }
+
+    private async requestAggregateEvaluationWorkflow(
+        workflowId: string,
+        options: AggregateEvaluationStart
+    ): Promise<WorkflowHandle | null> {
+        const { evaluationId, event, target, traceId, sessionId, aiSessionId, settle } = options
+        const client = await this.ensureConnected()
 
         try {
             const handle = await client.workflow.start('run-aggregate-evaluation', {
@@ -258,6 +400,8 @@ export class TemporalService {
                         trace_id: traceId,
                         distinct_id: event.distinct_id,
                         session_id: sessionId,
+                        ai_session_id: aiSessionId,
+                        target,
                         settle,
                     },
                 ],
@@ -268,12 +412,14 @@ export class TemporalService {
                 workflowTaskTimeout: '2 minutes',
             })
 
-            temporalWorkflowsStarted.labels({ status: 'success' }).inc()
+            temporalWorkflowsStarted.labels({ status: 'success', payload: 'none' }).inc()
 
             logger.debug('Started aggregate evaluation workflow', {
                 workflowId,
                 evaluationId,
+                target,
                 traceId,
+                aiSessionId,
                 strategy: settle.strategy,
                 timestamp: event.timestamp,
             })
@@ -281,7 +427,7 @@ export class TemporalService {
             return handle
         } catch (error) {
             if (error instanceof WorkflowExecutionAlreadyStartedError) {
-                temporalWorkflowsStarted.labels({ status: 'already_completed' }).inc()
+                temporalWorkflowsStarted.labels({ status: 'already_completed', payload: 'none' }).inc()
                 return null
             }
             throw error
@@ -292,12 +438,14 @@ export class TemporalService {
         const client = await this.ensureConnected()
 
         const workflowId = `llma-tagger-${taggerId}-${event.uuid}-ingestion`
+        const { eventData, payload, startOptions } = toWorkflowEventStart(event)
 
         const handle = await client.workflow.start('run-tagger', {
+            ...startOptions,
             args: [
                 {
                     tagger_id: taggerId,
-                    event_data: event,
+                    event_data: eventData,
                 },
             ],
             taskQueue: EVALUATION_TASK_QUEUE,
@@ -307,7 +455,7 @@ export class TemporalService {
             workflowTaskTimeout: '2 minutes',
         })
 
-        temporalWorkflowsStarted.labels({ status: 'success' }).inc()
+        temporalWorkflowsStarted.labels({ status: 'success', payload }).inc()
 
         logger.debug('Started tagger run workflow', {
             workflowId,

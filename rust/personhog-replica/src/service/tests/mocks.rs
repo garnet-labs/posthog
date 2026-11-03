@@ -28,6 +28,12 @@ impl FailingStorage {
             error: storage::StorageError::Query("syntax error at position 42".to_string()),
         }
     }
+
+    pub fn with_failed_precondition() -> Self {
+        Self {
+            error: storage::StorageError::FailedPrecondition("rows changed; retry".to_string()),
+        }
+    }
 }
 
 #[async_trait]
@@ -91,19 +97,49 @@ impl storage::PersonLookup for FailingStorage {
         Err(self.error.clone())
     }
 
-    async fn delete_persons(&self, _team_id: i64, _uuids: &[Uuid]) -> storage::StorageResult<i64> {
+    async fn delete_persons(
+        &self,
+        _team_id: i64,
+        _uuids: &[Uuid],
+    ) -> storage::StorageResult<storage::DeletePersonsOutcome> {
         Err(self.error.clone())
     }
 
-    async fn delete_persons_batch_for_team(
+    async fn delete_tombstoned_persons(
         &self,
         _team_id: i64,
-        _batch_size: i64,
+        _targets: &[storage::TombstoneTarget],
+        _max_rows: i64,
+    ) -> storage::StorageResult<storage::TombstonedDeleteOutcome> {
+        Err(self.error.clone())
+    }
+
+    async fn get_person_tombstones(
+        &self,
+        _team_id: i64,
+        _uuids: &[Uuid],
+    ) -> storage::StorageResult<Vec<storage::types::TombstonedPerson>> {
+        Err(self.error.clone())
+    }
+
+    async fn ack_person_tombstones(
+        &self,
+        _team_id: i64,
+        _acked: &[(Uuid, i64)],
     ) -> storage::StorageResult<i64> {
         Err(self.error.clone())
     }
 
-    async fn delete_personless_distinct_ids_batch_for_team(
+    async fn list_person_tombstone_queue(
+        &self,
+        _after: (i64, Uuid),
+        _team_id: Option<i64>,
+        _limit: i64,
+    ) -> storage::StorageResult<Vec<storage::types::PersonTombstoneQueueEntry>> {
+        Err(self.error.clone())
+    }
+
+    async fn delete_persons_batch_for_team(
         &self,
         _team_id: i64,
         _batch_size: i64,
@@ -137,6 +173,23 @@ impl storage::PersonLookup for FailingStorage {
     ) -> storage::StorageResult<bool> {
         Err(self.error.clone())
     }
+
+    async fn ensure_person_version_floors(
+        &self,
+        _team_id: i64,
+        _floors: &[(Uuid, i64)],
+    ) -> storage::StorageResult<Vec<storage::PersonVersionFloorResult>> {
+        Err(self.error.clone())
+    }
+    async fn list_persons_for_team(
+        &self,
+        _team_id: i64,
+        _after_person_id: i64,
+        _before_person_id: Option<i64>,
+        _limit: i64,
+    ) -> storage::StorageResult<Vec<storage::types::PersonListEntry>> {
+        Err(self.error.clone())
+    }
 }
 
 #[async_trait]
@@ -147,6 +200,7 @@ impl storage::DistinctIdLookup for FailingStorage {
         _person_id: i64,
         _consistency: storage::postgres::ConsistencyLevel,
         _limit: Option<i64>,
+        _cursor_id: Option<i64>,
     ) -> storage::StorageResult<Vec<storage::DistinctIdWithVersion>> {
         Err(self.error.clone())
     }
@@ -158,6 +212,14 @@ impl storage::DistinctIdLookup for FailingStorage {
         _consistency: storage::postgres::ConsistencyLevel,
         _limit_per_person: Option<i64>,
     ) -> storage::StorageResult<Vec<storage::DistinctIdMapping>> {
+        Err(self.error.clone())
+    }
+    async fn get_distinct_id_rows(
+        &self,
+        _team_id: i64,
+        _distinct_ids: &[String],
+        _consistency: storage::postgres::ConsistencyLevel,
+    ) -> storage::StorageResult<Vec<storage::types::DistinctIdRow>> {
         Err(self.error.clone())
     }
 }
@@ -384,6 +446,7 @@ impl storage::GroupStorage for FailingStorage {
         _name_plural: Option<&str>,
         _detail_dashboard_id: Option<i64>,
         _default_columns: Option<&[String]>,
+        _created_at: Option<chrono::DateTime<chrono::Utc>>,
     ) -> storage::StorageResult<Option<storage::GroupTypeMapping>> {
         Err(self.error.clone())
     }
@@ -472,19 +535,49 @@ impl storage::PersonLookup for SuccessStorage {
             .collect())
     }
 
-    async fn delete_persons(&self, _team_id: i64, _uuids: &[Uuid]) -> storage::StorageResult<i64> {
-        Ok(0)
-    }
-
-    async fn delete_persons_batch_for_team(
+    async fn delete_persons(
         &self,
         _team_id: i64,
-        _batch_size: i64,
+        _uuids: &[Uuid],
+    ) -> storage::StorageResult<storage::DeletePersonsOutcome> {
+        Ok(storage::DeletePersonsOutcome::default())
+    }
+
+    async fn delete_tombstoned_persons(
+        &self,
+        _team_id: i64,
+        _targets: &[storage::TombstoneTarget],
+        _max_rows: i64,
+    ) -> storage::StorageResult<storage::TombstonedDeleteOutcome> {
+        Ok(storage::TombstonedDeleteOutcome::default())
+    }
+
+    async fn get_person_tombstones(
+        &self,
+        _team_id: i64,
+        _uuids: &[Uuid],
+    ) -> storage::StorageResult<Vec<storage::types::TombstonedPerson>> {
+        Ok(Vec::new())
+    }
+
+    async fn ack_person_tombstones(
+        &self,
+        _team_id: i64,
+        _acked: &[(Uuid, i64)],
     ) -> storage::StorageResult<i64> {
         Ok(0)
     }
 
-    async fn delete_personless_distinct_ids_batch_for_team(
+    async fn list_person_tombstone_queue(
+        &self,
+        _after: (i64, Uuid),
+        _team_id: Option<i64>,
+        _limit: i64,
+    ) -> storage::StorageResult<Vec<storage::types::PersonTombstoneQueueEntry>> {
+        Ok(Vec::new())
+    }
+
+    async fn delete_persons_batch_for_team(
         &self,
         _team_id: i64,
         _batch_size: i64,
@@ -518,6 +611,23 @@ impl storage::PersonLookup for SuccessStorage {
     ) -> storage::StorageResult<bool> {
         Ok(false)
     }
+
+    async fn ensure_person_version_floors(
+        &self,
+        _team_id: i64,
+        _floors: &[(Uuid, i64)],
+    ) -> storage::StorageResult<Vec<storage::PersonVersionFloorResult>> {
+        Ok(Vec::new())
+    }
+    async fn list_persons_for_team(
+        &self,
+        _team_id: i64,
+        _after_person_id: i64,
+        _before_person_id: Option<i64>,
+        _limit: i64,
+    ) -> storage::StorageResult<Vec<storage::types::PersonListEntry>> {
+        Ok(Vec::new())
+    }
 }
 
 #[async_trait]
@@ -528,6 +638,7 @@ impl storage::DistinctIdLookup for SuccessStorage {
         _person_id: i64,
         _consistency: storage::postgres::ConsistencyLevel,
         _limit: Option<i64>,
+        _cursor_id: Option<i64>,
     ) -> storage::StorageResult<Vec<storage::DistinctIdWithVersion>> {
         Ok(Vec::new())
     }
@@ -539,6 +650,14 @@ impl storage::DistinctIdLookup for SuccessStorage {
         _consistency: storage::postgres::ConsistencyLevel,
         _limit_per_person: Option<i64>,
     ) -> storage::StorageResult<Vec<storage::DistinctIdMapping>> {
+        Ok(Vec::new())
+    }
+    async fn get_distinct_id_rows(
+        &self,
+        _team_id: i64,
+        _distinct_ids: &[String],
+        _consistency: storage::postgres::ConsistencyLevel,
+    ) -> storage::StorageResult<Vec<storage::types::DistinctIdRow>> {
         Ok(Vec::new())
     }
 }
@@ -781,6 +900,7 @@ impl storage::GroupStorage for SuccessStorage {
         _name_plural: Option<&str>,
         _detail_dashboard_id: Option<i64>,
         _default_columns: Option<&[String]>,
+        _created_at: Option<chrono::DateTime<chrono::Utc>>,
     ) -> storage::StorageResult<Option<storage::GroupTypeMapping>> {
         Ok(None)
     }
@@ -912,19 +1032,49 @@ impl storage::PersonLookup for PopulatedStorage {
             .collect())
     }
 
-    async fn delete_persons(&self, _team_id: i64, _uuids: &[Uuid]) -> storage::StorageResult<i64> {
-        Ok(0)
-    }
-
-    async fn delete_persons_batch_for_team(
+    async fn delete_persons(
         &self,
         _team_id: i64,
-        _batch_size: i64,
+        _uuids: &[Uuid],
+    ) -> storage::StorageResult<storage::DeletePersonsOutcome> {
+        Ok(storage::DeletePersonsOutcome::default())
+    }
+
+    async fn delete_tombstoned_persons(
+        &self,
+        _team_id: i64,
+        _targets: &[storage::TombstoneTarget],
+        _max_rows: i64,
+    ) -> storage::StorageResult<storage::TombstonedDeleteOutcome> {
+        Ok(storage::TombstonedDeleteOutcome::default())
+    }
+
+    async fn get_person_tombstones(
+        &self,
+        _team_id: i64,
+        _uuids: &[Uuid],
+    ) -> storage::StorageResult<Vec<storage::types::TombstonedPerson>> {
+        Ok(Vec::new())
+    }
+
+    async fn ack_person_tombstones(
+        &self,
+        _team_id: i64,
+        _acked: &[(Uuid, i64)],
     ) -> storage::StorageResult<i64> {
         Ok(0)
     }
 
-    async fn delete_personless_distinct_ids_batch_for_team(
+    async fn list_person_tombstone_queue(
+        &self,
+        _after: (i64, Uuid),
+        _team_id: Option<i64>,
+        _limit: i64,
+    ) -> storage::StorageResult<Vec<storage::types::PersonTombstoneQueueEntry>> {
+        Ok(Vec::new())
+    }
+
+    async fn delete_persons_batch_for_team(
         &self,
         _team_id: i64,
         _batch_size: i64,
@@ -958,6 +1108,23 @@ impl storage::PersonLookup for PopulatedStorage {
     ) -> storage::StorageResult<bool> {
         Ok(false)
     }
+
+    async fn ensure_person_version_floors(
+        &self,
+        _team_id: i64,
+        _floors: &[(Uuid, i64)],
+    ) -> storage::StorageResult<Vec<storage::PersonVersionFloorResult>> {
+        Ok(Vec::new())
+    }
+    async fn list_persons_for_team(
+        &self,
+        _team_id: i64,
+        _after_person_id: i64,
+        _before_person_id: Option<i64>,
+        _limit: i64,
+    ) -> storage::StorageResult<Vec<storage::types::PersonListEntry>> {
+        Ok(Vec::new())
+    }
 }
 
 #[async_trait]
@@ -968,6 +1135,7 @@ impl storage::DistinctIdLookup for PopulatedStorage {
         _person_id: i64,
         _consistency: storage::postgres::ConsistencyLevel,
         _limit: Option<i64>,
+        _cursor_id: Option<i64>,
     ) -> storage::StorageResult<Vec<storage::DistinctIdWithVersion>> {
         Ok(Vec::new())
     }
@@ -979,6 +1147,14 @@ impl storage::DistinctIdLookup for PopulatedStorage {
         _consistency: storage::postgres::ConsistencyLevel,
         _limit_per_person: Option<i64>,
     ) -> storage::StorageResult<Vec<storage::DistinctIdMapping>> {
+        Ok(Vec::new())
+    }
+    async fn get_distinct_id_rows(
+        &self,
+        _team_id: i64,
+        _distinct_ids: &[String],
+        _consistency: storage::postgres::ConsistencyLevel,
+    ) -> storage::StorageResult<Vec<storage::types::DistinctIdRow>> {
         Ok(Vec::new())
     }
 }
@@ -1221,6 +1397,7 @@ impl storage::GroupStorage for PopulatedStorage {
         _name_plural: Option<&str>,
         _detail_dashboard_id: Option<i64>,
         _default_columns: Option<&[String]>,
+        _created_at: Option<chrono::DateTime<chrono::Utc>>,
     ) -> storage::StorageResult<Option<storage::GroupTypeMapping>> {
         Ok(None)
     }
@@ -1328,19 +1505,49 @@ impl storage::PersonLookup for ConsistencyTrackingStorage {
             .collect())
     }
 
-    async fn delete_persons(&self, _team_id: i64, _uuids: &[Uuid]) -> storage::StorageResult<i64> {
-        Ok(0)
-    }
-
-    async fn delete_persons_batch_for_team(
+    async fn delete_persons(
         &self,
         _team_id: i64,
-        _batch_size: i64,
+        _uuids: &[Uuid],
+    ) -> storage::StorageResult<storage::DeletePersonsOutcome> {
+        Ok(storage::DeletePersonsOutcome::default())
+    }
+
+    async fn delete_tombstoned_persons(
+        &self,
+        _team_id: i64,
+        _targets: &[storage::TombstoneTarget],
+        _max_rows: i64,
+    ) -> storage::StorageResult<storage::TombstonedDeleteOutcome> {
+        Ok(storage::TombstonedDeleteOutcome::default())
+    }
+
+    async fn get_person_tombstones(
+        &self,
+        _team_id: i64,
+        _uuids: &[Uuid],
+    ) -> storage::StorageResult<Vec<storage::types::TombstonedPerson>> {
+        Ok(Vec::new())
+    }
+
+    async fn ack_person_tombstones(
+        &self,
+        _team_id: i64,
+        _acked: &[(Uuid, i64)],
     ) -> storage::StorageResult<i64> {
         Ok(0)
     }
 
-    async fn delete_personless_distinct_ids_batch_for_team(
+    async fn list_person_tombstone_queue(
+        &self,
+        _after: (i64, Uuid),
+        _team_id: Option<i64>,
+        _limit: i64,
+    ) -> storage::StorageResult<Vec<storage::types::PersonTombstoneQueueEntry>> {
+        Ok(Vec::new())
+    }
+
+    async fn delete_persons_batch_for_team(
         &self,
         _team_id: i64,
         _batch_size: i64,
@@ -1374,6 +1581,23 @@ impl storage::PersonLookup for ConsistencyTrackingStorage {
     ) -> storage::StorageResult<bool> {
         Ok(false)
     }
+
+    async fn ensure_person_version_floors(
+        &self,
+        _team_id: i64,
+        _floors: &[(Uuid, i64)],
+    ) -> storage::StorageResult<Vec<storage::PersonVersionFloorResult>> {
+        Ok(Vec::new())
+    }
+    async fn list_persons_for_team(
+        &self,
+        _team_id: i64,
+        _after_person_id: i64,
+        _before_person_id: Option<i64>,
+        _limit: i64,
+    ) -> storage::StorageResult<Vec<storage::types::PersonListEntry>> {
+        Ok(Vec::new())
+    }
 }
 
 #[async_trait]
@@ -1384,6 +1608,7 @@ impl storage::DistinctIdLookup for ConsistencyTrackingStorage {
         _person_id: i64,
         consistency: storage::postgres::ConsistencyLevel,
         _limit: Option<i64>,
+        _cursor_id: Option<i64>,
     ) -> storage::StorageResult<Vec<storage::DistinctIdWithVersion>> {
         self.record(consistency);
         Ok(Vec::new())
@@ -1396,6 +1621,15 @@ impl storage::DistinctIdLookup for ConsistencyTrackingStorage {
         consistency: storage::postgres::ConsistencyLevel,
         _limit_per_person: Option<i64>,
     ) -> storage::StorageResult<Vec<storage::DistinctIdMapping>> {
+        self.record(consistency);
+        Ok(Vec::new())
+    }
+    async fn get_distinct_id_rows(
+        &self,
+        _team_id: i64,
+        _distinct_ids: &[String],
+        consistency: storage::postgres::ConsistencyLevel,
+    ) -> storage::StorageResult<Vec<storage::types::DistinctIdRow>> {
         self.record(consistency);
         Ok(Vec::new())
     }
@@ -1653,6 +1887,7 @@ impl storage::GroupStorage for ConsistencyTrackingStorage {
         _name_plural: Option<&str>,
         _detail_dashboard_id: Option<i64>,
         _default_columns: Option<&[String]>,
+        _created_at: Option<chrono::DateTime<chrono::Utc>>,
     ) -> storage::StorageResult<Option<storage::GroupTypeMapping>> {
         Ok(None)
     }
@@ -1671,5 +1906,113 @@ impl storage::GroupStorage for ConsistencyTrackingStorage {
         _batch_size: i64,
     ) -> storage::StorageResult<i64> {
         Ok(0)
+    }
+}
+
+#[async_trait]
+impl storage::PersonRepair for FailingStorage {
+    async fn raise_person_version_floors(
+        &self,
+        _team_id: i64,
+        _floors: &[(Uuid, i64)],
+    ) -> storage::StorageResult<Vec<storage::types::RaiseResult>> {
+        Err(self.error.clone())
+    }
+
+    async fn restore_persons(
+        &self,
+        _team_id: i64,
+        _persons: &[storage::types::RestoredPerson],
+    ) -> storage::StorageResult<Vec<storage::types::RestoreResult>> {
+        Err(self.error.clone())
+    }
+
+    async fn write_distinct_ids(
+        &self,
+        _team_id: i64,
+        _writes: &[storage::types::DistinctIdWrite],
+    ) -> storage::StorageResult<Vec<storage::types::DistinctIdWriteResult>> {
+        Err(self.error.clone())
+    }
+}
+
+#[async_trait]
+impl storage::PersonRepair for SuccessStorage {
+    async fn raise_person_version_floors(
+        &self,
+        _team_id: i64,
+        _floors: &[(Uuid, i64)],
+    ) -> storage::StorageResult<Vec<storage::types::RaiseResult>> {
+        Ok(Vec::new())
+    }
+
+    async fn restore_persons(
+        &self,
+        _team_id: i64,
+        _persons: &[storage::types::RestoredPerson],
+    ) -> storage::StorageResult<Vec<storage::types::RestoreResult>> {
+        Ok(Vec::new())
+    }
+
+    async fn write_distinct_ids(
+        &self,
+        _team_id: i64,
+        _writes: &[storage::types::DistinctIdWrite],
+    ) -> storage::StorageResult<Vec<storage::types::DistinctIdWriteResult>> {
+        Ok(Vec::new())
+    }
+}
+
+#[async_trait]
+impl storage::PersonRepair for PopulatedStorage {
+    async fn raise_person_version_floors(
+        &self,
+        _team_id: i64,
+        _floors: &[(Uuid, i64)],
+    ) -> storage::StorageResult<Vec<storage::types::RaiseResult>> {
+        Ok(Vec::new())
+    }
+
+    async fn restore_persons(
+        &self,
+        _team_id: i64,
+        _persons: &[storage::types::RestoredPerson],
+    ) -> storage::StorageResult<Vec<storage::types::RestoreResult>> {
+        Ok(Vec::new())
+    }
+
+    async fn write_distinct_ids(
+        &self,
+        _team_id: i64,
+        _writes: &[storage::types::DistinctIdWrite],
+    ) -> storage::StorageResult<Vec<storage::types::DistinctIdWriteResult>> {
+        Ok(Vec::new())
+    }
+}
+
+#[async_trait]
+impl storage::PersonRepair for ConsistencyTrackingStorage {
+    async fn raise_person_version_floors(
+        &self,
+        _team_id: i64,
+        _floors: &[(Uuid, i64)],
+    ) -> storage::StorageResult<Vec<storage::types::RaiseResult>> {
+        Ok(Vec::new())
+    }
+
+    async fn restore_persons(
+        &self,
+        _team_id: i64,
+        _persons: &[storage::types::RestoredPerson],
+    ) -> storage::StorageResult<Vec<storage::types::RestoreResult>> {
+        Ok(Vec::new())
+    }
+
+    async fn write_distinct_ids(
+        &self,
+        _team_id: i64,
+        _writes: &[storage::types::DistinctIdWrite],
+    ) -> storage::StorageResult<Vec<storage::types::DistinctIdWriteResult>> {
+        Ok(Vec::new())
     }
 }

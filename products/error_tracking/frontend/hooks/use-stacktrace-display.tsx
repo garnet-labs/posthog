@@ -1,38 +1,60 @@
 import { useValues } from 'kea'
 import { useMemo } from 'react'
 
+import { toDisplayOrderFrames } from 'lib/components/Errors/displayOrder'
 import { errorPropertiesLogic } from 'lib/components/Errors/errorPropertiesLogic'
 import { ErrorTrackingException } from 'lib/components/Errors/types'
 import { formatResolvedName, formatType } from 'lib/components/Errors/utils'
 
 export const useStacktraceDisplay = (): { ready: boolean; stacktraceText: string; copyableStacktraceText: string } => {
-    const { exceptionList, stackFrameRecords, stackFrameRecordsLoading } = useValues(errorPropertiesLogic)
+    const { exceptionList, stackFrameRecords, stackFrameRecordsLoading, framesStoredCrashFirst } =
+        useValues(errorPropertiesLogic)
 
-    const stacktraceText = useMemo(() => {
-        return exceptionList
-            .map((exception) => generateExceptionText(exception, stackFrameRecords, { includeInAppMarkers: true }))
-            .join('\n\n')
-    }, [exceptionList, stackFrameRecords])
+    const stacktraceText = useMemo(
+        () =>
+            generateStacktraceText(exceptionList, stackFrameRecords, {
+                includeInAppMarkers: true,
+                storedCrashFirst: framesStoredCrashFirst,
+            }),
+        [exceptionList, stackFrameRecords, framesStoredCrashFirst]
+    )
 
-    const copyableStacktraceText = useMemo(() => {
-        return exceptionList
-            .map((exception) => generateExceptionText(exception, stackFrameRecords, { includeInAppMarkers: false }))
-            .join('\n\n')
-    }, [exceptionList, stackFrameRecords])
+    const copyableStacktraceText = useMemo(
+        () =>
+            generateStacktraceText(exceptionList, stackFrameRecords, {
+                includeInAppMarkers: false,
+                storedCrashFirst: framesStoredCrashFirst,
+            }),
+        [exceptionList, stackFrameRecords, framesStoredCrashFirst]
+    )
 
     const ready = exceptionList.length > 0 && !stackFrameRecordsLoading
 
     return { ready, stacktraceText, copyableStacktraceText }
 }
 
+interface StacktraceTextOptions {
+    includeInAppMarkers: boolean
+    storedCrashFirst: boolean
+}
+
+export function generateStacktraceText(
+    exceptionList: ErrorTrackingException[],
+    stackFrameRecords: Record<string, any>,
+    options: StacktraceTextOptions
+): string {
+    return exceptionList.map((exception) => generateExceptionText(exception, stackFrameRecords, options)).join('\n\n')
+}
+
 function generateExceptionText(
     exception: ErrorTrackingException,
     stackFrameRecords: Record<string, any>,
-    options: { includeInAppMarkers: boolean }
+    options: StacktraceTextOptions
 ): string {
     let result = `${formatType(exception)}${exception.value ? `: ${exception.value}` : ''}`
 
-    const frames = exception.stacktrace?.frames || []
+    // match the on-screen order: most recent call first
+    const frames = toDisplayOrderFrames(exception.stacktrace?.frames || [], options.storedCrashFirst)
 
     for (const frame of frames) {
         const inAppMarker = options.includeInAppMarkers && frame.in_app ? ' [IN-APP]' : ''

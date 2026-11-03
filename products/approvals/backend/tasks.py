@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Optional
 
 from django.db import transaction
 from django.utils import timezone
@@ -8,8 +8,10 @@ from structlog import get_logger
 
 from posthog.scoping_audit import skip_team_scope_audit
 
+from products.approvals.backend.experiment_policy_sync import sync_experiment_policies
 from products.approvals.backend.models import ChangeRequest, ChangeRequestState, ValidationStatus
 from products.approvals.backend.notifications import send_approval_expired_notification
+from products.approvals.backend.services import requester_still_has_access
 
 logger = get_logger(__name__)
 
@@ -23,16 +25,22 @@ def validate_pending_change_requests() -> dict[str, Any]:
     Periodic staleness check for pending change requests.
 
     Compares stored preconditions against the current resource state.
-    Marks CRs as STALE when the underlying resource has been modified,
-    which allows requesters to cancel even after approvals have been given.
+    Marks CRs as STALE when the underlying resource has been modified, which allows
+    requesters to cancel even after approvals have been given. Re-checks CRs already
+    marked STALE too, so one that matches its precondition again (e.g. after a
+    transient lookup miss) returns to VALID instead of being latched permanently.
     """
     stale_count = 0
+    healed_count = 0
     checked_count = 0
     errors: list[str] = []
 
+    # Approved requests are revalidated too. The apply-time access check only runs once a request
+    # is approved, so marking it invalid there and then never revisiting it would latch the mark
+    # exactly where it is set. `expire_old_change_requests` already spans both states.
     pending_requests = ChangeRequest.objects.filter(
-        state=ChangeRequestState.PENDING,
-    ).exclude(validation_status=ValidationStatus.STALE)
+        state__in=[ChangeRequestState.PENDING, ChangeRequestState.APPROVED],
+    )
 
     for change_request in pending_requests:
         try:
@@ -54,17 +62,39 @@ def validate_pending_change_requests() -> dict[str, Any]:
             }
             context = action_class.prepare_context(change_request, base_context)
 
+            # Derive the status the request should hold, rather than branching per transition.
+            # Branching missed the invalid-to-valid direction, which latched a request forever
+            # once its requester lost access.
             if action_class.check_staleness(change_request.intent, context):
-                change_request.validation_status = ValidationStatus.STALE
-                change_request.validation_errors = {
+                status = ValidationStatus.STALE
+                errors_for_status: Optional[dict[str, str]] = {
                     "staleness": "Resource has been modified since this change request was created"
                 }
+            elif not requester_still_has_access(change_request, context):
+                status = ValidationStatus.INVALID
+                errors_for_status = {
+                    "access": "The requester no longer has edit access to this resource, or their account is gone."
+                }
+            else:
+                status = ValidationStatus.VALID
+                errors_for_status = None
+
+            was = change_request.validation_status
+            if status != was:
+                change_request.validation_status = status
+                change_request.validation_errors = errors_for_status
                 change_request.validated_at = timezone.now()
                 change_request.save(update_fields=["validation_status", "validation_errors", "validated_at"])
-                stale_count += 1
+                if status == ValidationStatus.VALID:
+                    healed_count += 1
+                else:
+                    stale_count += 1
                 logger.info(
-                    "validate_pending_change_requests.stale",
+                    "validate_pending_change_requests.healed"
+                    if status == ValidationStatus.VALID
+                    else "validate_pending_change_requests.stale",
                     change_request_id=str(change_request.id),
+                    status=status,
                 )
 
         except Exception as e:
@@ -79,6 +109,7 @@ def validate_pending_change_requests() -> dict[str, Any]:
     result = {
         "checked_count": checked_count,
         "stale_count": stale_count,
+        "healed_count": healed_count,
         "errors": errors,
     }
 
@@ -147,3 +178,10 @@ def expire_old_change_requests() -> dict[str, Any]:
 
     logger.info("expire_old_change_requests.complete", **result)
     return result
+
+
+# TODO(experiment-approval-policies): temporary. See experiment_policy_sync.py for what to remove.
+@shared_task(ignore_result=True)
+@skip_team_scope_audit
+def sync_experiment_approval_policies() -> None:
+    sync_experiment_policies()

@@ -75,7 +75,11 @@ describe('Workflows', { concurrent: false }, () => {
                     type: 'trigger',
                     created_at: ts,
                     updated_at: ts,
-                    config: { type: 'event', filters: { events: [] } },
+                    // An active event trigger has to name an event; enabling the draft checks that.
+                    config: {
+                        type: 'event',
+                        filters: { events: [{ id: '$pageview', name: '$pageview', type: 'events' }] },
+                    },
                 },
                 {
                     id: 'exit_node',
@@ -413,16 +417,6 @@ describe('Workflows', { concurrent: false }, () => {
 
             expect(renamed.id).toBe(created.id)
             expect(renamed.name).toBe('mcp-test-renamed')
-        })
-
-        it('should refuse editing an active workflow via MCP', async () => {
-            const created = parseToolResponse(await createTool.handler(context, makeWorkflowParams()))
-            createdWorkflowIds.push(created.id)
-            await enableTool.handler(context, { id: created.id })
-
-            await expect(
-                updateTool.handler(context, { id: created.id, name: 'mcp-test-active-rename' })
-            ).rejects.toThrow(/active workflow isn't supported via MCP/)
         })
     })
 

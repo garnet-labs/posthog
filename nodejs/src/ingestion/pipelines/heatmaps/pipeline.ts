@@ -1,6 +1,6 @@
 import { Message } from 'node-rdkafka'
 
-import { AppMetricsOutput, DlqOutput, IngestionWarningsOutput } from '~/common/outputs'
+import { AppMetricsOutput, DlqOutput, IngestionWarningsOutput, TophogOutput } from '~/common/outputs'
 import { IngestionOutputs } from '~/common/outputs/ingestion-outputs'
 import { EventIngestionRestrictionManager } from '~/common/utils/event-ingestion-restrictions'
 import { PromiseScheduler } from '~/common/utils/promise-scheduler'
@@ -24,7 +24,9 @@ import { createApplyBasicEventRestrictionsStep } from '~/ingestion/common/steps/
 import { createDropOldEventsStep } from '~/ingestion/common/steps/event-processing/drop-old-events-step'
 import { createNormalizeEventStep } from '~/ingestion/common/steps/event-processing/normalize-event-step'
 import { createPrepareEventStep } from '~/ingestion/common/steps/event-processing/prepare-event-step'
+import { prefetchTeamsStep } from '~/ingestion/common/steps/prefetch-teams-step'
 import { createRecordIngestionLagStep } from '~/ingestion/common/steps/record-ingestion-lag'
+import { TopHogRegistry } from '~/ingestion/framework/extensions/tophog'
 
 import { createCheckHeatmapOptInStep } from './check-heatmap-opt-in-step'
 import { createDisablePersonProcessingStep } from './disable-person-processing-step'
@@ -32,7 +34,7 @@ import { createExtractHeatmapDataStep } from './extract-heatmap-data-step'
 import { HeatmapsOutput } from './outputs'
 
 export interface HeatmapsPipelineConfig {
-    outputs: IngestionOutputs<HeatmapsOutput | IngestionWarningsOutput | DlqOutput | AppMetricsOutput>
+    outputs: IngestionOutputs<HeatmapsOutput | IngestionWarningsOutput | DlqOutput | AppMetricsOutput | TophogOutput>
     teamManager: TeamManager
     // The managers come from a started `Lifecycle`'s service map, where
     // `start` and `stop` are stripped from the type — the pipeline only
@@ -41,6 +43,8 @@ export interface HeatmapsPipelineConfig {
     eventFilterManager: EventFilterManager
     cookielessManager: CookielessManager
     promiseScheduler: PromiseScheduler
+    topHog: TopHogRegistry
+    teamsPrefetchEnabled: boolean
 }
 
 interface HeatmapsPipelineInput {
@@ -61,6 +65,8 @@ export function createHeatmapsPipeline<TInput extends HeatmapsPipelineInput, TCo
         eventFilterManager,
         cookielessManager,
         promiseScheduler,
+        topHog,
+        teamsPrefetchEnabled,
     } = config
 
     return (
@@ -69,11 +75,13 @@ export function createHeatmapsPipeline<TInput extends HeatmapsPipelineInput, TCo
             outputs,
             promiseScheduler,
             concurrentBatches: 1,
+            topHog,
         })
             .beforeBatch((b) => b.pipe(createEventFiltersBatchAppMetricsBeforeBatchStep(outputs)))
             .parseHeaders()
             .pipe(createAllowEventsStep(['$$heatmap']))
             .pipe(createApplyBasicEventRestrictionsStep(eventIngestionRestrictionManager))
+            .pipeChunk(prefetchTeamsStep(teamManager, teamsPrefetchEnabled))
             .parseMessage()
             .resolveTeam()
             .pipe(createValidateHistoricalMigrationStep())

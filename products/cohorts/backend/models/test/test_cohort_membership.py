@@ -3,6 +3,11 @@
 from posthog.test.base import BaseTest
 from unittest.mock import patch
 
+from django.test import SimpleTestCase
+
+from parameterized import parameterized
+
+from posthog.exceptions import ClickHouseAtCapacity
 from posthog.models import Team
 from posthog.personhog_client.fake_client import get_active_fake
 from posthog.test.persons import add_cohort_members, create_person
@@ -378,7 +383,7 @@ class TestDeleteCohortMembersBulk(BaseTest):
         get_active_fake().assert_not_called("delete_cohort_members_bulk")
 
 
-class TestDeleteCohortMembersBulkMaxIterations(BaseTest):
+class TestDeleteCohortMembersBulkMaxIterations(SimpleTestCase):
     def test_stops_after_max_iterations(self):
         from unittest.mock import MagicMock
 
@@ -464,3 +469,24 @@ class TestInsertUsersListWithBatchingPersonhog(BaseTest):
 
         cohort.insert_users_list_by_uuid([str(person.uuid)], team_id=self.team.id)
         cohort.insert_users_list_by_uuid([str(person.uuid)], team_id=self.team.id)
+
+    @parameterized.expand([(True,), (False,)])
+    @patch("products.cohorts.backend.models.util.insert_static_cohort")
+    def test_insert_capacity_error_surfaces_only_with_raise_on_error(self, raise_on_error, mock_insert_ch):
+        # A transient ClickHouse capacity error during static-cohort population must propagate when
+        # raise_on_error=True, so the retrying calculate_cohort_from_list task can re-run it instead
+        # of leaving the cohort half-populated, and terminal state must be left for that task to
+        # finalize. Without the flag it stays swallowed and recorded here, which the create() path
+        # relies on.
+        mock_insert_ch.side_effect = ClickHouseAtCapacity()
+        create_person(team=self.team, distinct_ids=["d1"])
+        cohort = self._create_static_cohort()
+
+        if raise_on_error:
+            with self.assertRaises(ClickHouseAtCapacity):
+                cohort.insert_users_by_list(["d1"], team_id=self.team.id, raise_on_error=True)
+        else:
+            cohort.insert_users_by_list(["d1"], team_id=self.team.id)
+
+        cohort.refresh_from_db()
+        assert cohort.errors_calculating == (0 if raise_on_error else 1)

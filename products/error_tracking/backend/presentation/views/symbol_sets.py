@@ -1,22 +1,24 @@
 import posthoganalytics
 from drf_spectacular.utils import extend_schema
-from rest_framework import pagination, serializers, status, viewsets
+from rest_framework import serializers, status, viewsets
 from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.parsers import FileUploadParser, JSONParser, MultiPartParser
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework_dataclasses.serializers import DataclassSerializer
 
+from posthog.api.pagination import FacadeLimitOffsetPagination, facade_page_response
 from posthog.api.routing import TeamAndOrgViewSetMixin
 from posthog.api.utils import action
-from posthog.event_usage import groups
+from posthog.event_usage import get_request_analytics_properties, groups
 from posthog.rate_limit import SymbolSetUploadBurstRateThrottle, SymbolSetUploadSustainedRateThrottle
 
 from products.error_tracking.backend.facade import (
     contracts,
     symbol_sets as symbol_sets_facade,
 )
-from products.error_tracking.backend.presentation.pagination import paginate_via_facade
+
+BULK_CHECK_UPLOAD_MAX_SYMBOL_SETS = 1000
 
 
 class ErrorTrackingSymbolSetSerializer(DataclassSerializer):
@@ -36,6 +38,17 @@ class ErrorTrackingSymbolSetUploadSerializer(serializers.Serializer):
         default=None,
         help_text="Optional hash of the symbol set content, used to skip unchanged uploads.",
     )
+    content_length = serializers.IntegerField(
+        required=False,
+        allow_null=True,
+        default=None,
+        min_value=0,
+        help_text=(
+            "Optional byte count of the content about to be uploaded. When given, the upload "
+            "response also carries a presigned PUT signed for exactly this length, which "
+            "S3-compatible stores without presigned POST support (such as Cloudflare R2) accept."
+        ),
+    )
 
 
 class ErrorTrackingSymbolSetFinishUploadSerializer(serializers.Serializer):
@@ -49,22 +62,15 @@ class ErrorTrackingSymbolSetBulkDeleteSerializer(serializers.Serializer):
     )
 
 
-class ErrorTrackingSymbolSetBulkStartUploadSerializer(serializers.Serializer):
-    chunk_ids = serializers.ListField(
-        child=serializers.CharField(),
-        required=False,
-        help_text="Legacy list of symbol set references to upload, all associated with `release_id`.",
-    )
-    release_id = serializers.CharField(
-        required=False,
-        allow_null=True,
-        default=None,
-        help_text="Optional error tracking release ID used with `chunk_ids`.",
-    )
-    symbol_sets = ErrorTrackingSymbolSetUploadSerializer(
+class ErrorTrackingSymbolSetBulkCheckUploadSerializer(serializers.Serializer):
+    # `max_length` reaches the ListSerializer through `many_init`, which the DRF stubs do not model.
+    symbol_sets = ErrorTrackingSymbolSetUploadSerializer(  # type: ignore[call-arg]
         many=True,
-        required=False,
-        help_text="Symbol sets to upload with per-symbol release IDs and content hashes.",
+        max_length=BULK_CHECK_UPLOAD_MAX_SYMBOL_SETS,
+        help_text=(
+            "Symbol sets the client intends to upload, with per-symbol release IDs and content hashes. "
+            f"Send at most {BULK_CHECK_UPLOAD_MAX_SYMBOL_SETS} per request."
+        ),
     )
     force = serializers.BooleanField(
         required=False,
@@ -86,7 +92,83 @@ class ErrorTrackingSymbolSetBulkStartUploadSerializer(serializers.Serializer):
         return attrs
 
 
+class ErrorTrackingSymbolSetBulkCheckUploadResponseSerializer(serializers.Serializer):
+    chunk_ids_to_upload = serializers.ListField(
+        child=serializers.CharField(),
+        help_text="Chunk IDs to send to `bulk_start_upload`: the symbol set is missing, its upload never completed, its content differs, or it still needs the release bound. The other chunks are already uploaded with identical content and were marked as still in use.",
+    )
+
+
+class ErrorTrackingSymbolSetBulkStartUploadSerializer(ErrorTrackingSymbolSetBulkCheckUploadSerializer):
+    upload_attempt_id = serializers.UUIDField(
+        required=False,
+        help_text="Optional ID used to correlate upload analytics across start and finish requests.",
+    )
+    upload_run_id = serializers.UUIDField(
+        required=False,
+        help_text="Optional ID shared by every batch in one CLI upload run, including release-ID retries.",
+    )
+    chunk_ids = serializers.ListField(
+        child=serializers.CharField(),
+        required=False,
+        help_text="Legacy list of symbol set references to upload, all associated with `release_id`.",
+    )
+    release_id = serializers.CharField(
+        required=False,
+        allow_null=True,
+        default=None,
+        help_text="Optional error tracking release ID used with `chunk_ids`.",
+    )
+    symbol_sets = ErrorTrackingSymbolSetUploadSerializer(
+        many=True,
+        required=False,
+        help_text="Symbol sets to upload with per-symbol release IDs and content hashes.",
+    )
+
+
+class ErrorTrackingSymbolSetPresignedPostSerializer(serializers.Serializer):
+    url = serializers.URLField(help_text="S3 endpoint URL to send the multipart POST to.")
+    fields = serializers.DictField(  # type: ignore[assignment]
+        child=serializers.CharField(),
+        help_text="Form fields to include in the multipart POST, before the file part.",
+    )
+
+
+class ErrorTrackingSymbolSetBulkStartUploadEntrySerializer(serializers.Serializer):
+    symbol_set_id = serializers.CharField(help_text="ID of the symbol set the upload belongs to.")
+    presigned_url = ErrorTrackingSymbolSetPresignedPostSerializer(
+        help_text="Presigned POST for the upload. Uses the S3 transfer-acceleration endpoint when configured."
+    )
+    fallback_presigned_url = ErrorTrackingSymbolSetPresignedPostSerializer(
+        required=False,
+        help_text="Presigned POST against the standard S3 endpoint, present only when the primary URL uses transfer acceleration. For clients whose network blocks the accelerated endpoint.",
+    )
+    presigned_put_url = serializers.URLField(
+        required=False,
+        help_text="Presigned PUT for the upload, present only when the request declared `content_length`. Send the raw bytes with a matching `Content-Length` header. Prefer this over `presigned_url`: presigned POST is an AWS extension that some S3-compatible stores reject.",
+    )
+    fallback_presigned_put_url = serializers.URLField(
+        required=False,
+        help_text="Presigned PUT against the standard S3 endpoint, present only when the primary PUT uses transfer acceleration.",
+    )
+
+
+class ErrorTrackingSymbolSetBulkStartUploadResponseSerializer(serializers.Serializer):
+    id_map = serializers.DictField(
+        child=ErrorTrackingSymbolSetBulkStartUploadEntrySerializer(),
+        help_text="Map of chunk ID to upload details. Chunks skipped because their content is unchanged are omitted.",
+    )
+
+
 class ErrorTrackingSymbolSetBulkFinishUploadSerializer(serializers.Serializer):
+    upload_attempt_id = serializers.UUIDField(
+        required=False,
+        help_text="Optional ID from the corresponding bulk start request for upload analytics.",
+    )
+    upload_run_id = serializers.UUIDField(
+        required=False,
+        help_text="Optional ID shared by every batch in one CLI upload run, including release-ID retries.",
+    )
     content_hashes = serializers.DictField(
         child=serializers.CharField(),
         help_text="Map of symbol set ID to uploaded content hash.",
@@ -121,7 +203,7 @@ class _SymbolSetDownloadResponseSerializer(serializers.Serializer):
     )
 
 
-class ErrorTrackingSymbolSetPagination(pagination.LimitOffsetPagination):
+class ErrorTrackingSymbolSetPagination(FacadeLimitOffsetPagination):
     max_limit = 100
 
 
@@ -133,10 +215,13 @@ class ErrorTrackingSymbolSetViewSet(TeamAndOrgViewSetMixin, viewsets.GenericView
     throttle_classes = [SymbolSetUploadBurstRateThrottle, SymbolSetUploadSustainedRateThrottle]
     scope_object_read_actions = ["list", "retrieve", "download"]
     scope_object_write_actions = [
+        "bulk_check_upload",
         "bulk_start_upload",
         "bulk_finish_upload",
         "start_upload",
         "finish_upload",
+        "update",
+        "partial_update",
         "destroy",
         "bulk_delete",
         "create",
@@ -147,17 +232,15 @@ class ErrorTrackingSymbolSetViewSet(TeamAndOrgViewSetMixin, viewsets.GenericView
         query = ErrorTrackingSymbolSetListQuerySerializer(data=request.query_params)
         query.is_valid(raise_exception=True)
         params = dict(query.validated_data)
-        return paginate_via_facade(
+        return facade_page_response(
             self,
-            request,
-            lambda limit, offset: symbol_sets_facade.list_symbol_sets(
+            lambda page: symbol_sets_facade.list_symbol_sets(
                 self.team.id,
                 ref=params.get("ref"),
                 search=params.get("search"),
                 symbol_set_status=params.get("status"),
                 order_by=params.get("order_by"),
-                limit=limit,
-                offset=offset,
+                page=page,
             ),
         )
 
@@ -226,7 +309,7 @@ class ErrorTrackingSymbolSetViewSet(TeamAndOrgViewSetMixin, viewsets.GenericView
         posthoganalytics.capture(
             "error_tracking_symbol_set_deprecated_endpoint",
             distinct_id=request.user.pk,
-            properties={"team_id": self.team.id, "endpoint": "create"},
+            properties={**get_request_analytics_properties(request), "team_id": self.team.id, "endpoint": "create"},
         )
 
         if not chunk_id:
@@ -255,7 +338,11 @@ class ErrorTrackingSymbolSetViewSet(TeamAndOrgViewSetMixin, viewsets.GenericView
         posthoganalytics.capture(
             "error_tracking_symbol_set_deprecated_endpoint",
             distinct_id=request.user.pk,
-            properties={"team_id": self.team.id, "endpoint": "start_upload"},
+            properties={
+                **get_request_analytics_properties(request),
+                "team_id": self.team.id,
+                "endpoint": "start_upload",
+            },
         )
 
         if not chunk_id:
@@ -285,11 +372,61 @@ class ErrorTrackingSymbolSetViewSet(TeamAndOrgViewSetMixin, viewsets.GenericView
 
         return Response({"success": True}, status=status.HTTP_200_OK)
 
-    @extend_schema(request=ErrorTrackingSymbolSetBulkStartUploadSerializer)
-    @action(methods=["POST"], detail=False, parser_classes=[JSONParser])
-    def bulk_start_upload(self, request: Request, **kwargs) -> Response:
+    def _identify_upload_context(self, request: Request) -> None:
         if request.user.pk:
             posthoganalytics.identify_context(str(request.user.pk))
+        else:
+            posthoganalytics.identify_context(str(self.team.uuid))
+
+    @extend_schema(
+        request=ErrorTrackingSymbolSetBulkCheckUploadSerializer,
+        responses={200: ErrorTrackingSymbolSetBulkCheckUploadResponseSerializer},
+    )
+    @action(methods=["POST"], detail=False, parser_classes=[JSONParser])
+    def bulk_check_upload(self, request: Request, **kwargs) -> Response:
+        """Report which of the given symbol sets still need `bulk_start_upload`. Symbol sets already uploaded with identical content are omitted and marked as still in use."""
+        self._identify_upload_context(request)
+
+        check_serializer = ErrorTrackingSymbolSetBulkCheckUploadSerializer(data=request.data)
+        check_serializer.is_valid(raise_exception=True)
+        check_data = check_serializer.validated_data
+
+        force: bool = check_data["force"]
+        skip_on_conflict: bool = check_data["skip_on_conflict"]
+        symbol_sets = list(check_data["symbol_sets"])
+
+        chunk_ids_to_upload = symbol_sets_facade.bulk_check_upload(
+            self.team,
+            symbol_sets=symbol_sets,
+            force=force,
+            skip_on_conflict=skip_on_conflict,
+        )
+
+        posthoganalytics.capture(
+            "error_tracking_symbol_set_upload_checked",
+            properties={
+                **get_request_analytics_properties(request),
+                "team_id": self.team.id,
+                "force": force,
+                "skip_on_conflict": skip_on_conflict,
+                "total_chunks": len(symbol_sets),
+                "chunks_skipped": len(symbol_sets) - len(chunk_ids_to_upload),
+            },
+            groups=groups(self.team.organization, self.team),
+        )
+
+        response = ErrorTrackingSymbolSetBulkCheckUploadResponseSerializer(
+            instance={"chunk_ids_to_upload": chunk_ids_to_upload}
+        )
+        return Response(response.data, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        request=ErrorTrackingSymbolSetBulkStartUploadSerializer,
+        responses={201: ErrorTrackingSymbolSetBulkStartUploadResponseSerializer},
+    )
+    @action(methods=["POST"], detail=False, parser_classes=[JSONParser])
+    def bulk_start_upload(self, request: Request, **kwargs) -> Response:
+        self._identify_upload_context(request)
 
         upload_serializer = ErrorTrackingSymbolSetBulkStartUploadSerializer(data=request.data)
         upload_serializer.is_valid(raise_exception=True)
@@ -297,37 +434,61 @@ class ErrorTrackingSymbolSetViewSet(TeamAndOrgViewSetMixin, viewsets.GenericView
 
         force: bool = upload_data["force"]
         skip_on_conflict: bool = upload_data["skip_on_conflict"]
+        symbol_sets = list(upload_data.get("symbol_sets", []))
+        chunk_ids = list(upload_data.get("chunk_ids") or [])
 
+        id_map = symbol_sets_facade.bulk_start_upload(
+            self.team,
+            symbol_sets=symbol_sets,
+            chunk_ids=chunk_ids,
+            release_id=upload_data.get("release_id", None),
+            force=force,
+            skip_on_conflict=skip_on_conflict,
+        )
+
+        # Chunks that were skipped (content hash unchanged, or kept via skip_on_conflict)
+        # get no entry in the id_map, so its size is the number of chunks being uploaded.
+        total_chunks = len(symbol_sets) + len(chunk_ids)
         posthoganalytics.capture(
-            "error_tracking_symbol_set_upload_started",
+            "error_tracking_symbol_set_upload_started" if id_map else "error_tracking_symbol_set_upload_skipped",
             properties={
+                **get_request_analytics_properties(request),
                 "team_id": self.team.id,
                 "endpoint": "bulk_start_upload",
                 "force": force,
                 "skip_on_conflict": skip_on_conflict,
+                "total_chunks": total_chunks,
+                "chunks_skipped": total_chunks - len(id_map),
+                "chunks_to_upload": len(id_map),
+                **(
+                    {"upload_attempt_id": str(upload_data["upload_attempt_id"])}
+                    if "upload_attempt_id" in upload_data
+                    else {}
+                ),
+                **({"upload_run_id": str(upload_data["upload_run_id"])} if "upload_run_id" in upload_data else {}),
             },
             groups=groups(self.team.organization, self.team),
         )
 
-        id_map = symbol_sets_facade.bulk_start_upload(
-            self.team,
-            symbol_sets=list(upload_data.get("symbol_sets", [])),
-            chunk_ids=list(upload_data.get("chunk_ids") or []),
-            release_id=upload_data.get("release_id", None),
-            force=force,
-            skip_on_conflict=skip_on_conflict,
-            distinct_id=str(request.user.pk) if request.user.pk else None,
-        )
         return Response({"id_map": id_map}, status=status.HTTP_201_CREATED)
 
     @extend_schema(request=ErrorTrackingSymbolSetBulkFinishUploadSerializer)
     @action(methods=["POST"], detail=False, parser_classes=[JSONParser])
     def bulk_finish_upload(self, request: Request, **kwargs) -> Response:
-        if request.user.pk:
-            posthoganalytics.identify_context(str(request.user.pk))
+        self._identify_upload_context(request)
         content_hashes = request.data.get("content_hashes", {})
         if content_hashes is None:
             return Response({"detail": "content_hashes are required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        finish_data = {"content_hashes": content_hashes}
+        if "upload_attempt_id" in request.data:
+            finish_data["upload_attempt_id"] = request.data["upload_attempt_id"]
+        if "upload_run_id" in request.data:
+            finish_data["upload_run_id"] = request.data["upload_run_id"]
+        finish_serializer = ErrorTrackingSymbolSetBulkFinishUploadSerializer(data=finish_data)
+        finish_serializer.is_valid(raise_exception=True)
+        upload_attempt_id = finish_serializer.validated_data.get("upload_attempt_id")
+        upload_run_id = finish_serializer.validated_data.get("upload_run_id")
 
         if len(content_hashes) == 0:
             # This can happen if someone re-runs an upload against a directory that's already been
@@ -335,6 +496,11 @@ class ErrorTrackingSymbolSetViewSet(TeamAndOrgViewSetMixin, viewsets.GenericView
             # we can early exit here.
             return Response({"success": True}, status=status.HTTP_201_CREATED)
 
-        symbol_sets_facade.bulk_finish_upload(self.team, content_hashes)
+        analytics_props = get_request_analytics_properties(request)
+        if upload_attempt_id:
+            analytics_props["upload_attempt_id"] = str(upload_attempt_id)
+        if upload_run_id:
+            analytics_props["upload_run_id"] = str(upload_run_id)
+        symbol_sets_facade.bulk_finish_upload(self.team, content_hashes, analytics_props=analytics_props)
 
         return Response({"success": True}, status=status.HTTP_201_CREATED)

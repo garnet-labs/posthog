@@ -5,7 +5,9 @@ import { FEATURE_FLAGS } from 'lib/constants'
 import { urls } from 'scenes/urls'
 
 import { ProductItemCategory, ProductKey } from '~/queries/schema/schema-general'
-import { ProductManifest } from '~/types'
+import { FileSystemIconColor, ProductManifest } from '~/types'
+
+import type { WarehousePropertiesSceneTab } from './frontend/scenes/WarehousePropertiesScene/warehousePropertiesSceneLogic'
 
 export const manifest: ProductManifest = {
     name: 'Customer analytics',
@@ -16,6 +18,14 @@ export const manifest: ProductManifest = {
             name: 'Customer analytics',
             description: 'Understand how your customers interact with your product ',
             iconType: 'cohort',
+            docsHref: 'https://posthog.com/docs/customer-analytics',
+        },
+        CustomerAnalyticsAccount: {
+            import: () => import('./frontend/scenes/CustomerAnalyticsAccountScene/CustomerAnalyticsAccountScene'),
+            projectBased: true,
+            name: 'Account details',
+            iconType: 'cohort',
+            layout: 'app-full-scene-height',
         },
         CustomerAnalyticsConfiguration: {
             import: () =>
@@ -33,21 +43,51 @@ export const manifest: ProductManifest = {
             projectBased: true,
             name: 'New journey',
         },
+        WarehouseProperties: {
+            import: () => import('./frontend/scenes/WarehousePropertiesScene/WarehousePropertiesScene'),
+            projectBased: true,
+            name: 'Warehouse properties',
+            description: 'Add properties to your people and groups from a data warehouse table.',
+            iconType: 'data_warehouse',
+        },
     },
     routes: {
+        // nosemgrep: frontend-route-hyphen -- shipped app URL, existing links point here
         '/customer_analytics/dashboard': ['CustomerAnalytics', 'customerAnalyticsDashboard'],
+        // nosemgrep: frontend-route-hyphen -- shipped app URL, existing links point here
         '/customer_analytics/accounts': ['CustomerAnalytics', 'customerAnalyticsAccounts'],
-        // Deep-link to a single account (filtered + expanded), optionally on a given tab. Same scene key
-        // as the list so the accounts tab activates; accountsLogic reads the params.
-        '/customer_analytics/accounts/:accountId': ['CustomerAnalytics', 'customerAnalyticsAccounts'],
-        '/customer_analytics/accounts/:accountId/:tab': ['CustomerAnalytics', 'customerAnalyticsAccounts'],
+        // Match before UUID routes; the wildcard also accepts characters excluded from named segments.
+        // nosemgrep: frontend-route-hyphen -- shipped app URL, existing links point here
+        '/customer_analytics/accounts/by-external-id/*': ['CustomerAnalyticsAccount', 'customerAnalyticsAccount'],
+        // The detail scene serves these paths behind its flag and falls back to the list for legacy deep links.
+        // nosemgrep: frontend-route-hyphen -- shipped app URL, existing links point here
+        '/customer_analytics/accounts/:accountId': ['CustomerAnalyticsAccount', 'customerAnalyticsAccount'],
+        // nosemgrep: frontend-route-hyphen -- shipped app URL, existing links point here
+        '/customer_analytics/accounts/:accountId/:tab': ['CustomerAnalyticsAccount', 'customerAnalyticsAccount'],
+        // nosemgrep: frontend-route-hyphen -- shipped app URL, existing links point here
         '/customer_analytics/notes': ['CustomerAnalytics', 'customerAnalyticsNotes'],
+        // nosemgrep: frontend-route-hyphen -- shipped app URL, existing links point here
         '/customer_analytics/announcements': ['CustomerAnalytics', 'customerAnalyticsAnnouncements'],
+        // nosemgrep: frontend-route-hyphen -- shipped app URL, existing links point here
+        '/customer_analytics/feed': ['CustomerAnalytics', 'customerAnalyticsFeed'],
+        // nosemgrep: frontend-route-hyphen -- shipped app URL, existing links point here
+        '/customer_analytics/tasks': ['CustomerAnalytics', 'customerAnalyticsTasks'],
+        // nosemgrep: frontend-route-hyphen -- shipped app URL, existing links point here
+        '/customer_analytics/feature-requests': ['CustomerAnalytics', 'customerAnalyticsFeatureRequests'],
+        // nosemgrep: frontend-route-hyphen -- shipped app URL, existing links point here
+        '/customer_analytics/feature-requests/:requestId': ['CustomerAnalytics', 'customerAnalyticsFeatureRequests'],
+        // nosemgrep: frontend-route-hyphen -- shipped app URL, existing links point here
         '/customer_analytics/journeys/new': ['CustomerJourneyBuilder', 'customerJourneyBuilder'],
+        // nosemgrep: frontend-route-hyphen -- shipped app URL, existing links point here
         '/customer_analytics/journeys/templates': ['CustomerJourneyTemplates', 'customerJourneyTemplates'],
+        // nosemgrep: frontend-route-hyphen -- shipped app URL, existing links point here
         '/customer_analytics/journeys/:id/edit': ['CustomerJourneyBuilder', 'customerJourneyEdit'],
+        // nosemgrep: frontend-route-hyphen -- shipped app URL, existing links point here
         '/customer_analytics/journeys': ['CustomerAnalytics', 'customerAnalyticsJourneys'],
+        // nosemgrep: frontend-route-hyphen -- shipped app URL, existing links point here
         '/customer_analytics/configuration': ['CustomerAnalyticsConfiguration', 'customerAnalyticsConfiguration'],
+        '/data-management/warehouse-properties': ['WarehouseProperties', 'warehouseProperties'],
+        '/data-management/warehouse-properties/:tab': ['WarehouseProperties', 'warehouseProperties'],
     },
     redirects: {
         '/customer_analytics': (_params, searchParams, hashParams) => {
@@ -61,29 +101,92 @@ export const manifest: ProductManifest = {
         customerAnalytics: (): string => '/customer_analytics',
         customerAnalyticsDashboard: (): string => '/customer_analytics/dashboard',
         customerAnalyticsAccounts: (): string => '/customer_analytics/accounts',
-        // Path-based deep link to one account: filters the list to it, expands it, opens `tab`.
+        // Account detail path. The flag-off scene falls back to the filtered, expanded Accounts list.
         customerAnalyticsAccount: (accountId: string, tab?: string): string =>
-            `/customer_analytics/accounts/${accountId}${tab ? `/${tab}` : ''}`,
+            `/customer_analytics/accounts/${accountId}${tab ? `/${encodeURIComponent(tab)}` : ''}`,
+        customerAnalyticsAccountByExternalId: (externalId: string, tab?: string): string =>
+            `/customer_analytics/accounts/by-external-id/${encodeURIComponent(externalId)}${tab ? `/${encodeURIComponent(tab)}` : ''}`,
         customerAnalyticsNotes: (): string => '/customer_analytics/notes',
         customerAnalyticsAnnouncements: (): string => '/customer_analytics/announcements',
+        customerAnalyticsFeed: (): string => '/customer_analytics/feed',
+        customerAnalyticsTasks: (): string => '/customer_analytics/tasks',
+        customerAnalyticsFeatureRequests: (requestId?: string): string =>
+            `/customer_analytics/feature-requests${requestId ? `/${requestId}` : ''}`,
         customerAnalyticsJourneys: (): string => '/customer_analytics/journeys',
-        customerAnalyticsConfiguration: (tab?: string): string =>
-            `/customer_analytics/configuration${tab ? `?tab=${tab}` : ''}`,
+        customerAnalyticsConfiguration: (tab?: string, returnTo?: string): string =>
+            combineUrl('/customer_analytics/configuration', {
+                ...(tab ? { tab } : {}),
+                ...(returnTo ? { returnTo } : {}),
+            }).url,
         customerJourneyBuilder: (): string => '/customer_analytics/journeys/new',
         customerJourneyTemplates: (): string => '/customer_analytics/journeys/templates',
         customerJourneyEdit: (id: string): string => `/customer_analytics/journeys/${id}/edit`,
+        warehouseProperties: (tab?: WarehousePropertiesSceneTab): string =>
+            `/data-management/warehouse-properties${tab ? `/${tab}` : ''}`,
     },
     treeItemsProducts: [
         {
             path: 'Customer analytics',
             intents: [ProductKey.CUSTOMER_ANALYTICS],
-            category: ProductItemCategory.ANALYTICS,
-            iconType: 'cohort',
+            category: ProductItemCategory.DATA,
+            iconType: 'customer_analytics',
+            iconColor: [
+                'var(--color-product-customer-analytics-light)',
+                'var(--color-product-customer-analytics-dark)',
+            ] as FileSystemIconColor,
             href: urls.customerAnalytics(),
+            searchKeywords: ['crm', 'customer success', 'account health'],
+            searchTabs: [
+                { name: 'Feed', href: urls.customerAnalyticsFeed(), flag: FEATURE_FLAGS.CUSTOMER_ANALYTICS_CSP },
+                { name: 'Notes', href: urls.customerAnalyticsNotes(), flag: FEATURE_FLAGS.CUSTOMER_ANALYTICS_CSP },
+                {
+                    name: 'Announcements',
+                    href: urls.customerAnalyticsAnnouncements(),
+                    flag: FEATURE_FLAGS.CUSTOMER_ANALYTICS_CSP,
+                },
+                {
+                    name: 'Feature requests',
+                    href: urls.customerAnalyticsFeatureRequests(),
+                    flag: FEATURE_FLAGS.CUSTOMER_ANALYTICS_FEATURE_REQUESTS,
+                },
+                {
+                    name: 'Tasks',
+                    href: urls.customerAnalyticsTasks(),
+                    flag: FEATURE_FLAGS.CUSTOMER_ANALYTICS_CUSTOMER_TASKS,
+                },
+                {
+                    name: 'Customer journeys',
+                    href: urls.customerAnalyticsJourneys(),
+                    flag: FEATURE_FLAGS.CUSTOMER_ANALYTICS_JOURNEYS,
+                },
+            ],
             tags: ['beta'],
             flag: FEATURE_FLAGS.CUSTOMER_ANALYTICS,
             sceneKey: 'CustomerAnalytics',
-            sceneKeys: ['CustomerAnalytics', 'CustomerJourneyTemplates', 'CustomerJourneyBuilder'],
+            sceneKeys: [
+                'CustomerAnalytics',
+                'CustomerAnalyticsAccount',
+                'CustomerJourneyTemplates',
+                'CustomerJourneyBuilder',
+            ],
+        },
+    ],
+    // Deliberately not behind the Customer analytics flag: warehouse-backed person and group
+    // properties are useful without opting into Customer analytics, so this is their home in Data.
+    treeItemsMetadata: [
+        {
+            path: 'Warehouse properties',
+            category: 'Schema',
+            iconType: 'warehouse_property',
+            iconColor: [
+                'var(--color-product-warehouse-properties-light)',
+                'var(--color-product-warehouse-properties-dark)',
+            ],
+            href: urls.warehouseProperties(),
+            searchKeywords: ['crm properties', 'joined properties'],
+            flag: FEATURE_FLAGS.WAREHOUSE_PERSON_PROPERTIES,
+            sceneKey: 'WarehouseProperties',
+            sceneKeys: ['WarehouseProperties'],
         },
     ],
 }

@@ -22,9 +22,8 @@ export function TimeSensitiveAuthenticationModal(): JSX.Element {
         passkeysAvailable,
         totpAvailable,
     } = useValues(timeSensitiveAuthenticationLogic)
-    const { submitReauthentication, setDismissedReauthentication, beginPasskey2FA } = useActions(
-        timeSensitiveAuthenticationLogic
-    )
+    const { submitReauthentication, setDismissedReauthentication, beginPasskey2FA, beginSsoReauthentication } =
+        useActions(timeSensitiveAuthenticationLogic)
 
     const ssoEnforcement = precheckResponse?.sso_enforcement
     const showPassword = !ssoEnforcement && user?.has_password
@@ -50,6 +49,7 @@ export function TimeSensitiveAuthenticationModal(): JSX.Element {
                             email={user!.email}
                             size="medium"
                             extraQueryParams={extraQueryParams}
+                            onProviderClick={beginSsoReauthentication}
                         />
                     </span>
                 ) : showPassword ? (
@@ -77,15 +77,29 @@ export function TimeSensitiveAuthenticationModal(): JSX.Element {
                     enableFormOnSubmit
                 >
                     {!twoFactorRequired ? (
-                        <LemonField name="password" label="Re-enter password">
-                            <LemonInput
-                                type="password"
-                                className="ph-ignore-input"
-                                data-attr="password"
-                                autoComplete="current-password"
-                                autoFocus
+                        // One child of the spaced form, so the hidden input does not push the password field down
+                        <div>
+                            {/* Password managers match a saved login by username, so a lone password field gets a generated password instead */}
+                            <input
+                                type="email"
+                                name="email"
+                                autoComplete="username"
+                                value={user?.email || ''}
+                                readOnly
+                                tabIndex={-1}
+                                aria-hidden
+                                className="sr-only"
                             />
-                        </LemonField>
+                            <LemonField name="password" label="Password">
+                                <LemonInput
+                                    type="password"
+                                    className="ph-ignore-input"
+                                    data-attr="password"
+                                    autoComplete="current-password"
+                                    autoFocus
+                                />
+                            </LemonField>
+                        </div>
                     ) : null}
 
                     {twoFactorRequired ? (
@@ -137,6 +151,7 @@ export function TimeSensitiveAuthenticationModal(): JSX.Element {
                         className="mt-4"
                         caption={showPassword ? 'Or re-authenticate with' : undefined}
                         extraQueryParams={extraQueryParams}
+                        onProviderClick={beginSsoReauthentication}
                         showPasskey={true}
                     />
                     {precheckResponse?.saml_available ? (
@@ -145,6 +160,16 @@ export function TimeSensitiveAuthenticationModal(): JSX.Element {
                             email={user!.email}
                             size="medium"
                             extraQueryParams={extraQueryParams}
+                            onProviderClick={beginSsoReauthentication}
+                        />
+                    ) : null}
+                    {precheckResponse?.oidc_available ? (
+                        <SSOEnforcedLoginButton
+                            provider="oidc"
+                            email={user!.email}
+                            size="medium"
+                            extraQueryParams={extraQueryParams}
+                            onProviderClick={beginSsoReauthentication}
                         />
                     ) : null}
                 </div>

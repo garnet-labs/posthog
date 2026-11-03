@@ -7,19 +7,22 @@ from typing import TYPE_CHECKING, Any, cast
 from zoneinfo import ZoneInfo
 
 import pytest
-from freezegun import freeze_time
+import time_machine
 from posthog.test.base import BaseTest
 from unittest.mock import call, patch
 
 from django.contrib.auth.models import AnonymousUser
 from django.core.cache import cache
 from django.core.handlers.wsgi import WSGIRequest
-from django.http import HttpRequest
+from django.http import HttpRequest, QueryDict
 from django.test import SimpleTestCase, TestCase, override_settings
 from django.test.client import RequestFactory
 from django.utils.timezone import now
 
+import posthoganalytics
+from asgiref.sync import async_to_sync
 from parameterized import parameterized
+from rest_framework import serializers
 from rest_framework.request import Request
 
 from posthog.exceptions import RequestParsingError, UnspecifiedCompressionFallbackParsingError
@@ -33,6 +36,7 @@ from posthog.utils import (
     HAS_PERSON_EMAIL_ABSENT_TTL_SECONDS,
     HAS_PERSON_EMAIL_ABSENT_YOUNG_PROJECT_TTL_SECONDS,
     HAS_PERSON_EMAIL_PRESENT_TTL_SECONDS,
+    DayRange,
     PotentialSecurityProblemException,
     _build_flag_provider,
     _read_preload_manifest,
@@ -52,6 +56,7 @@ from posthog.utils import (
     get_js_url,
     get_self_capture_team_id,
     get_short_user_agent,
+    initialize_self_capture_api_token,
     load_data_from_request,
     refresh_requested_by_client,
     relative_date_parse,
@@ -66,7 +71,7 @@ from products.feature_flags.backend.cache_keys import EU_CROSS_REGION_MIRROR_CAC
 from products.feature_flags.backend.local_evaluation import flag_definitions_hypercache
 
 
-class TestAbsoluteUrls(TestCase):
+class TestAbsoluteUrls(SimpleTestCase):
     def test_format_absolute_url(self) -> None:
         regression_11204 = "api/projects/6642/insights/trend/?events=%5B%7B%22id%22%3A%22product%20viewed%22%2C%22name%22%3A%22product%20viewed%22%2C%22type%22%3A%22events%22%2C%22order%22%3A0%7D%5D&actions=%5B%5D&display=ActionsTable&insight=TRENDS&interval=day&breakdown=productName&new_entity=%5B%5D&properties=%5B%5D&step_limit=5&funnel_filter=%7B%7D&breakdown_type=event&exclude_events=%5B%5D&path_groupings=%5B%5D&include_event_types=%5B%22%24pageview%22%5D&filter_test_accounts=false&local_path_cleaning_filters=%5B%5D&date_from=-14d&offset=50"
         absolute_urls_test_cases = [
@@ -112,6 +117,13 @@ class TestAbsoluteUrls(TestCase):
                 "https://app.posthog.com",
                 "https://app.posthog.com/an.external.domain.com/something-outside-posthog",
             ),
+            # A relative path has no authority to judge, so reserved characters encoded in
+            # its query are ordinary data. absolute_uri builds most of our emailed links.
+            (
+                "/signup?email=someone%40example.com",
+                "https://app.posthog.com",
+                "https://app.posthog.com/signup?email=someone%40example.com",
+            ),
             ("/api/path", "", "/api/path"),  # current behavior whether correct or not
             (
                 "/api/path",
@@ -149,15 +161,20 @@ class TestAbsoluteUrls(TestCase):
             # passes, but HTTP clients/browsers route to attacker.example.
             ("raw_backslash", "https://attacker.example\\@app.posthog.com/path"),
             ("percent_encoded_backslash", "https://attacker.example%5C@app.posthog.com/path"),
+            # urljoin hands an absolute URL straight back, so the authority the caller
+            # embeds in a link or a redirect is the one supplied here.
+            ("percent_encoded_slash", "https://attacker.example%2F@app.posthog.com/path"),
+            ("percent_encoded_question_mark", "https://attacker.example%3F@app.posthog.com/path"),
+            ("percent_encoded_hash", "https://attacker.example%23@app.posthog.com/path"),
         ]
     )
-    def test_absolute_uri_rejects_backslash_authority_bypass(self, _name: str, url: str) -> None:
+    def test_absolute_uri_rejects_ambiguous_authority(self, _name: str, url: str) -> None:
         with self.settings(SITE_URL="https://app.posthog.com"):
             with pytest.raises(PotentialSecurityProblemException):
                 absolute_uri(url)
 
 
-class TestFormatUrls(TestCase):
+class TestFormatUrls(SimpleTestCase):
     factory = RequestFactory()
 
     def test_format_query_params_absolute_url(self) -> None:
@@ -197,11 +214,11 @@ class TestFormatUrls(TestCase):
                 "HTTP_HOST": "www.testserver",
                 "HTTP_X_FORWARDED_PROTO": "https",
             }
-            request: Request = Request(build_req)  # ty: ignore[invalid-assignment]
+            request: Request = Request(build_req)
             self.assertEqual("https://www.testserver", format_query_params_absolute_url(request))
 
 
-class TestGetJsUrl(TestCase):
+class TestGetJsUrl(SimpleTestCase):
     factory = RequestFactory()
 
     @parameterized.expand(
@@ -270,7 +287,7 @@ class TestGetJsUrl(TestCase):
             self.assertEqual(expected, get_js_url(request))
 
 
-class TestGeneralUtils(TestCase):
+class TestGeneralUtils(SimpleTestCase):
     def test_available_timezones(self):
         timezones = get_available_timezones_with_offsets()
         self.assertEqual(timezones.get("Europe/Moscow"), 3)
@@ -319,8 +336,8 @@ class TestGeneralUtils(TestCase):
             get_from_env("test_key", type_cast=float)
 
 
-class TestRelativeDateParse(TestCase):
-    @freeze_time("2020-01-31T12:22:23")
+class TestRelativeDateParse(SimpleTestCase):
+    @time_machine.travel("2020-01-31T12:22:23", tick=False)
     def test_hour(self):
         self.assertEqual(
             relative_date_parse("-24h", ZoneInfo("UTC")).isoformat(),
@@ -331,7 +348,7 @@ class TestRelativeDateParse(TestCase):
             "2020-01-29T12:22:23+00:00",
         )
 
-    @freeze_time("2020-01-31")
+    @time_machine.travel("2020-01-31", tick=False)
     def test_day(self):
         self.assertEqual(
             relative_date_parse("dStart", ZoneInfo("UTC")).strftime("%Y-%m-%d"),
@@ -355,7 +372,7 @@ class TestRelativeDateParse(TestCase):
             "2020-01-30T23:59:59.999999+00:00",
         )
 
-    @freeze_time("2020-01-31")
+    @time_machine.travel("2020-01-31", tick=False)
     def test_month(self):
         self.assertEqual(
             relative_date_parse("-1m", ZoneInfo("UTC")).strftime("%Y-%m-%d"),
@@ -400,21 +417,21 @@ class TestRelativeDateParse(TestCase):
             ("minus_two_end", "-2qEnd", "2019-09-30"),
         ]
     )
-    @freeze_time("2020-01-31")
+    @time_machine.travel("2020-01-31", tick=False)
     def test_quarter(self, _name, input, expected_date):
         self.assertEqual(
             relative_date_parse(input, ZoneInfo("UTC")).strftime("%Y-%m-%d"),
             expected_date,
         )
 
-    @freeze_time("2020-01-31")
+    @time_machine.travel("2020-01-31", tick=False)
     def test_quarter_human_friendly_comparison_periods_keeps_week_alignment(self):
         self.assertEqual(
             relative_date_parse("-1q", ZoneInfo("UTC"), human_friendly_comparison_periods=True).strftime("%Y-%m-%d"),
             "2019-11-01",
         )
 
-    @freeze_time("2020-01-31")
+    @time_machine.travel("2020-01-31", tick=False)
     def test_year(self):
         self.assertEqual(
             relative_date_parse("-1y", ZoneInfo("UTC")).strftime("%Y-%m-%d"),
@@ -443,14 +460,14 @@ class TestRelativeDateParse(TestCase):
             ("monday_start", 1, "2020-01-27"),
         ]
     )
-    @freeze_time("2020-01-31")
+    @time_machine.travel("2020-01-31", tick=False)
     def test_week_start(self, _name, week_start_day, expected_date):
         self.assertEqual(
             relative_date_parse("wStart", ZoneInfo("UTC"), team_week_start_day=week_start_day).strftime("%Y-%m-%d"),
             expected_date,
         )
 
-    @freeze_time("2020-01-31")
+    @time_machine.travel("2020-01-31", tick=False)
     def test_normal_date(self):
         self.assertEqual(
             relative_date_parse("2019-12-31", ZoneInfo("UTC")).strftime("%Y-%m-%d"),
@@ -797,25 +814,25 @@ class TestLoadDataFromRequest(TestCase):
         self.assertEqual({"what is it": "the decompressed value"}, data)
 
 
-class TestShouldRefresh(TestCase):
+class TestShouldRefresh(SimpleTestCase):
     def test_refresh_requested_by_client_with_refresh_true(self):
         request = HttpRequest()
-        request.GET["refresh"] = "true"
+        request.GET = QueryDict("refresh=true")
         self.assertTrue(refresh_requested_by_client(Request(request)))
 
     def test_refresh_requested_by_client_with_refresh_empty(self):
         request = HttpRequest()
-        request.GET["refresh"] = ""
+        request.GET = QueryDict("refresh=")
         self.assertTrue(refresh_requested_by_client(Request(request)))
 
     def test_should_not_refresh_with_refresh_false(self):
         request = HttpRequest()
-        request.GET["refresh"] = "false"
+        request.GET = QueryDict("refresh=false")
         self.assertFalse(refresh_requested_by_client(Request(request)))
 
     def test_should_not_refresh_with_refresh_gibberish(self):
         request = HttpRequest()
-        request.GET["refresh"] = "2132klkl"
+        request.GET = QueryDict("refresh=2132klkl")
         self.assertFalse(refresh_requested_by_client(Request(request)))
 
     def test_refresh_requested_by_client_with_data_true(self):
@@ -843,7 +860,7 @@ class TestShouldRefresh(TestCase):
         ) == (datetime(2021, 2, 27, 0, 0), datetime(2021, 12, 31, 21, 20, 41, 730028))
 
 
-class TestUtilities(TestCase):
+class TestUtilities(SimpleTestCase):
     def test_base64_decode(self):
         # Test with a simple string
         simple_string = "Hello, World!"
@@ -886,7 +903,7 @@ class TestUtilities(TestCase):
         self.assertEqual(decoded_json["groups"], {})
 
 
-class TestGetShortUserAgent(TestCase):
+class TestGetShortUserAgent(SimpleTestCase):
     def test_chrome_windows(self):
         request = HttpRequest()
         request.META = {
@@ -955,7 +972,7 @@ class TestGetShortUserAgent(TestCase):
         self.assertNotIn("1234", result)
 
 
-class TestFlatten(TestCase):
+class TestFlatten(SimpleTestCase):
     def test_flatten_lots_of_depth(self):
         assert list(flatten([1, [2, 3], [[4], [5, [6, 7]]]])) == [1, 2, 3, 4, 5, 6, 7]
 
@@ -988,7 +1005,7 @@ def create_group_type_mapping_without_created_at(**kwargs) -> "GroupTypeMapping"
     return instance
 
 
-class TestStrToIntSet(TestCase):
+class TestStrToIntSet(SimpleTestCase):
     @parameterized.expand(
         [
             (None, set()),
@@ -1005,7 +1022,7 @@ class TestStrToIntSet(TestCase):
         assert str_to_int_set(value) == expected
 
 
-class TestGetIpAddress(TestCase):
+class TestGetIpAddress(SimpleTestCase):
     @parameterized.expand(
         [
             # Valid IPv4
@@ -1045,7 +1062,7 @@ class TestGetIpAddress(TestCase):
         assert get_ip_address(request) == expected
 
 
-class TestSharingOverrideProtection(TestCase):
+class TestSharingOverrideProtection(SimpleTestCase):
     """Sharing token authenticators must block query param overrides on shared dashboards."""
 
     def _make_request(self, authenticator, query_params=None):
@@ -1076,13 +1093,73 @@ class TestSharingOverrideProtection(TestCase):
 
         assert result == {"date_from": "-30d"}
 
-    def test_filters_override_allowed_for_normal_auth(self):
-        request = self._make_request(None, query_params={"filters_override": json.dumps({"date_from": "-7d"})})
+    @parameterized.expand(
+        [
+            ("date", {"date_from": "-7d"}),
+            (
+                "grouped_property_list",
+                {"properties": [{"type": "AND", "values": [{"type": "event", "key": "browser", "value": "Chrome"}]}]},
+            ),
+            (
+                "grouped_property_dict",
+                {"properties": {"type": "AND", "values": [{"type": "event", "key": "browser", "value": "Chrome"}]}},
+            ),
+        ]
+    )
+    def test_filters_override_allowed_for_normal_auth(self, _name: str, override: dict[str, Any]) -> None:
+        request = self._make_request(None, query_params={"filters_override": json.dumps(override)})
         dashboard = type("Dashboard", (), {"filters": {"date_from": "-30d"}})()
 
         result = filters_override_requested_by_client(request, dashboard)
 
-        assert result == {"date_from": "-7d"}
+        assert result == {"date_from": "-30d", **override}
+
+    def test_filters_override_gets_saved_metric_variable_definitions(self):
+        saved = {"name": "env", "source": "sql", "query": "SELECT 1", "current": {"values": ["a"]}}
+        compact = [{"name": "env", "current": {"values": ["b"]}}, {"name": "gone", "current": {"values": ["c"]}}]
+        request = self._make_request(None, query_params={"filters_override": json.dumps({"metricVariables": compact})})
+        dashboard = type("Dashboard", (), {"filters": {"metricVariables": [saved]}})()
+
+        result = filters_override_requested_by_client(request, dashboard)
+
+        assert result["metricVariables"] == [{**saved, "current": {"values": ["b"]}}]
+
+    def test_filters_override_rejects_a_metric_variable_name_that_is_not_a_string(self):
+        override: dict[str, list[dict[str, list[str]]]] = {"metricVariables": [{"name": []}]}
+        request = self._make_request(None, query_params={"filters_override": json.dumps(override)})
+        dashboard = type("Dashboard", (), {"filters": {}})()
+
+        with pytest.raises(serializers.ValidationError):
+            filters_override_requested_by_client(request, dashboard)
+
+    @parameterized.expand(
+        [
+            (
+                "unknown_keys",
+                {"date_from": "-7d", "display": "ActionsLineGraph"},
+                "Unknown key(s) in filters_override: display.",
+            ),
+            ("not_an_object", ["date_from"], "filters_override must be a JSON object."),
+            ("invalid_value", {"interval": "fortnight"}, "Invalid value in filters_override at 'interval'"),
+            (
+                "nested_unknown_key",
+                {"compareFilter": {"surprise": True}},
+                "Invalid value in filters_override at 'compareFilter.surprise': Extra inputs are not permitted.",
+            ),
+            (
+                "invalid_property_group",
+                {"properties": [{"type": "OR", "values": []}]},
+                "Invalid value in filters_override: Only AND property groups are supported.",
+            ),
+        ]
+    )
+    def test_filters_override_rejects_invalid_filters(self, _name: str, override: Any, expected_detail: str) -> None:
+        request = self._make_request(None, query_params={"filters_override": json.dumps(override)})
+
+        with pytest.raises(serializers.ValidationError) as exc_info:
+            filters_override_requested_by_client(request, None)
+
+        assert expected_detail in str(exc_info.value.detail)
 
     @parameterized.expand(
         [
@@ -1091,7 +1168,7 @@ class TestSharingOverrideProtection(TestCase):
         ]
     )
     @patch(
-        "products.product_analytics.backend.api.insight_variable.map_stale_to_latest",
+        "products.product_analytics.backend.facade.api.map_stale_to_latest",
         side_effect=lambda variables, _: variables,
     )
     def test_variables_override_blocked_for_sharing_authenticators(self, auth_type, _mock):
@@ -1112,7 +1189,7 @@ class TestSharingOverrideProtection(TestCase):
         assert result == {"var1": {"value": "safe"}}
 
     @patch(
-        "products.product_analytics.backend.api.insight_variable.map_stale_to_latest",
+        "products.product_analytics.backend.facade.api.map_stale_to_latest",
         side_effect=lambda variables, _: variables,
     )
     def test_variables_override_allowed_for_normal_auth(self, _mock):
@@ -1168,7 +1245,7 @@ class TestSharingOverrideProtection(TestCase):
         assert result == {"date_from": "-30d"}
 
     @patch(
-        "products.product_analytics.backend.api.insight_variable.map_stale_to_latest",
+        "products.product_analytics.backend.facade.api.map_stale_to_latest",
         side_effect=lambda variables, _: variables,
     )
     def test_variables_override_blocked_for_shared_context_without_authenticator(self, _mock):
@@ -1190,7 +1267,7 @@ class TestSharingOverrideProtection(TestCase):
         assert result == {"breakdown": "country"}
 
 
-class TestTemplateContextHistogram(TestCase):
+class TestTemplateContextHistogram(SimpleTestCase):
     @staticmethod
     def _count_for_labels(template_name: str, authenticated: str) -> int:
         from posthog.utils import TEMPLATE_CONTEXT_DURATION_HISTOGRAM
@@ -1393,6 +1470,33 @@ class TestBuildFlagProvider(TestCase):
         assert _build_flag_provider()._resolve_team_id() == 5
 
 
+class TestInitializeSelfCaptureHost(SimpleTestCase):
+    def setUp(self):
+        for name in ("disabled", "api_key", "host"):
+            self.addCleanup(setattr, posthoganalytics, name, getattr(posthoganalytics, name))
+        for target, value in (
+            ("posthog.utils.resolve_self_capture_team", Team(api_token="phc_self_capture_test")),
+            ("posthog.utils._build_flag_provider", None),
+            ("posthoganalytics.feature_flag_definitions", {}),
+        ):
+            mocked = patch(target, return_value=value)
+            mocked.start()
+            self.addCleanup(mocked.stop)
+
+    @parameterized.expand(
+        [
+            ("explicit host", "http://static-proxy:8000", "http://static-proxy:8000"),
+            ("falls back to site url", "", "https://preview.example.com"),
+        ]
+    )
+    def test_backend_sends_to_self_capture_host(self, _name, self_capture_host, expected_host):
+        with override_settings(SELF_CAPTURE_HOST=self_capture_host, SITE_URL="https://preview.example.com"):
+            async_to_sync(initialize_self_capture_api_token)()
+
+        assert posthoganalytics.host == expected_host
+        assert posthoganalytics.api_key == "phc_self_capture_test"
+
+
 class TestSelfCaptureBrowserFlagToken(TestCase):
     PASSWORD = "testpassword12345"
 
@@ -1402,6 +1506,12 @@ class TestSelfCaptureBrowserFlagToken(TestCase):
         # is the first one. Cascade deletes roll back with the test transaction.
         User.objects.all().delete()
         Organization.objects.all().delete()
+        # POSTHOG_SELF_TEAM_ID steers the browser token as well as the flag provider, so set the
+        # environment per test instead of inheriting whatever the ambient one holds.
+        env_patch = patch.dict(os.environ, {}, clear=False)
+        env_patch.start()
+        self.addCleanup(env_patch.stop)
+        os.environ.pop("POSTHOG_SELF_TEAM_ID", None)
 
     @override_settings(SELF_CAPTURE=True, E2E_TESTING=False)
     def test_browser_token_uses_dogfood_flags_team_not_self_capture_team(self):
@@ -1425,6 +1535,40 @@ class TestSelfCaptureBrowserFlagToken(TestCase):
 
         assert context["js_posthog_api_key"] == first_team.api_token
         assert first_team.api_token != recent_team.api_token
+
+    @override_settings(SELF_CAPTURE=True, E2E_TESTING=False)
+    def test_browser_token_honors_explicit_self_team_id(self):
+        # A deploy that pins POSTHOG_SELF_TEAM_ID bootstraps flags from that team, so the browser
+        # token has to follow the pin. Reading the first team by PK instead hands posthog-js the
+        # token of whichever team is oldest, which on a long-lived deploy is a seed team that holds
+        # no internal flag definitions.
+        organization = Organization.objects.create(name="Org")
+        first_team = Team.objects.create(organization=organization, name="First")
+        pinned_team = Team.objects.create(organization=organization, name="Pinned")
+
+        request = RequestFactory().get("/?no-preloaded-app-context=1")
+        request.user = AnonymousUser()
+
+        os.environ["POSTHOG_SELF_TEAM_ID"] = str(pinned_team.id)
+        context = get_context_for_template("head.html", request)
+
+        assert context["js_posthog_api_key"] == pinned_team.api_token
+        assert pinned_team.api_token != first_team.api_token
+
+    @override_settings(SELF_CAPTURE=True, E2E_TESTING=False)
+    def test_browser_token_unset_when_pinned_team_is_absent(self):
+        # The provider still pins flag definitions to the missing id, so falling back to another
+        # team's token would recreate the mismatch the pin exists to remove.
+        organization = Organization.objects.create(name="Org")
+        Team.objects.create(organization=organization, name="First")
+
+        request = RequestFactory().get("/?no-preloaded-app-context=1")
+        request.user = AnonymousUser()
+
+        os.environ["POSTHOG_SELF_TEAM_ID"] = "987654321"
+        context = get_context_for_template("head.html", request)
+
+        assert context.get("js_posthog_api_key") is None
 
 
 VALID_PRELOAD_MANIFEST = {
@@ -1481,3 +1625,16 @@ class TestReadPreloadManifest(SimpleTestCase):
         path = self._write_manifest(content)
 
         assert _read_preload_manifest(path, include_authenticated_shell=True) == ("", (), "")
+
+
+class TestDayRange(SimpleTestCase):
+    START = datetime(2026, 1, 1, tzinfo=ZoneInfo("UTC"))
+
+    @parameterized.expand([("same_instant", timedelta(0)), ("full_day", timedelta(days=1))])
+    def test_accepts_ordered_bounds(self, _name: str, delta: timedelta) -> None:
+        day_range = DayRange(start=self.START, end=self.START + delta)
+        assert day_range.end - day_range.start == delta
+
+    def test_rejects_reversed_bounds(self) -> None:
+        with pytest.raises(ValueError, match="start"):
+            DayRange(start=self.START, end=self.START - timedelta(seconds=1))

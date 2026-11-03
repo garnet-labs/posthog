@@ -11,14 +11,17 @@ and response serialization. Business logic lives in ``backend/logic``:
 """
 
 import re
+import builtins
 import dataclasses
-from typing import cast
+from typing import Literal, cast
+from uuid import UUID
 
+from django.db.models import Count, F, Prefetch
 from django.shortcuts import get_object_or_404
 
 from django_filters.rest_framework import DjangoFilterBackend
+from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema_view
-from openai import APIConnectionError
 from pydantic import ValidationError as PydanticValidationError
 from rest_framework import serializers, status, viewsets
 from rest_framework.exceptions import PermissionDenied, ValidationError
@@ -43,30 +46,32 @@ from posthog.api.tagged_item import TaggedItemViewSetMixin
 from posthog.api.utils import action
 from posthog.auth import ProjectSecretAPIKeyAuthentication
 from posthog.clickhouse.query_tagging import Product
-from posthog.event_usage import report_user_action
 from posthog.exceptions_capture import capture_exception
-from posthog.models import User
+from posthog.models import TaggedItem, User
 from posthog.permissions import (
     APIScopePermission,
     TeamMemberAccessPermission,
     is_authenticated_via_project_secret_api_key,
 )
-from posthog.rate_limit import AIBurstRateThrottle, AISustainedRateThrottle
-from posthog.rbac.access_control_api_mixin import AccessControlViewSetMixin
-from posthog.rbac.user_access_control import access_level_satisfied_for_resource
 from posthog.schema_migrations.upgrade import upgrade
 
+from products.access_control.backend.facade.user_access_control import access_level_satisfied_for_resource
+from products.access_control.backend.presentation.access_control import AccessControlViewSetMixin
+from products.data_modeling.backend.facade.api import (
+    HasDependentsError,
+    allowed_saved_query_ids,
+    blocked_lineage_node_id,
+    describe_dependents,
+)
+from products.data_modeling.backend.facade.contracts import Dependent
+from products.data_modeling.backend.facade.models import DataModelingJob
 from products.endpoints.backend.facade.api import (
-    REWRITE_CONTRACT,
     EndpointCrudService,
     EndpointExecutionService,
     EndpointMaterializationService,
     build_materialization_info,
     generate_openapi_spec,
     get_last_execution_times,
-    live_materialization_conditions_source,
-    materialization_fix_enabled,
-    suggest_materialization_fix,
     validate_bucket_overrides,
     validate_endpoint_request,
     validate_update_request,
@@ -74,10 +79,7 @@ from products.endpoints.backend.facade.api import (
 from products.endpoints.backend.facade.enums import ENDPOINT_NAME_REGEX, ENDPOINTS_LOG_SOURCE
 from products.endpoints.backend.facade.models import Endpoint, EndpointVersion
 from products.endpoints.backend.presentation.serializers import (
-    EndpointMaterializationConditionsSerializer,
     EndpointMaterializationSerializer,
-    EndpointMaterializationSuggestionRequestSerializer,
-    EndpointMaterializationSuggestionSerializer,
     EndpointRequestSerializer,
     EndpointResponseSerializer,
     EndpointRunResponseSerializer,
@@ -91,14 +93,77 @@ from products.endpoints.backend.presentation.throttles import (
 )
 
 
+class EndpointDependentsValidationError(serializers.ValidationError):
+    def __init__(self, detail: str, node_id: str | None = None) -> None:
+        super().__init__(detail, code="has_dependents")
+        if node_id:
+            self.extra = {"node_id": node_id}
+
+
 class MaterializationPreviewRequestSerializer(serializers.Serializer):
-    version = serializers.IntegerField(required=False)
+    version = serializers.IntegerField(
+        required=False, help_text="Endpoint version to preview. Defaults to the current version."
+    )
     bucket_overrides = serializers.DictField(
         child=serializers.CharField(),
         required=False,
         allow_null=True,
         help_text='Per-column bucket function overrides, e.g. {"timestamp": "hour"}',
     )
+
+
+class MaterializationPreviewRangePairSerializer(serializers.Serializer):
+    column = serializers.CharField(help_text="Column the query buckets on.")
+    variables = serializers.ListField(
+        child=serializers.CharField(),
+        help_text="Query variables that filter on this column.",
+    )
+    bucket_fn = serializers.CharField(help_text="Bucket function applied to the column.")
+
+
+class MaterializationPreviewAggregateSerializer(serializers.Serializer):
+    expression = serializers.CharField(help_text="Aggregate expression in the transformed query.")
+    reaggregate_fn = serializers.CharField(
+        allow_null=True,
+        help_text="Function that combines materialized partials again, or null when there is none.",
+    )
+
+
+class MaterializationPreviewResponseSerializer(serializers.Serializer):
+    can_materialize = serializers.BooleanField(help_text="Whether the endpoint query can be materialized.")
+    reason = serializers.CharField(
+        allow_null=True,
+        help_text="Why the query cannot be materialized, or null when it can.",
+    )
+    transformed_query = serializers.CharField(
+        allow_null=True,
+        help_text="Query rewritten for materialization, when one could be produced.",
+    )
+    execution_query = serializers.CharField(
+        allow_null=True,
+        help_text="Query that would run against the materialized table.",
+    )
+    display_execution_query = serializers.CharField(
+        allow_null=True,
+        help_text="Execution query formatted for display.",
+    )
+    range_pairs = MaterializationPreviewRangePairSerializer(
+        many=True,
+        help_text="Bucketed columns and the variables that filter on them.",
+    )
+    aggregates = MaterializationPreviewAggregateSerializer(
+        many=True,
+        help_text="Aggregate expressions and how to re-aggregate them.",
+    )
+
+
+ENDPOINT_VERSION_PARAMETER = OpenApiParameter(
+    name="version",
+    type=OpenApiTypes.INT,
+    location=OpenApiParameter.QUERY,
+    required=False,
+    description="Endpoint version to act on. Defaults to the current version.",
+)
 
 
 @extend_schema_view(
@@ -128,10 +193,8 @@ class EndpointViewSet(
         "run",
         "versions",
         "openapi_spec",
-        "materialization_conditions",
         "materialization_preview",
         "materialization_status",
-        "materialization_suggestion",
         "get_endpoints_last_execution_times",
         "logs",
     ]
@@ -153,10 +216,6 @@ class EndpointViewSet(
         return serializers.Serializer  # We use Pydantic models instead; this fallback satisfies drf-spectacular
 
     def get_throttles(self):
-        # Per-user AI throttles: the suggestion action holds a worker on LLM calls, and the
-        # endpoint throttles below don't cover session auth
-        if self.action == "materialization_suggestion":
-            return [AIBurstRateThrottle(), AISustainedRateThrottle()]
         return [
             EndpointBurstThrottle(),
             EndpointSustainedThrottle(),
@@ -272,6 +331,62 @@ class EndpointViewSet(
             return sorted({ti.tag.name for ti in endpoint.prefetched_tags})
         return sorted(endpoint.tagged_items.values_list("tag__name", flat=True))
 
+    @staticmethod
+    def _with_materialization_job_prefetches(queryset):
+        latest_jobs = DataModelingJob.objects.filter(engine=DataModelingJob.Engine.CLICKHOUSE).order_by("-last_run_at")
+        latest_completed_jobs = latest_jobs.filter(status=DataModelingJob.Status.COMPLETED)
+        return queryset.select_related("saved_query", "team").prefetch_related(
+            EndpointVersion.frequency_nodes_prefetch(),
+            Prefetch("saved_query__datamodelingjob_set", queryset=latest_jobs[:1], to_attr="prefetched_latest_jobs"),
+            Prefetch(
+                "saved_query__datamodelingjob_set",
+                queryset=latest_completed_jobs[:1],
+                to_attr="prefetched_latest_completed_jobs",
+            ),
+        )
+
+    @classmethod
+    def _with_serialization_prefetches(cls, queryset):
+        """Tags are prefetched by TaggedItemViewSetMixin.filter_queryset; repeating them here
+        raises a lookup conflict.
+
+        Only the current version is fetched, and the history is counted in the database, so an
+        endpoint with a long version history costs the same as a fresh one.
+        """
+        current_versions = cls._with_materialization_job_prefetches(
+            EndpointVersion.objects.filter(version=F("endpoint__current_version"))
+        )
+        return (
+            queryset.select_related("created_by")
+            .prefetch_related(
+                Prefetch(
+                    "versions",
+                    queryset=current_versions,
+                    to_attr="prefetched_current_versions",
+                ),
+            )
+            .annotate(versions_count=Count("versions", distinct=True))
+        )
+
+    @staticmethod
+    def _current_version(endpoint: Endpoint) -> EndpointVersion:
+        """Read the current version from the prefetch, falling back to a query.
+
+        The prefetch is empty if `current_version` ever drifts from the versions actually stored,
+        so the fallback also covers that.
+        """
+        prefetched = getattr(endpoint, "prefetched_current_versions", None)
+        if prefetched:
+            return prefetched[0]
+        return endpoint.get_version()
+
+    @staticmethod
+    def _versions_count(endpoint: Endpoint) -> int:
+        annotated = getattr(endpoint, "versions_count", None)
+        if annotated is not None:
+            return annotated
+        return endpoint.versions.count()
+
     def _serialize(
         self,
         obj: Endpoint | EndpointVersion,
@@ -286,7 +401,13 @@ class EndpointViewSet(
             version = obj
         else:
             endpoint = obj
-            version = endpoint.get_version()
+            version = self._current_version(endpoint)
+
+        versions_count = (
+            obj.endpoint_versions_count
+            if isinstance(obj, EndpointVersion) and hasattr(obj, "endpoint_versions_count")
+            else self._versions_count(endpoint)
+        )
 
         url = None
         ui_url = None
@@ -311,7 +432,7 @@ class EndpointViewSet(
             "is_materialized": version.is_materialized,
             "current_version": endpoint.current_version,
             "current_version_id": str(version.id),
-            "versions_count": endpoint.versions.count(),
+            "versions_count": versions_count,
             "derived_from_insight": endpoint.derived_from_insight,
             "last_executed_at": endpoint.last_executed_at.isoformat() if endpoint.last_executed_at else None,
             "materialization": build_materialization_info(version),
@@ -343,7 +464,7 @@ class EndpointViewSet(
     )
     def list(self, request: Request, *args, **kwargs) -> Response:
         """List all endpoints for the team."""
-        queryset = self.filter_queryset(self.get_queryset())
+        queryset = self._with_serialization_prefetches(self.filter_queryset(self.get_queryset()))
         page = self.paginate_queryset(queryset)
         if page is not None:
             results = [self._serialize(endpoint, request) for endpoint in page]
@@ -352,6 +473,7 @@ class EndpointViewSet(
         return Response({"results": results})
 
     @extend_schema(
+        parameters=[ENDPOINT_VERSION_PARAMETER],
         responses={200: EndpointVersionResponseSerializer},
         description="Retrieve an endpoint, or a specific version via ?version=N.",
     )
@@ -423,7 +545,10 @@ class EndpointViewSet(
             data, self.team, cast(User, request.user), endpoint=endpoint, version_number=version_number
         )
 
-        outcome = EndpointCrudService(self.team, request).update(endpoint, data, request.data, version_number)
+        try:
+            outcome = EndpointCrudService(self.team, request).update(endpoint, data, request.data, version_number)
+        except HasDependentsError as error:
+            raise self._dependents_error(endpoint.name, error, action="turn off materialization for")
 
         # When targeting a specific version, return version data; otherwise return endpoint data
         if outcome.version_targeted and outcome.target_version is not None:
@@ -439,8 +564,97 @@ class EndpointViewSet(
     def destroy(self, request: Request, name=None, *args, **kwargs) -> Response:
         """Delete an endpoint and clean up materialized query."""
         endpoint = self._get_endpoint_with_object_access(name)
-        EndpointCrudService(self.team, request).destroy(endpoint)
+        try:
+            EndpointCrudService(self.team, request).destroy(endpoint)
+        except HasDependentsError as error:
+            raise self._dependents_error(error.view_name, error)
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+    def _dependents_error(
+        self,
+        subject_name: str,
+        error: HasDependentsError,
+        *,
+        action: Literal["delete", "turn off materialization for"] = "delete",
+    ) -> EndpointDependentsValidationError:
+        visible = self._visible_dependents(error.dependents)
+        can_read_lineage = self.user_access_control.check_access_level_for_resource(
+            "warehouse_view", required_level="viewer"
+        )
+        return EndpointDependentsValidationError(
+            describe_dependents(
+                subject_name,
+                visible,
+                any_hidden=len(visible) < len(error.dependents),
+                action=action,
+            ),
+            node_id=blocked_lineage_node_id(visible, error.fallback_node_id) if can_read_lineage else None,
+        )
+
+    def _visible_dependents(self, dependents: tuple[Dependent, ...]) -> builtins.list[Dependent]:
+        endpoint_dependents = [dependent for dependent in dependents if dependent.kind == "endpoint"]
+        endpoint_saved_query_ids = [
+            dependent.saved_query_id for dependent in endpoint_dependents if dependent.saved_query_id is not None
+        ]
+        endpoint_names = [dependent.name for dependent in endpoint_dependents if dependent.saved_query_id is None]
+        endpoint_versions = EndpointVersion.objects.filter(
+            endpoint__team=self.team,
+            saved_query_id__in=endpoint_saved_query_ids,
+        ).select_related("endpoint")
+        endpoints = {
+            endpoint.id: endpoint
+            for endpoint in [
+                *(version.endpoint for version in endpoint_versions),
+                *Endpoint.objects.filter(team=self.team, name__in=endpoint_names, deleted=False),
+            ]
+        }
+        self.user_access_control.preload_object_access_controls(list(endpoints.values()))
+        readable_endpoint_ids = {
+            str(endpoint.id)
+            for endpoint in endpoints.values()
+            if self.user_access_control.check_access_level_for_object(endpoint, "viewer")
+        }
+        endpoint_ids_by_saved_query = {
+            str(version.saved_query_id): str(version.endpoint_id) for version in endpoint_versions
+        }
+        endpoint_ids_by_name = {endpoint.name: str(endpoint.id) for endpoint in endpoints.values()}
+
+        saved_query_ids = [
+            UUID(dependent.saved_query_id)
+            for dependent in dependents
+            if dependent.kind not in {"endpoint", "metric"} and dependent.saved_query_id is not None
+        ]
+        readable_saved_query_ids = {
+            str(saved_query_id)
+            for saved_query_id in allowed_saved_query_ids(
+                self.team_id,
+                self.user_access_control,
+                ids=saved_query_ids,
+            )
+        }
+        metrics_readable = self.user_access_control.check_access_level_for_resource(
+            "data_catalog", required_level="viewer"
+        )
+
+        return [
+            dependent
+            for dependent in dependents
+            if (
+                (
+                    dependent.kind == "endpoint"
+                    and (
+                        endpoint_ids_by_saved_query.get(dependent.saved_query_id or "")
+                        or endpoint_ids_by_name.get(dependent.name)
+                    )
+                    in readable_endpoint_ids
+                )
+                or (dependent.kind == "metric" and metrics_readable)
+                or (
+                    dependent.kind not in {"endpoint", "metric"}
+                    and dependent.saved_query_id in readable_saved_query_ids
+                )
+            )
+        ]
 
     # ------------------------------------------------------------------
     # Execution
@@ -569,7 +783,19 @@ class EndpointViewSet(
         Returns versions in descending order (latest first).
         """
         endpoint = self._get_endpoint_with_object_access(name)
-        versions_qs = endpoint.versions.all()
+        versions_qs = (
+            self._with_materialization_job_prefetches(endpoint.versions.all())
+            .select_related("endpoint", "endpoint__created_by", "created_by")
+            .prefetch_related(
+                Prefetch(
+                    "endpoint__tagged_items",
+                    queryset=TaggedItem.objects.select_related("tag"),
+                    to_attr="prefetched_tags",
+                )
+            )
+            .annotate(endpoint_versions_count=Count("endpoint__versions", distinct=True))
+            .order_by("-version")
+        )
         page = self.paginate_queryset(versions_qs)
         if page is not None:
             results = [self._serialize(v) for v in page]
@@ -578,6 +804,7 @@ class EndpointViewSet(
         return Response({"results": results})
 
     @extend_schema(
+        parameters=[ENDPOINT_VERSION_PARAMETER],
         responses={200: EndpointMaterializationSerializer},
         description="Get materialization status for an endpoint. Supports ?version=N query param.",
     )
@@ -597,6 +824,7 @@ class EndpointViewSet(
 
     @validated_request(
         MaterializationPreviewRequestSerializer,
+        responses={200: OpenApiResponse(response=MaterializationPreviewResponseSerializer)},
         description="Preview the materialization transform for an endpoint. Shows what the query will look like after materialization, including range pair detection and bucket functions.",
     )
     @action(methods=["POST"], detail=True, url_path="materialization_preview")
@@ -623,125 +851,12 @@ class EndpointViewSet(
         service = EndpointMaterializationService(self.team, request)
         return Response(dataclasses.asdict(service.preview(endpoint, version, bucket_overrides)))
 
-    @validated_request(
-        EndpointMaterializationSuggestionRequestSerializer,
-        responses={200: OpenApiResponse(response=EndpointMaterializationSuggestionSerializer)},
-        description=(
-            "Ask AI to rewrite the endpoint's query into a semantically equivalent form that can be "
-            "materialized. Only applicable to SQL (HogQL) endpoints that currently fail the "
-            "materialization checks. The suggestion is validated against the live checks before being "
-            "returned; nothing is saved. Requires the organization's AI data processing approval."
-        ),
-    )
-    @action(methods=["POST"], detail=True, url_path="materialization_suggestion")
-    def materialization_suggestion(self, request: ValidatedRequest, name=None, *args, **kwargs) -> Response:
-        """Suggest a semantically equivalent, materializable rewrite of the endpoint's query."""
-        endpoint = self._get_endpoint_with_object_access(name)
-
-        if not materialization_fix_enabled(self.team):
-            return Response(
-                status=status.HTTP_404_NOT_FOUND,
-                data={"error": "AI materialization suggestions are not enabled for this project."},
-            )
-
-        if self.team.organization.is_ai_data_processing_approved is not True:
-            return Response(
-                status=status.HTTP_403_FORBIDDEN,
-                data={"error": "Enable AI data processing for this organization to use AI suggestions."},
-            )
-
-        version = self._resolve_version_param(request, endpoint)
-        if isinstance(version, Response):
-            return version
-
-        if (version.query or {}).get("kind") != "HogQLQuery":
-            return Response(
-                status=status.HTTP_400_BAD_REQUEST,
-                data={"error": "AI materialization suggestions are only available for SQL endpoints."},
-            )
-
-        can_materialize, _ = version.can_materialize()
-        if can_materialize:
-            return Response(
-                status=status.HTTP_400_BAD_REQUEST,
-                data={"error": "This query can already be materialized."},
-            )
-
-        try:
-            result = suggest_materialization_fix(
-                team_id=self.team_id, query=version.query, original_columns=version.get_columns()
-            )
-        except APIConnectionError as e:
-            capture_exception(e, {"team_id": self.team_id})
-            return Response(
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
-                data={
-                    "error": "Couldn't reach the AI service. If you're running locally, the LLM gateway isn't running."
-                },
-            )
-        except Exception as e:
-            capture_exception(e, {"team_id": self.team_id, "endpoint_name": endpoint.name})
-            return Response(
-                status=status.HTTP_502_BAD_GATEWAY,
-                data={"error": "The AI suggestion service failed. Try again, or edit the query manually."},
-            )
-
-        report_user_action(
-            cast(User, request.user),
-            "endpoint materialization fix suggested",
-            {
-                "suggestion_status": result.status,
-                "attempts": result.attempts,
-                "original_reason": result.original_reason,
-            },
-            team=self.team,
-        )
-
-        return Response(
-            {
-                "suggestion_status": result.status,
-                "suggested_query": result.suggested_query,
-                "explanation": result.explanation,
-                "attempts": result.attempts,
-                "error": result.error,
-                "original_reason": result.original_reason,
-            }
-        )
-
-    @extend_schema(
-        responses={200: OpenApiResponse(response=EndpointMaterializationConditionsSerializer)},
-        description=(
-            "Get the source code of the live materialization checks, plus the rewrite contract. "
-            "Lets an agent rewrite a rejected endpoint query itself: fetch these conditions, produce a "
-            "semantically equivalent query that passes every check, update the endpoint with it, then "
-            "confirm via materialization_status. The source is read from the running system, so it always "
-            "matches the checks this instance enforces."
-        ),
-    )
-    @action(methods=["GET"], detail=False, url_path="materialization_conditions")
-    def materialization_conditions(self, request: Request, *args, **kwargs) -> Response:
-        """Expose the live materialization conditions for client-side (agent) query rewriting."""
-        return Response(
-            {
-                "conditions_source": live_materialization_conditions_source(),
-                "rewrite_contract": REWRITE_CONTRACT,
-            }
-        )
-
     @extend_schema(
         # url_path="openapi.json" would otherwise produce `..._openapi.json_retrieve` —
         # the `.` is rejected by lint_spec_consistency_hook + the MCP YAML scaffolder.
         operation_id="endpoints_openapi_spec_retrieve",
         description="Get OpenAPI 3.0 specification for this endpoint. Use this to generate typed SDK clients.",
-        parameters=[
-            OpenApiParameter(
-                name="version",
-                type=int,
-                location=OpenApiParameter.QUERY,
-                required=False,
-                description="Specific endpoint version to generate the spec for. Defaults to latest.",
-            ),
-        ],
+        parameters=[ENDPOINT_VERSION_PARAMETER],
     )
     @action(methods=["GET"], detail=True, url_path="openapi.json")
     def openapi_spec(self, request: Request, name=None, *args, **kwargs) -> Response:

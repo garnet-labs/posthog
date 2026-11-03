@@ -18,6 +18,7 @@ export const SURFACE_KEYS = [
     'workflows.create',
     'data_warehouse_sources.create',
     'data_warehouse_sources.update',
+    'ai_observability_evaluations.create',
 ] as const
 
 export type SurfaceKey = (typeof SURFACE_KEYS)[number]
@@ -25,7 +26,11 @@ export type SurfaceKey = (typeof SURFACE_KEYS)[number]
 export type SurfacePrompts = {
     toast: string
     examples: string[]
+    display?: 'list' | 'prompt'
 }
+
+const AI_OBSERVABILITY_EVALUATION_PROMPT =
+    "Use the connected PostHog MCP server and this project's AI observability data to inspect recent traces. Identify and rank real failure modes, with an example trace for each. Recommend one evaluation per failure mode, and say whether it should return pass/fail, a score, or categories. Ask which ones I want before creating anything. Create them disabled, test each on a few recent generations, and show me the results before enabling."
 
 export const FALLBACK_PROMPTS: Record<SurfaceKey, SurfacePrompts> = {
     'feature_flags.create': {
@@ -163,6 +168,11 @@ export const FALLBACK_PROMPTS: Record<SurfaceKey, SurfacePrompts> = {
             '"Resync the orders table on my Postgres source"',
             '"Switch my Stripe source to sync hourly"',
         ],
+    },
+    'ai_observability_evaluations.create': {
+        toast: '"Find failure modes in my recent AI traces, then ask which evaluations to create"',
+        examples: [AI_OBSERVABILITY_EVALUATION_PROMPT],
+        display: 'prompt',
     },
 }
 
@@ -553,4 +563,12 @@ export function getSurfacePrompts(surfaceKey: SurfaceKey, options: ResolveOption
 export function formatDerivedToastPrompt(prompt: string): string {
     const trimmed = prompt.trim().replace(/^["']|["']$/g, '')
     return `"${trimmed}"`
+}
+
+/**
+ * Turns a displayed example into the prompt an external agent receives. The agent may not have the
+ * PostHog MCP server yet, so the prompt tells it to ask for the install instead of guessing.
+ */
+export function stripDisplayQuotes(example: string): string {
+    return example.trim().replace(/^["']|["']$/g, '')
 }

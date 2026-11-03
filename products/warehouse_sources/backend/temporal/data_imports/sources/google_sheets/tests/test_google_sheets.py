@@ -1,5 +1,6 @@
 from collections.abc import Iterable
 from typing import Any, cast
+from urllib.parse import urlencode
 
 import pytest
 from unittest import mock
@@ -8,18 +9,20 @@ import gspread
 import requests
 from google.auth import exceptions as google_auth_exceptions
 
-from products.warehouse_sources.backend.temporal.data_imports.sources.common.base import UNVERSIONED_API_VERSION
+from posthog.credentials_service.errors import CredentialsServiceFailure
+
+from products.warehouse_sources.backend.models.external_data_schema import SCHEMA_RESOURCE_ID_METADATA_KEY
 from products.warehouse_sources.backend.temporal.data_imports.sources.generated_configs.googlesheets import (
     GoogleSheetsSourceConfig,
 )
 from products.warehouse_sources.backend.temporal.data_imports.sources.google_sheets.google_sheets import (
-    _PERMISSION_DENIED_MESSAGE,
     _REQUEST_TIMEOUT_SECONDS,
     GOOGLE_SHEETS_API_VERSION_V4,
+    GoogleSheetsServiceAccountKeyInvalidError,
     _assert_unique_normalized_column_names,
     _get_worksheet,
     _retry_on_transient_api_error,
-    get_schema_incremental_fields,
+    discover_worksheet_schemas,
     get_schemas,
     google_sheets_client,
     google_sheets_source,
@@ -66,7 +69,7 @@ def test_get_worksheet_backoff():
         assert mock_get_worksheet_by_id.call_count == 10
 
 
-@pytest.mark.parametrize("status_code", [429, 500, 502, 503, 504])
+@pytest.mark.parametrize("status_code", [409, 429, 500, 502, 503, 504])
 def test_get_worksheet_retries_transient_api_errors(status_code):
     """Transient API errors (quota 429s and 5xx server errors like
     "[500]: Internal error encountered.") should be retried with backoff, not
@@ -102,7 +105,7 @@ def test_get_worksheet_retries_transient_api_errors(status_code):
         assert mock_get_worksheet_by_id.call_count == 10
 
 
-@pytest.mark.parametrize("status_code", [429, 500, 502, 503, 504])
+@pytest.mark.parametrize("status_code", [409, 429, 500, 502, 503, 504])
 def test_get_schemas_retries_transient_api_errors(status_code):
     """Schema discovery (`open_by_url`/`worksheets`) hits the Sheets API just like
     `_get_worksheet`, so a transient quota 429 or 5xx server error (e.g.
@@ -184,27 +187,6 @@ def test_get_worksheet_does_not_retry_non_transient_api_error():
         assert mock_get_worksheet_by_id.call_count == 1
 
 
-def test_get_worksheet_caching():
-    with (
-        mock.patch(
-            "products.warehouse_sources.backend.temporal.data_imports.sources.google_sheets.google_sheets.google_sheets_client"
-        ) as mock_google_sheets_client,
-    ):
-        _get_worksheet("url", 1)
-        _get_worksheet("url", 1)
-        _get_worksheet("url", 1)
-
-        # It should only have 1 call, the others should be returning the cached value
-        assert mock_google_sheets_client.call_count == 1
-
-        _get_worksheet("url", 2)
-        _get_worksheet("url", 2)
-        _get_worksheet("url", 2)
-
-        # It should now have 2 calls, we've changed one of the arguments, but the second/third calls should be cached
-        assert mock_google_sheets_client.call_count == 2
-
-
 @pytest.mark.parametrize(
     "call_site",
     [
@@ -231,10 +213,11 @@ def test_reraises_permission_error_with_message(call_site):
         assert "Spreadsheet access denied" in str(exc_info.value)
 
 
-@pytest.mark.parametrize("status_code", [429, 500, 502, 503, 504])
+@pytest.mark.parametrize("status_code", [409, 429, 500, 502, 503, 504])
 def test_retry_on_transient_api_error_retries_then_exhausts(status_code):
-    """The shared retry helper must retry transient API errors (quota 429s and 5xx
-    server errors like "[503]: The service is currently unavailable.") with backoff."""
+    """The shared retry helper must retry transient API errors (quota 429s, 5xx
+    server errors like "[503]: The service is currently unavailable.", and 409
+    concurrency conflicts) with backoff."""
     with mock.patch(
         "products.warehouse_sources.backend.temporal.data_imports.sources.google_sheets.google_sheets.time"
     ):
@@ -331,33 +314,6 @@ def test_retry_on_transient_api_error_does_not_retry_non_transient():
     [
         requests.exceptions.ConnectionError("Connection aborted."),
         requests.exceptions.ReadTimeout("Read timed out. (read timeout=120.0)"),
-        requests.exceptions.ConnectTimeout("Connection timed out."),
-        # A connection reset mid-download surfaces as ChunkedEncodingError, which is a sibling of
-        # ConnectionError in the requests hierarchy (not a subclass), so it must be caught explicitly.
-        requests.exceptions.ChunkedEncodingError(
-            "('Connection broken: ConnectionResetError(104, 'Connection reset by peer')', "
-            "ConnectionResetError(104, 'Connection reset by peer'))"
-        ),
-    ],
-)
-def test_retry_on_transient_api_error_retries_network_error_then_succeeds(error):
-    """A dropped connection or read timeout is raised by `requests` before gspread wraps it in an
-    APIError, so the status-code path never sees it. It's a transient blip and must be retried
-    inline rather than failing the read on the first occurrence."""
-    with mock.patch(
-        "products.warehouse_sources.backend.temporal.data_imports.sources.google_sheets.google_sheets.time"
-    ):
-        fn = mock.MagicMock(side_effect=[error, error, "ok"])
-
-        assert _retry_on_transient_api_error(fn) == "ok"
-        assert fn.call_count == 3
-
-
-@pytest.mark.parametrize(
-    "error",
-    [
-        requests.exceptions.ConnectionError("Connection aborted."),
-        requests.exceptions.ReadTimeout("Read timed out. (read timeout=120.0)"),
         requests.exceptions.ChunkedEncodingError("Connection broken: ConnectionResetError(104, ...)"),
     ],
 )
@@ -375,19 +331,34 @@ def test_retry_on_transient_api_error_bubbles_network_error_after_max_retries(er
         assert fn.call_count == 10
 
 
+def test_retry_on_transient_api_error_does_not_retry_persistent_refresh_error():
+    """A genuine credential problem (e.g. a rotated/invalid service-account key) surfaces as a
+    `RefreshError` with the OAuth JSON error body, not Google's frontend-outage HTML page. It must
+    fail immediately rather than spending the whole retry budget on something that can't recover."""
+    with mock.patch(
+        "products.warehouse_sources.backend.temporal.data_imports.sources.google_sheets.google_sheets.time"
+    ):
+        error = google_auth_exceptions.RefreshError("invalid_grant: Invalid JWT Signature.", retryable=False)
+        fn = mock.MagicMock(side_effect=error)
+
+        with pytest.raises(google_auth_exceptions.RefreshError):
+            _retry_on_transient_api_error(fn)
+
+        assert fn.call_count == 1
+
+
 def test_google_sheets_source_retries_transient_error_on_data_reads():
-    """A transient 5xx on the cell-reading calls (`get_all_values`/`get_all_records`)
-    must be retried, not surfaced on the first occurrence. These reads issue their own
-    Sheets API requests separate from worksheet acquisition, so they need the same
-    backoff — otherwise a "[503]: The service is currently unavailable." blip fails the
-    sync."""
+    """A transient 5xx on the cell-reading calls (`get_all_values`/`get`) must be retried,
+    not surfaced on the first occurrence. These reads issue their own Sheets API requests
+    separate from worksheet acquisition, so they need the same backoff — otherwise a
+    "[503]: The service is currently unavailable." blip fails the sync."""
     config = GoogleSheetsSourceConfig(spreadsheet_url="https://docs.google.com/spreadsheets/d/fake")
 
     mock_worksheet = mock.MagicMock()
     # First header read hits a transient 503, then succeeds on retry.
     mock_worksheet.get_all_values.side_effect = [_api_error(503), [["id"]]]
-    # The data read also hits a transient 503 once before returning rows.
-    mock_worksheet.get_all_records.side_effect = [_api_error(503), [{"id": 1}]]
+    # The data read also hits a transient 503 once before returning the grid.
+    mock_worksheet.get.side_effect = [_api_error(503), [["id"], ["1"]]]
 
     with (
         mock.patch(
@@ -406,18 +377,15 @@ def test_google_sheets_source_retries_transient_error_on_data_reads():
         list(cast(Iterable[Any], response.items()))
 
     assert mock_worksheet.get_all_values.call_count == 2
-    assert mock_worksheet.get_all_records.call_count == 2
+    assert mock_worksheet.get.call_count == 2
 
 
-def test_google_sheets_source_reads_blank_cells_as_null():
+def _read_sheet(header_row: list[str], data_rows: list[list[str]]) -> list[Any]:
     config = GoogleSheetsSourceConfig(spreadsheet_url="https://docs.google.com/spreadsheets/d/fake")
 
     mock_worksheet = mock.MagicMock()
-    mock_worksheet.get_all_values.return_value = [["id", "NumericColumnWithBlanks"]]
-    mock_worksheet.get_all_records.return_value = [
-        {"id": 1, "NumericColumnWithBlanks": 1.5},
-        {"id": 2, "NumericColumnWithBlanks": None},
-    ]
+    mock_worksheet.get_all_values.return_value = [header_row]
+    mock_worksheet.get.return_value = [header_row, *data_rows]
 
     with (
         mock.patch(
@@ -432,31 +400,57 @@ def test_google_sheets_source_reads_blank_cells_as_null():
         response = google_sheets_source(
             config, "sheet1", db_incremental_field_last_value=None, api_version=GOOGLE_SHEETS_API_VERSION_V4
         )
-        list(cast(Iterable[Any], response.items()))
+        return list(cast(Iterable[Any], response.items()))
 
-    mock_worksheet.get_all_records.assert_called_once_with(default_blank=None)
+
+def test_google_sheets_source_keeps_cell_text_in_a_column_mixing_numbers_and_text():
+    tables = _read_sheet(
+        ["id", "code"],
+        [["1", "spring sale"], ["2", "1,200"], ["3", ""], ["4", "42"]],
+    )
+
+    assert tables[0].to_pylist() == [
+        {"id": 1, "code": "spring sale"},
+        {"id": 2, "code": "1,200"},
+        {"id": 3, "code": None},
+        {"id": 4, "code": "42"},
+    ]
 
 
 @pytest.mark.parametrize(
-    "error",
+    "header_row,expected_columns",
     [
-        # gspread's bare 403 PermissionError, re-raised with a stable message.
-        pytest.param(PermissionError(_PERMISSION_DENIED_MESSAGE), id="permission_denied"),
-        # Values-read 404s stay a raw APIError (not SpreadsheetNotFound), so str() is
-        # "APIError: [404]: Requested entity was not found." — a deleted/moved/unshared sheet hit mid-read.
-        pytest.param(_api_error(404, "Requested entity was not found.", "NOT_FOUND"), id="entity_not_found_404"),
+        pytest.param(["id", "", "name"], ["id", "column_2", "name"], id="blank_header_between_named"),
+        pytest.param(["id", "name", "   "], ["id", "name", "column_3"], id="whitespace_only_header"),
+        # Google pads every row out to the width of the widest one, so a stray value to the right of
+        # the header row can invent several unnamed columns at once.
+        pytest.param(["id", "", ""], ["id", "column_2", "column_3"], id="several_blank_headers"),
+        # A generated name must not steal a name a real header already uses.
+        pytest.param(["", "column_1"], ["_column_1", "column_1"], id="generated_name_avoids_real_header"),
     ],
 )
-def test_error_string_matches_a_non_retryable_key(error):
-    """The framework classifies non-retryable errors by substring-matching `str(exc)` against the
-    source's keys. Each error the source surfaces for a permanent failure must match a key, otherwise
-    a deterministic 403/404 gets retried forever."""
+def test_google_sheets_source_names_columns_with_blank_headers(header_row, expected_columns):
+    """A header cell with nothing in it used to produce a column named "", which the naming
+    convention rejected with an empty error message — the sync failed permanently and the user was
+    told only "Application error". Every column must come out with a usable name instead."""
+    tables = _read_sheet(header_row, [["1"] * len(header_row)])
+
+    # Sorted because the pipeline decides the column order in the arrow table, not the source.
+    assert sorted(tables[0].column_names) == sorted(expected_columns)
+    assert tables[0].num_rows == 1
+
+
+def test_google_sheets_source_rejects_duplicate_named_headers():
+    """Two columns under the same name would silently collapse into one, so the sync must fail with
+    a message the framework knows is permanent. This check used to be gspread's, and is now ours."""
+    with pytest.raises(Exception) as exc_info:
+        _read_sheet(["id", "name", "name"], [["1", "a", "b"]])
+
     non_retryable_errors = GoogleSheetsSource().get_non_retryable_errors()
+    assert any(key in str(exc_info.value) for key in non_retryable_errors)
 
-    assert any(key in str(error) for key in non_retryable_errors)
 
-
-@pytest.mark.parametrize("status_code", [429, 500, 502, 503, 504])
+@pytest.mark.parametrize("status_code", [409, 429, 500, 502, 503, 504])
 def test_error_string_matches_a_retryable_key(status_code):
     """`_retry_on_transient_api_error` already retries these status codes in-process before
     re-raising; the framework then logs at `warning` instead of `exception` only if the re-raised
@@ -509,6 +503,9 @@ def test_reraises_spreadsheet_not_found_with_non_retryable_message(call_site):
         pytest.param(["task_id", "task-id"], id="punctuation_only"),
         pytest.param(["Name", "name"], id="case_only"),
         pytest.param(["id", "customer name", "Customer Name"], id="collision_among_distinct"),
+        # Normalization drops everything outside a-z and 0-9, so headers written entirely in another
+        # script all reduce to the same name however different they look.
+        pytest.param(["Дата", "Клиент"], id="distinct_non_latin_headers"),
     ],
 )
 def test_assert_unique_normalized_column_names_raises_on_normalized_collision(headers):
@@ -522,67 +519,129 @@ def test_assert_unique_normalized_column_names_raises_on_normalized_collision(he
     assert any(key in str(exc_info.value) for key in non_retryable_errors)
 
 
-@pytest.mark.parametrize(
-    "headers",
-    [
-        pytest.param(["id", "name", "email"], id="distinct"),
-        pytest.param(["id", "", "name"], id="blank_cells_ignored"),
-        # Exact duplicates are left to gspread's own "contains duplicates" check.
-        pytest.param(["id", "id"], id="exact_duplicate"),
-    ],
-)
-def test_assert_unique_normalized_column_names_allows_valid_headers(headers):
-    _assert_unique_normalized_column_names(headers)
+def _sheets_client_listing(*worksheets: mock.MagicMock) -> mock.MagicMock:
+    client = mock.MagicMock()
+    client.open_by_url.return_value.worksheets.return_value = list(worksheets)
+    return client
 
 
-def test_get_schema_incremental_fields_skips_unparseable_range():
+def _worksheet_handle(title: str, worksheet_id: int) -> mock.MagicMock:
+    handle = mock.MagicMock()
+    handle.title = title
+    handle.id = worksheet_id
+    return handle
+
+
+def test_discover_worksheet_schemas_skips_unparseable_range():
     """Google rejects the unbounded "1:2" row range with a 400 'Unable to parse range' for some
     worksheets (e.g. empty sheets). That deterministic error must not break schema discovery — the
     worksheet should just report no incremental fields so the rest of the spreadsheet still syncs."""
     config = GoogleSheetsSourceConfig(spreadsheet_url="https://docs.google.com/spreadsheets/d/fake")
 
-    mock_worksheet = mock.MagicMock()
-    mock_worksheet.get_all_values.side_effect = _api_error(
-        400, "Unable to parse range: 'csm_followups'!1:2", "INVALID_ARGUMENT"
-    )
+    handle = _worksheet_handle("csm_followups", 123)
+    unparseable = _api_error(400, "Unable to parse range: 'csm_followups'!1:2", "INVALID_ARGUMENT")
+    handle.get_all_values.side_effect = unparseable
+    readable = _worksheet_handle("budget", 124)
+    readable.get_all_values.return_value = [["id"], [1]]
+    client = _sheets_client_listing(handle, readable)
+    client.open_by_url.return_value.values_batch_get.side_effect = unparseable
 
-    with (
-        mock.patch(
-            "products.warehouse_sources.backend.temporal.data_imports.sources.google_sheets.google_sheets.get_schemas",
-            return_value=[("csm_followups", 123)],
-        ),
-        mock.patch(
-            "products.warehouse_sources.backend.temporal.data_imports.sources.google_sheets.google_sheets._get_worksheet",
-            return_value=mock_worksheet,
-        ),
+    with mock.patch(
+        "products.warehouse_sources.backend.temporal.data_imports.sources.google_sheets.google_sheets.google_sheets_client",
+        return_value=client,
     ):
-        assert get_schema_incremental_fields(config, "csm_followups") == []
+        schemas = discover_worksheet_schemas(config)
+
+    assert [len(schema.incremental_fields) for schema in schemas] == [0, 1]
 
 
-def test_get_schema_incremental_fields_reraises_other_api_errors():
-    """Only the deterministic 'Unable to parse range' 400 is swallowed. Transient 5xx errors are
-    retried with backoff and, once retries are exhausted, must still propagate so Temporal can retry
-    the activity rather than schema discovery silently reporting no incremental fields."""
+def test_google_sheets_source_skips_unparseable_header_range():
+    """Google rejects the unbounded "1:1" header-row range with the same deterministic 400 'Unable
+    to parse range' handled in `get_schema_incremental_fields` above (e.g. an empty sheet, or a
+    sheet resized to have no columns). The sync must treat this as a worksheet with no header row
+    instead of failing outright."""
     config = GoogleSheetsSourceConfig(spreadsheet_url="https://docs.google.com/spreadsheets/d/fake")
 
     mock_worksheet = mock.MagicMock()
-    mock_worksheet.get_all_values.side_effect = _api_error(500, "Internal error encountered.", "INTERNAL")
+    mock_worksheet.get_all_values.side_effect = _api_error(
+        400, "Unable to parse range: 'empty_sheet'!1:1", "INVALID_ARGUMENT"
+    )
+    mock_worksheet.get.return_value = [[]]
 
     with (
-        mock.patch("products.warehouse_sources.backend.temporal.data_imports.sources.google_sheets.google_sheets.time"),
         mock.patch(
             "products.warehouse_sources.backend.temporal.data_imports.sources.google_sheets.google_sheets.get_schemas",
-            return_value=[("sheet1", 123)],
+            return_value=[("empty_sheet", 123)],
         ),
         mock.patch(
             "products.warehouse_sources.backend.temporal.data_imports.sources.google_sheets.google_sheets._get_worksheet",
             return_value=mock_worksheet,
         ),
+    ):
+        response = google_sheets_source(
+            config, "empty_sheet", db_incremental_field_last_value=None, api_version=GOOGLE_SHEETS_API_VERSION_V4
+        )
+        tables = list(cast(Iterable[Any], response.items()))
+
+    assert response.primary_keys is None
+    assert tables[0].num_rows == 0
+
+
+def test_google_sheets_source_skips_unparseable_invalid_range_on_data_read():
+    """The full-grid read in `get_rows` has no explicit A1 range (it asks for the whole sheet by
+    name), so the same deterministic 400 handled above for the header/incremental-field reads
+    surfaces as 'Invalid range: <title>' instead of 'Unable to parse range'. This call had no
+    handling for it at all, so a zero-dimension worksheet crashed the sync outright instead of
+    syncing as an empty table."""
+    config = GoogleSheetsSourceConfig(spreadsheet_url="https://docs.google.com/spreadsheets/d/fake")
+
+    mock_worksheet = mock.MagicMock()
+    mock_worksheet.get_all_values.return_value = [[]]
+    mock_worksheet.get.side_effect = _api_error(400, "Invalid range: 'empty_sheet'", "INVALID_ARGUMENT")
+
+    with (
+        mock.patch(
+            "products.warehouse_sources.backend.temporal.data_imports.sources.google_sheets.google_sheets.get_schemas",
+            return_value=[("empty_sheet", 123)],
+        ),
+        mock.patch(
+            "products.warehouse_sources.backend.temporal.data_imports.sources.google_sheets.google_sheets._get_worksheet",
+            return_value=mock_worksheet,
+        ),
+    ):
+        response = google_sheets_source(
+            config, "empty_sheet", db_incremental_field_last_value=None, api_version=GOOGLE_SHEETS_API_VERSION_V4
+        )
+        tables = list(cast(Iterable[Any], response.items()))
+
+    assert tables[0].num_rows == 0
+
+
+def test_discover_worksheet_schemas_reraises_other_api_errors_after_a_short_retry_budget():
+    """Only the deterministic 'Unable to parse range' 400 is swallowed. Transient 5xx errors are
+    retried and must still propagate rather than schema discovery silently reporting no incremental
+    fields. Discovery runs inside a web request, so it uses a short retry budget, not the sync one."""
+    config = GoogleSheetsSourceConfig(spreadsheet_url="https://docs.google.com/spreadsheets/d/fake")
+
+    handle = _worksheet_handle("sheet1", 123)
+    client = _sheets_client_listing(handle)
+    batch_get = client.open_by_url.return_value.values_batch_get
+    batch_get.side_effect = _api_error(500, "Internal error encountered.", "INTERNAL")
+
+    with (
+        mock.patch(
+            "products.warehouse_sources.backend.temporal.data_imports.sources.google_sheets.google_sheets.time"
+        ) as mock_time,
+        mock.patch(
+            "products.warehouse_sources.backend.temporal.data_imports.sources.google_sheets.google_sheets.google_sheets_client",
+            return_value=client,
+        ),
         pytest.raises(gspread.exceptions.APIError),
     ):
-        get_schema_incremental_fields(config, "sheet1")
+        discover_worksheet_schemas(config)
 
-    assert mock_worksheet.get_all_values.call_count == 10
+    assert batch_get.call_count == 3
+    assert sum(call.args[0] for call in mock_time.sleep.call_args_list) < 10
 
 
 def test_google_sheets_client_sets_request_timeout():
@@ -635,12 +694,34 @@ def test_validate_credentials_maps_api_error_to_friendly_message(api_message, ex
     assert "APIError" not in (error_message or "")
 
 
-def test_validate_credentials_permission_denied_names_service_account(settings):
+def test_validate_credentials_rejects_non_sheets_url_with_actionable_message():
+    with mock.patch(
+        "products.warehouse_sources.backend.temporal.data_imports.sources.google_sheets.source.google_sheets_client"
+    ) as mock_client:
+        # gspread raises this (with an empty str()) when the value has no spreadsheet key.
+        mock_client.return_value.open_by_url.side_effect = gspread.exceptions.NoValidUrlKeyFound()
+        config = GoogleSheetsSourceConfig(spreadsheet_url="https://example.com/not-a-sheet")
+        is_valid, error_message = GoogleSheetsSource().validate_credentials(config, team_id=1)
+
+    assert is_valid is False
+    # The empty str() would otherwise surface as a bare "Invalid credentials"; point at the URL.
+    assert "Google Sheets URL" in (error_message or "")
+
+
+@pytest.mark.parametrize(
+    "open_error",
+    [
+        PermissionError(),
+        # An unshared sheet 404s just like a deleted one, so this branch must offer sharing too.
+        gspread.exceptions.SpreadsheetNotFound(mock.MagicMock()),
+    ],
+)
+def test_validate_credentials_unshared_sheet_names_service_account(settings, open_error):
     settings.GOOGLE_SHEETS_SERVICE_ACCOUNT_CLIENT_EMAIL = "svc@posthog.iam.gserviceaccount.com"
     with mock.patch(
         "products.warehouse_sources.backend.temporal.data_imports.sources.google_sheets.source.google_sheets_client"
     ) as mock_client:
-        mock_client.return_value.open_by_url.side_effect = PermissionError()
+        mock_client.return_value.open_by_url.side_effect = open_error
         config = GoogleSheetsSourceConfig(spreadsheet_url="https://docs.google.com/spreadsheets/d/fake")
         is_valid, error_message = GoogleSheetsSource().validate_credentials(config, team_id=1)
 
@@ -677,6 +758,37 @@ def test_validate_credentials_maps_google_auth_error(auth_error, expect_retry_hi
         assert "try again in a moment" not in (error_message or "").lower()
 
 
+@pytest.fixture
+def malformed_service_account_key():
+    module = "products.warehouse_sources.backend.temporal.data_imports.sources.google_sheets.google_sheets"
+    with (
+        mock.patch(f"{module}.credentials_service.get_secrets", side_effect=lambda keys: dict.fromkeys(keys, "x")),
+        mock.patch(
+            f"{module}.service_account.Credentials.from_service_account_info",
+            side_effect=ValueError("No key could be detected."),
+        ),
+    ):
+        yield
+
+
+@pytest.mark.usefixtures("malformed_service_account_key")
+def test_google_sheets_client_raises_non_reportable_error_for_malformed_service_account_key():
+    with pytest.raises(GoogleSheetsServiceAccountKeyInvalidError) as exc_info:
+        google_sheets_client()
+
+    assert isinstance(exc_info.value, CredentialsServiceFailure)
+    assert exc_info.value.reportable is False
+
+
+@pytest.mark.usefixtures("malformed_service_account_key")
+def test_validate_credentials_handles_malformed_service_account_key():
+    config = GoogleSheetsSourceConfig(spreadsheet_url="https://docs.google.com/spreadsheets/d/fake")
+    is_valid, error_message = GoogleSheetsSource().validate_credentials(config, team_id=1)
+
+    assert is_valid is False
+    assert "isn't configured correctly on this PostHog instance" in (error_message or "")
+
+
 @pytest.mark.parametrize(
     "pinned_version,expected_version",
     [
@@ -696,7 +808,7 @@ def test_source_for_pipeline_threads_resolved_api_version_to_worksheet(pinned_ve
 
     worksheet = mock.MagicMock()
     worksheet.get_all_values.return_value = [["id"]]
-    worksheet.get_all_records.return_value = [{"id": 1}]
+    worksheet.get.return_value = [["id"], ["1"]]
 
     inputs = mock.MagicMock()
     inputs.schema_name = "sheet1"
@@ -721,23 +833,88 @@ def test_source_for_pipeline_threads_resolved_api_version_to_worksheet(pinned_ve
 
 
 @pytest.mark.parametrize(
-    "pin, expected",
-    [("v4", "v4"), (None, "v4"), (UNVERSIONED_API_VERSION, UNVERSIONED_API_VERSION)],
+    "stored_worksheet_id, worksheet_exists, expected_worksheet_id",
+    [
+        # The worksheet was renamed, so its stored name matches no title, but the stored id finds it.
+        (7, True, 7),
+        # The stored worksheet is gone, so a worksheet with the stored name is read instead.
+        (7, False, 123),
+        # A schema stored before ids were has only its name.
+        (None, True, 123),
+    ],
+    ids=["renamed_worksheet_found_by_id", "missing_id_falls_back_to_name", "no_stored_id_uses_name"],
 )
-def test_get_schemas_threads_resolved_pin_into_incremental_fields(pin, expected):
-    # `_get_worksheet` memoizes on (url, worksheet_id, api_version), so discovery must pass the
-    # source's resolved pin — otherwise a pinned source reads headers under a different key.
+def test_google_sheets_source_resolves_the_stored_worksheet_id_before_the_name(
+    stored_worksheet_id, worksheet_exists, expected_worksheet_id
+):
+    config = GoogleSheetsSourceConfig(spreadsheet_url="https://docs.google.com/spreadsheets/d/fake")
+    mock_worksheet = mock.MagicMock()
+    mock_worksheet.get_all_values.return_value = [["id"]]
+    mock_worksheet.get.return_value = [["id"], ["1"]]
+
+    def get_worksheet(_url, worksheet_id, _api_version):
+        if worksheet_id == 7 and not worksheet_exists:
+            raise gspread.exceptions.WorksheetNotFound("id 7 not found")
+        return mock_worksheet
+
+    module = "products.warehouse_sources.backend.temporal.data_imports.sources.google_sheets.google_sheets"
     with (
-        mock.patch(
-            "products.warehouse_sources.backend.temporal.data_imports.sources.google_sheets.source.get_google_sheets_schemas",
-            return_value=[("sheet1", 10)],
-        ),
-        mock.patch(
-            "products.warehouse_sources.backend.temporal.data_imports.sources.google_sheets.source.get_google_sheets_schema_incremental_fields",
-            return_value=[],
-        ) as mock_incremental,
+        mock.patch(f"{module}.get_schemas", return_value=[("budget", 123)]),
+        mock.patch(f"{module}._get_worksheet", side_effect=get_worksheet) as mock_get_worksheet,
+    ):
+        response = google_sheets_source(
+            config,
+            "budget",
+            db_incremental_field_last_value=None,
+            api_version=GOOGLE_SHEETS_API_VERSION_V4,
+            worksheet_id=stored_worksheet_id,
+        )
+        list(cast(Iterable[Any], response.items()))
+
+    assert mock_get_worksheet.call_args.args[1] == expected_worksheet_id
+
+
+def test_discovery_splits_header_reads_to_keep_each_request_url_bounded():
+    handles = [_worksheet_handle(f"{index:03d} " + "quarterly revenue by region " * 3, index) for index in range(300)]
+    client = _sheets_client_listing(*handles)
+    batch_get = client.open_by_url.return_value.values_batch_get
+    batch_get.side_effect = lambda ranges: {"valueRanges": [{"values": [["text"]]} for _ in ranges]}
+
+    with mock.patch(
+        "products.warehouse_sources.backend.temporal.data_imports.sources.google_sheets.google_sheets.google_sheets_client",
+        return_value=client,
     ):
         config = GoogleSheetsSourceConfig(spreadsheet_url="https://docs.google.com/spreadsheets/d/fake")
-        GoogleSheetsSource().get_schemas(config, team_id=1, api_version=pin)
+        schemas = discover_worksheet_schemas(config)
 
-    assert mock_incremental.call_args.args[-1] == expected
+    batches = [call.args[0] for call in batch_get.call_args_list]
+    assert len(batches) > 1
+    assert all(len(urlencode([("ranges", r) for r in batch])) <= 8000 for batch in batches)
+    assert [schema.worksheet.worksheet_id for schema in schemas] == list(range(300))
+
+
+def test_discovered_schemas_list_worksheets_once_and_carry_title_and_id():
+    budget = _worksheet_handle("Budget 2025", 7)
+    notes = _worksheet_handle("Notes", 8)
+    client = _sheets_client_listing(budget, notes)
+    batch_get = client.open_by_url.return_value.values_batch_get
+    batch_get.return_value = {"valueRanges": [{"values": [["id"], [1]]}, {"values": [["text"], ["hello"]]}]}
+
+    with mock.patch(
+        "products.warehouse_sources.backend.temporal.data_imports.sources.google_sheets.google_sheets.google_sheets_client",
+        return_value=client,
+    ) as mock_client_factory:
+        config = GoogleSheetsSourceConfig(spreadsheet_url="https://docs.google.com/spreadsheets/d/fake")
+        schemas = GoogleSheetsSource().get_schemas(config, team_id=1)
+
+    assert mock_client_factory.call_count == 1
+    assert client.open_by_url.call_count == 1
+    assert client.open_by_url.return_value.worksheets.call_count == 1
+    assert batch_get.call_count == 1
+    assert batch_get.call_args.args[0] == ["'Budget 2025'!1:2", "'Notes'!1:2"]
+    assert budget.get_all_values.call_count == 0
+    assert notes.get_all_values.call_count == 0
+    assert [(s.name, s.label, s.schema_metadata, s.supports_incremental) for s in schemas] == [
+        ("budget_2025", "Budget 2025", {SCHEMA_RESOURCE_ID_METADATA_KEY: "7"}, True),
+        ("notes", "Notes", {SCHEMA_RESOURCE_ID_METADATA_KEY: "8"}, False),
+    ]

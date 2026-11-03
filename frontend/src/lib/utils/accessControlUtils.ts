@@ -1,13 +1,39 @@
 import posthog from 'posthog-js'
 
+import type { LemonSelectOptionLeaf } from '@posthog/lemon-ui'
+
 import { getAppContext } from 'lib/utils/getAppContext'
-import { toSentenceCase } from 'lib/utils/strings'
+import { capitalizeFirstLetter, toSentenceCase } from 'lib/utils/strings'
 import { Scene, sceneToAccessControlResourceType } from 'scenes/sceneTypes'
 
 import { APIScopeObject, AccessControlLevel, AccessControlResourceType, AvailableFeature } from '~/types'
 
+import { AccessLevelEnumApi } from 'products/access_control/frontend/generated/api.schemas'
+
+/** Property access levels with their user-facing labels, shared by the property definition page
+ * and the access control settings panels. */
+export const PROPERTY_ACCESS_LEVEL_OPTIONS: LemonSelectOptionLeaf<AccessLevelEnumApi>[] = [
+    { value: AccessLevelEnumApi.ReadWrite, label: 'Read & write' },
+    { value: AccessLevelEnumApi.Read, label: 'Read only' },
+    { value: AccessLevelEnumApi.None, label: 'No access' },
+]
+
 /** Which iteration of the access control settings UI an interaction came from. */
 export type AccessControlUIVersion = 'v1' | 'v2'
+
+export const toAccessControlLevel = (value: string | null | undefined): AccessControlLevel => {
+    switch (value) {
+        case AccessControlLevel.None:
+        case AccessControlLevel.Viewer:
+        case AccessControlLevel.Editor:
+        case AccessControlLevel.Manager:
+        case AccessControlLevel.Member:
+        case AccessControlLevel.Admin:
+            return value
+        default:
+            return AccessControlLevel.None
+    }
+}
 
 /**
  * Capture an access control analytics event. All events are tagged with
@@ -49,6 +75,18 @@ export const getMaximumAccessLevel = (resource: APIScopeObject): AccessControlLe
     return null
 }
 
+/** Resources whose REST collection route doesn't match the naive `${resource}s` pluralization. */
+const RESOURCE_API_ROUTES: Partial<Record<APIScopeObject, string>> = {
+    warehouse_view: 'warehouse_saved_queries',
+    early_access_feature: 'early_access_feature',
+    ticket: 'conversations/tickets',
+    heatmap: 'saved',
+    replay_scanner: 'vision/scanners',
+}
+
+/** REST collection route for a resource, for building `.../{route}/{id}/access_controls` urls. */
+export const resourceToApiRoute = (resource: APIScopeObject): string => RESOURCE_API_ROUTES[resource] ?? `${resource}s`
+
 /**
  * Converts a resource name to its plural form for display purposes.
  * Handles special cases for specific resources that have custom plural forms.
@@ -71,6 +109,8 @@ export const pluralizeResource = (resource: APIScopeObject): string => {
         return 'revenue analytics'
     } else if (resource === AccessControlResourceType.WebAnalytics) {
         return 'web analytics'
+    } else if (resource === AccessControlResourceType.MarketingAnalytics) {
+        return 'marketing analytics'
     } else if (resource === AccessControlResourceType.ActivityLog) {
         return 'activity logs'
     } else if (resource === AccessControlResourceType.ExternalDataSource) {
@@ -88,17 +128,29 @@ export const pluralizeResource = (resource: APIScopeObject): string => {
         return 'tracing'
     } else if (resource === AccessControlResourceType.SharingConfiguration) {
         return 'sharing'
+    } else if (resource === AccessControlResourceType.Stamphog) {
+        // Product name, so it does not take a plural
+        return 'stamphog'
     } else if (resource === AccessControlResourceType.Toolbar) {
         return 'toolbar'
+    } else if (resource === AccessControlResourceType.LlmPlayground) {
+        return 'LLM playground'
     } else if (resource === AccessControlResourceType.Workflow) {
         return 'workflows'
+    } else if (resource === AccessControlResourceType.Ticket) {
+        return 'support'
     } else if (resource === AccessControlResourceType.ReplayScanner) {
-        // Covers both scanners and their scheduled summary actions — "replay vision" is the product name.
+        // Replay vision is the product name users know for scanners.
         return 'replay vision'
+    } else if (resource === AccessControlResourceType.BusinessKnowledge) {
+        return 'business knowledge'
     }
 
     return resource.replace(/_/g, ' ') + 's'
 }
+
+/** Label for a resource in access control lists, e.g. "Marketing analytics". */
+export const resourceLabel = (resource: APIScopeObject): string => capitalizeFirstLetter(pluralizeResource(resource))
 
 /**
  * Returns the ordered list of access levels available for a given resource type.
@@ -131,12 +183,16 @@ export const resourceTypeToString = (resourceType: AccessControlResourceType): s
         return 'AI observability resource'
     } else if (resourceType === AccessControlResourceType.LlmSkill) {
         return 'skill'
+    } else if (resourceType === AccessControlResourceType.LlmPlayground) {
+        return 'LLM playground'
     } else if (resourceType === AccessControlResourceType.AiObservabilityClusters) {
         return 'AI trace clusters resource'
     } else if (resourceType === AccessControlResourceType.RevenueAnalytics) {
         return 'revenue analytics resource'
     } else if (resourceType === AccessControlResourceType.WebAnalytics) {
         return 'web analytics resource'
+    } else if (resourceType === AccessControlResourceType.MarketingAnalytics) {
+        return 'marketing analytics resource'
     } else if (resourceType === AccessControlResourceType.ErrorTracking) {
         return 'error tracking resource'
     } else if (resourceType === AccessControlResourceType.ExternalDataSource) {
@@ -151,6 +207,9 @@ export const resourceTypeToString = (resourceType: AccessControlResourceType): s
         return 'MCP analytic'
     } else if (resourceType === AccessControlResourceType.ReplayScanner) {
         return 'replay vision resource'
+    } else if (resourceType === AccessControlResourceType.Stamphog) {
+        // Proper noun, so it stays capitalized inside "...permissions for this Stamphog resource."
+        return 'Stamphog resource'
     }
 
     return resourceType.replace(/_/g, ' ')
@@ -243,7 +302,7 @@ const ENTRY_TYPE_TO_RESOURCE_TYPE: Record<string, AccessControlResourceType> = {
     session_recording_playlist: AccessControlResourceType.SessionRecording,
 }
 
-const productHasEffectiveNoneAccess = (resourceType: AccessControlResourceType): boolean => {
+export const productHasEffectiveNoneAccess = (resourceType: AccessControlResourceType): boolean => {
     return getAppContext()?.effective_resource_access_control?.[resourceType] === AccessControlLevel.None
 }
 
@@ -268,7 +327,8 @@ export const getProductAccessDisabledReason = (item: {
         return undefined
     }
     const resourceType = sceneToAccessControlResourceType[item.sceneKey as Scene]
-    if (!resourceType || !productHasEffectiveNoneAccess(resourceType)) {
+    const resources = Array.isArray(resourceType) ? resourceType : resourceType ? [resourceType] : []
+    if (!resources.length || !resources.every(productHasEffectiveNoneAccess)) {
         return undefined
     }
     return `You don't have access to ${item.displayLabel || item.path || 'this product'}`
@@ -319,6 +379,9 @@ export const getAccessControlTooltip = (resource: APIScopeObject): string | null
     }
     if (resource === AccessControlResourceType.Metrics) {
         return 'Controls access to the metrics product and its API. It does not restrict querying the underlying metrics tables with SQL.'
+    }
+    if (resource === AccessControlResourceType.LlmAnalytics) {
+        return 'Covers traces, datasets, provider keys, and the model picker.'
     }
     return null
 }

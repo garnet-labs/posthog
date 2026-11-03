@@ -6,11 +6,7 @@ import {
 } from '~/common/outputs'
 import { IngestionOutputsBuilder } from '~/common/outputs/ingestion-outputs-builder'
 
-import {
-    PRECALCULATED_PERSON_PROPERTIES_OUTPUT,
-    PREFILTERED_EVENTS_OUTPUT,
-    WAREHOUSE_SOURCE_WEBHOOKS_OUTPUT,
-} from './outputs'
+import { CDP_EVENTS_DLQ_OUTPUT, EMAIL_STATUS_OUTPUT, WAREHOUSE_SOURCE_WEBHOOKS_OUTPUT } from './outputs'
 
 /**
  * Outputs the CDP deployments write to. Each output's topic + producer are
@@ -20,9 +16,9 @@ import {
  * - `APP_METRICS_OUTPUT` + `LOG_ENTRIES_OUTPUT` — hog function monitoring path
  *   (also used for legacy plugin app metrics since they share the
  *   `clickhouse_app_metrics2` schema).
- * - `PREFILTERED_EVENTS_OUTPUT` + `PRECALCULATED_PERSON_PROPERTIES_OUTPUT` —
- *   precalculated-filters consumer writes to ClickHouse.
  * - `WAREHOUSE_SOURCE_WEBHOOKS_OUTPUT` — warehouse source webhook payloads.
+ * - `CDP_EVENTS_DLQ_OUTPUT` — events that matched a function but produced no invocation.
+ * - `EMAIL_STATUS_OUTPUT` — status changes of transactional emails.
  */
 export function createCdpOutputsRegistry() {
     return new IngestionOutputsBuilder()
@@ -42,16 +38,16 @@ export function createCdpOutputsRegistry() {
             topicKey: 'MESSAGE_ASSETS_TOPIC',
             producerKey: 'MESSAGE_ASSETS_PRODUCER',
         })
-        .register(PREFILTERED_EVENTS_OUTPUT, {
-            topicKey: 'CDP_PREFILTERED_EVENTS_TOPIC',
-            producerKey: 'CDP_PREFILTERED_EVENTS_PRODUCER',
-        })
-        .register(PRECALCULATED_PERSON_PROPERTIES_OUTPUT, {
-            topicKey: 'CDP_PRECALCULATED_PERSON_PROPERTIES_TOPIC',
-            producerKey: 'CDP_PRECALCULATED_PERSON_PROPERTIES_PRODUCER',
-        })
         .register(WAREHOUSE_SOURCE_WEBHOOKS_OUTPUT, {
             topicKey: 'CDP_WAREHOUSE_SOURCE_WEBHOOKS_TOPIC',
             producerKey: 'CDP_WAREHOUSE_SOURCE_WEBHOOKS_PRODUCER',
+        })
+        .register(CDP_EVENTS_DLQ_OUTPUT, {
+            topicKey: 'CDP_EVENTS_DLQ_TOPIC',
+            producerKey: 'CDP_EVENTS_DLQ_PRODUCER',
+        })
+        .register(EMAIL_STATUS_OUTPUT, {
+            topicKey: 'EMAIL_STATUS_TOPIC',
+            producerKey: 'EMAIL_STATUS_PRODUCER',
         })
 }

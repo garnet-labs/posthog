@@ -4,6 +4,10 @@ from typing import Any
 from parameterized import parameterized
 from rest_framework import status
 
+from posthog.constants import AvailableFeature
+
+from products.access_control.backend.models.access_control import AccessControl
+from products.ai_observability.backend.facade.contracts import EVALUATION_GRADED_MARKER, EVALUATION_PASSED_MARKER
 from products.ai_observability.backend.models.llm_prompt import LLMPrompt
 from products.experiments.backend.llm_metric_templates import TEMPLATE_NAMES
 from products.experiments.backend.models.experiment import Experiment
@@ -116,6 +120,9 @@ class TestExperimentsCreateFromPrompt(APILicensedTest):
         properties = source_or_numerator["properties"]
         prompt_filter = next(p for p in properties if p.get("key") == "$ai_prompt_name")
         self.assertEqual(prompt_filter["value"], self.prompt_name)
+        if template_name == "eval_pass_rate":
+            self.assertIn(EVALUATION_PASSED_MARKER, [prop["key"] for prop in metric["numerator"]["properties"]])
+            self.assertIn(EVALUATION_GRADED_MARKER, [prop["key"] for prop in metric["denominator"]["properties"]])
 
     def test_multiple_templates_creates_one_metric_each(self) -> None:
         # Pick all available templates so we exercise both mean and ratio shapes.
@@ -188,6 +195,16 @@ class TestExperimentsCreateFromPrompt(APILicensedTest):
     def test_400_when_prompt_unknown(self) -> None:
         response = self._post(prompt_name="does-not-exist", versions=[1, 2])
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_403_without_llm_analytics_resource_access(self) -> None:
+        features = self.organization.available_product_features or []
+        features.append({"key": AvailableFeature.ACCESS_CONTROL, "name": AvailableFeature.ACCESS_CONTROL})
+        self.organization.available_product_features = features
+        self.organization.save()
+        AccessControl.objects.create(team=self.team, resource="llm_analytics", access_level="none")
+
+        response = self._post()
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_400_when_template_unknown(self) -> None:
         response = self._post(templates=["bogus"])

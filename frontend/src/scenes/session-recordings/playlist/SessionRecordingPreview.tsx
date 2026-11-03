@@ -1,47 +1,33 @@
 import './SessionRecordingPreview.scss'
 
 import clsx from 'clsx'
-import { useActions, useValues } from 'kea'
+import { useValues } from 'kea'
 import { memo } from 'react'
 
-import {
-    IconAIText,
-    IconBug,
-    IconCursorClick,
-    IconHourglass,
-    IconKeyboard,
-    IconLive,
-    IconPlusSmall,
-} from '@posthog/icons'
-import { LemonButton, Spinner } from '@posthog/lemon-ui'
+import { IconBug, IconCursorClick, IconHourglass, IconKeyboard, IconLive } from '@posthog/icons'
+import { LemonTag } from '@posthog/lemon-ui'
 
-import { PropertyIcon } from 'lib/components/PropertyIcon/PropertyIcon'
 import { TZLabel } from 'lib/components/TZLabel'
-import { selectOutcome } from 'lib/components/ViewRecordingButton/sessionRecordingInfoLogic'
-import { FEATURE_FLAGS, SESSION_RECORDINGS_TTL_WARNING_THRESHOLD_DAYS } from 'lib/constants'
-import { LemonCheckbox } from 'lib/lemon-ui/LemonCheckbox'
+import { SESSION_RECORDINGS_TTL_WARNING_THRESHOLD_DAYS } from 'lib/constants'
 import { LemonSkeleton } from 'lib/lemon-ui/LemonSkeleton'
 import { Tooltip } from 'lib/lemon-ui/Tooltip'
-import { featureFlagLogic } from 'lib/logic/featureFlagLogic'
 import { colonDelimitedDuration } from 'lib/utils/durations'
 import { DraggableToNotebook } from 'scenes/notebooks/AddToNotebook/DraggableToNotebook'
-import { asDisplay } from 'scenes/persons/person-utils'
-import { preflightLogic } from 'scenes/PreflightCheck/preflightLogic'
 import { SimpleTimeLabel } from 'scenes/session-recordings/components/SimpleTimeLabel'
-import { countryTitleFrom } from 'scenes/session-recordings/player/player-meta/playerMetaLogic'
 import { TimestampFormat, playerSettingsLogic } from 'scenes/session-recordings/player/playerSettingsLogic'
 import { urls } from 'scenes/urls'
 
 import { RecordingsQuery } from '~/queries/schema/schema-general'
 import { SessionRecordingType } from '~/types'
 
-import { sessionSummaryProgressLogic } from '../player/player-meta/sessionSummaryProgressLogic'
+import { asDisplay } from 'products/persons/frontend/person-utils'
+
+import { gatherIconProperties } from './gatherIconProperties'
+import { ItemCheckbox } from './ItemCheckbox'
+import { PropertyIcons } from './PropertyIcons'
 import { sessionRecordingsListPropertiesLogic } from './sessionRecordingsListPropertiesLogic'
-import {
-    DEFAULT_RECORDING_FILTERS_ORDER_BY,
-    MAX_SELECTED_RECORDINGS,
-    sessionRecordingsPlaylistLogic,
-} from './sessionRecordingsPlaylistLogic'
+import { DEFAULT_RECORDING_FILTERS_ORDER_BY, sessionRecordingsPlaylistLogic } from './sessionRecordingsPlaylistLogic'
+import { UnwatchedIndicator } from './UnwatchedIndicator'
 
 export interface SessionRecordingPreviewProps {
     recording: SessionRecordingType
@@ -116,66 +102,6 @@ function RecordingExpiry({
     )
 }
 
-interface GatheredProperty {
-    property: string
-    value: string | undefined
-    label: string | undefined
-}
-
-const browserIconPropertyKeys = ['$geoip_country_code', '$browser', '$device_type', '$os']
-const mobileIconPropertyKeys = ['$geoip_country_code', '$device_type', '$os_name']
-
-export function gatherIconProperties(
-    recordingProperties: Record<string, any> | undefined,
-    recording?: SessionRecordingType
-): GatheredProperty[] {
-    const iconProperties =
-        recordingProperties && Object.keys(recordingProperties).length > 0
-            ? recordingProperties
-            : recording?.person?.properties || {}
-
-    const deviceType = iconProperties['$device_type'] || iconProperties['$initial_device_type']
-    const iconPropertyKeys = deviceType === 'Mobile' ? mobileIconPropertyKeys : browserIconPropertyKeys
-
-    return iconPropertyKeys
-        .flatMap((property) => {
-            const value = property === '$device_type' ? deviceType : iconProperties[property]
-            const label = property === '$geoip_country_code' ? countryTitleFrom(iconProperties) : value
-
-            return { property, value, label }
-        })
-        .filter((property) => !!property.value)
-}
-
-export interface PropertyIconsProps {
-    recordingProperties: GatheredProperty[]
-    loading?: boolean
-    iconClassNames?: string
-    showTooltip?: boolean
-    showLabel?: (key: string) => boolean
-}
-
-export function PropertyIcons({ recordingProperties, loading, iconClassNames }: PropertyIconsProps): JSX.Element {
-    return (
-        <div className="flex gap-x-1 ph-no-capture">
-            {loading ? (
-                <LemonSkeleton className="w-16 h-3" />
-            ) : (
-                recordingProperties.map(({ property, value, label }) => (
-                    <Tooltip key={property} title={label}>
-                        <span className="flex items-center gap-x-0.5">
-                            <PropertyIcon className={iconClassNames} property={property} value={value} />
-                            <span className="SessionRecordingPreview__property-label text-secondary truncate">
-                                {label}
-                            </span>
-                        </span>
-                    </Tooltip>
-                ))
-            )}
-        </div>
-    )
-}
-
 function FirstURL(props: { startUrl: string | undefined }): JSX.Element {
     const firstPath = props.startUrl?.replace(/https?:\/\//g, '').split(/[?|#]/)[0]
     return (
@@ -195,46 +121,6 @@ function RecordingOngoingIndicator(): JSX.Element {
     )
 }
 
-export function UnwatchedIndicator({ otherViewersCount }: { otherViewersCount: number }): JSX.Element {
-    const { featureFlags } = useValues(featureFlagLogic)
-
-    const isExcludedFromHideRecordingsMenu = featureFlags[FEATURE_FLAGS.REPLAY_EXCLUDE_FROM_HIDE_RECORDINGS_MENU]
-
-    // If person wished to be excluded from the hide recordings menu, we don't show the tooltip
-    const tooltip = isExcludedFromHideRecordingsMenu ? (
-        <span>You have not watched this recording yet.</span>
-    ) : otherViewersCount ? (
-        <span>
-            You have not watched this recording yet. {otherViewersCount} other{' '}
-            {otherViewersCount === 1 ? 'person has' : 'people have'}.
-        </span>
-    ) : (
-        <span>Nobody has watched this recording yet.</span>
-    )
-
-    return (
-        <Tooltip title={tooltip}>
-            <div
-                className={clsx(
-                    'UnwatchedIndicator w-2 h-2 rounded-full',
-                    isExcludedFromHideRecordingsMenu
-                        ? 'UnwatchedIndicator--primary'
-                        : otherViewersCount
-                          ? 'UnwatchedIndicator--secondary'
-                          : 'UnwatchedIndicator--primary'
-                )}
-                aria-label={
-                    isExcludedFromHideRecordingsMenu
-                        ? 'unwatched-recording-by-you-label'
-                        : otherViewersCount
-                          ? 'unwatched-recording-by-you-label'
-                          : 'unwatched-recording-by-everyone-label'
-                }
-            />
-        </Tooltip>
-    )
-}
-
 function durationToShow(recording: SessionRecordingType, order: RecordingsQuery['order']): number | undefined {
     return order === 'active_seconds'
         ? recording.active_seconds
@@ -242,92 +128,6 @@ function durationToShow(recording: SessionRecordingType, order: RecordingsQuery[
           ? recording.inactive_seconds
           : recording.recording_duration
 }
-
-function ItemCheckbox({ recording }: { recording: SessionRecordingType }): JSX.Element {
-    const { selectedRecordingsIds } = useValues(sessionRecordingsPlaylistLogic)
-    const { setSelectedRecordingsIds } = useActions(sessionRecordingsPlaylistLogic)
-
-    return (
-        <LemonCheckbox
-            checked={selectedRecordingsIds.some((s) => s === recording.id)}
-            data-attr="select-recording"
-            aria-label="Select recording"
-            disabledReason={
-                selectedRecordingsIds.length >= MAX_SELECTED_RECORDINGS
-                    ? `Cannot select more than ${MAX_SELECTED_RECORDINGS} recordings at once`
-                    : undefined
-            }
-            onChange={() => {
-                if (selectedRecordingsIds.some((r) => r === recording.id)) {
-                    setSelectedRecordingsIds(selectedRecordingsIds.filter((r) => r !== recording.id))
-                } else {
-                    setSelectedRecordingsIds([...selectedRecordingsIds, recording.id])
-                }
-            }}
-            stopPropagation
-        />
-    )
-}
-
-const RecordingSummaryIcon = memo(function RecordingSummaryIcon({
-    recording,
-}: {
-    recording: SessionRecordingType
-}): JSX.Element | null {
-    const { loadingBySessionId, summaryBySessionId } = useValues(sessionSummaryProgressLogic)
-    const { startSummarization } = useActions(sessionSummaryProgressLogic)
-    const { isCloudOrDev } = useValues(preflightLogic)
-
-    const isSummarizing = !!loadingBySessionId[recording.id]
-    const summaryOutcome = selectOutcome([summaryBySessionId[recording.id]?.session_outcome, recording.summary_outcome])
-    const hasSummary = !!summaryOutcome?.description
-
-    if (isSummarizing) {
-        return (
-            <Tooltip title="Generating summary…">
-                <span className="flex items-center">
-                    <Spinner className="shrink-0 text-lg mb-1" />
-                </span>
-            </Tooltip>
-        )
-    }
-    if (hasSummary && summaryOutcome) {
-        return (
-            <Tooltip title={summaryOutcome.description}>
-                <span className="flex items-center">
-                    <IconAIText
-                        className={clsx(
-                            'shrink-0 text-lg mb-1',
-                            summaryOutcome.success === false ? 'text-danger' : 'text-success'
-                        )}
-                    />
-                </span>
-            </Tooltip>
-        )
-    }
-    // AI summaries are PostHog Cloud only — hide the per-row trigger on self-hosted. The upsell
-    // lives on the replay page dock (PlayerSummaryDock) rather than repeating per list row.
-    if (!isCloudOrDev) {
-        return null
-    }
-    return (
-        <LemonButton
-            type="tertiary"
-            size="xxsmall"
-            noPadding
-            icon={<IconPlusSmall className="text-ai text-lg" />}
-            tooltip="Summarize this recording"
-            aria-label="Summarize this recording"
-            data-attr="summarize-recording-from-list"
-            className="shrink-0 border border-dashed border-ai text-ai hover:bg-ai/10 mb-1"
-            onClick={(e) => {
-                e.preventDefault()
-                e.stopPropagation()
-                startSummarization(recording.id)
-            }}
-        />
-    )
-})
 
 const SessionRecordingPreviewBase = memo(
     function SessionRecordingPreviewBase({
@@ -339,12 +139,6 @@ const SessionRecordingPreviewBase = memo(
         const { playlistTimestampFormat } = useValues(playerSettingsLogic)
 
         const { recordingPropertiesById, recordingPropertiesLoading } = useValues(sessionRecordingsListPropertiesLogic)
-        const { featureFlags } = useValues(featureFlagLogic)
-
-        // Vision teams trigger analysis from the replay-page dock, not the list. Hide the legacy
-        // summarize icon when replay-vision is on so it doesn't surface alongside Vision.
-        const replayVisionEnabled = !!featureFlags[FEATURE_FLAGS.REPLAY_VISION]
-
         const recordingProperties = recordingPropertiesById[recording.id]
         const loading = !recordingProperties && recordingPropertiesLoading
         const iconProperties = gatherIconProperties(recordingProperties, recording)
@@ -363,8 +157,15 @@ const SessionRecordingPreviewBase = memo(
                     {selectable && <ItemCheckbox recording={recording} />}
                     <div className="grow overflow-hidden flex flex-col gap-y-2 ml-1">
                         <div className="flex items-center justify-between gap-x-0.5">
-                            <div className="flex overflow-hidden font-medium ph-no-capture">
+                            <div className="flex overflow-hidden items-center gap-x-1 font-medium ph-no-capture">
                                 <span className="truncate">{asDisplay(recording.person)}</span>
+                                {recording.matches_filters === false && (
+                                    <Tooltip title="This recording is listed only because it's open. It doesn't match the current filters.">
+                                        <LemonTag type="warning" size="small" className="shrink-0">
+                                            Doesn't match filters
+                                        </LemonTag>
+                                    </Tooltip>
+                                )}
                             </div>
 
                             {playlistTimestampFormat === TimestampFormat.Relative ? (
@@ -433,7 +234,6 @@ const SessionRecordingPreviewBase = memo(
 
                         <div className="flex items-center justify-between">
                             <FirstURL startUrl={recording.start_url} />
-                            {!replayVisionEnabled && <RecordingSummaryIcon recording={recording} />}
                         </div>
                     </div>
 
@@ -454,6 +254,13 @@ const SessionRecordingPreviewBase = memo(
     },
     (prevProps, nextProps) =>
         prevProps.recording.id === nextProps.recording.id &&
+        // The row renders matches_filters, and the same recording flips in and out of matching
+        // as filters change around an open player, so comparing only the id would keep it stale.
+        prevProps.recording.matches_filters === nextProps.recording.matches_filters &&
+        // Mark watched and a session ending reload the same ids with viewed and ongoing flipped.
+        prevProps.recording.viewed === nextProps.recording.viewed &&
+        prevProps.recording.ongoing === nextProps.recording.ongoing &&
+        prevProps.recording.viewers?.length === nextProps.recording.viewers?.length &&
         prevProps.isActive === nextProps.isActive &&
         prevProps.selectable === nextProps.selectable &&
         prevProps.order === nextProps.order
@@ -474,6 +281,13 @@ export const SessionRecordingPreview = memo(
     },
     (prevProps, nextProps) =>
         prevProps.recording.id === nextProps.recording.id &&
+        // The row renders matches_filters, and the same recording flips in and out of matching
+        // as filters change around an open player, so comparing only the id would keep it stale.
+        prevProps.recording.matches_filters === nextProps.recording.matches_filters &&
+        // Mark watched and a session ending reload the same ids with viewed and ongoing flipped.
+        prevProps.recording.viewed === nextProps.recording.viewed &&
+        prevProps.recording.ongoing === nextProps.recording.ongoing &&
+        prevProps.recording.viewers?.length === nextProps.recording.viewers?.length &&
         prevProps.isActive === nextProps.isActive &&
         prevProps.selectable === nextProps.selectable &&
         prevProps.order === nextProps.order

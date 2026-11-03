@@ -1,20 +1,35 @@
 """Tests for trace clustering workflow."""
 
 import uuid
+import dataclasses
+from datetime import UTC, datetime, timedelta
 
 import pytest
+import time_machine
+from unittest.mock import patch
 
 import numpy as np
 from temporalio import activity
-from temporalio.testing import WorkflowEnvironment
+from temporalio.exceptions import ApplicationError
+from temporalio.testing import ActivityEnvironment, WorkflowEnvironment
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
 
+from posthog.clickhouse.client.limit import ConcurrencyLimitExceeded
+from posthog.exceptions import ClickHouseAtCapacity
+from posthog.temporal.ai_observability.trace_clustering.activities import perform_clustering_compute_activity
 from posthog.temporal.ai_observability.trace_clustering.clustering import perform_kmeans_with_optimal_k
-from posthog.temporal.ai_observability.trace_clustering.constants import DEFAULT_MAX_SAMPLES
+from posthog.temporal.ai_observability.trace_clustering.constants import (
+    COMPUTE_ACTIVITY_RETRY_POLICY,
+    COMPUTE_SCHEDULE_TO_CLOSE_TIMEOUT,
+    DEFAULT_MAX_SAMPLES,
+    QUERY_CAPACITY_BACKOFF_MAX,
+    QUERY_CAPACITY_BACKOFF_MIN,
+)
 from posthog.temporal.ai_observability.trace_clustering.models import (
     ClusterAggregateMetrics,
     ClusteringActivityInputs,
     ClusteringComputeResult,
+    ClusteringMetrics,
     ClusteringResult,
     ClusteringWorkflowInputs,
     ClusterItem,
@@ -26,6 +41,7 @@ from posthog.temporal.ai_observability.trace_clustering.models import (
     TraceLabelingMetadata,
 )
 from posthog.temporal.ai_observability.trace_clustering.workflow import DailyTraceClusteringWorkflow
+from posthog.temporal.common.errors import NonReportableError
 
 
 @pytest.fixture
@@ -273,6 +289,81 @@ class TestActivityInputOutputModels:
         assert inputs.job_name == ""
 
 
+class TestLabelingWorkflowWiring:
+    @pytest.mark.asyncio
+    async def test_forwards_workflow_run_identity_to_labeling(self) -> None:
+        trace_uuid = uuid.UUID("11111111-1111-4111-8111-111111111111")
+        compute_result = ClusteringComputeResult(
+            clustering_run_id="1_trace_20250108_000000_job-1",
+            items=[ClusterItem(trace_id="trace-1")],
+            labels=[0],
+            centroids=[[0.0, 0.0]],
+            distances=[[0.0]],
+            coords_2d=[[0.0, 0.0]],
+            centroid_coords_2d=[[0.0, 0.0]],
+            probabilities=[1.0],
+        )
+        emitted_result = ClusteringResult(
+            clustering_run_id=compute_result.clustering_run_id,
+            team_id=1,
+            timestamp="2025-01-08T00:00:00+00:00",
+            window_start="2025-01-01T00:00:00+00:00",
+            window_end="2025-01-08T00:00:00+00:00",
+            metrics=ClusteringMetrics(total_items_analyzed=1, num_clusters=1, duration_seconds=1.0),
+            clusters=[],
+        )
+        activity_inputs: list[object] = []
+        responses = iter(
+            [
+                compute_result,
+                GenerateLabelsActivityOutputs(
+                    cluster_labels={0: ClusterLabel(title="Cluster", description="Description")}
+                ),
+                {},
+                emitted_result,
+            ]
+        )
+
+        async def fake_execute_activity(_activity: object, *, args: list[object], **_kwargs: object) -> object:
+            activity_inputs.append(args[0])
+            return next(responses)
+
+        with (
+            patch(
+                "posthog.temporal.ai_observability.trace_clustering.workflow.workflow.execute_activity",
+                new=fake_execute_activity,
+            ),
+            patch(
+                "posthog.temporal.ai_observability.trace_clustering.workflow.workflow.now",
+                return_value=datetime(2025, 1, 8, tzinfo=UTC),
+            ),
+            patch(
+                "posthog.temporal.ai_observability.trace_clustering.workflow.workflow.uuid4",
+                return_value=trace_uuid,
+            ),
+            patch("posthog.temporal.ai_observability.trace_clustering.workflow.record_items_analyzed"),
+            patch("posthog.temporal.ai_observability.trace_clustering.workflow.record_noise_points"),
+            patch("posthog.temporal.ai_observability.trace_clustering.workflow.record_clusters_generated"),
+        ):
+            await DailyTraceClusteringWorkflow().run(
+                ClusteringWorkflowInputs(team_id=1, job_id="job-1", job_name="Job 1")
+            )
+
+        label_inputs = activity_inputs[1]
+        assert isinstance(label_inputs, GenerateLabelsActivityInputs)
+        assert label_inputs.trace_id == str(trace_uuid)
+        assert label_inputs.session_id == f"{trace_uuid}:session"
+        assert label_inputs.clustering_run_id == compute_result.clustering_run_id
+        assert label_inputs.clustering_job_id == "job-1"
+        assert label_inputs.properties_to_log == {
+            "team_id": 1,
+            "trace_id": str(trace_uuid),
+            "session_id": f"{trace_uuid}:session",
+            "clustering_run_id": compute_result.clustering_run_id,
+            "clustering_job_id": "job-1",
+        }
+
+
 class TestEmptyComputeResultShortCircuit:
     """Empty compute results must not trigger labeling/aggregates/emission.
 
@@ -342,3 +433,72 @@ class TestEmptyComputeResultShortCircuit:
         assert result.clusters == []
         assert result.clustering_run_id == "run-empty"
         assert result.team_id == 1
+
+
+class TestComputeActivityCapacityBackoff:
+    """The compute activity must not let a ClickHouse capacity error retry immediately.
+
+    Guards the incident fix: on `ClickHouseAtCapacity` or `ConcurrencyLimitExceeded` the activity
+    backs off with jitter (via ApplicationError.next_retry_delay) so a saturated pool gets
+    breathing room instead of more queries. A regression here would restore the immediate-retry load spiral.
+    """
+
+    @pytest.mark.parametrize("capacity_error", [ClickHouseAtCapacity, ConcurrencyLimitExceeded])
+    @pytest.mark.parametrize(
+        "attempt, seconds_to_deadline, reportable",
+        [
+            (1, COMPUTE_SCHEDULE_TO_CLOSE_TIMEOUT.total_seconds(), False),
+            (COMPUTE_ACTIVITY_RETRY_POLICY.maximum_attempts, COMPUTE_SCHEDULE_TO_CLOSE_TIMEOUT.total_seconds(), True),
+            (1, QUERY_CAPACITY_BACKOFF_MIN.total_seconds() / 2, True),
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_query_capacity_errors_back_off_and_report_only_the_last_attempt(
+        self, capacity_error: type[Exception], attempt: int, seconds_to_deadline: float, reportable: bool
+    ):
+        inputs = ClusteringActivityInputs(
+            team_id=1,
+            window_start="2025-01-01T00:00:00Z",
+            window_end="2025-01-08T00:00:00Z",
+        )
+        now = datetime(2026, 1, 1, tzinfo=UTC)
+        env = ActivityEnvironment()
+        env.info = dataclasses.replace(
+            env.info,
+            attempt=attempt,
+            retry_policy=COMPUTE_ACTIVITY_RETRY_POLICY,
+            schedule_to_close_timeout=COMPUTE_SCHEDULE_TO_CLOSE_TIMEOUT,
+            scheduled_time=now - COMPUTE_SCHEDULE_TO_CLOSE_TIMEOUT + timedelta(seconds=seconds_to_deadline),
+        )
+
+        with (
+            time_machine.travel(now, tick=False),
+            patch(
+                "posthog.temporal.ai_observability.trace_clustering.activities._perform_clustering_compute",
+                side_effect=capacity_error(),
+            ),
+        ):
+            with pytest.raises(ApplicationError) as exc_info:
+                await env.run(perform_clustering_compute_activity, inputs)
+
+        err = exc_info.value
+        assert err.type == capacity_error.__name__
+        assert err.non_retryable is False
+        assert isinstance(err, NonReportableError) is not reportable
+        assert err.next_retry_delay is not None
+        assert QUERY_CAPACITY_BACKOFF_MIN <= err.next_retry_delay <= QUERY_CAPACITY_BACKOFF_MAX
+
+
+@pytest.mark.django_db
+def test_compute_skips_deleted_team() -> None:
+    from posthog.temporal.ai_observability.trace_clustering.activities import _perform_clustering_compute
+
+    result = _perform_clustering_compute(
+        ClusteringActivityInputs(
+            team_id=999_999_999,
+            window_start="2025-01-01T00:00:00Z",
+            window_end="2025-01-08T00:00:00Z",
+        )
+    )
+
+    assert result.items == []

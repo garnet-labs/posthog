@@ -2,22 +2,17 @@ from typing import Optional, cast
 
 import requests
 
-from posthog.schema import (
+from posthog.exceptions_capture import capture_exception
+from posthog.models.integration import ERROR_TOKEN_REFRESH_FAILED, OauthIntegration, refresh_backoff_active
+
+from products.warehouse_sources.backend.facade.codebase_detection import detect
+from products.warehouse_sources.backend.facade.source_config import (
     DataWarehouseSourceCategory,
-    ExternalDataSourceType as SchemaExternalDataSourceType,
     ReleaseStatus,
     SourceConfig,
     SourceFieldOauthAccountSelectConfig,
     SourceFieldOauthConfig,
     SuggestedTable,
-)
-
-from posthog.exceptions_capture import capture_exception
-from posthog.models.integration import ERROR_TOKEN_REFRESH_FAILED, OauthIntegration
-
-from products.warehouse_sources.backend.temporal.data_imports.pipelines.pipeline.typings import (
-    SourceInputs,
-    SourceResponse,
 )
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.base import (
     MARKETING_ANALYTICS_SUGGESTED_TABLE_TOOLTIP,
@@ -35,6 +30,7 @@ from products.warehouse_sources.backend.temporal.data_imports.sources.common.mix
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.registry import SourceRegistry
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.resumable import ResumableSourceManager
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.schema import SourceSchema
+from products.warehouse_sources.backend.temporal.data_imports.sources.common.typings import SourceInputs, SourceResponse
 from products.warehouse_sources.backend.temporal.data_imports.sources.generated_configs.snapchatads import (
     SnapchatAdsSourceConfig,
 )
@@ -46,9 +42,22 @@ from products.warehouse_sources.backend.temporal.data_imports.sources.snapchat_a
 from products.warehouse_sources.backend.temporal.data_imports.sources.snapchat_ads.utils import list_ad_accounts
 from products.warehouse_sources.backend.types import ExternalDataSourceType
 
+# Raised when the refresh token is dead (an unbroken invalid_grant streak), so only a reconnect helps.
+SNAPCHAT_REAUTHORIZATION_REQUIRED_ERROR = "Snapchat Ads authorization can no longer be refreshed"
+SNAPCHAT_RECONNECT_MESSAGE = "Snapchat Ads authentication failed. Please reconnect your Snapchat account."
+
 
 @SourceRegistry.register
 class SnapchatAdsSource(ResumableSource[SnapchatAdsSourceConfig, SnapchatResumeConfig], OAuthMixin):
+    codebase_detection = detect(
+        env=("^(SNAPCHAT_ADS|SNAPCHATADS)_",),
+        script_hosts=("sc-static.net",),
+        pypi=("snap-business-sdk",),
+        go=("github.com/Snapchat/business-sdk-go",),
+        maven=("com.snap.business.sdk:capi-java",),
+        rubygems=("snap_business",),
+    )
+
     supported_versions = ("v1",)
     default_version = "v1"
     api_docs_url = "https://developers.snap.com/api/marketing-api"
@@ -68,18 +77,30 @@ class SnapchatAdsSource(ResumableSource[SnapchatAdsSourceConfig, SnapchatResumeC
 
     def get_non_retryable_errors(self) -> dict[str, str | None]:
         # Snapchat's Marketing API surfaces these as requests HTTPError "<code> Client Error".
-        # They're all permanent for a given config — a deleted/inaccessible ad account (404),
-        # revoked auth (401), or insufficient permissions (403) — so retrying cannot recover.
+        # They're permanent for a given config — a deleted/inaccessible ad account (404) or
+        # insufficient permissions (403) — so retrying cannot recover. A revoked grant shows up
+        # when the refresh token is rejected, not as a 401, see `source_for_pipeline`.
         return {
-            "401 Client Error": "Snapchat Ads authentication failed. Please reconnect your Snapchat account.",
+            SNAPCHAT_REAUTHORIZATION_REQUIRED_ERROR: SNAPCHAT_RECONNECT_MESSAGE,
             "403 Client Error": "Snapchat Ads access forbidden. Please check your account permissions.",
             "404 Client Error": "Snapchat Ads resource not found. Please check that the ad account still exists and is accessible.",
+        }
+
+    def get_retryable_errors(self) -> set[str]:
+        # The access token lives for one hour. A 401 can come from a token that expired before the
+        # refresh, or from Snapchat when it rejects valid tokens of many accounts at once. The next
+        # attempt refreshes an expired token, so a 401 must not disable the schema.
+        return {"401 Client Error"}
+
+    def get_retry_exhausted_errors(self) -> dict[str, str]:
+        return {
+            "401 Client Error": "Snapchat Ads did not accept the access token. The next sync tries again automatically. If this error continues, reconnect your Snapchat account.",
         }
 
     @property
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
-            name=SchemaExternalDataSourceType.SNAPCHAT_ADS,
+            name=ExternalDataSourceType.SNAPCHATADS,
             category=DataWarehouseSourceCategory.ADVERTISING,
             label="Snapchat Ads",
             caption="Collect campaign data, ad performance, and advertising metrics from Snapchat Ads. Ensure you have granted PostHog access to your Snapchat Ads account, learn how to do this in [the documentation](https://posthog.com/docs/cdp/sources/snapchat-ads).",
@@ -172,6 +193,11 @@ class SnapchatAdsSource(ResumableSource[SnapchatAdsSourceConfig, SnapchatResumeC
             self.get_oauth_integration(config.snapchat_integration_id, team_id)
             return True, None
         except Exception as e:
+            if isinstance(e, ValueError) and "Integration not found" in str(e):
+                # The integration was deleted/disconnected while the source still references it —
+                # an expected user state, not an error worth reporting (get_oauth_integration raises
+                # ValueError("Integration not found: <id>")).
+                return False, "Snapchat Ads integration not found. Please reconnect your Snapchat Ads integration."
             capture_exception(e)
             return False, f"Failed to validate Snapchat Ads credentials: {str(e)}"
 
@@ -190,6 +216,7 @@ class SnapchatAdsSource(ResumableSource[SnapchatAdsSourceConfig, SnapchatResumeC
                 supports_incremental=endpoint_config.incremental_fields is not None,
                 supports_append=False,
                 incremental_fields=endpoint_config.incremental_fields or [],
+                should_sync_default=endpoint_config.should_sync_default,
             )
             for endpoint_config in SNAPCHAT_ADS_CONFIG.values()
         ]
@@ -210,6 +237,17 @@ class SnapchatAdsSource(ResumableSource[SnapchatAdsSourceConfig, SnapchatResumeC
         inputs: SourceInputs,
     ) -> SourceResponse:
         integration = self.get_oauth_integration(config.snapchat_integration_id, inputs.team_id)
+
+        if integration.config.get("refresh_terminal"):
+            raise ValueError(f"{SNAPCHAT_REAUTHORIZATION_REQUIRED_ERROR} for job {inputs.job_id}")
+
+        # The refresh sweep can fall behind, and an expired token gets a 401 on every request. A
+        # failed refresh is recorded on the integration and the run continues with the old token.
+        oauth = OauthIntegration(integration)
+        if not refresh_backoff_active(oauth.integration) and oauth.access_token_expired():
+            oauth.refresh_access_token()
+            if integration.config.get("refresh_terminal"):
+                raise ValueError(f"{SNAPCHAT_REAUTHORIZATION_REQUIRED_ERROR} for job {inputs.job_id}")
 
         if not integration.access_token:
             raise ValueError(f"Snapchat Ads access token not found for job {inputs.job_id}")

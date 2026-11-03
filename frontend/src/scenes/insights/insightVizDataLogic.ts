@@ -1,4 +1,4 @@
-import { MakeLogicType, actions, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
+import { MakeLogicType, actions, afterMount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import posthog from 'posthog-js'
 
 import { lemonToast } from '@posthog/lemon-ui'
@@ -9,28 +9,78 @@ import {
 } from 'lib/components/InsightLegend/utils'
 import { Intervals, intervals } from 'lib/components/IntervalFilter/intervals'
 import { parseProperties } from 'lib/components/PropertyFilters/utils'
-import { FEATURE_FLAGS, NON_TIME_SERIES_DISPLAY_TYPES, NON_VALUES_ON_SERIES_DISPLAY_TYPES } from 'lib/constants'
+import { dataWarehouseColumnsWithJoins } from 'lib/components/TaxonomicFilter/dataWarehouseColumns'
+import {
+    FEATURE_FLAGS,
+    NON_TIME_SERIES_DISPLAY_TYPES,
+    NON_VALUES_ON_SERIES_DISPLAY_TYPES,
+    PIE_DISPLAY_TYPES,
+} from 'lib/constants'
 import { dayjs } from 'lib/dayjs'
+import { keyForInsightLogicProps } from 'lib/insights/sharedUtils'
 import { featureFlagLogic } from 'lib/logic/featureFlagLogic'
 import { dateMapping, is12HoursOrLess, isLessThan2Days } from 'lib/utils/dateFilters'
-import { eventUsageLogic } from 'lib/utils/eventUsageLogic'
+import { objectsEqual } from 'lib/utils/objects'
 import { databaseTableListLogic } from 'scenes/data-management/database/databaseTableListLogic'
 import { dataThemeLogic } from 'scenes/dataThemeLogic'
-import { getClampedFunnelStepRange } from 'scenes/funnels/funnelUtils'
+import {
+    FLAG_EVALUATIONS_TABLE,
+    FlagCallsRetentionGap,
+    flagCallsRetentionGap,
+    flagEvaluationsRetentionStartDate,
+} from 'scenes/feature-flags/flagEvaluationsTable'
+import { MathAvailability } from 'scenes/insights/filters/ActionFilter/ActionFilterRow/types'
+import { cleanSeriesNodes } from 'scenes/insights/filters/ActionFilter/cleanSeriesNodes'
+import {
+    flagCallsSeriesName,
+    dataWarehouseSeriesNodes,
+    everyWarehouseSeriesReadsFlagCalls,
+    flagCallsBreakdownFromEventBreakdown,
+    readsFlagCalls,
+    withFlagCallsAggregationTarget,
+} from 'scenes/insights/filters/ActionFilter/flagCallsSeries'
+import type { SeriesNode } from 'scenes/insights/filters/ActionFilter/seriesNode'
 import { insightDataLogic } from 'scenes/insights/insightDataLogic'
-import { keyForInsightLogicProps } from 'scenes/insights/sharedUtils'
-import { AggregationType } from 'scenes/insights/views/InsightsTable/insightsTableDataLogic'
+import { insightLogic } from 'scenes/insights/insightLogic'
 import { sceneLogic } from 'scenes/sceneLogic'
 import { filterTestAccountsDefaultsLogic } from 'scenes/settings/environment/filterTestAccountDefaultsLogic'
-import { BASE_MATH_DEFINITIONS } from 'scenes/trends/mathsLogic'
 
 import { actionsModel } from '~/models/actionsModel'
+import { trendsResultsMatchQuery } from '~/queries/nodes/InsightViz/queryUtils'
 import {
     extractValidationError,
     extractValidationErrorCode,
     getAllEventNames,
     queryFromKind,
 } from '~/queries/nodes/InsightViz/utils'
+import {
+    getBreakdown,
+    getCompareFilter,
+    getDisplay,
+    getFormula,
+    getInterval,
+    getSeries,
+} from '~/queries/schema/node-accessors'
+import {
+    isActionsNode,
+    isAnyDataWarehouseNode,
+    isDataWarehouseNode,
+    isEventsNode,
+    isFunnelsQuery,
+    isInsightQueryNode,
+    isInsightVizNode,
+    isLifecycleDataWarehouseNode,
+    isLifecycleQuery,
+    isNodeWithSource,
+    isPathsQuery,
+    isPathsV2Query,
+    isRetentionQuery,
+    isStickinessQuery,
+    isTrendsQuery,
+    isWebOverviewQuery,
+    isWebStatsTableQuery,
+    hasBreakdownFilter,
+} from '~/queries/schema/node-guards'
 import {
     AnyDataWarehouseNode,
     AnyEntityNode,
@@ -60,18 +110,13 @@ import {
     filterForQuery,
     filterKeyForQuery,
     getAggregationGroupTypeIndex,
-    getBreakdown,
-    getCompareFilter,
-    getDisplay,
-    getFormula,
     getFormulaNodes,
     getFormulas,
     getGoalLines,
-    getInterval,
     getLegendPosition,
     getResultCustomizationBy,
-    getSeries,
     getShowAlertThresholdLines,
+    getAnnotationsScope,
     getShowAnnotations,
     getShowLabelsOnSeries,
     getShowLegend,
@@ -80,23 +125,7 @@ import {
     getShowPercentStackView,
     getShowValuesOnSeries,
     getYAxisScaleType,
-    isActionsNode,
-    isAnyDataWarehouseNode,
-    isDataWarehouseNode,
-    isEventsNode,
-    isFunnelsQuery,
-    isInsightQueryNode,
-    isInsightVizNode,
-    isLifecycleDataWarehouseNode,
-    isLifecycleQuery,
-    isNodeWithSource,
-    isPathsQuery,
-    isRetentionQuery,
-    isStickinessQuery,
-    isTrendsQuery,
     isWebAnalyticsInsightQuery,
-    isWebOverviewQuery,
-    isWebStatsTableQuery,
     nodeKindToFilterProperty,
     supportsBarValueStacking,
     supportsPercentStackView,
@@ -109,7 +138,12 @@ import {
     IntervalType,
     LabelGroupType,
     SlowQueryPossibilities,
+    AnnotationScope,
 } from '~/types'
+
+import { getClampedFunnelStepRange } from 'products/product_analytics/frontend/insights/funnels/funnelUtils'
+import { AggregationType } from 'products/product_analytics/frontend/insights/shared/InsightsTable/insightsTableDataLogic'
+import { BASE_MATH_DEFINITIONS } from 'products/product_analytics/frontend/insights/trends/mathsLogic'
 
 import type { DataColorTheme } from '../../lib/colors'
 import type { FeatureFlagsSet } from '../../lib/logic/featureFlagLogic'
@@ -117,8 +151,7 @@ import type {
     Breakdown,
     DataNode,
     DataWarehouseNode,
-    DatabaseSchemaDataWarehouseTable,
-    DatabaseSchemaViewTable,
+    DatabaseSchemaTable,
     ErrorTrackingQueryResponse,
     EventsQueryResponse,
     FunnelPathsFilter,
@@ -133,6 +166,7 @@ import type {
     LogsQueryResponse,
     MetricsQueryResponse,
     PathsFilter,
+    PathsV2Filter,
     PathsQuery,
     RefreshType,
     ResultCustomizationBy,
@@ -146,9 +180,13 @@ import type {
     WebOverviewQuery,
     WebStatsTableQuery,
 } from '../../queries/schema/schema-general'
-import type { AnyPropertyFilter, GroupTypeIndex, PropertyGroupFilter } from '../../types'
+import type { PathsV2Query } from '../../queries/schema/schema-general'
+import type { ActionType, AnyPropertyFilter, GroupTypeIndex, PropertyGroupFilter } from '../../types'
 
 const SHOW_TIMEOUT_MESSAGE_AFTER = 5000
+
+// Stable empty list so the allEventNames selector does not recompute while actionsModel is unmounted
+const NO_ACTIONS: ActionType[] = []
 
 // Trends/stickiness displays whose chart renders the in-chart quill legend (line/area/cumulative,
 // bar layouts, and pie). Lifecycle always renders it regardless of display.
@@ -159,14 +197,32 @@ export const DISPLAYS_WITH_IN_CHART_LEGEND = [
     ChartDisplayType.ActionsBar,
     ChartDisplayType.ActionsUnstackedBar,
     ChartDisplayType.ActionsPie,
+    ChartDisplayType.ActionsDonut,
+    ChartDisplayType.ActionsProportionBar,
 ]
 
-export type QuerySourceUpdate = Omit<Partial<InsightQueryNode>, 'kind'>
+/** The parts a proportion bar draws: one per result row, leaving out a previous period saved with compare on. */
+function proportionBarPartCount(query: InsightQueryNode, insightData: Record<string, any> | null): number | undefined {
+    const result = insightData?.result
+    if (
+        !isTrendsQuery(query) ||
+        query.trendsFilter?.display !== ChartDisplayType.ActionsProportionBar ||
+        !Array.isArray(result)
+    ) {
+        return undefined
+    }
+    return result.reduce((count: number, row) => (row?.compare_label === 'previous' ? count : count + 1), 0)
+}
+
+// Omit must distribute over the query-node union: a plain Omit would collapse the update type
+// to the keys shared by every insight kind, dropping fields like samplingFactor that only some have
+type DistributiveOmit<T, K extends keyof any> = T extends any ? Omit<T, K> : never
+export type QuerySourceUpdate = DistributiveOmit<Partial<InsightQueryNode>, 'kind'>
 
 // Generated by kea-typegen. Update if you're an agent, ignore if you're human.
 export interface insightVizDataLogicValues {
     getTheme: (themeId: number | string | null | undefined) => DataColorTheme | null // dataThemeLogic
-    dataWarehouseTablesMap: Record<string, DatabaseSchemaDataWarehouseTable | DatabaseSchemaViewTable> // databaseTableListLogic
+    allTablesMap: Record<string, DatabaseSchemaTable> // databaseTableListLogic
     featureFlags: FeatureFlagsSet // featureFlagLogic
     filterTestAccountsDefault: boolean // filterTestAccountsDefaultsLogic
     insightData: Record<string, any> // insightDataLogic
@@ -177,25 +233,31 @@ export interface insightVizDataLogicValues {
     activeUsersMath: BaseMathType.MonthlyActiveUsers | BaseMathType.WeeklyActiveUsers | null
     aggregationGroupTypeIndex: GroupTypeIndex | null | undefined
     allEventNames: string[]
+    annotationsScope: AnnotationScope | null | undefined
     breakdownFilter: BreakdownFilter | null | undefined
     compareFilter: CompareFilter | null | undefined
     currentDataWarehouseSchemaColumns: DatabaseSchemaField[]
+    dataWarehouseSeriesTableNames: string[]
     dateRange: DateRange | null | undefined
     detailedResultsAggregationType: AggregationType | undefined
     display: ChartDisplayType | null | undefined
     enabledIntervals: Intervals
     erroredQueryId: any
+    flagCallsRetentionGap: FlagCallsRetentionGap | null
+    flagCallsRetentionStartDate: string
     formula: string | null | undefined
     formulaNodes: TrendsFormulaNode[]
     formulas: string[] | null | undefined
     funnelPathsFilter: FunnelPathsFilter | null | undefined
     funnelsFilter: FunnelsFilter | null | undefined
+    globalFiltersUnsupported: boolean
     goalLines: GoalLine[] | null | undefined
     hasDataWarehouseSeries: boolean
     hasDetailedResultsTable: boolean
     hasFormula: boolean
     hasLegend: boolean
     hasOnlyDataWarehouseSeries: boolean
+    hasRenderableResults: boolean
     insightFilter: InsightFilter | null | undefined
     interval: IntervalType | null | undefined
     isAllEventsQuery: boolean
@@ -207,6 +269,7 @@ export interface insightVizDataLogicValues {
     isLifecycle: boolean
     isNonTimeSeriesDisplay: boolean
     isPaths: boolean
+    isPathsV2: boolean
     isRetention: boolean
     isSingleSeriesDefinition: boolean
     isSingleSeriesOutput: boolean
@@ -223,11 +286,13 @@ export interface insightVizDataLogicValues {
     lifecycleFilter: LifecycleFilter | null | undefined
     localQuerySource: InsightQueryNode
     pathsFilter: PathsFilter | null
+    pathsV2Filter: PathsV2Filter | null | undefined
     properties: PropertyGroupFilter | AnyPropertyFilter[] | null | undefined
     querySource:
         | FunnelsQuery
         | LifecycleQuery
         | PathsQuery
+        | PathsV2Query
         | RetentionQuery
         | StickinessQuery
         | TrendsQuery
@@ -238,6 +303,7 @@ export interface insightVizDataLogicValues {
     retentionFilter: RetentionFilter | null
     samplingFactor: number | null | undefined
     series: (AnyEntityNode<AnyDataWarehouseNode> | GroupNode<DataWarehouseNode>)[] | null | undefined
+    seriesMathAvailability: MathAvailability
     shouldShowSessionAnalysisWarning: boolean
     showAlertThresholdLines: boolean | null | undefined
     showAnnotations: boolean | null | undefined
@@ -269,6 +335,9 @@ export interface insightVizDataLogicValues {
 
 // Generated by kea-typegen. Update if you're an agent, ignore if you're human.
 export interface insightVizDataLogicActions {
+    ensureAllTableFields: () => {
+        value: true
+    } // databaseTableListLogic
     cancelChanges: () => {
         value: true
     } // insightDataLogic
@@ -304,8 +373,8 @@ export interface insightVizDataLogicActions {
             | TraceSpansAggregationQueryResponse
             | TraceSpansAttributeBreakdownQueryResponse
             | TraceSpansQueryResponse
-            | null
-            | undefined,
+            | TraceSpansTreeQueryResponse
+            | null,
         payload?:
             | {
                   overrideQuery: DataNode<Record<string, any>> | undefined
@@ -335,8 +404,8 @@ export interface insightVizDataLogicActions {
             | TraceSpansAggregationQueryResponse
             | TraceSpansAttributeBreakdownQueryResponse
             | TraceSpansQueryResponse
+            | TraceSpansTreeQueryResponse
             | null
-            | undefined
     } // insightDataLogic
     setInsightData: (
         response:
@@ -373,7 +442,11 @@ export interface insightVizDataLogicActions {
         | TraceSpansAttributeBreakdownQueryResponse
         | TraceSpansQueryResponse
         | TraceSpansTreeQueryResponse // insightDataLogic
-    setQuery: (query: Node<Record<string, any>> | null) => {
+    setQuery: (
+        query: Node<Record<string, any>> | null,
+        fromUrl?: boolean | undefined
+    ) => {
+        fromUrl: boolean
         query: Node<Record<string, any>> | null
     } // insightDataLogic
     removeFormulaNode: (formulas: TrendsFormulaNode[]) => {
@@ -385,14 +458,14 @@ export interface insightVizDataLogicActions {
     setDetailedResultsAggregationType: (detailedResultsAggregationType: AggregationType) => {
         detailedResultsAggregationType: AggregationType
     }
+    setFormulaMode: (enabled: boolean) => {
+        enabled: boolean
+    }
     setIsIntervalManuallySet: (isIntervalManuallySet: boolean) => {
         isIntervalManuallySet: boolean
     }
     setTimedOutQueryId: (id: string | null) => {
         id: string | null
-    }
-    toggleFormulaMode: () => {
-        value: true
     }
     updateBreakdownFilter: (breakdownFilter: BreakdownFilter) => {
         breakdownFilter: BreakdownFilter
@@ -416,6 +489,9 @@ export interface insightVizDataLogicActions {
     updateQuerySource: (querySource: QuerySourceUpdate) => {
         querySource: QuerySourceUpdate
     }
+    updateSeries: (series: SeriesNode[]) => {
+        series: SeriesNode[]
+    }
     updateVizSpecificOptions: (vizSpecificOptions: VizSpecificOptions) => {
         vizSpecificOptions: VizSpecificOptions
     }
@@ -438,6 +514,7 @@ export interface insightVizDataLogicMeta {
             | FunnelsQuery
             | LifecycleQuery
             | PathsQuery
+            | PathsV2Query
             | RetentionQuery
             | StickinessQuery
             | TrendsQuery
@@ -449,6 +526,7 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -462,6 +540,7 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -474,6 +553,7 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -486,6 +566,7 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -498,6 +579,20 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
+                | RetentionQuery
+                | StickinessQuery
+                | TrendsQuery
+                | WebOverviewQuery
+                | WebStatsTableQuery
+                | null
+        ) => boolean
+        isPathsV2: (
+            querySource:
+                | FunnelsQuery
+                | LifecycleQuery
+                | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -510,6 +605,7 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -522,6 +618,7 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -534,6 +631,7 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -546,6 +644,7 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -558,6 +657,7 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -570,6 +670,7 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -582,6 +683,7 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -594,6 +696,7 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -608,6 +711,7 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -620,6 +724,7 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -640,6 +745,7 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -652,6 +758,7 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -664,6 +771,7 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -676,6 +784,7 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -688,6 +797,7 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -700,6 +810,7 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -712,6 +823,7 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -724,6 +836,7 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -736,6 +849,7 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -748,6 +862,7 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -760,6 +875,7 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -772,6 +888,7 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -784,6 +901,7 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -791,23 +909,39 @@ export interface insightVizDataLogicMeta {
                 | WebStatsTableQuery
                 | null
         ) => boolean | null | undefined
-        showLegend: (
+        annotationsScope: (
             querySource:
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
                 | WebOverviewQuery
                 | WebStatsTableQuery
                 | null
+        ) => AnnotationScope | null | undefined
+        showLegend: (
+            querySource:
+                | FunnelsQuery
+                | LifecycleQuery
+                | PathsQuery
+                | PathsV2Query
+                | RetentionQuery
+                | StickinessQuery
+                | TrendsQuery
+                | WebOverviewQuery
+                | WebStatsTableQuery
+                | null,
+            insightData: Record<string, any>
         ) => boolean | null | undefined
         legendPosition: (
             querySource:
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -820,6 +954,7 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -832,6 +967,7 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -844,6 +980,7 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -856,6 +993,7 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -868,6 +1006,7 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -880,6 +1019,7 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -892,6 +1032,7 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -904,6 +1045,7 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -917,6 +1059,7 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -929,6 +1072,7 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -941,6 +1085,7 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -953,6 +1098,7 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -965,6 +1111,7 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -977,6 +1124,7 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -989,6 +1137,7 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -996,11 +1145,25 @@ export interface insightVizDataLogicMeta {
                 | WebStatsTableQuery
                 | null
         ) => PathsFilter | null
+        pathsV2Filter: (
+            querySource:
+                | FunnelsQuery
+                | LifecycleQuery
+                | PathsQuery
+                | PathsV2Query
+                | RetentionQuery
+                | StickinessQuery
+                | TrendsQuery
+                | WebOverviewQuery
+                | WebStatsTableQuery
+                | null
+        ) => PathsV2Filter | null | undefined
         stickinessFilter: (
             querySource:
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -1013,6 +1176,7 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -1025,6 +1189,7 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -1042,6 +1207,23 @@ export interface insightVizDataLogicMeta {
             isUsingSessionAnalysis: boolean | Breakdown,
             query: Node<Record<string, any>> | null
         ) => boolean
+        flagCallsRetentionGap: (
+            querySource:
+                | FunnelsQuery
+                | LifecycleQuery
+                | PathsQuery
+                | PathsV2Query
+                | RetentionQuery
+                | StickinessQuery
+                | TrendsQuery
+                | WebOverviewQuery
+                | WebStatsTableQuery
+                | null,
+            dateRange: DateRange | null | undefined,
+            compareFilter: CompareFilter | null | undefined,
+            insightData: Record<string, any>
+        ) => FlagCallsRetentionGap | null
+        flagCallsRetentionStartDate: (insightData: Record<string, any>) => string
         isNonTimeSeriesDisplay: (display: ChartDisplayType | null | undefined) => boolean
         isSingleSeriesOutput: (
             isTrends: boolean,
@@ -1052,6 +1234,12 @@ export interface insightVizDataLogicMeta {
             breakdownFilter: BreakdownFilter | null | undefined
         ) => boolean
         isBreakdownSeries: (breakdownFilter: BreakdownFilter | null | undefined) => boolean
+        seriesMathAvailability: (
+            isFunnels: boolean,
+            isLifecycle: boolean,
+            isStickiness: boolean,
+            display: ChartDisplayType | null | undefined
+        ) => MathAvailability
         isSingleSeriesDefinition: (
             isTrends: boolean,
             formula: string | null | undefined,
@@ -1062,16 +1250,32 @@ export interface insightVizDataLogicMeta {
         hasDataWarehouseSeries: (
             series: (AnyEntityNode<AnyDataWarehouseNode> | GroupNode<DataWarehouseNode>)[] | null | undefined
         ) => boolean
+        globalFiltersUnsupported: (
+            querySource:
+                | FunnelsQuery
+                | LifecycleQuery
+                | PathsQuery
+                | PathsV2Query
+                | RetentionQuery
+                | StickinessQuery
+                | TrendsQuery
+                | WebOverviewQuery
+                | WebStatsTableQuery
+                | null
+        ) => boolean
         hasOnlyDataWarehouseSeries: (
             series: (AnyEntityNode<AnyDataWarehouseNode> | GroupNode<DataWarehouseNode>)[] | null | undefined
         ) => boolean
+        dataWarehouseSeriesTableNames: (
+            series: (AnyEntityNode<AnyDataWarehouseNode> | GroupNode<DataWarehouseNode>)[] | null | undefined
+        ) => string[]
         currentDataWarehouseSchemaColumns: (
-            series: (AnyEntityNode<AnyDataWarehouseNode> | GroupNode<DataWarehouseNode>)[] | null | undefined,
+            dataWarehouseSeriesTableNames: string[],
             isSingleSeriesOutput: boolean,
             isTrends: boolean,
             hasDataWarehouseSeries: boolean,
             isBreakdownSeries: boolean,
-            dataWarehouseTablesMap: Record<string, DatabaseSchemaDataWarehouseTable | DatabaseSchemaViewTable>
+            allTablesMap: Record<string, DatabaseSchemaTable>
         ) => DatabaseSchemaField[]
         valueOnSeries: (
             isTrends: boolean,
@@ -1109,25 +1313,41 @@ export interface insightVizDataLogicMeta {
         validationError: (insightDataError: Record<string, any> | null) => string | null
         validationErrorCode: (insightDataError: Record<string, any> | null) => string | null
         timezone: (insightData: Record<string, any>) => any
+        hasRenderableResults: (
+            insightData: Record<string, any>,
+            querySource:
+                | FunnelsQuery
+                | LifecycleQuery
+                | PathsQuery
+                | PathsV2Query
+                | RetentionQuery
+                | StickinessQuery
+                | TrendsQuery
+                | WebOverviewQuery
+                | WebStatsTableQuery
+                | null
+        ) => boolean
         allEventNames: (
             querySource:
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
                 | WebOverviewQuery
                 | WebStatsTableQuery
                 | null,
-            actions: import('~/types').ActionType[]
+            arg: ActionType[]
         ) => string[]
         theme: (
-            getTheme: (themeId: number | string | null | undefined) => DataColorTheme | null,
+            getTheme: (themeId: number | string | null | undefined) => DataColorTheme | null, // dataThemeLogic
             querySource:
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -1140,6 +1360,7 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -1152,6 +1373,7 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -1164,6 +1386,7 @@ export interface insightVizDataLogicMeta {
                 | FunnelsQuery
                 | LifecycleQuery
                 | PathsQuery
+                | PathsV2Query
                 | RetentionQuery
                 | StickinessQuery
                 | TrendsQuery
@@ -1198,13 +1421,15 @@ export const insightVizDataLogic = kea<insightVizDataLogicType>([
             filterTestAccountsDefaultsLogic,
             ['filterTestAccountsDefault'],
             databaseTableListLogic,
-            ['dataWarehouseTablesMap'],
+            ['allTablesMap'],
             dataThemeLogic,
             ['getTheme'],
             featureFlagLogic,
             ['featureFlags'],
         ],
         actions: [
+            databaseTableListLogic,
+            ['ensureAllTableFields'],
             insightDataLogic,
             ['setQuery', 'setInsightData', 'loadData', 'loadDataSuccess', 'loadDataFailure', 'cancelChanges'],
         ],
@@ -1213,6 +1438,7 @@ export const insightVizDataLogic = kea<insightVizDataLogicType>([
     actions({
         saveInsight: (redirectToViewMode = true) => ({ redirectToViewMode }),
         updateQuerySource: (querySource: QuerySourceUpdate) => ({ querySource }),
+        updateSeries: (series: SeriesNode[]) => ({ series }),
         updateInsightFilter: (insightFilter: InsightFilter) => ({ insightFilter }),
         updateDateRange: (dateRange: DateRange, ignoreDebounce: boolean = false) => ({ dateRange, ignoreDebounce }),
         /** Apply a drag-to-zoom date range to the insight's query. Both dates are bucket starts;
@@ -1223,7 +1449,7 @@ export const insightVizDataLogic = kea<insightVizDataLogicType>([
         updateDisplay: (display: ChartDisplayType | undefined) => ({ display }),
         setTimedOutQueryId: (id: string | null) => ({ id }),
         setIsIntervalManuallySet: (isIntervalManuallySet: boolean) => ({ isIntervalManuallySet }),
-        toggleFormulaMode: true,
+        setFormulaMode: (enabled: boolean) => ({ enabled }),
         removeFormulaNode: (formulas: TrendsFormulaNode[]) => ({ formulas }),
         setDetailedResultsAggregationType: (detailedResultsAggregationType: AggregationType) => ({
             detailedResultsAggregationType,
@@ -1251,7 +1477,18 @@ export const insightVizDataLogic = kea<insightVizDataLogicType>([
         isFormulaModeOpenedExplicitly: [
             false,
             {
-                toggleFormulaMode: (state) => !state,
+                setFormulaMode: (_, { enabled }) => enabled,
+                // A blank row left behind still empties the query's formula list, so hold the
+                // mode open or hasFormula closes the editor mid-edit. A filled row needs no flag.
+                removeFormulaNode: (state, { formulas }) =>
+                    formulas.length > 0 && formulas.every((node) => node.formula.trim() === '') ? true : state,
+                // A query that holds a formula keeps the mode open on its own, so drop the flag
+                // there. It would otherwise outlive the removal that set it and hold the editor
+                // open over the next empty field. The reset keys on setQuery, which is what writes
+                // the formula into the query: reset it one action earlier and hasFormula is false
+                // for a render, which closes the editor the user is typing in.
+                setQuery: (state, { query }) =>
+                    isInsightVizNode(query) && (getFormulaNodes(query.source)?.length ?? 0) > 0 ? false : state,
             },
         ],
     }),
@@ -1355,6 +1592,7 @@ export const insightVizDataLogic = kea<insightVizDataLogicType>([
                     | import('~/queries/schema/schema-general').WebStatsTableQuery
             ) => isPathsQuery(q),
         ],
+        isPathsV2: [(s) => [s.querySource], (q: InsightQueryNode | null) => isPathsV2Query(q)],
         isStickiness: [
             (s) => [s.querySource],
             (
@@ -1480,7 +1718,11 @@ export const insightVizDataLogic = kea<insightVizDataLogicType>([
                     return false
                 }
                 if (isTrendsQuery(q) || isStickinessQuery(q) || isWebAnalyticsInsightQuery(q)) {
-                    return display !== ChartDisplayType.WorldMap && display !== ChartDisplayType.CalendarHeatmap
+                    return (
+                        display !== ChartDisplayType.WorldMap &&
+                        display !== ChartDisplayType.CalendarHeatmap &&
+                        display !== ChartDisplayType.ActionsProportionBar
+                    )
                 }
                 // Funnel compare is supported for the STEPS, TRENDS and TIME_TO_CONVERT viz modes.
                 // FLOW is excluded — the backend ignores compare for it (mirrors `_is_compare_active`).
@@ -1713,8 +1955,12 @@ export const insightVizDataLogic = kea<insightVizDataLogicType>([
                     | import('~/queries/schema/schema-general').WebStatsTableQuery
             ) => (q ? getShowAnnotations(q) : null),
         ],
-        showLegend: [
+        annotationsScope: [
             (s) => [s.querySource],
+            (querySource: InsightQueryNode | null) => (querySource ? getAnnotationsScope(querySource) : null),
+        ],
+        showLegend: [
+            (s) => [s.querySource, s.insightData],
             (
                 q:
                     | FunnelsQuery
@@ -1725,8 +1971,9 @@ export const insightVizDataLogic = kea<insightVizDataLogicType>([
                     | null
                     | import('~/queries/schema/schema-general').PathsQuery
                     | import('~/queries/schema/schema-general').WebOverviewQuery
-                    | import('~/queries/schema/schema-general').WebStatsTableQuery
-            ) => (q ? getShowLegend(q) : null),
+                    | import('~/queries/schema/schema-general').WebStatsTableQuery,
+                insightData: Record<string, any> | null
+            ) => (q ? getShowLegend(q, proportionBarPartCount(q, insightData)) : null),
         ],
         legendPosition: [
             (s) => [s.querySource],
@@ -1977,6 +2224,10 @@ export const insightVizDataLogic = kea<insightVizDataLogicType>([
                     | import('~/queries/schema/schema-general').WebStatsTableQuery
             ) => (isPathsQuery(q) ? q.pathsFilter : null),
         ],
+        pathsV2Filter: [
+            (s) => [s.querySource],
+            (q: InsightQueryNode | null) => (isPathsV2Query(q) ? q.pathsV2Filter : null),
+        ],
         stickinessFilter: [
             (s) => [s.querySource],
             (
@@ -2070,6 +2321,22 @@ export const insightVizDataLogic = kea<insightVizDataLogicType>([
                 query: Node | null
             ) => isUsingSessionAnalysis && !(isInsightVizNode(query) && query.suppressSessionAnalysisWarning),
         ],
+        flagCallsRetentionGap: [
+            (s) => [s.querySource, s.dateRange, s.compareFilter, s.insightData],
+            (
+                querySource: InsightQueryNode | null,
+                dateRange: DateRange | null | undefined,
+                compareFilter: CompareFilter | null | undefined,
+                insightData: Record<string, any>
+            ): FlagCallsRetentionGap | null =>
+                querySource && readsFlagCalls(querySource)
+                    ? flagCallsRetentionGap({ dateFrom: dateRange?.date_from, response: insightData, compareFilter })
+                    : null,
+        ],
+        flagCallsRetentionStartDate: [
+            (s) => [s.insightData],
+            (insightData: Record<string, any>): string => flagEvaluationsRetentionStartDate(insightData),
+        ],
         isNonTimeSeriesDisplay: [
             (s) => [s.display],
             (display: ChartDisplayType | null | undefined) =>
@@ -2093,7 +2360,10 @@ export const insightVizDataLogic = kea<insightVizDataLogicType>([
                     (formula && !formulas) ||
                     (formulas && formulas.length === 1) ||
                     (formulaNodes && formulaNodes.length === 1)
-                return (isTrends && hasSingleFormula) || ((series || []).length <= 1 && !breakdownFilter?.breakdown)
+                return (
+                    !hasBreakdownFilter(breakdownFilter) &&
+                    ((isTrends && hasSingleFormula) || (series || []).length <= 1)
+                )
             },
         ],
         isBreakdownSeries: [
@@ -2101,6 +2371,26 @@ export const insightVizDataLogic = kea<insightVizDataLogicType>([
             (breakdownFilter: BreakdownFilter | null | undefined): boolean => {
                 return !!breakdownFilter?.breakdown || (breakdownFilter?.breakdowns?.length ?? 0) > 0
             },
+        ],
+        seriesMathAvailability: [
+            (s) => [s.isFunnels, s.isLifecycle, s.isStickiness, s.display],
+            (
+                isFunnels: boolean,
+                isLifecycle: boolean,
+                isStickiness: boolean,
+                display: ChartDisplayType | null | undefined
+            ): MathAvailability =>
+                isFunnels
+                    ? MathAvailability.FunnelsOnly
+                    : isLifecycle
+                      ? MathAvailability.None
+                      : isStickiness
+                        ? MathAvailability.ActorsOnly
+                        : display === ChartDisplayType.CalendarHeatmap
+                          ? MathAvailability.CalendarHeatmapOnly
+                          : display === ChartDisplayType.BoxPlot
+                            ? MathAvailability.BoxPlotOnly
+                            : MathAvailability.All,
         ],
 
         // Whether there's only one event/action series defined in the query.
@@ -2135,6 +2425,11 @@ export const insightVizDataLogic = kea<insightVizDataLogicType>([
                     | undefined
             ): boolean => (series || []).length > 0 && !!series?.some((node) => isAnyDataWarehouseNode(node)),
         ],
+        globalFiltersUnsupported: [
+            (s) => [s.querySource],
+            (querySource: InsightQueryNode | null): boolean =>
+                !!querySource && !everyWarehouseSeriesReadsFlagCalls(querySource),
+        ],
         hasOnlyDataWarehouseSeries: [
             (s) => [s.series],
             (
@@ -2150,15 +2445,8 @@ export const insightVizDataLogic = kea<insightVizDataLogicType>([
             },
         ],
 
-        currentDataWarehouseSchemaColumns: [
-            (s) => [
-                s.series,
-                s.isSingleSeriesOutput,
-                s.isTrends,
-                s.hasDataWarehouseSeries,
-                s.isBreakdownSeries,
-                s.dataWarehouseTablesMap,
-            ],
+        dataWarehouseSeriesTableNames: [
+            (s) => [s.series],
             (
                 series:
                     | (
@@ -2166,26 +2454,37 @@ export const insightVizDataLogic = kea<insightVizDataLogicType>([
                           | GroupNode<import('~/queries/schema/schema-general').DataWarehouseNode>
                       )[]
                     | null
-                    | undefined,
+                    | undefined
+            ): string[] =>
+                Array.from(new Set((series ?? []).filter(isAnyDataWarehouseNode).map((node) => node.table_name))),
+        ],
+
+        currentDataWarehouseSchemaColumns: [
+            (s) => [
+                s.dataWarehouseSeriesTableNames,
+                s.isSingleSeriesOutput,
+                s.isTrends,
+                s.hasDataWarehouseSeries,
+                s.isBreakdownSeries,
+                s.allTablesMap,
+            ],
+            (
+                dataWarehouseSeriesTableNames: string[],
                 isSingleSeriesOutput: boolean,
                 isTrends: boolean,
                 hasDataWarehouseSeries: boolean,
                 isBreakdownSeries: boolean,
-                dataWarehouseTablesMap: Record<
-                    string,
-                    | import('~/queries/schema/schema-general').DatabaseSchemaDataWarehouseTable
-                    | import('~/queries/schema/schema-general').DatabaseSchemaViewTable
-                >
+                allTablesMap: Record<string, import('~/queries/schema/schema-general').DatabaseSchemaTable>
             ): DatabaseSchemaField[] => {
                 if (!hasDataWarehouseSeries || (isTrends && !isSingleSeriesOutput && !isBreakdownSeries)) {
                     return []
                 }
 
-                const dataWarehouseSeries = series!.filter(isAnyDataWarehouseNode)
-                const dataWarehouseTableNames = Array.from(new Set(dataWarehouseSeries.map((node) => node.table_name)))
-                return dataWarehouseTableNames.flatMap((tableName) =>
-                    Object.values(dataWarehouseTablesMap[tableName]?.fields ?? {})
-                )
+                // Only the trends backend splits a dotted breakdown value into a field chain, so a
+                // joined column would fail to resolve on a funnel.
+                return dataWarehouseColumnsWithJoins(dataWarehouseSeriesTableNames, allTablesMap, {
+                    includeJoinedColumns: isTrends,
+                })
             },
         ],
 
@@ -2201,7 +2500,7 @@ export const insightVizDataLogic = kea<insightVizDataLogicType>([
                     ((isTrends || isStickiness || isLifecycle) &&
                         (insightFilter as TrendsFilter)?.showValuesOnSeries) ||
                     (isTrends &&
-                        (insightFilter as TrendsFilter)?.display === ChartDisplayType.ActionsPie &&
+                        PIE_DISPLAY_TYPES.includes((insightFilter as TrendsFilter)?.display as ChartDisplayType) &&
                         (insightFilter as TrendsFilter)?.showValuesOnSeries === undefined)
                 )
             },
@@ -2335,9 +2634,28 @@ export const insightVizDataLogic = kea<insightVizDataLogicType>([
 
         timezone: [(s) => [s.insightData], (insightData: Record<string, any>) => insightData?.timezone || 'UTC'],
 
+        hasRenderableResults: [
+            (s) => [s.insightData, s.querySource],
+            (
+                insightData: Record<string, any>,
+                querySource: FunnelsQuery | LifecycleQuery | RetentionQuery | StickinessQuery | TrendsQuery | null
+            ): boolean => {
+                const results = insightData?.results ?? insightData?.result
+                if (results == null) {
+                    return false
+                }
+                if (!querySource || !isTrendsQuery(querySource) || !Array.isArray(results)) {
+                    return true
+                }
+                return trendsResultsMatchQuery(results, querySource)
+            },
+        ],
+
         // all events used in the insight (useful for fetching only relevant property definitions)
         allEventNames: [
-            (s) => [s.querySource, actionsModel.selectors.actions],
+            // actionsModel is only mounted by the surfaces that read this value. Reading it through
+            // findMounted keeps the shared insight logic from fetching every action on mount.
+            (s) => [s.querySource, () => actionsModel.findMounted()?.values.actions ?? NO_ACTIONS],
             (
                 querySource:
                     | FunnelsQuery
@@ -2409,7 +2727,12 @@ export const insightVizDataLogic = kea<insightVizDataLogicType>([
                 return (
                     querySource?.kind === NodeKind.TrendsQuery &&
                     querySource?.series?.some((s: { math?: string }) =>
-                        ['first_matching_event_for_user', 'first_time_for_user'].includes(s.math || '')
+                        [
+                            'first_matching_event_for_user',
+                            'first_time_for_user',
+                            'first_matching_event_for_group',
+                            'first_time_for_group',
+                        ].includes(s.math || '')
                     )
                 )
             },
@@ -2459,9 +2782,23 @@ export const insightVizDataLogic = kea<insightVizDataLogicType>([
     listeners(({ actions, values, props, cache }) => ({
         // query
         setQuery: ({ query }) => {
+            if (values.hasDataWarehouseSeries) {
+                actions.ensureAllTableFields()
+            }
             if (isInsightVizNode(query)) {
                 if (props.setQuery) {
                     props.setQuery(query)
+                }
+            }
+            // While a PostHog AI suggestion is under review the query is either the suggestion
+            // itself or, after a reject, the query from before it. Any other query means the
+            // reader edited the suggestion by hand, and a reject from then on would revert
+            // their edit together with the suggestion.
+            const mountedInsightLogic = insightLogic.findMounted(props)
+            if (mountedInsightLogic) {
+                const { previousQuery, suggestedQuery } = mountedInsightLogic.values
+                if (previousQuery && !objectsEqual(query, suggestedQuery) && !objectsEqual(query, previousQuery)) {
+                    mountedInsightLogic.actions.onKeepSuggestedInsight()
                 }
             }
         },
@@ -2478,19 +2815,24 @@ export const insightVizDataLogic = kea<insightVizDataLogicType>([
         updateQuerySource: ({ querySource }) => {
             actions.setQuery({
                 ...values.query,
-                source: {
+                source: withFlagCallsAggregationTarget({
                     ...values.querySource,
                     ...handleQuerySourceUpdateSideEffects(
                         querySource,
                         values.querySource as InsightQueryNode,
                         values.isIntervalManuallySet
                     ),
-                },
+                } as InsightQueryNode),
             } as Node)
+        },
+        updateSeries: ({ series }) => {
+            actions.updateQuerySource({
+                series: cleanSeriesNodes(series, values.seriesMathAvailability),
+            } as QuerySourceUpdate)
         },
 
         zoomDateRange: ({ dateFrom, dateTo }) => {
-            eventUsageLogic.actions.reportInsightDragToZoomed(values.querySource?.kind)
+            posthog.capture('insight drag to zoomed', { query_kind: values.querySource?.kind })
             // Charts emit bucket starts — widen the end to the last selected bucket's end, so
             // e.g. dragging over the "May" bar of a monthly chart zooms to all of May.
             // Sub-day buckets carry a time component; explicitDate stops the backend from
@@ -2517,7 +2859,7 @@ export const insightVizDataLogic = kea<insightVizDataLogicType>([
                 cache.pendingFilterUpdateCancelled = false
                 return
             }
-            eventUsageLogic.actions.reportInsightDateRangeChanged(values.querySource?.kind)
+            posthog.capture('insight date range changed', { query_kind: values.querySource?.kind })
             const updates = {
                 dateRange: {
                     ...values.dateRange,
@@ -2547,13 +2889,13 @@ export const insightVizDataLogic = kea<insightVizDataLogicType>([
         },
         updateBreakdownFilter: async ({ breakdownFilter }, breakpoint) => {
             await breakpoint(500) // extra debounce time because of number input
-            eventUsageLogic.actions.reportInsightBreakdownChanged(values.querySource?.kind)
+            posthog.capture('insight breakdown changed', { query_kind: values.querySource?.kind })
             const update: Partial<TrendsQuery> = { breakdownFilter: { ...values.breakdownFilter, ...breakdownFilter } }
             actions.updateQuerySource(update)
         },
         updateCompareFilter: async ({ compareFilter }, breakpoint) => {
             await breakpoint(500) // extra debounce time because of number input
-            eventUsageLogic.actions.reportInsightCompareChanged(values.querySource?.kind)
+            posthog.capture('insight compare changed', { query_kind: values.querySource?.kind })
             const update: Partial<TrendsQuery> = { compareFilter: { ...values.compareFilter, ...compareFilter } }
             actions.updateQuerySource(update)
         },
@@ -2618,28 +2960,31 @@ export const insightVizDataLogic = kea<insightVizDataLogicType>([
         loadDataFailure: () => {
             actions.setTimedOutQueryId(null)
         },
-        toggleFormulaMode: () => {
-            // Only if formula mode is already open should we trigger a query.
-            if (values.hasFormula) {
+        setFormulaMode: ({ enabled }) => {
+            // Turning the mode off has to clear the query's formulas too, because hasFormula reads
+            // them back and would turn the mode straight on again.
+            if (!enabled && values.formulaNodes.length > 0) {
                 actions.updateInsightFilter({ formula: undefined, formulas: undefined, formulaNodes: [] })
             }
         },
         removeFormulaNode: ({ formulas }) => {
             if (formulas.length === 0) {
-                actions.toggleFormulaMode()
+                actions.setFormulaMode(false)
                 return
             }
 
-            const filledFormulas = formulas.filter((v) => v.formula.trim() !== '')
-            if (filledFormulas.length > 0) {
-                actions.updateInsightFilter({
-                    formula: undefined,
-                    formulas: undefined,
-                    formulaNodes: filledFormulas,
-                })
-            }
+            actions.updateInsightFilter({
+                formula: undefined,
+                formulas: undefined,
+                formulaNodes: formulas.filter((v) => v.formula.trim() !== ''),
+            })
         },
     })),
+    afterMount(({ actions, values }) => {
+        if (values.hasDataWarehouseSeries) {
+            actions.ensureAllTableFields()
+        }
+    }),
 ])
 
 const getActiveUsersMath = (
@@ -2681,6 +3026,21 @@ export function dateRangeZoomEnd(bucketStart: string, interval: IntervalType | n
         return start.add(1, interval).subtract(1, 'second').format('YYYY-MM-DD HH:mm:ss')
     }
     return start.add(1, interval).subtract(1, 'day').format('YYYY-MM-DD')
+}
+
+// The only breakdown types the trends backend resolves against a data warehouse series.
+const DATA_WAREHOUSE_SERIES_BREAKDOWN_TYPES = new Set<string>(['data_warehouse', 'hogql'])
+
+function hasEventBasedBreakdown(breakdownFilter: BreakdownFilter | null | undefined): boolean {
+    if (breakdownFilter?.breakdowns?.length) {
+        return breakdownFilter.breakdowns.some(
+            (breakdown) => !DATA_WAREHOUSE_SERIES_BREAKDOWN_TYPES.has(breakdown.type ?? '')
+        )
+    }
+    return (
+        breakdownFilter?.breakdown != null &&
+        !DATA_WAREHOUSE_SERIES_BREAKDOWN_TYPES.has(breakdownFilter.breakdown_type ?? '')
+    )
 }
 
 const handleQuerySourceUpdateSideEffects = (
@@ -2767,29 +3127,37 @@ const handleQuerySourceUpdateSideEffects = (
         ;(mergedUpdate as LifecycleQuery).customAggregationTarget = undefined
     }
 
+    const nextRetentionFilter = isRetentionQuery(currentState)
+        ? (maybeChangedInsightFilter as RetentionFilter | undefined)
+        : undefined
+
+    // Switching a retention entity away from the data warehouse invalidates the "Custom entities"
+    // aggregation target, which the backend rejects for non-warehouse entities.
     if (
-        maybeChangedSeries &&
-        isLifecycleQuery(currentState) &&
-        maybeChangedSeries.some((series) => isLifecycleDataWarehouseNode(series))
+        nextRetentionFilter?.customAggregationTarget &&
+        (nextRetentionFilter.targetEntity?.type !== 'data_warehouse' ||
+            nextRetentionFilter.returningEntity?.type !== 'data_warehouse')
     ) {
-        ;(mergedUpdate as LifecycleQuery).properties = undefined
-        ;(mergedUpdate as LifecycleQuery).filterTestAccounts = false
-        ;(mergedUpdate as LifecycleQuery).samplingFactor = undefined
+        ;(mergedUpdate as RetentionQuery).retentionFilter = {
+            ...nextRetentionFilter,
+            customAggregationTarget: undefined,
+        }
     }
 
-    // We do not support properties, filtering test accounts, and sampling for DWH nodes
-    // Disable them if there are any
+    // DWH series do not support sampling. They support properties and test account filtering only when every DWH
+    // series reads flag calls. Check the query after the update, so a later edit cannot turn them on again.
+    const nextQuery = { ...currentState, ...mergedUpdate } as InsightQueryNode
     if (
-        isTrendsQuery(currentState) &&
-        (currentState.filterTestAccounts || currentState.properties) &&
-        maybeChangedSeries?.some(isAnyDataWarehouseNode)
+        !everyWarehouseSeriesReadsFlagCalls(nextQuery) &&
+        (!!nextQuery.filterTestAccounts || parseProperties(nextQuery.properties).length > 0)
     ) {
         lemonToast.info(
             'Filter groups and test accounts are not supported for Data Warehouse series and have been disabled.'
         )
-
         ;(mergedUpdate as TrendsQuery).properties = undefined
         ;(mergedUpdate as TrendsQuery).filterTestAccounts = false
+    }
+    if (dataWarehouseSeriesNodes(nextQuery).length > 0 && (nextQuery as TrendsQuery).samplingFactor != null) {
         ;(mergedUpdate as TrendsQuery).samplingFactor = undefined
     }
 
@@ -2799,6 +3167,7 @@ const handleQuerySourceUpdateSideEffects = (
     if (
         !isRetentionQuery(currentState) &&
         !isPathsQuery(currentState) && // TODO: Apply side logic more elegantly
+        !isPathsV2Query(currentState) && // PathsV2Query has no interval field, and the backend rejects unknown fields
         update.dateRange &&
         update.dateRange.date_from &&
         (update.dateRange.date_from !== currentState.dateRange?.date_from ||
@@ -2873,15 +3242,42 @@ const handleQuerySourceUpdateSideEffects = (
         }
     }
 
-    // if mixed, clear breakdown and trends filter
+    let breakdownFilter = (('breakdownFilter' in mergedUpdate ? mergedUpdate : currentState) as TrendsQuery)
+        .breakdownFilter
     if (
+        kind === NodeKind.TrendsQuery &&
+        maybeChangedSeries?.length &&
+        maybeChangedSeries.every(
+            (series) => isDataWarehouseNode(series) && series.table_name === FLAG_EVALUATIONS_TABLE
+        )
+    ) {
+        const flagCallsBreakdownFilter = flagCallsBreakdownFromEventBreakdown(breakdownFilter)
+        if (flagCallsBreakdownFilter !== breakdownFilter) {
+            breakdownFilter = flagCallsBreakdownFilter
+            ;(mergedUpdate as TrendsQuery).breakdownFilter = flagCallsBreakdownFilter
+        }
+    }
+    // A trends insight that mixes event and data warehouse series cannot have a breakdown.
+    const mixesEventAndDataWarehouseSeries =
         kind === NodeKind.TrendsQuery &&
         (mergedUpdate as TrendsQuery).series?.length >= 0 &&
         (mergedUpdate as TrendsQuery).series.some((series) => isDataWarehouseNode(series)) &&
         (mergedUpdate as TrendsQuery).series.some((series) => isActionsNode(series) || isEventsNode(series))
-    ) {
+    // The trends backend rejects an event-based breakdown on a data warehouse series.
+    const hasEventBreakdownOnDataWarehouseSeries =
+        kind === NodeKind.TrendsQuery &&
+        !!maybeChangedSeries?.some((series) => isDataWarehouseNode(series)) &&
+        hasEventBasedBreakdown(breakdownFilter)
+    if (mixesEventAndDataWarehouseSeries || hasEventBreakdownOnDataWarehouseSeries) {
+        if (hasBreakdownFilter(breakdownFilter)) {
+            const subject = readsFlagCalls(nextQuery) ? flagCallsSeriesName() : 'A data warehouse series'
+            lemonToast.info(
+                hasEventBreakdownOnDataWarehouseSeries
+                    ? `${subject} doesn't support this breakdown, so it's removed.`
+                    : `${subject} can't share a breakdown with event or action series, so it's removed.`
+            )
+        }
         ;(mergedUpdate as TrendsQuery).breakdownFilter = undefined
-        mergedUpdate['properties'] = []
     }
 
     // Remove breakdown filter if display type is BoldNumber because it is not supported

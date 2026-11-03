@@ -10,14 +10,25 @@ import { apiMutator } from '../../../../frontend/src/lib/api-orval-mutator'
  */
 import type {
     CheckDatabaseNameResponseApi,
+    CheckIncrementalApi,
     CheckSchemaNameResponseApi,
     CreateTableFromUploadApi,
+    DataHealthIssuesResponseApi,
     DataModelingJobApi,
     DataModelingJobsListParams,
+    DataQualityGateConfigApi,
     DataWarehouseCheckDatabaseNameRetrieveParams,
     DataWarehouseCheckSchemaNameRetrieveParams,
+    DataWarehouseCompletedActivityRetrieveParams,
+    DataWarehouseExpressionApi,
+    DataWarehouseJobStatsRetrieveParams,
+    DataWarehouseManagedViewSetApi,
+    DataWarehouseManagedViewSetResponseApi,
+    DataWarehouseManagedViewSetUpdateResponseApi,
+    DataWarehouseManagedWarehouseMonitoringTimeseriesRetrieveParams,
     DataWarehouseManagedWarehouseSourceSchemasRetrieveParams,
-    DataWarehouseModelPathApi,
+    DataWarehouseManagedWarehouseTrinoMonitoringTimeseriesRetrieveParams,
+    DataWarehouseRunningActivityRetrieveParams,
     DataWarehouseSavedQueryApi,
     DataWarehouseSavedQueryColumnAnnotationApi,
     DataWarehouseSavedQueryDraftApi,
@@ -26,14 +37,18 @@ import type {
     DeprovisionWarehouseResponseApi,
     FileUploadResponseApi,
     FixHogqlListParams,
+    IncrementalEligibilityApi,
     InsightVariableApi,
     InsightVariablesListParams,
     ManagedWarehouseDataStatusResponseApi,
+    ManagedWarehouseMonitoringSeriesResponseApi,
+    ManagedWarehouseMonitoringSnapshotResponseApi,
     ManagedWarehouseSourceSchemasResponseApi,
+    ManagedWarehouseTrinoMonitoringSnapshotResponseApi,
     OnboardWarehouseTeamRequestApi,
     OnboardWarehouseTeamResponseApi,
     PaginatedDataModelingJobListApi,
-    PaginatedDataWarehouseModelPathListApi,
+    PaginatedDataWarehouseExpressionListApi,
     PaginatedDataWarehouseSavedQueryColumnAnnotationListApi,
     PaginatedDataWarehouseSavedQueryDraftListApi,
     PaginatedDataWarehouseSavedQueryMinimalListApi,
@@ -42,7 +57,8 @@ import type {
     PaginatedTableListApi,
     PaginatedViewLinkListApi,
     PaginatedWarehouseColumnAnnotationListApi,
-    PaginatedWarehouseColumnStatisticsListApi,
+    PatchedDataQualityGateConfigApi,
+    PatchedDataWarehouseExpressionApi,
     PatchedDataWarehouseSavedQueryApi,
     PatchedDataWarehouseSavedQueryColumnAnnotationApi,
     PatchedDataWarehouseSavedQueryDraftApi,
@@ -52,21 +68,34 @@ import type {
     PatchedTableApi,
     PatchedViewLinkApi,
     PatchedWarehouseColumnAnnotationApi,
+    PipelineActivityResponseApi,
+    PipelineJobStatsResponseApi,
+    PipelineRowsStatsResponseApi,
     ProvisionWarehouseRequestApi,
     ProvisionWarehouseResponseApi,
     QueryTabStateApi,
     QueryTabStateListParams,
+    QueryTabStateUserRetrieveParams,
     ResetPasswordResponseApi,
+    SavedQueryAncestorsApi,
     SavedQueryColumnAnnotationsListParams,
+    SavedQueryDependenciesApi,
+    SavedQueryDescendantsApi,
+    SavedQueryLineageRequestApi,
+    SavedQueryMaterializeApi,
     SavedQueryResumeApi,
+    SavedQueryResumeRequestApi,
+    SavedQueryResumeSchedulesRequestApi,
+    SavedQueryRunApi,
+    SavedQueryRunResponseApi,
     TableApi,
+    UploadedFileApi,
     ViewLinkApi,
     ViewLinkValidationApi,
+    ViewLinkValidationResponseApi,
     WarehouseColumnAnnotationApi,
     WarehouseColumnAnnotationsListParams,
-    WarehouseColumnStatisticsApi,
-    WarehouseColumnStatisticsListParams,
-    WarehouseModelPathsListParams,
+    WarehouseExpressionsListParams,
     WarehouseSavedQueriesListParams,
     WarehouseSavedQueryDraftsListParams,
     WarehouseStatusResponseApi,
@@ -241,8 +270,23 @@ export const dataWarehouseCheckSchemaNameRetrieve = async (
     })
 }
 
-export const getDataWarehouseCompletedActivityRetrieveUrl = (projectId: string) => {
-    return `/api/projects/${projectId}/data_warehouse/completed_activity/`
+export const getDataWarehouseCompletedActivityRetrieveUrl = (
+    projectId: string,
+    params?: DataWarehouseCompletedActivityRetrieveParams
+) => {
+    const normalizedParams = new URLSearchParams()
+
+    Object.entries(params || {}).forEach(([key, value]) => {
+        if (value !== undefined) {
+            normalizedParams.append(key, value === null ? 'null' : String(value))
+        }
+    })
+
+    const stringifiedParams = normalizedParams.toString()
+
+    return stringifiedParams.length > 0
+        ? `/api/projects/${projectId}/data_warehouse/completed_activity/?${stringifiedParams}`
+        : `/api/projects/${projectId}/data_warehouse/completed_activity/`
 }
 
 /**
@@ -251,9 +295,10 @@ export const getDataWarehouseCompletedActivityRetrieveUrl = (projectId: string) 
  */
 export const dataWarehouseCompletedActivityRetrieve = async (
     projectId: string,
+    params?: DataWarehouseCompletedActivityRetrieveParams,
     options?: RequestInit
-): Promise<void> => {
-    return apiMutator<void>(getDataWarehouseCompletedActivityRetrieveUrl(projectId), {
+): Promise<PipelineActivityResponseApi> => {
+    return apiMutator<PipelineActivityResponseApi>(getDataWarehouseCompletedActivityRetrieveUrl(projectId, params), {
         ...options,
         method: 'GET',
     })
@@ -270,8 +315,8 @@ export const getDataWarehouseDataHealthIssuesRetrieveUrl = (projectId: string) =
 export const dataWarehouseDataHealthIssuesRetrieve = async (
     projectId: string,
     options?: RequestInit
-): Promise<void> => {
-    return apiMutator<void>(getDataWarehouseDataHealthIssuesRetrieveUrl(projectId), {
+): Promise<DataHealthIssuesResponseApi> => {
+    return apiMutator<DataHealthIssuesResponseApi>(getDataWarehouseDataHealthIssuesRetrieveUrl(projectId), {
         ...options,
         method: 'GET',
     })
@@ -291,6 +336,43 @@ export const dataWarehouseDataOpsDashboardRetrieve = async (
     return apiMutator<void>(getDataWarehouseDataOpsDashboardRetrieveUrl(projectId), {
         ...options,
         method: 'GET',
+    })
+}
+
+export const getDataWarehouseDataQualityGateRetrieveUrl = (projectId: string) => {
+    return `/api/projects/${projectId}/data_warehouse/data_quality_gate/`
+}
+
+/**
+ * Read or update the team's data quality gate: whether a materialization whose error-severity checks fail is published.
+ */
+export const dataWarehouseDataQualityGateRetrieve = async (
+    projectId: string,
+    options?: RequestInit
+): Promise<DataQualityGateConfigApi> => {
+    return apiMutator<DataQualityGateConfigApi>(getDataWarehouseDataQualityGateRetrieveUrl(projectId), {
+        ...options,
+        method: 'GET',
+    })
+}
+
+export const getDataWarehouseDataQualityGatePartialUpdateUrl = (projectId: string) => {
+    return `/api/projects/${projectId}/data_warehouse/data_quality_gate/`
+}
+
+/**
+ * Read or update the team's data quality gate: whether a materialization whose error-severity checks fail is published.
+ */
+export const dataWarehouseDataQualityGatePartialUpdate = async (
+    projectId: string,
+    patchedDataQualityGateConfigApi?: PatchedDataQualityGateConfigApi,
+    options?: RequestInit
+): Promise<DataQualityGateConfigApi> => {
+    return apiMutator<DataQualityGateConfigApi>(getDataWarehouseDataQualityGatePartialUpdateUrl(projectId), {
+        ...options,
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...options?.headers },
+        body: JSON.stringify(patchedDataQualityGateConfigApi),
     })
 }
 
@@ -332,16 +414,35 @@ export const dataWarehouseDeprovisionCreate = async (
     })
 }
 
-export const getDataWarehouseJobStatsRetrieveUrl = (projectId: string) => {
-    return `/api/projects/${projectId}/data_warehouse/job_stats/`
+export const getDataWarehouseJobStatsRetrieveUrl = (
+    projectId: string,
+    params?: DataWarehouseJobStatsRetrieveParams
+) => {
+    const normalizedParams = new URLSearchParams()
+
+    Object.entries(params || {}).forEach(([key, value]) => {
+        if (value !== undefined) {
+            normalizedParams.append(key, value === null ? 'null' : String(value))
+        }
+    })
+
+    const stringifiedParams = normalizedParams.toString()
+
+    return stringifiedParams.length > 0
+        ? `/api/projects/${projectId}/data_warehouse/job_stats/?${stringifiedParams}`
+        : `/api/projects/${projectId}/data_warehouse/job_stats/`
 }
 
 /**
  * Returns success and failed job statistics for the last 1, 7, or 30 days.
  * Query parameter 'days' can be 1, 7, or 30 (default: 7).
  */
-export const dataWarehouseJobStatsRetrieve = async (projectId: string, options?: RequestInit): Promise<void> => {
-    return apiMutator<void>(getDataWarehouseJobStatsRetrieveUrl(projectId), {
+export const dataWarehouseJobStatsRetrieve = async (
+    projectId: string,
+    params?: DataWarehouseJobStatsRetrieveParams,
+    options?: RequestInit
+): Promise<PipelineJobStatsResponseApi> => {
+    return apiMutator<PipelineJobStatsResponseApi>(getDataWarehouseJobStatsRetrieveUrl(projectId, params), {
         ...options,
         method: 'GET',
     })
@@ -360,6 +461,64 @@ export const dataWarehouseManagedWarehouseDataStatusRetrieve = async (
 ): Promise<ManagedWarehouseDataStatusResponseApi> => {
     return apiMutator<ManagedWarehouseDataStatusResponseApi>(
         getDataWarehouseManagedWarehouseDataStatusRetrieveUrl(projectId),
+        {
+            ...options,
+            method: 'GET',
+        }
+    )
+}
+
+export const getDataWarehouseManagedWarehouseMonitoringRetrieveUrl = (projectId: string) => {
+    return `/api/projects/${projectId}/data_warehouse/managed-warehouse-monitoring/`
+}
+
+/**
+ * Get tenant-safe live worker, session, queue, and capacity data for the current organization.
+ * @summary Get managed warehouse monitoring snapshot
+ */
+export const dataWarehouseManagedWarehouseMonitoringRetrieve = async (
+    projectId: string,
+    options?: RequestInit
+): Promise<ManagedWarehouseMonitoringSnapshotResponseApi> => {
+    return apiMutator<ManagedWarehouseMonitoringSnapshotResponseApi>(
+        getDataWarehouseManagedWarehouseMonitoringRetrieveUrl(projectId),
+        {
+            ...options,
+            method: 'GET',
+        }
+    )
+}
+
+export const getDataWarehouseManagedWarehouseMonitoringTimeseriesRetrieveUrl = (
+    projectId: string,
+    params: DataWarehouseManagedWarehouseMonitoringTimeseriesRetrieveParams
+) => {
+    const normalizedParams = new URLSearchParams()
+
+    Object.entries(params || {}).forEach(([key, value]) => {
+        if (value !== undefined) {
+            normalizedParams.append(key, value === null ? 'null' : String(value))
+        }
+    })
+
+    const stringifiedParams = normalizedParams.toString()
+
+    return stringifiedParams.length > 0
+        ? `/api/projects/${projectId}/data_warehouse/managed-warehouse-monitoring-timeseries/?${stringifiedParams}`
+        : `/api/projects/${projectId}/data_warehouse/managed-warehouse-monitoring-timeseries/`
+}
+
+/**
+ * Get one allow-listed monitoring metric for the current organization and trailing time window.
+ * @summary Get managed warehouse monitoring time series
+ */
+export const dataWarehouseManagedWarehouseMonitoringTimeseriesRetrieve = async (
+    projectId: string,
+    params: DataWarehouseManagedWarehouseMonitoringTimeseriesRetrieveParams,
+    options?: RequestInit
+): Promise<ManagedWarehouseMonitoringSeriesResponseApi> => {
+    return apiMutator<ManagedWarehouseMonitoringSeriesResponseApi>(
+        getDataWarehouseManagedWarehouseMonitoringTimeseriesRetrieveUrl(projectId, params),
         {
             ...options,
             method: 'GET',
@@ -404,6 +563,64 @@ export const dataWarehouseManagedWarehouseSourceSchemasRetrieve = async (
     )
 }
 
+export const getDataWarehouseManagedWarehouseTrinoMonitoringRetrieveUrl = (projectId: string) => {
+    return `/api/projects/${projectId}/data_warehouse/managed-warehouse-trino-monitoring/`
+}
+
+/**
+ * Get tenant-safe live Trino query totals, limits, and in-flight queries for the current organization.
+ * @summary Get managed warehouse Trino monitoring snapshot
+ */
+export const dataWarehouseManagedWarehouseTrinoMonitoringRetrieve = async (
+    projectId: string,
+    options?: RequestInit
+): Promise<ManagedWarehouseTrinoMonitoringSnapshotResponseApi> => {
+    return apiMutator<ManagedWarehouseTrinoMonitoringSnapshotResponseApi>(
+        getDataWarehouseManagedWarehouseTrinoMonitoringRetrieveUrl(projectId),
+        {
+            ...options,
+            method: 'GET',
+        }
+    )
+}
+
+export const getDataWarehouseManagedWarehouseTrinoMonitoringTimeseriesRetrieveUrl = (
+    projectId: string,
+    params: DataWarehouseManagedWarehouseTrinoMonitoringTimeseriesRetrieveParams
+) => {
+    const normalizedParams = new URLSearchParams()
+
+    Object.entries(params || {}).forEach(([key, value]) => {
+        if (value !== undefined) {
+            normalizedParams.append(key, value === null ? 'null' : String(value))
+        }
+    })
+
+    const stringifiedParams = normalizedParams.toString()
+
+    return stringifiedParams.length > 0
+        ? `/api/projects/${projectId}/data_warehouse/managed-warehouse-trino-monitoring-timeseries/?${stringifiedParams}`
+        : `/api/projects/${projectId}/data_warehouse/managed-warehouse-trino-monitoring-timeseries/`
+}
+
+/**
+ * Get one allow-listed Trino monitoring metric for the current organization and trailing time window.
+ * @summary Get managed warehouse Trino monitoring time series
+ */
+export const dataWarehouseManagedWarehouseTrinoMonitoringTimeseriesRetrieve = async (
+    projectId: string,
+    params: DataWarehouseManagedWarehouseTrinoMonitoringTimeseriesRetrieveParams,
+    options?: RequestInit
+): Promise<ManagedWarehouseMonitoringSeriesResponseApi> => {
+    return apiMutator<ManagedWarehouseMonitoringSeriesResponseApi>(
+        getDataWarehouseManagedWarehouseTrinoMonitoringTimeseriesRetrieveUrl(projectId, params),
+        {
+            ...options,
+            method: 'GET',
+        }
+    )
+}
+
 export const getDataWarehouseOnboardTeamCreateUrl = (projectId: string) => {
     return `/api/projects/${projectId}/data_warehouse/onboard-team/`
 }
@@ -411,8 +628,8 @@ export const getDataWarehouseOnboardTeamCreateUrl = (projectId: string) => {
 /**
  * Onboard this project onto the organization's existing managed warehouse.
  *
- * Requires a schema name; records the project's membership both in duckgres and in the
- * Django backfill state. Restricted to organization admins.
+ * Requires a schema name and records the project's membership in the Duckgres control plane.
+ * Restricted to organization admins.
  */
 export const dataWarehouseOnboardTeamCreate = async (
     projectId: string,
@@ -478,16 +695,35 @@ export const dataWarehouseResetPasswordCreate = async (
     })
 }
 
-export const getDataWarehouseRunningActivityRetrieveUrl = (projectId: string) => {
-    return `/api/projects/${projectId}/data_warehouse/running_activity/`
+export const getDataWarehouseRunningActivityRetrieveUrl = (
+    projectId: string,
+    params?: DataWarehouseRunningActivityRetrieveParams
+) => {
+    const normalizedParams = new URLSearchParams()
+
+    Object.entries(params || {}).forEach(([key, value]) => {
+        if (value !== undefined) {
+            normalizedParams.append(key, value === null ? 'null' : String(value))
+        }
+    })
+
+    const stringifiedParams = normalizedParams.toString()
+
+    return stringifiedParams.length > 0
+        ? `/api/projects/${projectId}/data_warehouse/running_activity/?${stringifiedParams}`
+        : `/api/projects/${projectId}/data_warehouse/running_activity/`
 }
 
 /**
  * Returns currently running activities (jobs with status 'Running').
  * Supports pagination and cutoff time filtering.
  */
-export const dataWarehouseRunningActivityRetrieve = async (projectId: string, options?: RequestInit): Promise<void> => {
-    return apiMutator<void>(getDataWarehouseRunningActivityRetrieveUrl(projectId), {
+export const dataWarehouseRunningActivityRetrieve = async (
+    projectId: string,
+    params?: DataWarehouseRunningActivityRetrieveParams,
+    options?: RequestInit
+): Promise<PipelineActivityResponseApi> => {
+    return apiMutator<PipelineActivityResponseApi>(getDataWarehouseRunningActivityRetrieveUrl(projectId, params), {
         ...options,
         method: 'GET',
     })
@@ -501,8 +737,11 @@ export const getDataWarehouseTotalRowsStatsRetrieveUrl = (projectId: string) => 
  * Returns aggregated statistics for the data warehouse total rows processed within the current billing period.
  * Used by the frontend data warehouse scene to display usage information.
  */
-export const dataWarehouseTotalRowsStatsRetrieve = async (projectId: string, options?: RequestInit): Promise<void> => {
-    return apiMutator<void>(getDataWarehouseTotalRowsStatsRetrieveUrl(projectId), {
+export const dataWarehouseTotalRowsStatsRetrieve = async (
+    projectId: string,
+    options?: RequestInit
+): Promise<PipelineRowsStatsResponseApi> => {
+    return apiMutator<PipelineRowsStatsResponseApi>(getDataWarehouseTotalRowsStatsRetrieveUrl(projectId), {
         ...options,
         method: 'GET',
     })
@@ -728,8 +967,8 @@ export const managedViewsetsRetrieve = async (
     projectId: string,
     kind: 'revenue_analytics' | 'engineering_analytics',
     options?: RequestInit
-): Promise<void> => {
-    return apiMutator<void>(getManagedViewsetsRetrieveUrl(projectId, kind), {
+): Promise<DataWarehouseManagedViewSetResponseApi> => {
+    return apiMutator<DataWarehouseManagedViewSetResponseApi>(getManagedViewsetsRetrieveUrl(projectId, kind), {
         ...options,
         method: 'GET',
     })
@@ -746,11 +985,14 @@ export const getManagedViewsetsUpdateUrl = (projectId: string, kind: 'revenue_an
 export const managedViewsetsUpdate = async (
     projectId: string,
     kind: 'revenue_analytics' | 'engineering_analytics',
+    dataWarehouseManagedViewSetApi: DataWarehouseManagedViewSetApi,
     options?: RequestInit
-): Promise<void> => {
-    return apiMutator<void>(getManagedViewsetsUpdateUrl(projectId, kind), {
+): Promise<DataWarehouseManagedViewSetUpdateResponseApi> => {
+    return apiMutator<DataWarehouseManagedViewSetUpdateResponseApi>(getManagedViewsetsUpdateUrl(projectId, kind), {
         ...options,
         method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...options?.headers },
+        body: JSON.stringify(dataWarehouseManagedViewSetApi),
     })
 }
 
@@ -878,8 +1120,20 @@ export const queryTabStateDestroy = async (projectId: string, id: string, option
     })
 }
 
-export const getQueryTabStateUserRetrieveUrl = (projectId: string) => {
-    return `/api/projects/${projectId}/query_tab_state/user/`
+export const getQueryTabStateUserRetrieveUrl = (projectId: string, params: QueryTabStateUserRetrieveParams) => {
+    const normalizedParams = new URLSearchParams()
+
+    Object.entries(params || {}).forEach(([key, value]) => {
+        if (value !== undefined) {
+            normalizedParams.append(key, value === null ? 'null' : String(value))
+        }
+    })
+
+    const stringifiedParams = normalizedParams.toString()
+
+    return stringifiedParams.length > 0
+        ? `/api/projects/${projectId}/query_tab_state/user/?${stringifiedParams}`
+        : `/api/projects/${projectId}/query_tab_state/user/`
 }
 
 /**
@@ -887,9 +1141,10 @@ export const getQueryTabStateUserRetrieveUrl = (projectId: string) => {
  */
 export const queryTabStateUserRetrieve = async (
     projectId: string,
+    params: QueryTabStateUserRetrieveParams,
     options?: RequestInit
 ): Promise<QueryTabStateApi> => {
-    return apiMutator<QueryTabStateApi>(getQueryTabStateUserRetrieveUrl(projectId), {
+    return apiMutator<QueryTabStateApi>(getQueryTabStateUserRetrieveUrl(projectId, params), {
         ...options,
         method: 'GET',
     })
@@ -1220,10 +1475,7 @@ export const warehouseColumnAnnotationsDestroy = async (
     })
 }
 
-export const getWarehouseColumnStatisticsListUrl = (
-    projectId: string,
-    params?: WarehouseColumnStatisticsListParams
-) => {
+export const getWarehouseExpressionsListUrl = (projectId: string, params?: WarehouseExpressionsListParams) => {
     const normalizedParams = new URLSearchParams()
 
     Object.entries(params || {}).forEach(([key, value]) => {
@@ -1235,106 +1487,119 @@ export const getWarehouseColumnStatisticsListUrl = (
     const stringifiedParams = normalizedParams.toString()
 
     return stringifiedParams.length > 0
-        ? `/api/projects/${projectId}/warehouse_column_statistics/?${stringifiedParams}`
-        : `/api/projects/${projectId}/warehouse_column_statistics/`
+        ? `/api/projects/${projectId}/warehouse_expressions/?${stringifiedParams}`
+        : `/api/projects/${projectId}/warehouse_expressions/`
 }
 
 /**
- * Read per-column data statistics (null fraction, min/max, row count) for warehouse tables.
- *
- * Statistics are computed automatically after a sync and surfaced to the AI agent so it can write
- * better queries. They are system-owned and read-only here. List can be filtered to one table with
- * `?table_id=<uuid>`.
+ * Create, read, update and delete saved HogQL expressions that appear as virtual fields on tables.
  */
-export const warehouseColumnStatisticsList = async (
+export const warehouseExpressionsList = async (
     projectId: string,
-    params?: WarehouseColumnStatisticsListParams,
+    params?: WarehouseExpressionsListParams,
     options?: RequestInit
-): Promise<PaginatedWarehouseColumnStatisticsListApi> => {
-    return apiMutator<PaginatedWarehouseColumnStatisticsListApi>(
-        getWarehouseColumnStatisticsListUrl(projectId, params),
-        {
-            ...options,
-            method: 'GET',
-        }
-    )
+): Promise<PaginatedDataWarehouseExpressionListApi> => {
+    return apiMutator<PaginatedDataWarehouseExpressionListApi>(getWarehouseExpressionsListUrl(projectId, params), {
+        ...options,
+        method: 'GET',
+    })
 }
 
-export const getWarehouseColumnStatisticsRetrieveUrl = (projectId: string, id: string) => {
-    return `/api/projects/${projectId}/warehouse_column_statistics/${id}/`
+export const getWarehouseExpressionsCreateUrl = (projectId: string) => {
+    return `/api/projects/${projectId}/warehouse_expressions/`
 }
 
 /**
- * Read per-column data statistics (null fraction, min/max, row count) for warehouse tables.
- *
- * Statistics are computed automatically after a sync and surfaced to the AI agent so it can write
- * better queries. They are system-owned and read-only here. List can be filtered to one table with
- * `?table_id=<uuid>`.
+ * Create, read, update and delete saved HogQL expressions that appear as virtual fields on tables.
  */
-export const warehouseColumnStatisticsRetrieve = async (
+export const warehouseExpressionsCreate = async (
+    projectId: string,
+    dataWarehouseExpressionApi: NonReadonly<DataWarehouseExpressionApi>,
+    options?: RequestInit
+): Promise<DataWarehouseExpressionApi> => {
+    return apiMutator<DataWarehouseExpressionApi>(getWarehouseExpressionsCreateUrl(projectId), {
+        ...options,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...options?.headers },
+        body: JSON.stringify(dataWarehouseExpressionApi),
+    })
+}
+
+export const getWarehouseExpressionsRetrieveUrl = (projectId: string, id: string) => {
+    return `/api/projects/${projectId}/warehouse_expressions/${id}/`
+}
+
+/**
+ * Create, read, update and delete saved HogQL expressions that appear as virtual fields on tables.
+ */
+export const warehouseExpressionsRetrieve = async (
     projectId: string,
     id: string,
     options?: RequestInit
-): Promise<WarehouseColumnStatisticsApi> => {
-    return apiMutator<WarehouseColumnStatisticsApi>(getWarehouseColumnStatisticsRetrieveUrl(projectId, id), {
+): Promise<DataWarehouseExpressionApi> => {
+    return apiMutator<DataWarehouseExpressionApi>(getWarehouseExpressionsRetrieveUrl(projectId, id), {
         ...options,
         method: 'GET',
     })
 }
 
-export const getWarehouseDagListUrl = (projectId: string) => {
-    return `/api/projects/${projectId}/warehouse_dag/`
+export const getWarehouseExpressionsUpdateUrl = (projectId: string, id: string) => {
+    return `/api/projects/${projectId}/warehouse_expressions/${id}/`
 }
 
 /**
- * Return this team's DAG as a set of edges and nodes
+ * Create, read, update and delete saved HogQL expressions that appear as virtual fields on tables.
  */
-export const warehouseDagList = async (projectId: string, options?: RequestInit): Promise<void> => {
-    return apiMutator<void>(getWarehouseDagListUrl(projectId), {
-        ...options,
-        method: 'GET',
-    })
-}
-
-export const getWarehouseModelPathsListUrl = (projectId: string, params?: WarehouseModelPathsListParams) => {
-    const normalizedParams = new URLSearchParams()
-
-    Object.entries(params || {}).forEach(([key, value]) => {
-        if (value !== undefined) {
-            normalizedParams.append(key, value === null ? 'null' : String(value))
-        }
-    })
-
-    const stringifiedParams = normalizedParams.toString()
-
-    return stringifiedParams.length > 0
-        ? `/api/projects/${projectId}/warehouse_model_paths/?${stringifiedParams}`
-        : `/api/projects/${projectId}/warehouse_model_paths/`
-}
-
-export const warehouseModelPathsList = async (
+export const warehouseExpressionsUpdate = async (
     projectId: string,
-    params?: WarehouseModelPathsListParams,
+    id: string,
+    dataWarehouseExpressionApi: NonReadonly<DataWarehouseExpressionApi>,
     options?: RequestInit
-): Promise<PaginatedDataWarehouseModelPathListApi> => {
-    return apiMutator<PaginatedDataWarehouseModelPathListApi>(getWarehouseModelPathsListUrl(projectId, params), {
+): Promise<DataWarehouseExpressionApi> => {
+    return apiMutator<DataWarehouseExpressionApi>(getWarehouseExpressionsUpdateUrl(projectId, id), {
         ...options,
-        method: 'GET',
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...options?.headers },
+        body: JSON.stringify(dataWarehouseExpressionApi),
     })
 }
 
-export const getWarehouseModelPathsRetrieveUrl = (projectId: string, id: string) => {
-    return `/api/projects/${projectId}/warehouse_model_paths/${id}/`
+export const getWarehouseExpressionsPartialUpdateUrl = (projectId: string, id: string) => {
+    return `/api/projects/${projectId}/warehouse_expressions/${id}/`
 }
 
-export const warehouseModelPathsRetrieve = async (
+/**
+ * Create, read, update and delete saved HogQL expressions that appear as virtual fields on tables.
+ */
+export const warehouseExpressionsPartialUpdate = async (
+    projectId: string,
+    id: string,
+    patchedDataWarehouseExpressionApi?: NonReadonly<PatchedDataWarehouseExpressionApi>,
+    options?: RequestInit
+): Promise<DataWarehouseExpressionApi> => {
+    return apiMutator<DataWarehouseExpressionApi>(getWarehouseExpressionsPartialUpdateUrl(projectId, id), {
+        ...options,
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...options?.headers },
+        body: JSON.stringify(patchedDataWarehouseExpressionApi),
+    })
+}
+
+export const getWarehouseExpressionsDestroyUrl = (projectId: string, id: string) => {
+    return `/api/projects/${projectId}/warehouse_expressions/${id}/`
+}
+
+/**
+ * Create, read, update and delete saved HogQL expressions that appear as virtual fields on tables.
+ */
+export const warehouseExpressionsDestroy = async (
     projectId: string,
     id: string,
     options?: RequestInit
-): Promise<DataWarehouseModelPathApi> => {
-    return apiMutator<DataWarehouseModelPathApi>(getWarehouseModelPathsRetrieveUrl(projectId, id), {
+): Promise<void> => {
+    return apiMutator<void>(getWarehouseExpressionsDestroyUrl(projectId, id), {
         ...options,
-        method: 'GET',
+        method: 'DELETE',
     })
 }
 
@@ -1494,21 +1759,20 @@ export const getWarehouseSavedQueriesAncestorsCreateUrl = (projectId: string, id
 /**
  * Return the ancestors of this saved query.
  *
- * By default, we return the immediate parents. The `level` parameter can be used to
- * look further back into the ancestor tree. If `level` overshoots (i.e. points to only
- * ancestors beyond the root), we return an empty list.
+ * By default, we return every ancestor. The `level` parameter bounds how many hops back
+ * to walk, so 1 gives the immediate parents.
  */
 export const warehouseSavedQueriesAncestorsCreate = async (
     projectId: string,
     id: string,
-    dataWarehouseSavedQueryApi: NonReadonly<DataWarehouseSavedQueryApi>,
+    savedQueryLineageRequestApi?: SavedQueryLineageRequestApi,
     options?: RequestInit
-): Promise<DataWarehouseSavedQueryApi> => {
-    return apiMutator<DataWarehouseSavedQueryApi>(getWarehouseSavedQueriesAncestorsCreateUrl(projectId, id), {
+): Promise<SavedQueryAncestorsApi> => {
+    return apiMutator<SavedQueryAncestorsApi>(getWarehouseSavedQueriesAncestorsCreateUrl(projectId, id), {
         ...options,
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...options?.headers },
-        body: JSON.stringify(dataWarehouseSavedQueryApi),
+        body: JSON.stringify(savedQueryLineageRequestApi),
     })
 }
 
@@ -1544,8 +1808,8 @@ export const warehouseSavedQueriesDependenciesRetrieve = async (
     projectId: string,
     id: string,
     options?: RequestInit
-): Promise<DataWarehouseSavedQueryApi> => {
-    return apiMutator<DataWarehouseSavedQueryApi>(getWarehouseSavedQueriesDependenciesRetrieveUrl(projectId, id), {
+): Promise<SavedQueryDependenciesApi> => {
+    return apiMutator<SavedQueryDependenciesApi>(getWarehouseSavedQueriesDependenciesRetrieveUrl(projectId, id), {
         ...options,
         method: 'GET',
     })
@@ -1558,21 +1822,20 @@ export const getWarehouseSavedQueriesDescendantsCreateUrl = (projectId: string, 
 /**
  * Return the descendants of this saved query.
  *
- * By default, we return the immediate children. The `level` parameter can be used to
- * look further ahead into the descendants tree. If `level` overshoots (i.e. points to only
- * descendants further than a leaf), we return an empty list.
+ * By default, we return every descendant. The `level` parameter bounds how many hops
+ * forward to walk, so 1 gives the immediate children.
  */
 export const warehouseSavedQueriesDescendantsCreate = async (
     projectId: string,
     id: string,
-    dataWarehouseSavedQueryApi: NonReadonly<DataWarehouseSavedQueryApi>,
+    savedQueryLineageRequestApi?: SavedQueryLineageRequestApi,
     options?: RequestInit
-): Promise<DataWarehouseSavedQueryApi> => {
-    return apiMutator<DataWarehouseSavedQueryApi>(getWarehouseSavedQueriesDescendantsCreateUrl(projectId, id), {
+): Promise<SavedQueryDescendantsApi> => {
+    return apiMutator<SavedQueryDescendantsApi>(getWarehouseSavedQueriesDescendantsCreateUrl(projectId, id), {
         ...options,
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...options?.headers },
-        body: JSON.stringify(dataWarehouseSavedQueryApi),
+        body: JSON.stringify(savedQueryLineageRequestApi),
     })
 }
 
@@ -1581,19 +1844,19 @@ export const getWarehouseSavedQueriesMaterializeCreateUrl = (projectId: string, 
 }
 
 /**
- * Enable materialization for this saved query with a 24-hour sync frequency.
+ * Enable materialization for this saved query, at the requested sync frequency or daily.
  */
 export const warehouseSavedQueriesMaterializeCreate = async (
     projectId: string,
     id: string,
-    dataWarehouseSavedQueryApi: NonReadonly<DataWarehouseSavedQueryApi>,
+    savedQueryMaterializeApi?: SavedQueryMaterializeApi,
     options?: RequestInit
-): Promise<DataWarehouseSavedQueryApi> => {
-    return apiMutator<DataWarehouseSavedQueryApi>(getWarehouseSavedQueriesMaterializeCreateUrl(projectId, id), {
+): Promise<void> => {
+    return apiMutator<void>(getWarehouseSavedQueriesMaterializeCreateUrl(projectId, id), {
         ...options,
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...options?.headers },
-        body: JSON.stringify(dataWarehouseSavedQueryApi),
+        body: JSON.stringify(savedQueryMaterializeApi),
     })
 }
 
@@ -1610,11 +1873,14 @@ export const getWarehouseSavedQueriesResumeCreateUrl = (projectId: string, id: s
 export const warehouseSavedQueriesResumeCreate = async (
     projectId: string,
     id: string,
+    savedQueryResumeRequestApi?: SavedQueryResumeRequestApi,
     options?: RequestInit
 ): Promise<SavedQueryResumeApi> => {
     return apiMutator<SavedQueryResumeApi>(getWarehouseSavedQueriesResumeCreateUrl(projectId, id), {
         ...options,
         method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...options?.headers },
+        body: JSON.stringify(savedQueryResumeRequestApi),
     })
 }
 
@@ -1653,14 +1919,14 @@ export const getWarehouseSavedQueriesRunCreateUrl = (projectId: string, id: stri
 export const warehouseSavedQueriesRunCreate = async (
     projectId: string,
     id: string,
-    dataWarehouseSavedQueryApi: NonReadonly<DataWarehouseSavedQueryApi>,
+    savedQueryRunApi?: SavedQueryRunApi,
     options?: RequestInit
-): Promise<DataWarehouseSavedQueryApi> => {
-    return apiMutator<DataWarehouseSavedQueryApi>(getWarehouseSavedQueriesRunCreateUrl(projectId, id), {
+): Promise<SavedQueryRunResponseApi> => {
+    return apiMutator<SavedQueryRunResponseApi>(getWarehouseSavedQueriesRunCreateUrl(projectId, id), {
         ...options,
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...options?.headers },
-        body: JSON.stringify(dataWarehouseSavedQueryApi),
+        body: JSON.stringify(savedQueryRunApi),
     })
 }
 
@@ -1682,26 +1948,49 @@ export const warehouseSavedQueriesRunHistoryRetrieve = async (
     })
 }
 
+export const getWarehouseSavedQueriesCheckIncrementalCreateUrl = (projectId: string) => {
+    return `/api/projects/${projectId}/warehouse_saved_queries/check_incremental/`
+}
+
+/**
+ * Report whether a query can be materialized incrementally, without running it.
+ *
+ * Parses the SQL only, so it is cheap enough to call from the editor as the user types. Lets
+ * the editor explain why the incremental option is unavailable before anything is saved.
+ */
+export const warehouseSavedQueriesCheckIncrementalCreate = async (
+    projectId: string,
+    checkIncrementalApi: CheckIncrementalApi,
+    options?: RequestInit
+): Promise<IncrementalEligibilityApi> => {
+    return apiMutator<IncrementalEligibilityApi>(getWarehouseSavedQueriesCheckIncrementalCreateUrl(projectId), {
+        ...options,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...options?.headers },
+        body: JSON.stringify(checkIncrementalApi),
+    })
+}
+
 export const getWarehouseSavedQueriesResumeSchedulesCreateUrl = (projectId: string) => {
     return `/api/projects/${projectId}/warehouse_saved_queries/resume_schedules/`
 }
 
 /**
- * Resume paused materialization schedules for multiple matviews.
+ * Resume materialization for several models that were suspended after repeated failures.
  *
  * Accepts a list of view IDs in the request body: {"view_ids": ["id1", "id2", ...]}
- * This endpoint is idempotent - calling it on already running or non-existent schedules is safe.
+ * This endpoint is idempotent - calling it on models that are already running is safe.
  */
 export const warehouseSavedQueriesResumeSchedulesCreate = async (
     projectId: string,
-    dataWarehouseSavedQueryApi: NonReadonly<DataWarehouseSavedQueryApi>,
+    savedQueryResumeSchedulesRequestApi: SavedQueryResumeSchedulesRequestApi,
     options?: RequestInit
-): Promise<DataWarehouseSavedQueryApi> => {
-    return apiMutator<DataWarehouseSavedQueryApi>(getWarehouseSavedQueriesResumeSchedulesCreateUrl(projectId), {
+): Promise<void> => {
+    return apiMutator<void>(getWarehouseSavedQueriesResumeSchedulesCreateUrl(projectId), {
         ...options,
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...options?.headers },
-        body: JSON.stringify(dataWarehouseSavedQueryApi),
+        body: JSON.stringify(savedQueryResumeSchedulesRequestApi),
     })
 }
 
@@ -2043,6 +2332,28 @@ export const warehouseTablesRefreshSchemaCreate = async (
     })
 }
 
+export const getWarehouseTablesReplaceFileCreateUrl = (projectId: string, id: string) => {
+    return `/api/projects/${projectId}/warehouse_tables/${id}/replace_file/`
+}
+
+/**
+ * Point a table made from an uploaded file at a new upload, then import it with one full refresh. Upload the new file with upload_file first. The table keeps its id and its name, and its rows are replaced when the sync finishes. The old file is deleted only after that sync succeeds. The sync bills its rows like any other import.
+ * @summary Replace the file of a table made from an uploaded file
+ */
+export const warehouseTablesReplaceFileCreate = async (
+    projectId: string,
+    id: string,
+    uploadedFileApi: UploadedFileApi,
+    options?: RequestInit
+): Promise<TableApi> => {
+    return apiMutator<TableApi>(getWarehouseTablesReplaceFileCreateUrl(projectId, id), {
+        ...options,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...options?.headers },
+        body: JSON.stringify(uploadedFileApi),
+    })
+}
+
 export const getWarehouseTablesUpdateSchemaCreateUrl = (projectId: string, id: string) => {
     return `/api/projects/${projectId}/warehouse_tables/${id}/update_schema/`
 }
@@ -2076,6 +2387,9 @@ export const getWarehouseTablesCreateFromUploadCreateUrl = (projectId: string) =
  * S3/GCS bucket. The read location is always derived from the caller's own team, so a client-supplied
  * `upload_id` can only resolve inside that team's folder, and the table carries no credential (reads
  * fall back to the node role, never a user-supplied key).
+ *
+ * For a team with object storage sources, the table also gets a file upload source. Its first
+ * sync imports the file and turns the same table row into a managed table.
  * @summary Create a self-managed warehouse table from an uploaded file
  */
 export const warehouseTablesCreateFromUploadCreate = async (
@@ -2289,8 +2603,8 @@ export const warehouseViewLinkValidateCreate = async (
     projectId: string,
     viewLinkValidationApi: ViewLinkValidationApi,
     options?: RequestInit
-): Promise<void> => {
-    return apiMutator<void>(getWarehouseViewLinkValidateCreateUrl(projectId), {
+): Promise<ViewLinkValidationResponseApi> => {
+    return apiMutator<ViewLinkValidationResponseApi>(getWarehouseViewLinkValidateCreateUrl(projectId), {
         ...options,
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...options?.headers },
@@ -2437,8 +2751,8 @@ export const warehouseViewLinksValidateCreate = async (
     projectId: string,
     viewLinkValidationApi: ViewLinkValidationApi,
     options?: RequestInit
-): Promise<void> => {
-    return apiMutator<void>(getWarehouseViewLinksValidateCreateUrl(projectId), {
+): Promise<ViewLinkValidationResponseApi> => {
+    return apiMutator<ViewLinkValidationResponseApi>(getWarehouseViewLinksValidateCreateUrl(projectId), {
         ...options,
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...options?.headers },

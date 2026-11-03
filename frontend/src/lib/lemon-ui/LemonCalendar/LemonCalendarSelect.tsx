@@ -87,6 +87,10 @@ export interface LemonCalendarSelectProps {
     onToggleTime?: (value: boolean) => void
     /** Use 24-hour format instead of 12-hour with AM/PM */
     use24HourFormat?: boolean
+    /** Extra "Apply" variants shown in a dropdown next to the Apply button. Each receives the selected date. */
+    applyActions?: { label: string; onClick: (date: dayjs.Dayjs) => void }[]
+    /** For a caller that saves on Apply: shows Apply as loading and disables Cancel, dates and times while it saves. */
+    loading?: boolean
 }
 
 export function LemonCalendarSelect({
@@ -100,6 +104,8 @@ export function LemonCalendarSelect({
     showTimeToggle,
     onToggleTime,
     use24HourFormat = false,
+    applyActions,
+    loading,
 }: LemonCalendarSelectProps): JSX.Element {
     const calendarRef = useRef<HTMLDivElement | null>(null)
     const [selectValue, setSelectValue] = useState<dayjs.Dayjs | null>(value ? value.startOf(granularity) : null)
@@ -107,6 +113,7 @@ export function LemonCalendarSelect({
     // Evaluate "now" as the timezone's wall clock (naive local Dayjs) so it's comparable to picked dates.
     const now = selectionPeriodTimezone ? dayjsNowInTimezone(selectionPeriodTimezone) : dayjs()
     const today = now.startOf('day')
+    const savingReason = loading ? 'Saving in progress' : undefined
 
     const scrollToTime = (date: dayjs.Dayjs, skipAnimation: boolean): void => {
         const calendarEl = calendarRef.current
@@ -176,7 +183,7 @@ export function LemonCalendarSelect({
                         }
                     }
 
-                    return { disabledReason, selected: date.isSame(selectValue, 'd') }
+                    return { disabledReason: savingReason ?? disabledReason, selected: date.isSame(selectValue, 'd') }
                 }}
                 getTimeState={(props) => {
                     const selected = selectValue
@@ -196,7 +203,7 @@ export function LemonCalendarSelect({
 
                     return {
                         active: selected === String(props.value),
-                        disabledReason,
+                        disabledReason: savingReason ?? disabledReason,
                         onClick: () => {
                             if (selected != props.value) {
                                 onTimeClick(props)
@@ -223,15 +230,43 @@ export function LemonCalendarSelect({
                 )}
                 <div className="flex deprecated-space-x-2">
                     {onClose && (
-                        <LemonButton type="secondary" onClick={onClose} data-attr="lemon-calendar-select-cancel">
+                        <LemonButton
+                            type="secondary"
+                            onClick={onClose}
+                            disabledReason={savingReason}
+                            data-attr="lemon-calendar-select-cancel"
+                        >
                             Cancel
                         </LemonButton>
                     )}
                     <LemonButton
                         type="primary"
                         disabled={!selectValue}
+                        loading={loading}
                         onClick={() => selectValue && onChange && onChange(selectValue)}
                         data-attr="lemon-calendar-select-apply"
+                        sideAction={
+                            applyActions?.length
+                                ? {
+                                      disabled: !selectValue || loading,
+                                      'aria-label': 'More apply options',
+                                      dropdown: {
+                                          placement: 'bottom-end',
+                                          overlay: applyActions.map((action) => (
+                                              <LemonButton
+                                                  key={action.label}
+                                                  fullWidth
+                                                  size="small"
+                                                  disabled={!selectValue}
+                                                  onClick={() => selectValue && action.onClick(selectValue)}
+                                              >
+                                                  {action.label}
+                                              </LemonButton>
+                                          )),
+                                      },
+                                  }
+                                : undefined
+                        }
                     >
                         Apply
                     </LemonButton>
@@ -274,6 +309,13 @@ export function LemonCalendarSelectInput(props: LemonCalendarSelectInputProps): 
                         props.onChange?.(value)
                         setUncontrolledVisible(false)
                     }}
+                    applyActions={props.applyActions?.map((action) => ({
+                        ...action,
+                        onClick: (date) => {
+                            action.onClick(date)
+                            setUncontrolledVisible(false)
+                        },
+                    }))}
                     onClose={() => {
                         setUncontrolledVisible(false)
                         props.onClose?.()

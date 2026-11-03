@@ -23,10 +23,10 @@ pub const POSTHOG_REQUEST_TIMESTAMP: &str = "PostHog-Request-Timestamp";
 
 /// AI-gateway provenance: lowercase-hex HMAC-SHA256 over the canonical tuple
 /// (token, distinct_id, request_id, signed_at). See `gateway_provenance::canonical`.
-pub const POSTHOG_AI_GATEWAY_SIGNATURE: &str = "PostHog-Ai-Gateway-Signature";
+pub const POSTHOG_AI_GATEWAY_SIGNATURE: &str = crate::gateway_provenance::SIGNATURE_HEADER;
 
 /// AI-gateway provenance: RFC3339 timestamp the gateway signed at.
-pub const POSTHOG_AI_GATEWAY_SIGNED_AT: &str = "PostHog-Ai-Gateway-Signed-At";
+pub const POSTHOG_AI_GATEWAY_SIGNED_AT: &str = crate::gateway_provenance::SIGNED_AT_HEADER;
 
 /// AI-gateway provenance: per-call request id; billing dedups exemptions by it.
 pub const POSTHOG_AI_GATEWAY_REQUEST_ID: &str = "PostHog-Ai-Gateway-Request-Id";
@@ -87,7 +87,7 @@ pub(super) const CAPTURE_V1_PAYLOAD_SIZE: &str = "capture_v1_payload_size_bytes"
 /// configured in prometheus.rs (CLOCK_SKEW_SECONDS).
 pub(super) const CAPTURE_V1_CLOCK_SKEW_SECONDS: &str = "capture_v1_clock_skew_seconds";
 
-/// Histogram of batch serialize wall-time (label: batch_size bucket). Sink- and
+/// Histogram of batch serialize wall-time (label: batch_size bucket). Output- and
 /// product-agnostic by design — faceting comes from the per-mode service
 /// deployment (capture-analytics / capture-replay / capture-ai).
 pub(super) const CAPTURE_V1_SERIALIZE_DURATION_SECONDS: &str =

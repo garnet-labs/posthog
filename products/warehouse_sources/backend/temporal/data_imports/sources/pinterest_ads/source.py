@@ -2,22 +2,17 @@ from typing import Optional, cast
 
 import requests
 
-from posthog.schema import (
+from posthog.exceptions_capture import capture_exception
+from posthog.models.integration import ERROR_TOKEN_REFRESH_FAILED, OauthIntegration
+
+from products.warehouse_sources.backend.facade.codebase_detection import detect
+from products.warehouse_sources.backend.facade.source_config import (
     DataWarehouseSourceCategory,
-    ExternalDataSourceType as SchemaExternalDataSourceType,
     ReleaseStatus,
     SourceConfig,
     SourceFieldOauthAccountSelectConfig,
     SourceFieldOauthConfig,
     SuggestedTable,
-)
-
-from posthog.exceptions_capture import capture_exception
-from posthog.models.integration import ERROR_TOKEN_REFRESH_FAILED, OauthIntegration
-
-from products.warehouse_sources.backend.temporal.data_imports.pipelines.pipeline.typings import (
-    SourceInputs,
-    SourceResponse,
 )
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.base import (
     MARKETING_ANALYTICS_SUGGESTED_TABLE_TOOLTIP,
@@ -35,6 +30,7 @@ from products.warehouse_sources.backend.temporal.data_imports.sources.common.mix
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.registry import SourceRegistry
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.resumable import ResumableSourceManager
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.schema import SourceSchema
+from products.warehouse_sources.backend.temporal.data_imports.sources.common.typings import SourceInputs, SourceResponse
 from products.warehouse_sources.backend.temporal.data_imports.sources.generated_configs.pinterestads import (
     PinterestAdsSourceConfig,
 )
@@ -56,6 +52,18 @@ def _format_permission(permission: str) -> str:
 
 @SourceRegistry.register
 class PinterestAdsSource(ResumableSource[PinterestAdsSourceConfig, PinterestAdsResumeConfig], OAuthMixin):
+    codebase_detection = detect(
+        env=(
+            "^PINTEREST_ADS_",
+            "^PINTEREST_APP_ID$",
+            "^PINTEREST_APP_SECRET$",
+            "^PINTEREST_ACCESS_TOKEN$",
+            "^PINTEREST_REFRESH_ACCESS_TOKEN$",
+        ),
+        script_hosts=("s.pinimg.com",),
+        pypi=("pinterest-api-sdk",),
+    )
+
     supported_versions = ("v5",)
     default_version = "v5"
     api_docs_url = "https://developers.pinterest.com/docs/api/v5/"
@@ -74,10 +82,26 @@ class PinterestAdsSource(ResumableSource[PinterestAdsSourceConfig, PinterestAdsR
             "404 Client Error": "Pinterest Ads resource not found. Please check your ad account ID.",
         }
 
+    def get_retryable_errors(self) -> set[str]:
+        # `build_session` mounts the shared tracked transport, whose adapter already retries
+        # GET requests on these statuses in-process (see DEFAULT_RETRY in
+        # sources/common/http/transport.py) before `raise_for_status()` can raise. A plain
+        # `requests.HTTPError` only reaches `_make_request` once that budget is exhausted, so
+        # Pinterest is rate-limiting us (429) or briefly unavailable (5xx) — both transient and
+        # self-recovering. Let Temporal retry the whole activity instead of reporting this as an
+        # unclassified error every run.
+        return {
+            "429 Client Error",
+            "500 Server Error",
+            "502 Server Error",
+            "503 Server Error",
+            "504 Server Error",
+        }
+
     @property
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
-            name=SchemaExternalDataSourceType.PINTEREST_ADS,
+            name=ExternalDataSourceType.PINTERESTADS,
             category=DataWarehouseSourceCategory.ADVERTISING,
             label="Pinterest Ads",
             caption="Collect campaign data, ad performance, and advertising metrics from Pinterest Ads. Ensure you have granted PostHog access to your Pinterest Ads account, learn how to do this in [the documentation](https://posthog.com/docs/cdp/sources/pinterest-ads).",
@@ -196,6 +220,11 @@ class PinterestAdsSource(ResumableSource[PinterestAdsSourceConfig, PinterestAdsR
             self.get_oauth_integration(config.pinterest_ads_integration_id, team_id)
             return True, None
         except Exception as e:
+            if isinstance(e, ValueError) and "Integration not found" in str(e):
+                # The integration was deleted/disconnected while the source still references it —
+                # an expected user state, not an error worth reporting (get_oauth_integration raises
+                # ValueError("Integration not found: <id>")).
+                return False, "Pinterest Ads integration not found. Please reconnect your Pinterest Ads integration."
             capture_exception(e)
             return False, f"Failed to validate Pinterest Ads credentials: {str(e)}"
 
@@ -221,6 +250,7 @@ class PinterestAdsSource(ResumableSource[PinterestAdsSourceConfig, PinterestAdsR
                 supports_incremental=endpoint_config.incremental_fields is not None,
                 supports_append=False,
                 incremental_fields=endpoint_config.incremental_fields or [],
+                should_sync_default=endpoint_config.should_sync_default,
             )
             for endpoint_config in PINTEREST_ADS_CONFIG.values()
         ]

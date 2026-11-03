@@ -50,6 +50,7 @@ from posthog.clickhouse.query_tagging import Feature, Product, tags_context
 from posthog.models import Team, User
 from posthog.permissions import APIScopePermission
 from posthog.rate_limit import PersonalSpendBurstThrottle, PersonalSpendDailyThrottle, PersonalSpendSustainedThrottle
+from posthog.tasks.usage_report import POSTHOG_AI_PRODUCTS, POSTHOG_CODE_AI_PRODUCTS
 from posthog.utils import relative_date_parse
 
 logger = structlog.get_logger(__name__)
@@ -58,11 +59,14 @@ MAX_PRODUCT_KEY_LENGTH = 64
 MAX_DATE_STRING_LENGTH = 32
 
 SUPPORTED_PRODUCTS = frozenset({"posthog_code"})
+BILLABLE_AI_PRODUCTS = frozenset(POSTHOG_AI_PRODUCTS + POSTHOG_CODE_AI_PRODUCTS)
 
 DEFAULT_DATE_FROM = "-30d"
 MAX_WINDOW_DAYS = 90
 # The most calendar days a MAX_WINDOW_DAYS window can touch: partial days at both edges.
 BY_DAY_MAX_ROWS = MAX_WINDOW_DAYS + 1
+BY_DAY_MODEL_TOP_MODELS = 6
+BY_DAY_MODEL_MAX_ROWS = BY_DAY_MAX_ROWS * (BY_DAY_MODEL_TOP_MODELS + 1)
 # Sub-day series are only useful (and cheap) over short windows; a "last 24h"
 # view is the intended consumer. The cap bounds the series length regardless of
 # bucket size: 600 buckets is 50 hours at 5-minute buckets and 25 days hourly.
@@ -75,6 +79,7 @@ MAX_LIMIT = 200
 DEFAULT_LIMIT = 50
 
 CACHE_TIMEOUT_SECONDS = 300
+CACHE_VERSION = "v3"
 
 UTC = ZoneInfo("UTC")
 
@@ -89,7 +94,7 @@ def _cache_key(
     to_slot = date_to or "_now"
     # Suffix only when set, so bucketless requests keep their pre-bucket_minutes cache keys.
     bucket_slot = f":{bucket_minutes}" if bucket_minutes else ""
-    return f"personal_spend:{email}:{date_from}:{to_slot}:{product}:{limit}{bucket_slot}"
+    return f"personal_spend:{CACHE_VERSION}:{email}:{date_from}:{to_slot}:{product}:{limit}{bucket_slot}"
 
 
 def _parse_date_param(value: str, field: str, now: datetime.datetime) -> datetime.datetime:
@@ -235,6 +240,9 @@ class _ProductBreakdownRowSerializer(serializers.Serializer):
         help_text="Number of $ai_generation + $ai_embedding events for this product."
     )
     cost_usd = serializers.FloatField(help_text="Total cost in USD for this product over the lookback window.")
+    billable = serializers.BooleanField(
+        help_text="Whether this product is eligible for PostHog AI or Desktop credit billing, independent of event-level billing rules."
+    )
 
 
 class _ToolBreakdownRowSerializer(serializers.Serializer):
@@ -282,6 +290,25 @@ class _DayBreakdownRowSerializer(serializers.Serializer):
         help_text="Number of $ai_generation + $ai_embedding events on this day for the scoped product."
     )
     cost_usd = serializers.FloatField(help_text="Total cost in USD on this day for the scoped product.")
+    input_tokens = serializers.IntegerField(help_text="Sum of `$ai_input_tokens` on this day for the scoped product.")
+    output_tokens = serializers.IntegerField(help_text="Sum of `$ai_output_tokens` on this day for the scoped product.")
+
+
+class _DayModelBreakdownRowSerializer(serializers.Serializer):
+    day = serializers.DateField(help_text="UTC calendar day the events fall on (`toDate(timestamp)`).")
+    model = serializers.CharField(
+        allow_null=True,
+        help_text=(
+            "Model name for one of the highest-cost models in the selected window. Null is the aggregate "
+            "of all remaining models, including events without a model."
+        ),
+    )
+    cost_usd = serializers.FloatField(help_text="Total cost in USD for this model on this day.")
+    input_tokens = serializers.IntegerField(help_text="Sum of `$ai_input_tokens` for this model on this day.")
+    output_tokens = serializers.IntegerField(help_text="Sum of `$ai_output_tokens` for this model on this day.")
+    generation_count = serializers.IntegerField(
+        help_text="Number of $ai_generation + $ai_embedding events for this model on this day."
+    )
 
 
 class _BucketBreakdownRowSerializer(serializers.Serializer):
@@ -358,6 +385,12 @@ class _SummarySerializer(serializers.Serializer):
     )
     total_cost_usd = serializers.FloatField(
         help_text="Total LLM cost in USD across every `ai_product` for the user — independent of the `product` filter."
+    )
+    billable_cost_usd = serializers.FloatField(
+        help_text=(
+            "Raw LLM cost in USD for products eligible for AI or Desktop credit billing, independent of the "
+            "product filter and breakdown limit. Excludes credit markup and does not represent an invoiced amount."
+        )
     )
     event_count = serializers.IntegerField(
         help_text="Total $ai_generation + $ai_embedding events captured across every product."
@@ -456,6 +489,13 @@ class PersonalSpendAnalysisResponseSerializer(serializers.Serializer):
     by_day = _DayBreakdownSerializer(
         help_text="Spend grouped by UTC day, ordered ascending. Scoped to `product`. Not subject to `limit`."
     )
+    by_day_model = _DayModelBreakdownRowSerializer(
+        many=True,
+        help_text=(
+            "Daily model spend for the scoped product, ordered by day and cost. Includes the six highest-cost "
+            "models in the selected window plus a null-model row for the remaining models."
+        ),
+    )
     by_bucket = _BucketBreakdownSerializer(
         required=False,
         help_text=(
@@ -537,7 +577,8 @@ def _fetch_summary(
             countIf({product_filter}) AS scoped_event_count,
             round(sumIf(toFloat(properties.$ai_total_cost_usd), {product_filter}), 6) AS scoped_cost_usd,
             count() AS event_count,
-            round(sum(toFloat(properties.$ai_total_cost_usd)), 6) AS total_cost_usd
+            round(sum(toFloat(properties.$ai_total_cost_usd)), 6) AS total_cost_usd,
+            round(sumIf(toFloat(properties.$ai_total_cost_usd), properties.ai_product IN {billable_products}), 6) AS billable_cost_usd
         FROM events
         WHERE {event_in} AND {email_filter} AND {timestamp_filter}
         """
@@ -546,6 +587,7 @@ def _fetch_summary(
         query=query,
         placeholders={
             "product_filter": _product_filter(product),
+            "billable_products": ast.Tuple(exprs=[ast.Constant(value=value) for value in sorted(BILLABLE_AI_PRODUCTS)]),
             "event_in": _event_in(["$ai_generation", "$ai_embedding"]),
             "email_filter": _email_filter(email),
             "timestamp_filter": _timestamp_filter(from_dt, to_dt),
@@ -553,7 +595,7 @@ def _fetch_summary(
         team=team,
         query_type="PersonalSpendSummary",
     )
-    row = (result.results or [(0, 0.0, 0, 0.0)])[0]
+    row = (result.results or [(0, 0.0, 0, 0.0, 0.0)])[0]
     return {
         "date_from": from_dt,
         "date_to": to_dt,
@@ -562,6 +604,7 @@ def _fetch_summary(
         "scoped_cost_usd": float(row[1] or 0.0),
         "event_count": int(row[2] or 0),
         "total_cost_usd": float(row[3] or 0.0),
+        "billable_cost_usd": float(row[4] or 0.0),
     }
 
 
@@ -595,6 +638,7 @@ def _fetch_by_product(
     rows = [
         {
             "product": row[0] if row[0] is not None else None,
+            "billable": row[0] in BILLABLE_AI_PRODUCTS,
             "event_count": int(row[1] or 0),
             "cost_usd": float(row[2] or 0.0),
         }
@@ -718,7 +762,9 @@ def _fetch_by_day(
         SELECT
             toDate(timestamp) AS day,
             count() AS event_count,
-            round(sum(toFloat(properties.$ai_total_cost_usd)), 6) AS cost_usd
+            round(sum(toFloat(properties.$ai_total_cost_usd)), 6) AS cost_usd,
+            sum(toFloat(properties.$ai_input_tokens)) AS input_tokens,
+            sum(toFloat(properties.$ai_output_tokens)) AS output_tokens
         FROM events
         WHERE {event_in}
             AND {product_filter}
@@ -751,10 +797,99 @@ def _fetch_by_day(
             "day": row[0],
             "event_count": int(row[1] or 0),
             "cost_usd": float(row[2] or 0.0),
+            "input_tokens": int(row[3] or 0),
+            "output_tokens": int(row[4] or 0),
         }
         for row in (result.results or [])
     ]
     return _truncate(rows, BY_DAY_MAX_ROWS)
+
+
+def _fetch_by_day_model(
+    team: Team,
+    email: str,
+    from_dt: datetime.datetime,
+    to_dt: datetime.datetime,
+    product: str,
+) -> list[dict[str, Any]]:
+    top_models_query = parse_select(
+        f"""
+        SELECT properties.$ai_model AS model
+        FROM events
+        WHERE {{event_in}}
+            AND {{product_filter}}
+            AND {{email_filter}}
+            AND {{timestamp_filter}}
+            AND isNotNull(properties.$ai_model)
+        GROUP BY model
+        ORDER BY sum(toFloat(properties.$ai_total_cost_usd)) DESC, model ASC
+        LIMIT {{limit}}
+        """
+    )
+    top_models_result = execute_hogql_query(
+        query=top_models_query,
+        placeholders={
+            "event_in": _event_in(["$ai_generation", "$ai_embedding"]),
+            "product_filter": _product_filter(product),
+            "email_filter": _email_filter(email),
+            "timestamp_filter": _timestamp_filter(from_dt, to_dt),
+            "limit": ast.Constant(value=BY_DAY_MODEL_TOP_MODELS),
+        },
+        team=team,
+        query_type="PersonalSpendByDayModelTopModels",
+    )
+    top_models = [row[0] for row in (top_models_result.results or []) if row[0] is not None]
+    model_expression = "NULL"
+    if top_models:
+        model_expression = "if(properties.$ai_model IN {top_models}, properties.$ai_model, NULL)"
+
+    query = parse_select(
+        f"""
+        SELECT
+            toDate(timestamp) AS day,
+            {model_expression} AS model,
+            round(sum(toFloat(properties.$ai_total_cost_usd)), 6) AS cost_usd,
+            sum(toFloat(properties.$ai_input_tokens)) AS input_tokens,
+            sum(toFloat(properties.$ai_output_tokens)) AS output_tokens,
+            count() AS generation_count
+        FROM events
+        WHERE {{event_in}}
+            AND {{product_filter}}
+            AND {{email_filter}}
+            AND {{timestamp_filter}}
+        GROUP BY day, model
+        ORDER BY day ASC, cost_usd DESC, model ASC
+        LIMIT {{limit}}
+        """
+    )
+    placeholders: dict[str, ast.Expr] = {
+        "event_in": _event_in(["$ai_generation", "$ai_embedding"]),
+        "product_filter": _product_filter(product),
+        "email_filter": _email_filter(email),
+        "timestamp_filter": _timestamp_filter(from_dt, to_dt),
+        "limit": ast.Constant(value=BY_DAY_MODEL_MAX_ROWS),
+    }
+    if top_models:
+        placeholders["top_models"] = ast.Tuple(exprs=[ast.Constant(value=model) for model in top_models])
+
+    result = execute_hogql_query(
+        query=query,
+        placeholders=placeholders,
+        team=team,
+        modifiers=HogQLQueryModifiers(convertToProjectTimezone=False),
+        query_type="PersonalSpendByDayModel",
+    )
+    return [
+        {
+            "day": row[0],
+            "model": str(row[1]) if row[1] is not None else None,
+            "cost_usd": float(row[2] or 0.0),
+            "input_tokens": int(row[3] or 0),
+            "output_tokens": int(row[4] or 0),
+            "generation_count": int(row[5] or 0),
+        }
+        for row in (result.results or [])
+    ]
 
 
 def _fetch_by_bucket(
@@ -888,6 +1023,7 @@ def _compute_spend_analysis(
             "by_tool": by_tool,
             "by_model": _fetch_by_model(team, email, from_dt, to_dt, product, limit),
             "by_day": _fetch_by_day(team, email, from_dt, to_dt, product),
+            "by_day_model": _fetch_by_day_model(team, email, from_dt, to_dt, product),
             **(
                 {"by_bucket": _fetch_by_bucket(team, email, from_dt, to_dt, product, bucket_minutes)}
                 if bucket_minutes is not None
@@ -1053,6 +1189,8 @@ class PersonalSpendCrossRegionAuthentication(WebhookSignatureAuthentication):
     """HMAC verification for the EU→US personal-spend proxy. The base class
     fails closed on missing headers, unset secret, stale timestamp, or digest
     mismatch; the asserted identity lives in the signed body, not `request.user`."""
+
+    activity_credential_type = "cross_region_signature"
 
     def get_signature_header(self) -> str:
         return CROSS_REGION_SIGNATURE_HEADER

@@ -1,7 +1,16 @@
-from django.db import models
+import json
+import hashlib
+from typing import Any
+
+from django.core.exceptions import ValidationError
+from django.db import models, transaction
 from django.db.models import Q
 
+from posthog.models.scoping.manager import EnvironmentScopedManager
 from posthog.models.utils import UpdatedMetaFields, UUIDModel
+
+from products.growth.backend.enrichment.icp_lists import clear_lists_cache
+from products.growth.backend.enrichment.scoring_rules import validate_scoring_rules
 
 
 class ProductPushCampaign(UUIDModel, UpdatedMetaFields):
@@ -34,11 +43,7 @@ class ProductPushCampaign(UUIDModel, UpdatedMetaFields):
         db_constraint=False,
     )
     created_by = models.ForeignKey(
-        "posthog.User",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        db_constraint=False,
+        "posthog.User", on_delete=models.SET_NULL, null=True, blank=True, db_constraint=False, related_name="+"
     )
 
     # A ProductKey value. Plain CharField (like ProductIntent.product_type) so the
@@ -139,7 +144,186 @@ class OrganizationEnrichmentFetch(UUIDModel):
     class Meta:
         indexes = [
             models.Index(fields=["organization", "fetched_at"], name="growth_enrich_fetch_org_time"),
+            # Matches latest_fetches_qs' DISTINCT ON ordering (enrichment/labels.py) so the latest-fetch
+            # subquery in the batch runner's driving query is an index scan instead of a sort of the
+            # whole archive.
+            models.Index(fields=["organization", "-fetched_at", "-id"], name="growth_enrich_fetch_org_ts_id"),
         ]
+
+
+class EnrichmentPromptConfig(UUIDModel):
+    """A versioned LLM classifier definition for one AI enrichment label.
+
+    Rails are code; brains are rows: the label owner iterates prompt/model/input selection by
+    creating new rows, without a deploy. A behavior change is always a new row (new version),
+    never an in-place edit. `name` is a human label for this classifier; the output contract is
+    output_fields (see enrichment/labels.py). But `EnrichmentLabelResult.label_name` is a
+    denormalized copy of `name`, and both the idempotency check and the unique constraint key on
+    it — so renaming a label orphans every existing verdict (they keep the old label_name and are
+    invisible under the new one), and the runner reclassifies the org from scratch. Renaming
+    requires updating history in the same transaction:
+    `EnrichmentLabelResult.objects.filter(label_name=old).update(label_name=new)`.
+    """
+
+    # Label this config computes, e.g. "ai_pilled".
+    name = models.CharField(max_length=128)
+    # Human-readable classifier version, e.g. "ai-pilled-clay-v1".
+    version = models.CharField(max_length=128)
+    prompt_text = models.TextField()
+    model = models.CharField(max_length=128)
+    # Dotted paths into the archived Harmonic payload fed to the prompt, e.g. ["name", "funding.fundingStage"].
+    input_fields = models.JSONField(default=list)
+    # The classifier's entire output contract: list of {"key", "type"
+    # ("boolean"|"number"|"string"), "description"}. These are the keys the prompt asks for and
+    # the only keys a stored verdict carries — see enrichment/labels.py's build_messages /
+    # _parse_custom_output. `name` is never one of them.
+    output_fields = models.JSONField(default=list)
+    # The version the batch runner computes; at most one active row per label (enforced below).
+    is_active = models.BooleanField(default=False)
+    created_by = models.ForeignKey(
+        "posthog.User", on_delete=models.SET_NULL, null=True, blank=True, db_constraint=False, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["name", "version"], name="growth_prompt_config_name_version"),
+            models.UniqueConstraint(
+                fields=["name"], condition=Q(is_active=True), name="growth_prompt_config_one_active"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.name} {self.version}"
+
+    # Bumped whenever the set of fields below changes, or when this module changes how it
+    # interprets one of them without changing the row itself.
+    CONTENT_HASH_VERSION = "v2"
+
+    @property
+    def content_hash(self) -> str:
+        """Hash of the behavior-defining fields, stamped onto every result so results stay
+        self-describing even if this row is later deleted."""
+        content = json.dumps(
+            {
+                "prompt_text": self.prompt_text,
+                "model": self.model,
+                "input_fields": self.input_fields,
+                "output_fields": self.output_fields,
+            },
+            sort_keys=True,
+        )
+        return f"{self.CONTENT_HASH_VERSION}:{hashlib.sha256(content.encode()).hexdigest()}"
+
+
+class EnrichmentLabelResult(UUIDModel):
+    """One classifier verdict for one org under one prompt version, computed from one archived fetch.
+
+    Positive results from configured AI labels contribute to the ICP fit score.
+    Other labels remain available for inspection. Keying on the fetch means a re-enriched org
+    naturally gets recomputed under the same version instead of being frozen — which matters
+    most for `unknown` verdicts from empty payloads, which would otherwise be permanent.
+    """
+
+    # db_constraint=False keeps CreateModel off posthog_organization's lock path (hot table)
+    organization = models.ForeignKey(
+        "posthog.Organization",
+        on_delete=models.CASCADE,
+        db_constraint=False,
+        related_name="enrichment_label_results",
+    )
+    # Exactly which archived payload was classified. SET_NULL (not CASCADE): the fetch archive
+    # is the natural target for retention pruning (Organization deletion already cascades to it,
+    # see OrganizationEnrichmentFetch.organization), and prompt_hash + inputs make a verdict
+    # self-describing enough to survive its source fetch being pruned.
+    fetch = models.ForeignKey(
+        "growth.OrganizationEnrichmentFetch",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="label_results",
+    )
+    label_name = models.CharField(max_length=128)
+    prompt_version = models.CharField(max_length=128)
+    # EnrichmentPromptConfig.content_hash at compute time, so the result is self-describing
+    # even if the config row is deleted.
+    prompt_hash = models.CharField(max_length=72)
+    model = models.CharField(max_length=128)
+    # The config's output_fields keys and their values, e.g. {"ai_pilled": true|false|"unknown",
+    # "confidence": float, "reasoning": str}, plus a "meta" provenance key.
+    output = models.JSONField(default=dict)
+    # The rendered classifier inputs (extracted payload fields + signup domain) at compute
+    # time: the domain derives from current org membership and drifts as members leave, so
+    # this is the only durable record of what was actually sent to the LLM.
+    inputs = models.JSONField(default=dict)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["organization", "label_name", "prompt_version", "fetch"],
+                name="growth_label_result_uniq",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["label_name", "prompt_version"], name="growth_label_result_version"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.organization_id} {self.label_name} {self.prompt_version}"
+
+
+class IcpScoringConfig(UUIDModel):
+    """An immutable scoring policy and curated lists, activated as one version."""
+
+    # Human-readable list version, e.g. "2026-08-13".
+    version = models.CharField(max_length=128, unique=True)
+    # Tag curation rows: [{"tag", "type", "recommendation", "reason", "note"}]. recommendation
+    # is "+"-joined bucket names (ai_positive, capital_quality, software_positive,
+    # software_negative, dq, ignore).
+    tags = models.JSONField(default=list)
+    # Quality investor rows: [{"investor", "aliases": [...], "notes"}].
+    quality_investors = models.JSONField(default=list)
+    scoring_rules = models.JSONField(default=dict, db_default={}, blank=True, validators=[validate_scoring_rules])
+    # The row the scorer loads; at most one active row (enforced below).
+    is_active = models.BooleanField(default=False)
+    created_by = models.ForeignKey(
+        "posthog.User", on_delete=models.SET_NULL, null=True, blank=True, db_constraint=False, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["is_active"], condition=Q(is_active=True), name="growth_icp_lists_one_active"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"icp scoring {self.version}{' (active)' if self.is_active else ''}"
+
+    def save(self, *args: Any, **kwargs: Any) -> None:
+        validate_scoring_rules(self.scoring_rules)
+        with transaction.atomic():
+            saved = type(self).objects.select_for_update().filter(pk=self.pk).first()
+            if saved is not None:
+                immutable = ("version", "tags", "quality_investors", "scoring_rules", "created_by_id", "created_at")
+                if any(getattr(saved, field) != getattr(self, field) for field in immutable):
+                    raise ValidationError("Saved scoring versions cannot be edited. Clone this version instead.")
+                if saved.is_active != self.is_active:
+                    raise ValidationError("Use the activation action to change the active scoring version.")
+            super().save(*args, **kwargs)
+
+    def activate(self) -> None:
+        with transaction.atomic():
+            list(type(self).objects.select_for_update().order_by("pk").values_list("pk", flat=True))
+            saved = type(self).objects.get(pk=self.pk)
+            validate_scoring_rules(saved.scoring_rules)
+            type(self).objects.filter(is_active=True).exclude(pk=self.pk).update(is_active=False)
+            type(self).objects.filter(pk=self.pk).update(is_active=True)
+            self.is_active = True
+            clear_lists_cache()
+            transaction.on_commit(clear_lists_cache)
 
 
 class EnrichmentSignupSnapshot(UUIDModel):
@@ -159,3 +343,26 @@ class EnrichmentSignupSnapshot(UUIDModel):
         related_name="enrichment_signup_snapshot",
     )
     created_at = models.DateTimeField(auto_now_add=True)
+
+
+class SdkVersionsDaily(models.Model):
+    """Events per SDK version for one environment and one UTC day.
+
+    The daily rollup job replaces a whole day at a time, so readers sum days instead of
+    scanning raw events. `team_id` is the environment id from events, and has no foreign key
+    because team deletion removes the rows explicitly.
+    """
+
+    pk = models.CompositePrimaryKey("team_id", "day", "lib", "lib_version")
+    team_id = models.BigIntegerField()
+    day = models.DateField()
+    lib = models.CharField(max_length=64)
+    lib_version = models.CharField(max_length=64)
+    event_count = models.BigIntegerField()
+    max_timestamp = models.DateTimeField()
+
+    objects = EnvironmentScopedManager()
+
+    class Meta:
+        db_table = "growth_sdk_versions_daily"
+        indexes = [models.Index(fields=["day"], name="growth_sdk_ver_daily_day_idx")]

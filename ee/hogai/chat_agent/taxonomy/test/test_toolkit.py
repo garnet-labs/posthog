@@ -1,3 +1,5 @@
+from collections.abc import Callable
+
 from posthog.test.base import BaseTest
 from unittest.mock import patch
 
@@ -5,12 +7,15 @@ from langchain_core.agents import AgentAction
 from parameterized import parameterized
 from pydantic import BaseModel
 
-from posthog.schema import AssistantToolCall
+from posthog.schema import ActorsPropertyTaxonomyQuery, AssistantToolCall
+
+from posthog.models import Team
 
 from products.event_definitions.backend.models.property_definition import PropertyDefinition
 
 from ee.hogai.chat_agent.taxonomy.toolkit import TaxonomyAgentToolkit, TaxonomyToolNotFoundError
 from ee.hogai.chat_agent.taxonomy.tools import TaxonomyTool
+from ee.hogai.chat_agent.taxonomy.virtual_properties import PropertyDefinitionOrVirtual
 
 
 class DummyToolkit(TaxonomyAgentToolkit):
@@ -47,6 +52,17 @@ class TestTaxonomyAgentToolkit(BaseTest):
         assert browser_prop is not None
         self.assertEqual(browser_prop[1], "String")
         self.assertIsNotNone(browser_prop[2])
+
+    def test_enrich_props_uses_stored_description_only_for_custom_props(self):
+        # Custom properties fall back to the user-authored description; core taxonomy still wins so a
+        # stored description can never override (or spoof) a built-in one.
+        props = [("$browser", "String"), ("custom_prop", "Numeric")]
+        stored = {"custom_prop": "Revenue in cents", "$browser": "should be ignored"}
+        enriched = self.toolkit._enrich_props_with_descriptions("event", props, stored)
+        by_name = {name: description for name, _, description in enriched}
+
+        self.assertEqual(by_name["custom_prop"], "Revenue in cents")
+        self.assertNotEqual(by_name["$browser"], "should be ignored")
 
     @parameterized.expand(
         [
@@ -292,6 +308,65 @@ class TestTaxonomyAgentToolkit(BaseTest):
         result = await self.toolkit._handle_entity_properties_task({"task": task})
         self.assertIn("<name>visible</name>", result.result)
         self.assertNotIn("<name>secret</name>", result.result)
+
+    async def test_person_properties_surface_stored_descriptions_sanitized(self):
+        from ee.models.property_definition import EnterprisePropertyDefinition
+
+        # An EnterprisePropertyDefinition also creates the base PropertyDefinition row the person path
+        # discovers, so its user-authored description should ride along on the surfaced property.
+        await EnterprisePropertyDefinition.objects.acreate(
+            team=self.team,
+            type=PropertyDefinition.Type.PERSON,
+            name="plan_tier",
+            property_type="String",
+            description="Subscription tier\nof the account",
+        )
+        task = AssistantToolCall(id="1", name="retrieve_entity_properties", args={"entity": "person"})
+        result = await self.toolkit._handle_entity_properties_task({"task": task})
+
+        self.assertIn("<name>plan_tier</name>", result.result)
+        # Sanitization collapses the newline so a description can't break out of its line.
+        self.assertIn("<description>Subscription tier of the account</description>", result.result)
+
+    @parameterized.expand(
+        [
+            (
+                "entity_lookup",
+                PropertyDefinition.Type.PERSON,
+                lambda toolkit: vars(TaxonomyAgentToolkit)["_get_definitions_for_entity"].func(
+                    toolkit, "person", ["sibling_tier"], ActorsPropertyTaxonomyQuery(properties=["sibling_tier"])
+                ),
+            ),
+            (
+                "event_or_action_lookup",
+                PropertyDefinition.Type.EVENT,
+                lambda toolkit: vars(TaxonomyAgentToolkit)["_get_definitions_for_event_or_action"].func(
+                    toolkit, ["sibling_tier"]
+                ),
+            ),
+        ]
+    )
+    def test_property_definitions_resolve_across_sibling_environments(
+        self,
+        _name: str,
+        definition_type: PropertyDefinition.Type,
+        lookup: Callable[[TaxonomyAgentToolkit], dict[str, PropertyDefinitionOrVirtual]],
+    ) -> None:
+        # Both lookups are `database_sync_to_async(thread_sensitive=False)`, which runs them on another thread and
+        # connection. The wrapper's `.func` runs them on the test's connection, the only one that sees its rows.
+        sibling = Team.objects.create(organization=self.organization, project=self.team.project)
+        PropertyDefinition.objects.create(
+            team=sibling,
+            project=self.team.project,
+            type=definition_type,
+            name="sibling_tier",
+            property_type="String",
+        )
+
+        definition = lookup(self.toolkit)["sibling_tier"]
+
+        assert isinstance(definition, PropertyDefinition)
+        self.assertEqual(definition.property_type, "String")
 
     @patch("ee.hogai.chat_agent.taxonomy.toolkit.restricted_property_names")
     async def test_retrieve_multiple_entity_property_values_hides_restricted(self, mock_restricted):

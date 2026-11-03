@@ -1,23 +1,17 @@
 from typing import Optional, cast
 
-from django.conf import settings
+from posthog.exceptions_capture import capture_exception
 
-from posthog.schema import (
+from products.warehouse_sources.backend.facade.codebase_detection import detect
+from products.warehouse_sources.backend.facade.source_config import (
     DataWarehouseSourceCategory,
-    ExternalDataSourceType as SchemaExternalDataSourceType,
     ReleaseStatus,
     SourceConfig,
     SourceFieldOauthAccountSelectConfig,
     SourceFieldOauthConfig,
     SuggestedTable,
 )
-
-from posthog.exceptions_capture import capture_exception
-
-from products.warehouse_sources.backend.temporal.data_imports.pipelines.pipeline.typings import (
-    SourceInputs,
-    SourceResponse,
-)
+from products.warehouse_sources.backend.temporal.data_imports.sources.common import credentials_service
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.base import (
     MARKETING_ANALYTICS_SUGGESTED_TABLE_TOOLTIP,
     FieldType,
@@ -34,6 +28,7 @@ from products.warehouse_sources.backend.temporal.data_imports.sources.common.mix
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.registry import SourceRegistry
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.resumable import ResumableSourceManager
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.schema import SourceSchema
+from products.warehouse_sources.backend.temporal.data_imports.sources.common.typings import SourceInputs, SourceResponse
 from products.warehouse_sources.backend.temporal.data_imports.sources.generated_configs.bingads import (
     BingAdsSourceConfig,
 )
@@ -41,11 +36,38 @@ from products.warehouse_sources.backend.types import ExternalDataSourceType
 
 from .bing_ads import bing_ads_source, get_incremental_fields, get_schemas
 from .client import BingAdsClient
+from .schemas import BingAdsResource
 from .utils import BingAdsResumeConfig
+
+# Default incremental overlap re-read windows, keyed by schema name. The report request sets
+# ReturnOnlyCompleteData = False, so the newest days arrive before Microsoft finishes processing them,
+# and Microsoft attributes later conversions to the date of the click. An incremental sync that starts
+# at the newest imported day freezes each earlier day at its first-imported value. Re-reading a trailing
+# window lets those days catch up, and merge-by-primary-key makes the overlap idempotent. The window
+# matches the Google Ads stats tables, and users can change it per schema.
+BING_ADS_INCREMENTAL_LOOKBACK_SECONDS: dict[str, int] = {
+    BingAdsResource.DESTINATION_URL_PERFORMANCE_REPORT.value: 15 * 24 * 60 * 60,
+}
+
+# The account picker runs before the user enters an Account ID, so the sync-time guidance does not apply there.
+BING_ADS_LISTING_MESSAGE_OVERRIDES: dict[str, str] = {
+    "Invalid client data": (
+        "Microsoft returned 'Invalid client data' for the signed-in Microsoft login. This usually means that "
+        "the login cannot access a Microsoft Advertising account. Reconnect your Bing Ads integration and sign in "
+        "with a login that can access your Microsoft Advertising account."
+    ),
+}
 
 
 @SourceRegistry.register
 class BingAdsSource(ResumableSource[BingAdsSourceConfig, BingAdsResumeConfig], OAuthMixin):
+    codebase_detection = detect(
+        env=("^BING_ADS_", "^MICROSOFT_ADS_"),
+        pypi=("bingads",),
+        composer=("microsoft/bingads",),
+        maven=("com.microsoft.bingads:microsoft.bingads",),
+    )
+
     lists_tables_without_credentials = True  # static endpoint catalog — safe for public docs
     supported_versions = ("v13",)
     default_version = "v13"
@@ -141,15 +163,45 @@ class BingAdsSource(ResumableSource[BingAdsSourceConfig, BingAdsResumeConfig], O
             "Bing Ads access token not found": "Bing Ads OAuth access token is missing. Please reconnect your Bing Ads integration.",
             "Bing Ads refresh token not found": "Bing Ads OAuth refresh token is missing. Please reconnect your Bing Ads integration.",
             "Bing Ads developer token not configured": None,
+            # A report request that names a column not valid for its report type comes back as a coded
+            # WebFault (InvalidReportColumn), surfaced by _wrap_with_fault_detail. This is deterministic —
+            # retrying re-sends the same bad column list forever — and only a fix to a resource's
+            # field_names in schemas.py can resolve it, so it's internal config (None message), not
+            # customer-actionable.
+            "InvalidReportColumn": None,
             # PostHog's Bing Ads OAuth application credentials aren't configured — an empty client_id makes
             # Microsoft reject the token request with AADSTS900144. Internal config, not customer-actionable.
             "Bing Ads OAuth application credentials not configured": None,
         }
 
+    def get_retryable_errors(self) -> set[str]:
+        return {
+            # A Bing SOAP call that comes back with a bare HTTP 400 (no SOAP fault) is rejected at the
+            # transport/edge layer, not by request validation — suds surfaces it as `Exception((400,
+            # 'Bad Request'))`, which our wrapper re-raises as `ValueError(... Exception: (400, 'Bad
+            # Request'))`. A genuinely malformed report request instead returns a coded WebFault
+            # (InvalidReportColumn, etc.), so this shape is a transient upstream blip that Temporal's
+            # activity retry clears — keep it out of error tracking as noise rather than paging as a bug.
+            # Match the stable status tuple only; a fault-backed 400 never produces this substring.
+            "(400, 'Bad Request')",
+            # Bing did not finish building the report before the SDK exhausted its own polling window
+            # (REPORT_TIMEOUT_MS), which it reports as `ReportingDownloadException`. Generation runs on
+            # Bing's queue, so the next Temporal attempt submits a fresh request and normally clears it.
+            # Match the SDK's stable message text, which carries no request or account values.
+            "Reporting file download tracking status timeout",
+            # A urllib transport failure reaching Bing's SOAP endpoints — connection refused, DNS or
+            # TLS failure, socket timeout — which suds surfaces as `URLError` and our wrapper re-raises
+            # as `ValueError(... URLError: <urlopen error ...>)`. The endpoints are fixed (see
+            # utils.ENVIRONMENT), so nothing at this layer is customer-configured or deterministic: the
+            # next Temporal attempt normally clears it. Match the exception name plus urllib's fixed
+            # message prefix, which together carry no request or account values.
+            "URLError: <urlopen error",
+        }
+
     @property
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
-            name=SchemaExternalDataSourceType.BING_ADS,
+            name=ExternalDataSourceType.BINGADS,
             category=DataWarehouseSourceCategory.ADVERTISING,
             keywords=["microsoft ads", "microsoft advertising"],
             label="Bing Ads",
@@ -222,7 +274,7 @@ class BingAdsSource(ResumableSource[BingAdsSourceConfig, BingAdsResumeConfig], O
         catalog — entries with a None friendly message are internal config issues, not user-actionable."""
         for substring, friendly in self.get_non_retryable_errors().items():
             if friendly is not None and substring in error:
-                return friendly
+                return BING_ADS_LISTING_MESSAGE_OVERRIDES.get(substring, friendly)
         return None
 
     def get_oauth_accounts(
@@ -238,7 +290,11 @@ class BingAdsSource(ResumableSource[BingAdsSourceConfig, BingAdsResumeConfig], O
                 "The linked Bing Ads integration could not be found. Please reconnect your Bing Ads integration."
             ) from e
 
-        if not settings.BING_ADS_DEVELOPER_TOKEN:
+        secrets = credentials_service.get_secrets(
+            ["BING_ADS_DEVELOPER_TOKEN", "BING_ADS_CLIENT_ID", "BING_ADS_CLIENT_SECRET"]
+        )
+        developer_token = secrets["BING_ADS_DEVELOPER_TOKEN"]
+        if not developer_token:
             raise ValueError("Bing Ads developer token not configured")
         if not integration.access_token:
             raise IntegrationAccountListingError(
@@ -252,7 +308,9 @@ class BingAdsSource(ResumableSource[BingAdsSourceConfig, BingAdsResumeConfig], O
         client = BingAdsClient(
             access_token=integration.access_token,
             refresh_token=integration.refresh_token,
-            developer_token=settings.BING_ADS_DEVELOPER_TOKEN,
+            developer_token=developer_token,
+            client_id=secrets["BING_ADS_CLIENT_ID"],
+            client_secret=secrets["BING_ADS_CLIENT_SECRET"],
         )
         try:
             return client.list_accounts()
@@ -287,6 +345,7 @@ class BingAdsSource(ResumableSource[BingAdsSourceConfig, BingAdsResumeConfig], O
                     {"label": column_name, "type": column_type, "field": column_name, "field_type": column_type}
                     for column_name, column_type in ads_incremental_fields.get(endpoint, [])
                 ],
+                default_incremental_lookback_seconds=BING_ADS_INCREMENTAL_LOOKBACK_SECONDS.get(endpoint),
             )
             for endpoint in bing_ads_schemas.keys()
         ]

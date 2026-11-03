@@ -27,6 +27,9 @@ export interface ExceptionData {
     stacktrace?: {
         type?: string
         frames?: StackFrame[]
+        frames_omitted?: number
+        same_as_event?: string
+        same_as_exception?: number
     }
 }
 
@@ -117,7 +120,8 @@ function FrameRow({ frame, index }: { frame: StackFrame; index: number }): React
 
 function ExceptionSection({ exception, index }: { exception: ExceptionData; index: number }): ReactElement {
     const frames = exception.stacktrace?.frames ?? []
-    // Reverse frames so most recent call is at the top (Python/JS convention)
+    // Stored order is canonical bottom-up; display policy is most recent call
+    // first for every platform, so the crash site leads.
     const displayFrames = [...frames].reverse()
     const inAppCount = frames.filter((f) => f.in_app).length
 
@@ -143,6 +147,11 @@ function ExceptionSection({ exception, index }: { exception: ExceptionData; inde
                                 {inAppCount > 0 && (
                                     <span className="text-xs text-muted-foreground">({inAppCount} in-app)</span>
                                 )}
+                                {exception.stacktrace?.frames_omitted ? (
+                                    <span className="text-xs text-muted-foreground">
+                                        ({exception.stacktrace.frames_omitted} older frames not shown)
+                                    </span>
+                                ) : null}
                             </div>
                             <div className="rounded-lg border overflow-hidden">
                                 <Accordion multiple defaultValue={getDefaultExpanded(displayFrames)}>

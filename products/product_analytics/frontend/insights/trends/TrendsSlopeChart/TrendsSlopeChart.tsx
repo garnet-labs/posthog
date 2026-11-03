@@ -4,25 +4,26 @@ import { useMemo } from 'react'
 import { SlopeChart, createXAxisTickCallback } from '@posthog/quill-charts'
 import type { Series, SlopeChartConfig, SlopeSeriesMeta } from '@posthog/quill-charts'
 
+import { makeChartErrorHandler } from 'lib/charts/chartErrorHandler'
 import { useChartTheme } from 'lib/charts/hooks'
-import { formatAggregationAxisValue } from 'scenes/insights/aggregationAxisFormat'
+import { formatAggregationAxisValue } from 'lib/insights/aggregationAxisFormat'
 import { InsightEmptyState } from 'scenes/insights/EmptyStates'
 import { insightLogic } from 'scenes/insights/insightLogic'
 import { insightVizDataLogic } from 'scenes/insights/insightVizDataLogic'
 import { teamLogic } from 'scenes/teamLogic'
-import { trendsDataLogic } from 'scenes/trends/trendsDataLogic'
-import type { IndexedTrendResult } from 'scenes/trends/types'
 
 import { InsightVizNode } from '~/queries/schema/schema-general'
 import { QueryContext } from '~/queries/types'
 
-import { makeChartErrorHandler } from '../shared/chartErrorHandler'
+import { trendsDataLogic } from 'products/product_analytics/frontend/insights/trends/trendsDataLogic'
+import type { IndexedTrendResult } from 'products/product_analytics/frontend/insights/trends/types'
 
 interface TrendsSlopeChartProps {
     context?: QueryContext<InsightVizNode>
 }
 
 const handleChartError = makeChartErrorHandler('trends-slope-chart')
+const PREVIEW_MARGINS = { left: 8, right: 8 }
 
 export function TrendsSlopeChart({ context }: TrendsSlopeChartProps): JSX.Element | null {
     const theme = useChartTheme()
@@ -37,7 +38,9 @@ export function TrendsSlopeChart({ context }: TrendsSlopeChartProps): JSX.Elemen
     // matching labels, so we just map to quill series: resolve the theme colour, drop legend-hidden
     // series, and forward the backend's `incomplete_end` flag (which dashes the connector). A
     // single-bucket range comes back as one point and is dropped — there's no slope to draw.
-    const labels = currentPeriodResult?.labels ?? []
+    // Key the endpoints by ISO days rather than display labels: week and hour labels omit the
+    // year, so on a multi-year range both endpoints can share a label and collapse onto one x.
+    const labels = (currentPeriodResult?.days?.length ? currentPeriodResult.days : currentPeriodResult?.labels) ?? []
     const series = useMemo<Series<SlopeSeriesMeta>[]>(() => {
         return (indexedResults ?? [])
             .filter((result: IndexedTrendResult) => !getTrendsHidden(result) && (result.data?.length ?? 0) >= 2)
@@ -57,13 +60,17 @@ export function TrendsSlopeChart({ context }: TrendsSlopeChartProps): JSX.Elemen
             // insight's "Show legend" toggle, so there's only ever one legend and no in-chart names.
             showSeriesLabels: false,
             legend: { show: !!showLegend },
+            hideXAxis: context?.hideAxes,
+            showStartLabels: !context?.hideAxes,
+            showEndLabels: !context?.hideAxes,
+            margins: context?.hideAxes ? PREVIEW_MARGINS : undefined,
             xTickFormatter: createXAxisTickCallback({
                 interval: interval ?? 'day',
                 allDays: currentPeriodResult?.days ?? [],
                 timezone,
             }),
         }),
-        [trendsFilter, baseCurrency, showLegend, interval, currentPeriodResult, timezone]
+        [trendsFilter, baseCurrency, showLegend, interval, currentPeriodResult, timezone, context?.hideAxes]
     )
 
     if (series.length === 0) {

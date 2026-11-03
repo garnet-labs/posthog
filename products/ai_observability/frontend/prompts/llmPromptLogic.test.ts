@@ -15,16 +15,19 @@ import {
     llmPromptsNameLabelsDestroy,
     llmPromptsNameLabelsUpdate,
     llmPromptsNamePartialUpdate,
+    llmPromptsNameRetrieve,
     llmPromptsResolveNameRetrieve,
 } from '../generated/api'
-import type { LLMPromptApi, LLMPromptResolveResponseApi } from '../generated/api.schemas'
+import type { LLMPromptApi, LLMPromptPublicApi, LLMPromptResolveResponseApi } from '../generated/api.schemas'
 import { PromptAnalyticsScope, PromptMode, llmPromptLogic } from './llmPromptLogic'
+import type { ResolvedLLMPrompt } from './llmPromptLogic'
 import { validatePromptLabelName } from './utils'
 
 jest.mock('../generated/api', () => ({
     llmPromptsNameLabelsUpdate: jest.fn(),
     llmPromptsNameLabelsDestroy: jest.fn(),
     llmPromptsNamePartialUpdate: jest.fn(),
+    llmPromptsNameRetrieve: jest.fn(),
     llmPromptsResolveNameRetrieve: jest.fn(),
 }))
 
@@ -32,6 +35,7 @@ const mockLabelsUpdate = llmPromptsNameLabelsUpdate as jest.MockedFunction<typeo
 const mockLabelsDestroy = llmPromptsNameLabelsDestroy as jest.MockedFunction<typeof llmPromptsNameLabelsDestroy>
 const mockPartialUpdate = llmPromptsNamePartialUpdate as jest.MockedFunction<typeof llmPromptsNamePartialUpdate>
 const mockResolve = llmPromptsResolveNameRetrieve as jest.MockedFunction<typeof llmPromptsResolveNameRetrieve>
+const mockNameRetrieve = llmPromptsNameRetrieve as jest.MockedFunction<typeof llmPromptsNameRetrieve>
 
 const mockPrompt = {
     id: 'prompt-version-2',
@@ -63,7 +67,7 @@ const mockPrompt = {
         },
     ],
     has_more: false,
-}
+} as unknown as ResolvedLLMPrompt
 
 const productionLabelV1 = {
     id: 'label-1',
@@ -300,6 +304,81 @@ describe('llmPromptLogic', () => {
         logic.unmount()
     })
 
+    it('reloads the URL-selected version in place, keeping the loaded prompt visible', async () => {
+        const { versions, has_more, ...promptFields } = mockPrompt
+        mockResolve.mockResolvedValue({
+            prompt: promptFields,
+            versions,
+            has_more,
+        } as unknown as LLMPromptResolveResponseApi)
+
+        const logic = llmPromptLogic({ promptName: 'my-test-prompt' })
+        logic.mount()
+        await expectLogic(logic).toDispatchActions(['loadPromptSuccess'])
+
+        router.actions.push('/prompt-management/prompts/my-test-prompt', { version: 1 })
+
+        // Old prompt data stays while the selected version loads: no skeleton flash
+        expect(logic.values.promptLoading).toBe(true)
+        expect(logic.values.prompt).not.toBeNull()
+
+        await expectLogic(logic).toDispatchActions(['loadPromptSuccess'])
+        expect(mockResolve).toHaveBeenLastCalledWith(expect.any(String), 'my-test-prompt', {
+            version: 1,
+            limit: 50,
+        })
+
+        logic.unmount()
+    })
+
+    it('discards a stale resolved-preview response once a newer load started', async () => {
+        const { versions, has_more, ...promptFields } = mockPrompt
+        mockResolve.mockResolvedValue({
+            prompt: promptFields,
+            versions,
+            has_more,
+        } as unknown as LLMPromptResolveResponseApi)
+        let resolveStale: (value: LLMPromptPublicApi) => void = () => {}
+        let resolveFresh: (value: LLMPromptPublicApi) => void = () => {}
+        mockNameRetrieve
+            .mockImplementationOnce(() => new Promise((resolve) => (resolveStale = resolve)))
+            .mockImplementationOnce(() => new Promise((resolve) => (resolveFresh = resolve)))
+
+        const logic = llmPromptLogic({ promptName: 'my-test-prompt' })
+        logic.mount()
+        await expectLogic(logic).toDispatchActions(['loadPromptSuccess'])
+
+        logic.actions.toggleResolvedPreview() // show: first fetch starts
+        logic.actions.toggleResolvedPreview() // hide while it is in flight
+        logic.actions.toggleResolvedPreview() // show again: second fetch starts
+
+        resolveFresh({ prompt: 'fresh resolved' } as LLMPromptPublicApi)
+        await expectLogic(logic).toDispatchActions(['loadResolvedPreviewSuccess'])
+        expect(logic.values.resolvedPreview?.prompt).toBe('fresh resolved')
+
+        resolveStale({ prompt: 'stale resolved' } as LLMPromptPublicApi)
+        await expectLogic(logic).toFinishAllListeners()
+        expect(logic.values.resolvedPreview?.prompt).toBe('fresh resolved')
+
+        logic.unmount()
+    })
+
+    it('drops prompt-scene params from the breadcrumb link back to the list', async () => {
+        router.actions.push('/prompt-management/prompts/existing-prompt', {
+            edit: true,
+            version: 2,
+            tab: 'code',
+            search: 'checkout',
+        })
+
+        const logic = llmPromptLogic({ promptName: 'existing-prompt' })
+        logic.mount()
+
+        expect(logic.values.breadcrumbs[0].path).toBe('/prompt-management/prompts?search=checkout')
+
+        logic.unmount()
+    })
+
     it('preserves form edits and advances the base version on a publish conflict', async () => {
         const { versions, has_more, ...promptFields } = mockPrompt
         const conflictingLatest = {
@@ -340,6 +419,98 @@ describe('llmPromptLogic', () => {
         expect(logic.values.publishConflict).toEqual({ latestVersion: 3 })
         expect(logic.values.prompt).toMatchObject({ latest_version: 3 })
         expect(logic.values.mode).toBe(PromptMode.Edit)
+
+        logic.unmount()
+    })
+
+    it('sends the parsed config on publish and null when the editor is cleared', async () => {
+        const { versions, has_more, ...promptFields } = mockPrompt
+        const promptWithConfig = { ...promptFields, config: { model: 'gpt-4o' } }
+        mockResolve.mockResolvedValue({
+            prompt: promptWithConfig,
+            versions,
+            has_more,
+        } as unknown as LLMPromptResolveResponseApi)
+        mockPartialUpdate.mockResolvedValue({
+            ...promptWithConfig,
+            id: 'prompt-version-3',
+            version: 3,
+            latest_version: 3,
+        } as unknown as LLMPromptApi)
+
+        const logic = llmPromptLogic({ promptName: 'my-test-prompt' })
+        logic.mount()
+        await expectLogic(logic).toDispatchActions(['loadPromptSuccess'])
+
+        // The form is seeded with the stored config so an untouched publish round-trips it.
+        expect(JSON.parse(logic.values.promptForm.config)).toEqual({ model: 'gpt-4o' })
+
+        logic.actions.setPromptFormValues({ config: '{"temperature": 0.9}' })
+        logic.actions.submitPromptForm()
+        await expectLogic(logic).toDispatchActions(['submitPromptFormSuccess'])
+        expect(mockPartialUpdate).toHaveBeenLastCalledWith(
+            expect.anything(),
+            'my-test-prompt',
+            expect.objectContaining({ config: { temperature: 0.9 } })
+        )
+
+        // Clearing the editor publishes an explicit null; omitting the key would carry the old config forward.
+        logic.actions.setMode(PromptMode.Edit)
+        logic.actions.setPromptFormValues({ config: '' })
+        logic.actions.submitPromptForm()
+        await expectLogic(logic).toDispatchActions(['submitPromptFormSuccess'])
+        expect(mockPartialUpdate).toHaveBeenLastCalledWith(
+            expect.anything(),
+            'my-test-prompt',
+            expect.objectContaining({ config: null })
+        )
+
+        logic.unmount()
+    })
+
+    it('does not count a key reorder as a config change, matching jsonb storage', async () => {
+        const { versions, has_more, ...promptFields } = mockPrompt
+        mockResolve.mockResolvedValue({
+            prompt: { ...promptFields, config: { model: 'gpt-4o', temperature: 0.2 } },
+            versions,
+            has_more,
+        } as unknown as LLMPromptResolveResponseApi)
+
+        const logic = llmPromptLogic({ promptName: 'my-test-prompt' })
+        logic.mount()
+        await expectLogic(logic).toDispatchActions(['loadPromptSuccess'])
+
+        logic.actions.setPromptFormValues({ config: '{"temperature": 0.2, "model": "gpt-4o"}' })
+        expect(logic.values.isConfigChanged).toBe(false)
+
+        logic.actions.setPromptFormValues({ config: '{"temperature": 0.9, "model": "gpt-4o"}' })
+        expect(logic.values.isConfigChanged).toBe(true)
+
+        logic.unmount()
+    })
+
+    it('routes publish with invalid config through form errors instead of the review modal', async () => {
+        const { versions, has_more, ...promptFields } = mockPrompt
+        mockResolve.mockResolvedValue({
+            prompt: promptFields,
+            versions,
+            has_more,
+        } as unknown as LLMPromptResolveResponseApi)
+
+        const logic = llmPromptLogic({ promptName: 'my-test-prompt' })
+        logic.mount()
+        await expectLogic(logic).toDispatchActions(['loadPromptSuccess'])
+
+        logic.actions.setMode(PromptMode.Edit)
+        logic.actions.setPromptFormValues({ config: '["not", "an", "object"]' })
+        logic.actions.requestPublish()
+
+        await expectLogic(logic).toDispatchActions(['submitPromptForm', 'submitPromptFormFailure'])
+        expect(logic.values.isPublishReviewOpen).toBe(false)
+        expect(logic.values.promptFormErrors.config).toBe(
+            'Configuration must be a JSON object, e.g. {"model": "your-model-name"}'
+        )
+        expect(mockPartialUpdate).not.toHaveBeenCalled()
 
         logic.unmount()
     })
@@ -436,6 +607,7 @@ describe('llmPromptLogic', () => {
         expect(updateSpy).toHaveBeenCalledTimes(1)
         expect(updateSpy).toHaveBeenCalledWith(String(MOCK_DEFAULT_TEAM.id), 'my-test-prompt', {
             prompt: 'My edited prompt.',
+            config: null,
             base_version: 2,
             version_description: 'Tightened the refusal criteria',
         })
@@ -540,5 +712,28 @@ describe('llmPromptLogic', () => {
         expect(secondMount.values.promptForm.name).toBe('')
         expect(secondMount.values.promptForm.prompt).toBe('')
         secondMount.unmount()
+    })
+
+    it('remembers the markdown rendering choice across prompts', async () => {
+        const firstPrompt = llmPromptLogic({ promptName: 'prompt-a' })
+        firstPrompt.mount()
+        expect(firstPrompt.values.isRenderingMarkdown).toBe(true)
+        firstPrompt.actions.toggleMarkdownRendering()
+        expect(firstPrompt.values.isRenderingMarkdown).toBe(false)
+        firstPrompt.unmount()
+
+        const secondPrompt = llmPromptLogic({ promptName: 'prompt-b' })
+        secondPrompt.mount()
+        expect(secondPrompt.values.isRenderingMarkdown).toBe(false)
+
+        // Edit mode forces the raw textarea; leaving it must restore the stored
+        // preference instead of overwriting it with the mode's forced value.
+        secondPrompt.actions.setMode(PromptMode.Edit)
+        expect(secondPrompt.values.isRenderingMarkdown).toBe(false)
+        secondPrompt.actions.toggleMarkdownRendering()
+        expect(secondPrompt.values.isRenderingMarkdown).toBe(true)
+        secondPrompt.actions.setMode(PromptMode.View)
+        expect(secondPrompt.values.isRenderingMarkdown).toBe(false)
+        secondPrompt.unmount()
     })
 })

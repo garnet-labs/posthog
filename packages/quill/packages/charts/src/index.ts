@@ -7,6 +7,21 @@ export { funnelConversionRate, funnelFromCounts, RATE_TO_PERCENT } from './chart
 export type { FunnelFromCountsOptions, FunnelStepCount } from './charts/FunnelChart/funnel-data'
 export { LineChart } from './charts/LineChart/LineChart'
 export type { LineChartProps } from './charts/LineChart/LineChart'
+export { ScatterChart } from './charts/ScatterChart/ScatterChart'
+export type { ScatterChartProps } from './charts/ScatterChart/ScatterChart'
+export { ScatterTooltip } from './charts/ScatterChart/ScatterTooltip'
+export type { ScatterTooltipProps } from './charts/ScatterChart/ScatterTooltip'
+export type {
+    ScatterAreaSelection,
+    ScatterAxisConfig,
+    ScatterChartConfig,
+    ScatterMarkerShape,
+    ScatterPoint,
+    ScatterPointDatum,
+    ScatterSeries,
+    ScatterTooltipConfig,
+    ScatterTooltipContext,
+} from './charts/ScatterChart/types'
 export { ComboChart } from './charts/ComboChart/ComboChart'
 export type { ComboChartProps } from './charts/ComboChart/ComboChart'
 export { TimeSeriesLineChart } from './charts/TimeSeriesLineChart/TimeSeriesLineChart'
@@ -64,12 +79,14 @@ export { Heatmap } from './charts/Heatmap/Heatmap'
 export type {
     HeatmapBrushData,
     HeatmapCellDatum,
+    HeatmapCellStyle,
     HeatmapConfig,
     HeatmapProps,
     HeatmapRowMeta,
     HeatmapTooltipContext,
 } from './charts/Heatmap/Heatmap'
 export type { HeatmapColorScale } from './charts/Heatmap/heatmap-layout'
+export type { HeatmapCellLabelFormatter } from './charts/Heatmap/HeatmapCellLabels'
 
 // Slope chart
 export { SlopeChart } from './charts/SlopeChart/SlopeChart'
@@ -91,12 +108,60 @@ export type { PieChartConfig, PieChartProps } from './charts/PieChart/PieChart'
 export { computePieLayout, cursorOffsetToAngle, sliceAt, defaultSliceValue } from './charts/PieChart/computePieLayout'
 export type { PieLayout, PieSlice } from './charts/PieChart/computePieLayout'
 export { SliceLabels } from './charts/PieChart/SliceLabels'
-export type { SliceLabelsProps } from './charts/PieChart/SliceLabels'
+export type { SliceLabelsProps, SliceValueDisplay } from './charts/PieChart/SliceLabels'
 export { PieTooltip } from './charts/PieChart/PieTooltip'
 export type { PieTooltipProps } from './charts/PieChart/PieTooltip'
 export { useRadialLayout } from './core/radial-context'
 export type { RadialLayoutContextValue } from './core/radial-context'
 export type { RadialSlicePayload } from './core/hooks/useRadialInteraction'
+
+// Proportion bar
+export { ProportionBar } from './charts/ProportionBar/ProportionBar'
+export type { ProportionBarConfig, ProportionBarProps } from './charts/ProportionBar/ProportionBar'
+
+// Bar list
+export { BarList } from './charts/BarList/BarList'
+export type { BarListConfig, BarListProps } from './charts/BarList/BarList'
+export { StackedBarList } from './charts/BarList/StackedBarList'
+export type { StackedBarListConfig, StackedBarListProps } from './charts/BarList/StackedBarList'
+
+// Sankey
+export { SankeyChart } from './charts/SankeyChart/SankeyChart'
+export type {
+    SankeyChartConfig,
+    SankeyChartProps,
+    SankeyHighlight,
+    SankeyTooltipContext,
+    SankeyTooltipHit,
+} from './charts/SankeyChart/types'
+export type {
+    SankeyChartLayout,
+    SankeyLinkDatum,
+    SankeyLinkInput,
+    SankeyNodeAlign,
+    SankeyNodeDatum,
+    SankeyNodeInput,
+} from './charts/SankeyChart/sankey-data'
+export { MAX_SANKEY_COLUMN } from './charts/SankeyChart/sankey-data'
+export { useSankeyLayout } from './charts/SankeyChart/sankey-context'
+export type { SankeyLayoutContextValue } from './charts/SankeyChart/sankey-context'
+export type { SankeyLastColumnLabels } from './charts/SankeyChart/sankey-labels'
+// The layout engine on its own, for hosts that draw their own SVG (user paths).
+export {
+    sankeyCenter,
+    sankeyJustify,
+    sankeyLayout,
+    sankeyLeft,
+    sankeyLinkHorizontal,
+    sankeyRight,
+} from './charts/SankeyChart/sankey-layout'
+export type {
+    SankeyGraph,
+    SankeyInputGraph,
+    SankeyLayout,
+    SankeyLink,
+    SankeyNode,
+} from './charts/SankeyChart/sankey-layout'
 
 // Chart context (for custom overlay children)
 export { useChart, useChartHover, useChartLayout } from './core/chart-context'
@@ -126,6 +191,7 @@ export type {
     ResolveValueFn,
     Series,
     SeriesType,
+    TimeScale,
     TooltipConfig,
     TooltipContext,
     ValueDomain,
@@ -135,13 +201,25 @@ export type {
 export { DEFAULT_Y_AXIS_ID, resolveAxisLines } from './core/types'
 
 // Theme: read a ChartTheme from quill data-viz CSS vars (with a built-in fallback palette)
-export { themeFromCssVars, useChartTheme, DEFAULT_CHART_COLORS } from './core/theme'
+export {
+    ChartThemeProvider,
+    themeDefaultsFromCssVars,
+    themeFromCssVars,
+    useChartTheme,
+    useResolvedChartTheme,
+    DEFAULT_CHART_COLORS,
+} from './core/theme'
+export { applyChartDefaults, DEFAULT_CHART_CONFIG } from './core/chart-config'
 export type { ThemeFromCssOptions } from './core/theme'
+
+// Grid and axis lines, for chart types built on the Chart core
+export { drawAxes, drawGrid, resolveAxisLineColor } from './core/canvas-renderer'
+export type { DrawAxesOptions, DrawGridOptions } from './core/canvas-renderer'
 
 // Built-in tooltip (for reference or extension)
 export { DefaultTooltip, type DefaultTooltipProps } from './overlays/DefaultTooltip'
 // Shared tooltip surface — reuse to build custom tooltips with the quill look
-export { TooltipSurface, TooltipSwatch } from './overlays/TooltipSurface'
+export { TooltipFooter, TooltipSurface, TooltipSwatch } from './overlays/TooltipSurface'
 
 // Optional overlays
 export { ReferenceLine, ReferenceLines } from './overlays/ReferenceLine'
@@ -169,7 +247,7 @@ export type { AnomalyMarker } from './overlays/AnomalyPointsLayer'
 export { movingAverageKey } from './charts/utils/derived-series'
 
 // Timeseries utils
-export { createXAxisTickCallback } from './utils/dates'
+export { createTooltipDateFormatter, createXAxisTickCallback } from './utils/dates'
 export type { TimeInterval } from './utils/dates'
 export { buildYTickFormatter } from './utils/y-formatters'
 export type { YAxisFormat, YFormatterConfig } from './utils/y-formatters'
@@ -185,9 +263,9 @@ export { ciRanges, linearRegression, movingAverage, trendLine } from './utils/st
 
 // Generic UI primitives (no canvas) — composed alongside charts by adapters
 export { Legend } from './components/Legend/Legend'
-export type { LegendItem, LegendProps } from './components/Legend/Legend'
+export type { LegendItem, LegendItemClickModifiers, LegendProps } from './components/Legend/Legend'
 export { ChartLegend } from './components/Legend/ChartLegend'
 export type { ChartLegendProps } from './components/Legend/ChartLegend'
 export { legendItemsFromSeries } from './components/Legend/legendItemsFromSeries'
 export { useChartLegend, applyHiddenSeries } from './components/Legend/useChartLegend'
-export type { ChartLegendRenderProps, ChartLegendState } from './components/Legend/useChartLegend'
+export type { ChartLegendRenderProps, ChartLegendState, LegendItemControls } from './components/Legend/useChartLegend'

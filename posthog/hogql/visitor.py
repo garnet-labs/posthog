@@ -4,6 +4,7 @@ from typing import Any, Generic, Optional, TypeVar
 from posthog.hogql import ast
 from posthog.hogql.ast import SelectSetNode
 from posthog.hogql.base import AST, Expr
+from posthog.hogql.compilation import compilation_budget
 from posthog.hogql.errors import BaseHogQLError
 from posthog.hogql.utils import is_simple_value
 
@@ -27,6 +28,9 @@ def clear_locations(expr: T_AST) -> T_AST:
 
 class Visitor(Generic[T]):
     def visit(self, node: AST | None) -> T:
+        budget = compilation_budget.get()
+        if budget is not None:
+            budget.check_time()
         if node is None:
             return node  # type: ignore
 
@@ -274,6 +278,9 @@ class TraversingVisitor(Visitor[None]):
     def visit_field_alias_type(self, node: ast.FieldAliasType):
         self.visit(node.type)
 
+    def visit_array_join_alias_type(self, node: ast.ArrayJoinAliasType):
+        self.visit_field_alias_type(node)
+
     def visit_field_type(self, node: ast.FieldType):
         pass
 
@@ -296,7 +303,7 @@ class TraversingVisitor(Visitor[None]):
     def visit_table_type(self, node: ast.TableType):
         pass
 
-    def visit_lazy_table_type(self, node: ast.TableType):
+    def visit_lazy_table_type(self, node: ast.LazyTableType):
         pass
 
     def visit_field_traverser_type(self, node: ast.LazyJoinType):
@@ -785,6 +792,7 @@ class CloningVisitor(Visitor[Any]):
             end=None if self.clear_locations else node.end,
             type=None if self.clear_types else node.type,
             value=node.value,
+            is_sensitive=node.is_sensitive,
             inline_sentinel=node.inline_sentinel,
         )
 

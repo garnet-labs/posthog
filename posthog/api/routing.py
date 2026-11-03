@@ -1,19 +1,23 @@
+import re
 import sys
+from collections.abc import Sequence
 from functools import cached_property, lru_cache
 from typing import TYPE_CHECKING, Any, Literal, Optional, cast
 from uuid import UUID
 
+from django.core.exceptions import ImproperlyConfigured
 from django.db.models.query import QuerySet
 
 from opentelemetry import trace
 from rest_framework.exceptions import AuthenticationFailed, NotFound, ValidationError
 from rest_framework.permissions import IsAuthenticated
+from rest_framework.routers import DefaultRouter
 from rest_framework.viewsets import GenericViewSet
-from rest_framework_extensions.routers import ExtendedDefaultRouter, NestedRegistryItem
-from rest_framework_extensions.settings import extensions_api_settings
 
 from posthog.api.utils import get_token
 from posthog.auth import (
+    DelegatedOAuthAccessTokenAuthentication,
+    DelegatedPersonalAPIKeyAuthentication,
     IDJagAccessTokenAuthentication,
     InternalAPIAuthentication,
     JwtAuthentication,
@@ -24,6 +28,7 @@ from posthog.auth import (
     SharingPasswordProtectedAuthentication,
 )
 from posthog.clickhouse.query_tagging import get_team_query_tags, tag_queries
+from posthog.dataclasses import frozen
 from posthog.models.organization import Organization
 from posthog.models.project import Project
 from posthog.models.scoping import reset_current_team_id, set_current_team_id
@@ -31,14 +36,21 @@ from posthog.models.team import Team
 from posthog.models.user import User
 from posthog.permissions import (
     AccessControlPermission,
+    ActiveOrganizationPermission,
     APIScopePermission,
+    MCPAccessPermission,
     OrganizationMemberPermissions,
     SharingTokenPermission,
     TeamMemberAccessPermission,
+    VerifiedDomainEnforcementPermission,
+    is_service_auth,
 )
-from posthog.rbac.user_access_control import UserAccessControl
+from posthog.products import is_product_module
+from posthog.queryset_paging import stable_queryset_ordering
 from posthog.scopes import APIScopeObjectOrNotSupported
 from posthog.user_permissions import UserPermissions
+
+from products.access_control.backend.facade.user_access_control import UserAccessControl
 
 if TYPE_CHECKING:
     _GenericViewSet = GenericViewSet
@@ -46,12 +58,94 @@ else:
     _GenericViewSet = object
 
 
-class DefaultRouterPlusPlus(ExtendedDefaultRouter):
-    """DefaultRouter with optional trailing slash and drf-extensions nesting."""
+# Adapted from drf-extensions 0.8.0 (MIT, Copyright (c) 2013 Gennady Chibisov, github.com/chibisov/drf-extensions).
+PARENT_LOOKUP_KWARG_PREFIX = "parent_lookup_"
+
+PathParameterType = type[UUID] | type[int] | type[str]
+PATH_PARAMETER_TYPES: tuple[PathParameterType, ...] = (UUID, int, str)
+# parents_query_dict resolves these with token overrides and `@current`, so path_parameters must not parse them.
+_PARENT_PATH_PARAMETERS = frozenset({"team_id", "project_id", "organization_id"})
+_ASCII_DIGITS = re.compile(r"[0-9]+")
+# Postgres bigint maximum. A larger id makes the database lookup fail with a 500.
+_MAX_BIGINT = 2**63 - 1
+
+
+@frozen
+class PathParameter:
+    """A URL kwarg type in TeamAndOrgViewSetMixin.path_parameters, with a description for the API docs."""
+
+    type: PathParameterType
+    description: str = ""
+
+
+def as_path_parameter(declared: PathParameterType | PathParameter) -> PathParameter:
+    if isinstance(declared, PathParameter):
+        return declared
+    return PathParameter(type=declared)
+
+
+def _parse_path_parameter(raw_value: str, parameter_type: PathParameterType) -> UUID | int | str:
+    if parameter_type is not int:
+        return parameter_type(raw_value)
+    # int() also accepts "1_000", " 7" and non-ASCII digits, which are not ids.
+    if not _ASCII_DIGITS.fullmatch(raw_value):
+        raise ValueError(f"{raw_value!r} is not a decimal id")
+    value = int(raw_value)
+    if value > _MAX_BIGINT:
+        raise ValueError(f"{raw_value!r} is out of the bigint range")
+    return value
+
+
+class NestedRegistryItem:
+    def __init__(
+        self,
+        router: "DefaultRouterPlusPlus",
+        parent_prefix: str,
+        parent_item: Optional["NestedRegistryItem"] = None,
+        parent_viewset: Any = None,
+    ) -> None:
+        self.router = router
+        self.parent_prefix = parent_prefix
+        self.parent_item = parent_item
+        self.parent_viewset = parent_viewset
+
+    def register(
+        self, prefix: str, viewset: Any, basename: str, parents_query_lookups: Sequence[str]
+    ) -> "NestedRegistryItem":
+        self.router.register_flat(
+            self.get_prefix(current_prefix=prefix, parents_query_lookups=parents_query_lookups), viewset, basename
+        )
+        return NestedRegistryItem(router=self.router, parent_prefix=prefix, parent_item=self, parent_viewset=viewset)
+
+    def get_prefix(self, current_prefix: str, parents_query_lookups: Sequence[str]) -> str:
+        return f"{self.get_parent_prefix(parents_query_lookups)}/{current_prefix}"
+
+    def get_parent_prefix(self, parents_query_lookups: Sequence[str]) -> str:
+        prefix = "/"
+        current_item: Optional[NestedRegistryItem] = self
+        i = len(parents_query_lookups) - 1
+        while current_item:
+            lookup_value_regex = getattr(current_item.parent_viewset, "lookup_value_regex", "[^/.]+")
+            kwarg_name = f"{PARENT_LOOKUP_KWARG_PREFIX}{parents_query_lookups[i]}"
+            prefix = f"{current_item.parent_prefix}/(?P<{kwarg_name}>{lookup_value_regex})/{prefix}"
+            i -= 1
+            current_item = current_item.parent_item
+        return prefix.strip("/")
+
+
+class DefaultRouterPlusPlus(DefaultRouter):
+    """DefaultRouter with optional trailing slash and nested registration."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.trailing_slash = r"/?"
+
+    def register_flat(self, prefix: str, viewset: Any, basename: str | None = None) -> None:
+        super().register(prefix, viewset, basename)
+
+    def register(self, prefix: str, viewset: Any, basename: str | None = None) -> NestedRegistryItem:  # type: ignore[override]
+        self.register_flat(prefix, viewset, basename)
+        return NestedRegistryItem(router=self, parent_prefix=self.registry[-1][0], parent_viewset=self.registry[-1][1])
 
 
 class RouterRegistry:
@@ -83,7 +177,7 @@ class RouterRegistry:
     def _reject_product_caller(method: str) -> None:
         # frame 0 = here, 1 = the public method, 2 = its caller
         caller_module = sys._getframe(2).f_globals.get("__name__", "")
-        if caller_module.startswith("products."):
+        if is_product_module(caller_module):
             raise RuntimeError(
                 f"Parent routers are core-owned; {caller_module} must not call RouterRegistry.{method}(). "
                 "Products nest onto existing parents via routers.projects/organizations/root."
@@ -142,6 +236,28 @@ class TeamAndOrgViewSetMixin(_GenericViewSet):
     required_scopes: Optional[list[str]] = None
     sharing_enabled_actions: list[str] = []
 
+    # Types of the URL kwargs, for views without a queryset model, e.g. {"pk": UUID}, or
+    # {"pk": PathParameter(type=UUID, description="...")} to describe the id in the API docs.
+    # A nested parent lookup is declared by its bare name: "pipeline_id" types `parent_lookup_pipeline_id`.
+    # initial() parses each kwarg and answers 404 for a malformed value, so a handler gets `pk: UUID`.
+    # PostHogAutoSchema reads the same mapping to type the OpenAPI path parameters.
+    path_parameters: dict[str, PathParameterType | PathParameter] = {}
+
+    @classmethod
+    def _check_path_parameters(cls) -> None:
+        for name, declared in cls.path_parameters.items():
+            if name.startswith(PARENT_LOOKUP_KWARG_PREFIX) or name in _PARENT_PATH_PARAMETERS:
+                raise ImproperlyConfigured(
+                    f"{cls.__name__}.path_parameters declares {name!r}. parents_query_dict resolves team_id, "
+                    "project_id and organization_id. Declare any other parent lookup by its bare name, "
+                    f"e.g. 'pipeline_id' for '{PARENT_LOOKUP_KWARG_PREFIX}pipeline_id'."
+                )
+            parameter_type = as_path_parameter(declared).type
+            if parameter_type not in PATH_PARAMETER_TYPES:
+                raise ImproperlyConfigured(
+                    f"{cls.__name__}.path_parameters declares {name!r} as {parameter_type!r}. Use UUID, int or str."
+                )
+
     def __init_subclass__(cls, **kwargs):
         """
         This class plays a crucial role in ensuring common permissions, authentication and filtering.
@@ -159,6 +275,23 @@ class TeamAndOrgViewSetMixin(_GenericViewSet):
             if method in cls.__dict__:
                 raise Exception(f"Method {method} is protected and should not be overridden. {message}")
 
+        cls._check_path_parameters()
+
+    def _parse_path_parameters(self) -> None:
+        # Change self.kwargs in place, because APIView.dispatch passes this same dict to the handler.
+        # A parsed parent lookup is not written back to parents_query_dict, which can keep the raw string.
+        for name, declared in self.path_parameters.items():
+            kwarg_name = name if name in self.kwargs else f"{PARENT_LOOKUP_KWARG_PREFIX}{name}"
+            raw_value = self.kwargs.get(kwarg_name)
+            parameter_type = as_path_parameter(declared).type
+            if raw_value is None or isinstance(raw_value, parameter_type):
+                continue
+            try:
+                self.kwargs[kwarg_name] = _parse_path_parameter(raw_value, parameter_type)
+            except ValueError:
+                # A malformed id names no object, so the answer is 404, the same as from a queryset view.
+                raise NotFound()
+
     def dispatch(self, request, *args, **kwargs):
         """
         Outermost wrapper for the request lifecycle. The try/finally below
@@ -167,8 +300,7 @@ class TeamAndOrgViewSetMixin(_GenericViewSet):
         calling super() would otherwise leak the token.
 
         Note: a subclass that overrides `dispatch` itself without super() would
-        also bypass this cleanup; in this codebase only `query_coalescer.py`
-        overrides dispatch and it does call super().
+        also bypass this cleanup.
 
         ContextVars in sync Django are thread-local and the same worker thread
         is reused across requests, so a leaked token would let scope from one
@@ -205,8 +337,12 @@ class TeamAndOrgViewSetMixin(_GenericViewSet):
         simply never set — scoped queries raise TeamScopeError, which is the
         correct fail-closed behavior. dispatch() above guarantees cleanup
         regardless.
+
+        Path parameters are parsed after super().initial(), so an
+        authentication or permission error wins over a 404 for a malformed id.
         """
         super().initial(request, *args, **kwargs)
+        self._parse_path_parameters()
         self._team_scope_token = None
         if self._is_team_view or self._is_project_view:
             try:
@@ -246,9 +382,18 @@ class TeamAndOrgViewSetMixin(_GenericViewSet):
     # so we offer a way to add additional classes
     def get_permissions(self):
         try:
-            return self.dangerously_get_permissions()
+            dangerously_defined = self.dangerously_get_permissions()
         except NotImplementedError:
             pass
+        else:
+            # These are tenant boundaries, not authorization levels. Views that shape their own
+            # permission chain cannot remove them.
+            return [
+                *dangerously_defined,
+                VerifiedDomainEnforcementPermission(),
+                MCPAccessPermission(),
+                ActiveOrganizationPermission(),
+            ]
 
         if isinstance(self.request.successful_authenticator, InternalAPIAuthentication):
             return [IsAuthenticated()]
@@ -261,12 +406,23 @@ class TeamAndOrgViewSetMixin(_GenericViewSet):
 
         # NOTE: We define these here to make it hard _not_ to use them. If you want to override them, you have to
         # override the entire method.
-        permission_classes: list = [IsAuthenticated, APIScopePermission, AccessControlPermission]
+        permission_classes: list = [
+            IsAuthenticated,
+            APIScopePermission,
+            AccessControlPermission,
+        ]
 
         if self._is_team_view or self._is_project_view:
             permission_classes.append(TeamMemberAccessPermission)
         else:
             permission_classes.append(OrganizationMemberPermissions)
+
+        # After the membership permission, so non-members get the generic denial and the
+        # organization row it resolved is reused. The MCP cap follows for the same reason:
+        # its message must not disclose another organization's security settings.
+        permission_classes.append(VerifiedDomainEnforcementPermission)
+        permission_classes.append(MCPAccessPermission)
+        permission_classes.append(ActiveOrganizationPermission)
 
         permission_classes.extend(self.permission_classes)
         return [permission() for permission in permission_classes]
@@ -289,6 +445,8 @@ class TeamAndOrgViewSetMixin(_GenericViewSet):
                 # rejected before its own authenticator could run. IDJagAccessTokenAuthentication
                 # has a strict `typ == "at+jwt"` precheck and cleanly defers for other JWTs.
                 IDJagAccessTokenAuthentication,
+                DelegatedPersonalAPIKeyAuthentication,
+                DelegatedOAuthAccessTokenAuthentication,
                 JwtAuthentication,
                 OAuthAccessTokenAuthentication,
                 PersonalAPIKeyAuthentication,
@@ -340,10 +498,22 @@ class TeamAndOrgViewSetMixin(_GenericViewSet):
         finally:
             self._in_get_queryset = False
 
+    def paginate_queryset(self, queryset: QuerySet | Sequence) -> Sequence | None:
+        if self.paginator is not None and isinstance(queryset, QuerySet):
+            queryset = stable_queryset_ordering(queryset)
+        return super().paginate_queryset(queryset)
+
     def _filter_queryset_by_access_level(self, queryset: QuerySet) -> QuerySet:
         if self.action != "list":
             # NOTE: If we are getting an individual object then we don't filter it out here - this is handled by the permission logic
             # The reason being, that if we filter out here already, we can't load the object which is required for checking access controls for it
+            return queryset
+
+        # Service credentials (TST, PSAK) authenticate as synthetic users UserAccessControl
+        # can't evaluate (a `created_by=<synthetic user>` filter would raise). They're gated
+        # by API scope + project membership, and their scopes grant project-wide access —
+        # mirroring the service-auth short-circuit in AccessControlPermission.
+        if is_service_auth(self.request):
             return queryset
 
         # NOTE: Half implemented - for admins, they may want to include listing of results that are not accessible (like private resources)
@@ -437,7 +607,10 @@ class TeamAndOrgViewSetMixin(_GenericViewSet):
                 team = Team.objects.select_related("organization").get(id=self.team_id)
             except (Team.DoesNotExist, ValueError):
                 raise NotFound(
-                    detail="Project not found."  # TODO: "Environment" instead of "Project" when project environments are rolled out
+                    # TODO: "Environment" instead of "Project" when project environments are rolled out.
+                    # Keep in sync with SCOPE_NOT_FOUND_DETAILS in frontend/src/lib/api-error.ts, which
+                    # matches this exact text to stop dead-scope polling and to skip error reports.
+                    detail="Project not found."
                 )
 
         tag_queries(**get_team_query_tags(team))
@@ -494,8 +667,12 @@ class TeamAndOrgViewSetMixin(_GenericViewSet):
 
     @cached_property
     def organization(self) -> Organization:
+        if self._is_team_view:
+            return self.team.organization
         try:
-            return Organization.objects.get(id=self.organization_id)
+            return Organization.objects.get(
+                id=self.project.organization_id if self._is_project_view else self.organization_id
+            )
         except (Organization.DoesNotExist, ValueError):
             raise NotFound(detail="Organization not found.")
 
@@ -527,13 +704,8 @@ class TeamAndOrgViewSetMixin(_GenericViewSet):
     def parent_query_kwargs(self) -> dict[str, Any]:
         parent_query_kwargs: dict[str, str] = {}
         for kwarg_name, kwarg_value in self.kwargs.items():
-            # drf-extensions nested parameters are prefixed
-            if kwarg_name.startswith(extensions_api_settings.DEFAULT_PARENT_LOOKUP_KWARG_NAME_PREFIX):
-                query_lookup = kwarg_name.replace(
-                    extensions_api_settings.DEFAULT_PARENT_LOOKUP_KWARG_NAME_PREFIX,
-                    "",
-                    1,
-                )
+            if kwarg_name.startswith(PARENT_LOOKUP_KWARG_PREFIX):
+                query_lookup = kwarg_name.replace(PARENT_LOOKUP_KWARG_PREFIX, "", 1)
                 parent_query_kwargs[query_lookup] = kwarg_value
         return parent_query_kwargs
 
@@ -563,7 +735,9 @@ class TeamAndOrgViewSetMixin(_GenericViewSet):
                     current_team = self.request.user.team
                     if current_team is None:
                         raise NotFound(
-                            "Project not found."  # TODO: "Environment" instead of "Project" when project environments are rolled out
+                            # TODO: "Environment" instead of "Project" when project environments are rolled out.
+                            # Keep in sync with SCOPE_NOT_FOUND_DETAILS in frontend/src/lib/api-error.ts.
+                            "Project not found."
                         )
                     query_value = current_team.id
                 elif query_lookup == "project_id":
@@ -580,7 +754,9 @@ class TeamAndOrgViewSetMixin(_GenericViewSet):
                 try:
                     query_value = team_from_request.id if team_from_request else int(query_value)
                 except ValueError:
-                    raise NotFound("Project not found.")  # TODO: "Environment"
+                    # TODO: "Environment" instead of "Project" when project environments are rolled out.
+                    # Keep in sync with SCOPE_NOT_FOUND_DETAILS in frontend/src/lib/api-error.ts.
+                    raise NotFound("Project not found.")
             elif query_lookup == "project_id":
                 try:
                     query_value = team_from_request.project_id if team_from_request else int(query_value)
@@ -610,6 +786,11 @@ class TeamAndOrgViewSetMixin(_GenericViewSet):
 
     @lru_cache(maxsize=1)  # noqa: B019 - short-lived per-request router
     def _get_team_from_request(self) -> Optional["Team"]:
+        # Permission classes treat `view.team` as the target of the request, so a route that
+        # identifies no team must not gain one from a request parameter.
+        if not (self._is_team_view or self._is_project_view):
+            return None
+
         team_found = None
         token = get_token(None, self.request)
 

@@ -18,14 +18,17 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from posthog.api.routing import TeamAndOrgViewSetMixin
-from posthog.constants import AvailableFeature
 
-from ee.billing.quota_limiting import QuotaResource, get_fresh_team_limited_resources
+from ee.billing.quota_limiting import team_quota_snapshot
 
 
 class QuotaResourceLimitSerializer(serializers.Serializer):
     limited = serializers.BooleanField(
-        help_text="True when the team is currently over its quota for this resource and limits are in effect.",
+        help_text=(
+            "True when the team is currently over its quota for this resource and limits are in "
+            "effect. A deactivated organization additionally reads as limited on the two credit "
+            "buckets `ai_credits` and `posthog_code_credits`, regardless of usage."
+        ),
     )
     usage = serializers.FloatField(
         allow_null=True,
@@ -41,33 +44,25 @@ class QuotaResourceLimitSerializer(serializers.Serializer):
     )
 
 
-def _resource_usage(summary: dict[str, Any]) -> float | None:
-    """usage + todays_usage, the sum the quota limiter compares against the limit.
-
-    None rather than 0 when billing has never synced the resource, so clients read
-    it as unknown, not "$0 spent". The `limited` boolean stays authoritative for
-    gating; grace periods and refund offsets live only in that limiting decision.
-    """
-    if not summary:
-        return None
-    usage = summary.get("usage")
-    todays_usage = summary.get("todays_usage")
-    if usage is None and todays_usage is None:
-        return None
-    return (usage or 0) + (todays_usage or 0)
-
-
 class QuotaLimitsResponseSerializer(serializers.Serializer):
     limited = serializers.DictField(
         child=QuotaResourceLimitSerializer(),
-        help_text="Per-resource limit state for every `QuotaResource` value, e.g. `ai_credits`, `posthog_code_credits`.",
+        help_text=(
+            "Per-resource limit state for every `QuotaResource` value, e.g. `ai_credits`, "
+            "`posthog_code_credits`. Also carries the informational Desktop component resources "
+            "(`posthog_code_token_credits`, `sandbox_compute_credits`, "
+            "`sandbox_compute_cpu_millicore_seconds`, `sandbox_compute_memory_mib_seconds`) with "
+            "usage in their native units, a null limit, and `limited` always false — they are never "
+            "quota-enforced; only the combined `posthog_code_credits` is."
+        ),
     )
     code_usage_billing_active = serializers.BooleanField(
         help_text=(
             "Whether the team's organization pays for PostHog Desktop usage: billing grants the "
             "`posthog_code_usage` product feature only on the Desktop usage product's paid plan, "
             "synced into the organization's available features. Consumers gate paid-tier Desktop "
-            "behavior on this; an org unknown to billing reads as not paying."
+            "behavior on this; an org unknown to billing reads as not paying. Always false for "
+            "deactivated organizations."
         ),
     )
 
@@ -90,25 +85,5 @@ class QuotaLimitsViewSet(TeamAndOrgViewSetMixin, viewsets.ViewSet):
         responses={200: QuotaLimitsResponseSerializer},
     )
     def list(self, request: Request, *args: Any, **kwargs: Any) -> Response:
-        org_usage = self.team.organization.usage or {}
-        # Fresh read on purpose: the gateway re-caches this answer for minutes, so serving
-        # the 30s per-worker memo here would re-poison a just-invalidated gateway entry.
-        limited_resources = get_fresh_team_limited_resources(self.team.api_token)
-        limited = {}
-        for resource in QuotaResource:
-            summary = org_usage.get(resource.value) or {}
-            limited[resource.value] = {
-                "limited": limited_resources[resource],
-                "usage": _resource_usage(summary),
-                "limit": summary.get("limit"),
-            }
-        return Response(
-            QuotaLimitsResponseSerializer(
-                {
-                    "limited": limited,
-                    "code_usage_billing_active": self.team.organization.is_feature_available(
-                        AvailableFeature.POSTHOG_CODE_USAGE
-                    ),
-                }
-            ).data
-        )
+        data = QuotaLimitsResponseSerializer(team_quota_snapshot(self.team)).data
+        return Response(data)

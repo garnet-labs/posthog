@@ -26,9 +26,37 @@ import type {
 // replacement rather than surviving around a link.
 const SAFE_CITATION_LABEL_RE = /^[A-Za-z0-9._~-]{1,8}$/
 
-function citationLinkLabel(citedId: string, isGenerationCitation: boolean): string {
+function citationLinkLabel(citedId: string, fallbackLabel: string): string {
     const preview = citedId.slice(0, 8)
-    return SAFE_CITATION_LABEL_RE.test(preview) ? `${preview}...` : isGenerationCitation ? 'generation' : 'trace'
+    return SAFE_CITATION_LABEL_RE.test(preview) ? `${preview}...` : fallbackLabel
+}
+
+// $ai_session_id is caller-supplied through ingestion and urls.aiObservabilitySession interpolates
+// it into the path raw, so a ">" or ")" in it escapes the Markdown link destination and the rest of
+// the ID renders as attacker-controlled Markdown. Only link IDs that can't do that; anything else
+// stays plain text. Percent-encoding the session URL is the real fix, but that also has to teach
+// the session scene to decode, which is a routing change beyond this.
+const LINKABLE_SESSION_ID_RE = /^[A-Za-z0-9._~:@-]+$/
+
+// A citation names the unit that was evaluated: a session, a generation, or a trace. Session
+// citations may also carry the trace the agent read inside them, but the link goes to the session.
+function citationTarget(c: EvaluationReportCitation): { citedId: string; url: string; label: string } | null {
+    if (c.session_id) {
+        if (!LINKABLE_SESSION_ID_RE.test(c.session_id)) {
+            return null
+        }
+        return { citedId: c.session_id, url: urls.aiObservabilitySession(c.session_id), label: 'session' }
+    }
+    const citedId = c.generation_id || c.trace_id
+    const traceId = c.trace_id || c.generation_id
+    if (!citedId || !traceId) {
+        return null
+    }
+    return {
+        citedId,
+        url: urls.aiObservabilityTrace(traceId, c.generation_id && c.trace_id ? { event: c.generation_id } : undefined),
+        label: c.generation_id ? 'generation' : 'trace',
+    }
 }
 
 function linkifyCitations(content: string, citations: EvaluationReportCitation[]): string {
@@ -38,17 +66,15 @@ function linkifyCitations(content: string, citations: EvaluationReportCitation[]
     const tokens: Array<{ token: string; link: string }> = []
     let out = content
     citations.forEach((c, idx) => {
-        const citedId = c.generation_id || c.trace_id
-        const traceId = c.trace_id || c.generation_id
-        if (!citedId || !traceId) {
+        const target = citationTarget(c)
+        if (!target) {
             return
         }
+        const { citedId, url } = target
         const token = `\0CITE${idx}\0`
-        const url = urls.aiObservabilityTrace(
-            traceId,
-            c.generation_id && c.trace_id ? { event: c.generation_id } : undefined
-        )
-        const link = `[\`${citationLinkLabel(citedId, Boolean(c.generation_id))}\`](${url})`
+        // Angle-bracket destination: trace and session IDs are opaque and caller-supplied, and a
+        // bare ")" in one would otherwise close the destination early and hijack the rest of the link.
+        const link = `[\`${citationLinkLabel(citedId, target.label)}\`](<${url}>)`
         const before = out
         out = out.split(`\`${citedId}\``).join(token)
         out = out.split(`<${citedId}>`).join(token)
@@ -107,7 +133,7 @@ function stripRedundantLeadingHeading(content: string, sectionTitle: string): st
     return lines.slice(startIdx).join('\n')
 }
 
-function ReportSectionContent({
+export function ReportSectionContent({
     section,
     citations,
 }: {
@@ -118,8 +144,9 @@ function ReportSectionContent({
         stripRedundantLeadingHeading(section.content ?? '', section.title ?? ''),
         citations
     )
+    // A model writes reports from trace content, so an injected image would call an outside server for each viewer.
     return (
-        <LemonMarkdown lowKeyHeadings className="text-sm">
+        <LemonMarkdown lowKeyHeadings disableImages className="text-sm">
             {markdown}
         </LemonMarkdown>
     )
@@ -127,8 +154,13 @@ function ReportSectionContent({
 
 const RESULT_ORDER: Record<EvaluationOutputType, string[]> = {
     boolean: ['pass', 'fail', 'na'],
+    numeric: ['pass', 'fail', 'na'],
+    categorical: ['pass', 'fail', 'na'],
     sentiment: ['positive', 'neutral', 'negative'],
 }
+
+const METRICS_UNAVAILABLE_MESSAGE =
+    'Metrics could not be calculated for this period because evaluation data was temporarily unavailable. This does not mean that no evaluations ran.'
 
 interface EvaluationReportResultMetric {
     key: string
@@ -195,7 +227,7 @@ function getBooleanPassRate(
 
 export function summarizeEvaluationReportResults(metrics: EvaluationReportStoredMetrics): string {
     const resultMetrics = getResultMetrics(metrics)
-    if ((metrics.output_type ?? 'boolean') === 'boolean') {
+    if (['boolean', 'numeric', 'categorical'].includes(metrics.output_type ?? 'boolean')) {
         const passRate = getBooleanPassRate(metrics, resultMetrics)
         const summaryParts = passRate == null ? [] : [`Pass rate ${formatResultRate(passRate, 1)}`]
         summaryParts.push(
@@ -221,15 +253,31 @@ export function summarizeEvaluationReportResults(metrics: EvaluationReportStored
 
 function MetricsCard({ metrics }: { metrics: EvaluationReportStoredMetrics }): JSX.Element {
     const resultMetrics = getResultMetrics(metrics)
-    const isBooleanMetrics = (metrics.output_type ?? 'boolean') === 'boolean'
+    const isBooleanMetrics = ['boolean', 'numeric', 'categorical'].includes(metrics.output_type ?? 'boolean')
     const passRate = isBooleanMetrics ? getBooleanPassRate(metrics, resultMetrics) : undefined
     const passRateDiff =
         passRate == null || metrics.previous_pass_rate == null ? null : passRate - metrics.previous_pass_rate
     const passRateDiffClass =
         passRateDiff == null || passRateDiff === 0 ? 'text-muted' : passRateDiff > 0 ? 'text-success' : 'text-danger'
+    const passingRule =
+        metrics.output_config && 'passing_rule' in metrics.output_config ? metrics.output_config.passing_rule : null
 
     return (
         <div className="bg-bg-light border rounded p-3 mb-3">
+            {metrics.output_type === 'numeric' && passingRule && 'threshold' in passingRule && (
+                <p className="text-sm text-muted">{`Passing rule used for this report: score ${passingRule.operator === 'gte' ? '≥' : '≤'} ${passingRule.threshold}`}</p>
+            )}
+            {metrics.output_type === 'categorical' && passingRule && 'categories' in passingRule && (
+                <p className="text-sm text-muted">
+                    Passing categories used for this report:{' '}
+                    {passingRule.categories
+                        .map(
+                            (key) => metrics.output_config?.options?.find((option) => option.key === key)?.label ?? key
+                        )
+                        .join(', ') || 'None'}
+                    . Every returned category must pass.
+                </p>
+            )}
             <div className="flex items-center gap-6 flex-wrap text-sm">
                 <div>
                     <div className="text-muted text-xs">Total runs</div>
@@ -314,6 +362,7 @@ export function EvaluationReportViewer({
     const content = reportRun.content
     const sections = useMemo(() => content.sections ?? [], [content.sections])
     const metrics = content.metrics ?? reportRun.metadata
+    const metricsUnavailable = content.generation_status === 'metrics_unavailable'
     const citations = useMemo(() => content.citations ?? [], [content.citations])
 
     // Default to executive summary (first section) expanded. Memoized so Expand/Collapse all
@@ -374,7 +423,13 @@ export function EvaluationReportViewer({
                 </div>
             )}
 
-            {metrics && <MetricsCard metrics={metrics} />}
+            {metricsUnavailable ? (
+                <div className="bg-bg-light border rounded p-3 mb-3 text-sm text-muted">
+                    {METRICS_UNAVAILABLE_MESSAGE}
+                </div>
+            ) : (
+                metrics && <MetricsCard metrics={metrics} />
+            )}
 
             {sections.length > 0 && (
                 <>

@@ -1,19 +1,14 @@
 from typing import TYPE_CHECKING, Optional, cast
 
-from posthog.schema import (
+from products.warehouse_sources.backend.facade.codebase_detection import detect
+from products.warehouse_sources.backend.facade.source_config import (
     DataWarehouseSourceCategory,
-    ExternalDataSourceType as SchemaExternalDataSourceType,
     ReleaseStatus,
     SourceConfig,
     SourceFieldInputConfig,
     SourceFieldInputConfigType,
     SourceFieldSelectConfig,
     SourceFieldSelectConfigOption,
-)
-
-from products.warehouse_sources.backend.temporal.data_imports.pipelines.pipeline.typings import (
-    SourceInputs,
-    SourceResponse,
 )
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.base import (
     FieldType,
@@ -31,6 +26,7 @@ from products.warehouse_sources.backend.temporal.data_imports.sources.common.sch
     SourceSchema,
     build_endpoint_schemas,
 )
+from products.warehouse_sources.backend.temporal.data_imports.sources.common.typings import SourceInputs, SourceResponse
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.webhook_s3 import WebhookSourceManager
 from products.warehouse_sources.backend.temporal.data_imports.sources.generated_configs.zapsign import (
     ZapSignSourceConfig,
@@ -45,7 +41,7 @@ from products.warehouse_sources.backend.temporal.data_imports.sources.zapsign.za
 from products.warehouse_sources.backend.types import ExternalDataSourceType
 
 if TYPE_CHECKING:
-    from posthog.cdp.templates.hog_function_template import HogFunctionTemplateDC
+    from products.cdp.backend.templates.hog_function_template import HogFunctionTemplateDC
 
 
 @SourceRegistry.register
@@ -53,6 +49,8 @@ class ZapSignSource(
     ResumableSource[ZapSignSourceConfig, ZapSignResumeConfig],
     WebhookSource[ZapSignSourceConfig],
 ):
+    codebase_detection = detect(env=("^(ZAP_SIGN|ZAPSIGN)_",))
+
     lists_tables_without_credentials = True  # static endpoint catalog — safe for public docs
     api_docs_url = "https://docs.zapsign.com.br"
 
@@ -159,7 +157,7 @@ class ZapSignSource(
     @property
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
-            name=SchemaExternalDataSourceType.ZAP_SIGN,
+            name=ExternalDataSourceType.ZAPSIGN,
             category=DataWarehouseSourceCategory.SALES,
             label="ZapSign",
             caption=(
@@ -195,7 +193,7 @@ class ZapSignSource(
                     ),
                 ],
             ),
-            releaseStatus=ReleaseStatus.ALPHA,
+            releaseStatus=ReleaseStatus.BETA,
             webhookSetupCaption=(
                 "PostHog tries to register a webhook in ZapSign using your API token, subscribed "
                 "to all document events (created, signed, refused, deleted). The webhook "

@@ -1,189 +1,259 @@
+import datetime as dt
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import Optional
+from uuid import UUID
 
 import structlog
-from rest_framework.exceptions import NotFound
 
 from posthog.clickhouse.client import sync_execute
-from posthog.models.person import Person
-from posthog.models.person.util import create_person, create_person_distinct_id
+from posthog.models.person.util import (
+    PERSONHOG_BATCH_SIZE,
+    PersonTombstone,
+    PersonTombstonePublication,
+    PersonVersionFloor,
+    VersionFloorOutcome,
+    ensure_person_version_floors,
+    get_person_tombstones,
+    get_persons_by_uuids,
+)
 
 logger = structlog.get_logger(__name__)
 
-
-def reset_all_deleted_person_distinct_ids(team_id: int, version: int = 2500):
-    # NOTE: Version is arbitrary, we just need to make sure it's higher than any existing version
-    distinct_ids = _get_distinct_ids_tied_to_deleted_persons(team_id)
-    distinct_ids_and_versions: list[tuple[str, int]] = [(distinct_id, version) for distinct_id in distinct_ids]
-    _updated_distinct_ids(team_id, distinct_ids_and_versions)
+# personhog clamps uuid lookups at 250 per request; batch to match.
+_PERSONHOG_UUID_BATCH = 250
 
 
-def reset_deleted_person_distinct_ids(team_id: int, distinct_id: str):
-    existing_version = _get_version_for_distinct_id(team_id, distinct_id)
-    distinct_ids_and_versions = [(distinct_id, existing_version + 100)]
+# ── Orphaned ClickHouse person repair ────────────────────────────────
+#
+# A person can be hard-deleted from the persons DB (posthog_person + posthog_persondistinctid) with no matching
+# ClickHouse tombstone. The row then stays visible to every ClickHouse-backed
+# read path (HogQL `persons`, the UI Persons page) while every persons-DB write
+# path 404s. This produces the missing tombstones so ClickHouse agrees with the
+# persons DB.
 
-    logger.info(f"Resetting distinct id {distinct_id} to version {existing_version + 100}")
-    _updated_distinct_ids(team_id, distinct_ids_and_versions)
+
+@dataclass
+class OrphanedPerson:
+    """A ClickHouse person row that is live in CH but absent from the persons DB."""
+
+    uuid: str
+    ch_max_version: int
+    created_at: dt.datetime
 
 
-def _get_distinct_ids_tied_to_deleted_persons(team_id: int) -> list[str]:
-    # find distinct_ids where the person is set to be deleted
+@dataclass
+class _Mapping:
+    """The current ClickHouse winner for a distinct_id (ReplacingMergeTree argMax)."""
+
+    distinct_id: str
+    winner_person_id: str
+    winner_is_deleted: bool
+    max_version: int
+
+
+@dataclass(frozen=False)
+class OrphanRepairResult:
+    orphaned_person_uuids: list[str]
+    # Orphans with no persons-DB row, which get a new persons-DB tombstone above ClickHouse.
+    tombstoned_persons: int = 0
+    # Orphans that are tombstoned in the persons DB, raised above ClickHouse when needed and republished.
+    republished_persons: int = 0
+    # Orphans the persons-DB primary holds as live, which a lagging replica read reported as missing.
+    skipped_live_persons: int = 0
+    # (distinct_id, winner_uuid) pairs where the CH mapping is tombstoned but the
+    # winning person is live in the persons DB — the opposite drift, handled by
+    # person_divergence repair, reported here rather than repaired.
+    reverse_drift_mappings: list[tuple[str, str]] = field(default_factory=list)
+    dry_run: bool = False
+
+
+# Past this share of live ClickHouse persons missing from the persons DB, the team likely needs a restore.
+ORPHAN_TOMBSTONE_SHARE_LIMIT = 0.05
+
+
+def count_live_ch_persons(team_id: int) -> int:
     rows = sync_execute(
         """
-            SELECT distinct_id FROM (
-                SELECT distinct_id, argMax(person_id, version) AS person_id FROM person_distinct_id2 WHERE team_id = %(team)s GROUP BY distinct_id
-            ) AS pdi2
-            WHERE pdi2.person_id NOT IN (SELECT id FROM person WHERE team_id = %(team)s)
-            OR
-            pdi2.person_id IN (SELECT id FROM person WHERE team_id = %(team)s AND is_deleted = 1)
-        """,
-        {
-            "team": team_id,
-        },
-    )
-    return [row[0] for row in rows]
-
-
-def _get_version_for_distinct_id(team_id: int, distinct_id: str) -> int:
-    rows = sync_execute(
-        """
-            SELECT max(version) as version FROM person_distinct_id2 WHERE team_id = %(team)s AND distinct_id = %(distinct_id)s
-        """,
-        {
-            "team": team_id,
-            "distinct_id": distinct_id,
-        },
-    )
-
-    if len(rows) == 0:
-        raise NotFound(f"Distinct id {distinct_id} not found")
-    return rows[0][0]
-
-
-def _updated_distinct_ids(team_id: int, distinct_id_versions: list[tuple[str, int]]):
-    reset_person_uuids: set[str] = set()
-
-    for distinct_id, version in distinct_id_versions:
-        # this can throw but this script can safely be re-run as
-        # updated distinct_ids won't show up in the search anymore
-        # since they no longer belong to deleted persons
-        # it's safer to throw and exit if anything went wrong
-
-        # The write goes through personhog (an external RPC that can't join a
-        # Postgres transaction), so there is no surrounding atomic block.
-        person = _update_distinct_id_in_postgres(distinct_id, version, team_id)
-
-        # Update ClickHouse via Kafka message
-        if person:
-            person_uuid = str(person.uuid)
-
-            create_person_distinct_id(
-                team_id=team_id,
-                distinct_id=distinct_id,
-                person_id=person_uuid,
-                version=version,
-                is_deleted=False,
+            SELECT count() FROM (
+                SELECT id FROM person WHERE team_id = %(team_id)s GROUP BY id HAVING argMax(is_deleted, version) = 0
             )
-
-            # Also reset the person record in ClickHouse — the soft-deleted person row
-            # has a high version that causes ReplacingMergeTree to keep the deleted state,
-            # making the person invisible to analytics queries
-            if person_uuid not in reset_person_uuids:
-                reset_person_uuids.add(person_uuid)
-                _reset_person_in_clickhouse(team_id, person)
-
-
-def _update_distinct_id_in_postgres(distinct_id: str, version: int, team_id: int) -> Optional[Person]:
-    """Raise the distinct_id's version to at least `version` and return its person.
-
-    Routes through SetPersonDistinctIdVersionFloor (guarded — never lowers the
-    version). Returns None when the distinct_id doesn't exist (it hasn't been
-    re-used yet).
-    """
-    from posthog.personhog_client.client import personhog_call
-
-    return personhog_call(
-        "set_person_distinct_id_version_floor",
-        lambda: _set_distinct_id_version_floor_via_personhog(team_id, distinct_id, version),
+        """,
+        {"team_id": team_id},
     )
+    return int(rows[0][0])
 
 
-def _set_distinct_id_version_floor_via_personhog(team_id: int, distinct_id: str, version: int) -> Optional[Person]:
-    from posthog.personhog_client.client import require_personhog_client
-    from posthog.personhog_client.converters import proto_person_to_model
-    from posthog.personhog_client.proto import SetPersonDistinctIdVersionFloorRequest
-
-    client = require_personhog_client()
-
-    resp = client.set_person_distinct_id_version_floor(
-        SetPersonDistinctIdVersionFloorRequest(team_id=team_id, distinct_id=distinct_id, min_version=version)
-    )
-    if not resp.HasField("person"):
-        logger.info(f"Distinct id {distinct_id} hasn't been re-used yet and can cause problems in the future")
+def orphan_share_refusal(team_id: int, to_tombstone: int, live_ch_persons: int) -> Optional[str]:
+    """Return why tombstoning this many ClickHouse-only persons is refused, or None when it is within the limit."""
+    if to_tombstone <= ORPHAN_TOMBSTONE_SHARE_LIMIT * live_ch_persons:
         return None
-    return proto_person_to_model(resp.person, distinct_ids=[distinct_id])
+    return (
+        f"Refusing to tombstone {to_tombstone} of the {live_ch_persons} live ClickHouse persons of team {team_id}, "
+        f"more than {ORPHAN_TOMBSTONE_SHARE_LIMIT:.0%}. A team whose persons-DB persons were lost, for example by "
+        "an interrupted project deletion, needs a restore, and tombstoning destroys the ClickHouse copy the restore "
+        "reads from. Pass --force only if these persons should really be deleted."
+    )
 
 
-def _get_person_version_if_deleted(team_id: int, person_uuid: str) -> Optional[int]:
-    """Returns the max version if the person is soft-deleted in ClickHouse, None otherwise."""
+def find_orphaned_ch_persons(team_id: int, uuids: Optional[list[str]] = None) -> list[OrphanedPerson]:
+    """Return ClickHouse person rows that are live in CH but have no persons-DB row.
+
+    With ``uuids`` set the search is scoped to those ids (a one-shot repair);
+    otherwise every live CH person for the team is checked, which is a full scan.
+    """
+    candidates = _ch_live_persons(team_id, uuids)
+    if not candidates:
+        return []
+
+    present_in_db: set[str] = set()
+    candidate_uuids = list(candidates)
+    for start in range(0, len(candidate_uuids), _PERSONHOG_UUID_BATCH):
+        batch = candidate_uuids[start : start + _PERSONHOG_UUID_BATCH]
+        present_in_db.update(str(p.uuid) for p in get_persons_by_uuids(team_id, batch, distinct_id_limit=0))
+
+    return [
+        OrphanedPerson(uuid=uuid, ch_max_version=max_version, created_at=created_at)
+        for uuid, (max_version, created_at) in candidates.items()
+        if uuid not in present_in_db
+    ]
+
+
+def tombstone_orphaned_ch_persons(
+    team_id: int,
+    orphans: list[OrphanedPerson],
+    *,
+    dry_run: bool = True,
+    on_outcome: Optional[Callable[[str, str], None]] = None,
+) -> OrphanRepairResult:
+    """Tombstone orphaned persons in the persons DB one version above ClickHouse, then publish those tombstones.
+
+    Each ClickHouse tombstone carries the exact stored version, so a later revival lands above it and a rerun
+    republishes the same versions. Distinct ids get no tombstone of their own, because the ClickHouse deletion
+    sweep removes every live mapping of a person it deletes.
+
+    Once applied, ``on_outcome`` receives each orphan's uuid with "tombstoned", "republished" or "skipped_live".
+    """
+    result = OrphanRepairResult(orphaned_person_uuids=sorted(o.uuid for o in orphans), dry_run=dry_run)
+    if not orphans:
+        return result
+
+    orphan_uuids = {o.uuid for o in orphans}
+    deleted_winners = [m for m in _ch_mappings_for_persons(team_id, orphan_uuids) if m.winner_is_deleted]
+    result.reverse_drift_mappings = _find_reverse_drift(team_id, deleted_winners, orphan_uuids)
+
+    stored_by_uuid = {str(t.uuid): t for t in get_person_tombstones(team_id, [UUID(o.uuid) for o in orphans])}
+    if dry_run:
+        result.republished_persons = sum(1 for o in orphans if o.uuid in stored_by_uuid)
+        result.tombstoned_persons = len(orphans) - result.republished_persons
+        return result
+
+    created_at_by_uuid = {o.uuid: o.created_at for o in orphans}
+    floors = [PersonVersionFloor(uuid=UUID(o.uuid), min_version=o.ch_max_version + 1) for o in orphans]
+    publication = PersonTombstonePublication(team_id=team_id, source="orphan_repair")
+    try:
+        # Each batch commits on its own, so it is published before the next batch starts, and a later failure
+        # leaves no committed tombstone unpublished.
+        for i in range(0, len(floors), PERSONHOG_BATCH_SIZE):
+            to_publish: list[tuple[PersonTombstone, Optional[dt.datetime]]] = []
+            for floor in ensure_person_version_floors(team_id, floors[i : i + PERSONHOG_BATCH_SIZE]):
+                uuid = str(floor.uuid)
+                if floor.outcome == VersionFloorOutcome.LIVE:
+                    result.skipped_live_persons += 1
+                    if on_outcome is not None:
+                        on_outcome(uuid, "skipped_live")
+                    continue
+                stored = stored_by_uuid.get(uuid)
+                if stored is None:
+                    result.tombstoned_persons += 1
+                else:
+                    result.republished_persons += 1
+                if on_outcome is not None:
+                    on_outcome(uuid, "tombstoned" if stored is None else "republished")
+                tombstone = PersonTombstone(
+                    uuid=floor.uuid, version=floor.version, distinct_ids=stored.distinct_ids if stored else []
+                )
+                to_publish.append((tombstone, created_at_by_uuid[uuid]))
+            publication.publish(to_publish)
+    finally:
+        publication.await_and_ack()
+    if publication.failures:
+        raise publication.failures[0].error
+    return result
+
+
+_LIVE_PERSONS_BASE = """
+    SELECT id, max(version) AS max_version, argMax(created_at, version) AS created_at
+    FROM person
+    WHERE team_id = %(team_id)s
+    GROUP BY id
+    HAVING argMax(is_deleted, version) = 0
+"""
+
+_LIVE_PERSONS_SCOPED = """
+    SELECT id, max(version) AS max_version, argMax(created_at, version) AS created_at
+    FROM person
+    WHERE team_id = %(team_id)s AND id IN %(uuids)s
+    GROUP BY id
+    HAVING argMax(is_deleted, version) = 0
+"""
+
+
+def _ch_live_persons(team_id: int, uuids: Optional[list[str]]) -> dict[str, tuple[int, dt.datetime]]:
+    """Map each non-deleted CH person id to its (max_version, created_at)."""
+    # Two static query literals rather than an interpolated WHERE — every value is
+    # bound through %(...)s params, so there's no user data in the SQL text itself.
+    params: dict[str, object] = {"team_id": team_id}
+    if uuids is None:
+        query = _LIVE_PERSONS_BASE
+    else:
+        query = _LIVE_PERSONS_SCOPED
+        params["uuids"] = list(uuids)
+
+    rows = sync_execute(query, params)
+    return {str(row[0]): (int(row[1]), row[2]) for row in rows}
+
+
+def _ch_mappings_for_persons(team_id: int, orphan_uuids: set[str]) -> list[_Mapping]:
+    """Return the current CH winner for every distinct_id ever tied to an orphan."""
     rows = sync_execute(
         """
-            SELECT max(version), argMax(is_deleted, version)
-            FROM person
-            WHERE team_id = %(team_id)s AND id = %(person_id)s
+            SELECT
+                distinct_id,
+                argMax(person_id, version) AS winner_person_id,
+                argMax(is_deleted, version) AS winner_is_deleted,
+                max(version) AS max_version
+            FROM person_distinct_id2
+            WHERE team_id = %(team_id)s AND distinct_id IN (
+                SELECT DISTINCT distinct_id
+                FROM person_distinct_id2
+                WHERE team_id = %(team_id)s AND person_id IN %(orphans)s
+            )
+            GROUP BY distinct_id
         """,
-        {"team_id": team_id, "person_id": person_uuid},
+        {"team_id": team_id, "orphans": list(orphan_uuids)},
     )
-    if len(rows) == 0:
-        return None
-    max_version, is_deleted = rows[0]
-    if not is_deleted:
-        return None
-    return max_version
+    return [
+        _Mapping(
+            distinct_id=row[0],
+            winner_person_id=str(row[1]),
+            winner_is_deleted=bool(row[2]),
+            max_version=int(row[3]),
+        )
+        for row in rows
+    ]
 
 
-def _reset_person_in_clickhouse(team_id: int, person: Person) -> None:
-    person_uuid = str(person.uuid)
-    max_version = _get_person_version_if_deleted(team_id, person_uuid)
-    if max_version is None:
-        return
+def _find_reverse_drift(team_id: int, deleted_winners: list[_Mapping], orphan_uuids: set[str]) -> list[tuple[str, str]]:
+    """Among mappings whose winner is tombstoned, find those whose winning person
+    is nonetheless live in the persons DB (CH-deleted / DB-live drift)."""
+    winner_uuids = sorted({m.winner_person_id for m in deleted_winners if m.winner_person_id not in orphan_uuids})
+    if not winner_uuids:
+        return []
 
-    new_version = max_version + 100
-    logger.info(f"Resetting person {person_uuid} in ClickHouse to version {new_version}")
+    live_in_db: set[str] = set()
+    for start in range(0, len(winner_uuids), _PERSONHOG_UUID_BATCH):
+        batch = winner_uuids[start : start + _PERSONHOG_UUID_BATCH]
+        live_in_db.update(str(p.uuid) for p in get_persons_by_uuids(team_id, batch, distinct_id_limit=0))
 
-    # Raise the Postgres version so future updates from the plugin-server (which
-    # reads version from Postgres) won't be ignored by ClickHouse.
-    _set_person_version_floor(team_id, person.pk, new_version)
-
-    create_person(
-        uuid=person_uuid,
-        team_id=team_id,
-        version=new_version,
-        properties=person.properties,
-        is_identified=person.is_identified,
-        is_deleted=False,
-        created_at=person.created_at,
-    )
-
-
-def _set_person_version_floor(team_id: int, person_id: int, new_version: int) -> None:
-    """Raise a person's version to at least `new_version` (guarded — never lowers).
-
-    Routes through SetPersonVersionFloor.
-    """
-    from posthog.personhog_client.client import personhog_call
-
-    personhog_call(
-        "set_person_version_floor",
-        lambda: _set_person_version_floor_via_personhog(team_id, person_id, new_version),
-    )
-
-
-def _set_person_version_floor_via_personhog(team_id: int, person_id: int, new_version: int) -> None:
-    from posthog.personhog_client.client import require_personhog_client
-    from posthog.personhog_client.proto import SetPersonVersionFloorRequest
-
-    client = require_personhog_client()
-
-    client.set_person_version_floor(
-        SetPersonVersionFloorRequest(team_id=team_id, person_id=person_id, min_version=new_version)
-    )
+    return sorted((m.distinct_id, m.winner_person_id) for m in deleted_winners if m.winner_person_id in live_in_db)

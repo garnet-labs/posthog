@@ -6,14 +6,14 @@ import { router } from 'kea-router'
 import { subscriptions } from 'kea-subscriptions'
 import posthog from 'posthog-js'
 
-import api, { ApiError } from 'lib/api'
+import api, { ApiConfig, ApiError } from 'lib/api'
 import { tryShowMCPHint } from 'lib/components/MCPHint/mcpHintLogic'
 import { lemonToast } from 'lib/lemon-ui/LemonToast/LemonToast'
 import { insightVizDataLogic } from 'scenes/insights/insightVizDataLogic'
-import { trendsDataLogic } from 'scenes/trends/trendsDataLogic'
 import { urls } from 'scenes/urls'
 import { userLogic } from 'scenes/userLogic'
 
+import { containsHogQLQuery, isFunnelsQuery, isInsightVizNode, isMetricsQuery } from '~/queries/schema/node-guards'
 import {
     AlertCalculationInterval,
     AlertConditionType,
@@ -22,14 +22,16 @@ import {
     InsightThresholdType,
     InsightsThresholdBounds,
 } from '~/queries/schema/schema-general'
-import { containsHogQLQuery, isFunnelsQuery, isInsightVizNode, isMetricsQuery } from '~/queries/utils'
-import { AvailableFeature, InsightLogicProps, IntervalType, QueryBasedInsightModel } from '~/types'
+import { AvailableFeature, InsightLogicProps, IntervalType, InsightModel } from '~/types'
 
+import { alertsSimulateCreate } from 'products/alerts/frontend/generated/api'
 import {
     blockSubmitWithoutEntitlement,
     getDefaultSimulationRange,
     isSubDailyAlertInterval,
 } from 'products/alerts/frontend/logic/alertIntervalHelpers'
+import { resolveSnoozeUntil } from 'products/alerts/frontend/utils'
+import { trendsDataLogic } from 'products/product_analytics/frontend/insights/trends/trendsDataLogic'
 
 import {
     AlertConfig,
@@ -42,7 +44,7 @@ import {
     isTrendsAlertConfig,
     supportsOngoingInterval,
 } from '../types'
-import { getAlertFormValidationErrors } from './alertFormSchema'
+import { canCheckOngoingInterval, getAlertFormValidationErrors } from './alertFormSchema'
 import { alertLogic } from './alertLogic'
 import { alertNotificationLogic } from './alertNotificationLogic'
 import { getDefaultAnomalyDetectorConfig } from './detectorConfigDefaults'
@@ -50,7 +52,7 @@ import { deriveFunnelAlertPreview, FunnelAlertPreview } from './funnelAlertPrevi
 import { columnIsNumeric, deriveHogQLAlertPreview, HogQLAlertPreview } from './hogqlAlertPreview'
 import { insightAlertsLogic } from './insightAlertsLogic'
 
-export { THRESHOLD_BOUNDS_FORM_ERROR, thresholdAlertHasBounds } from './alertFormSchema'
+export { canCheckOngoingInterval, THRESHOLD_BOUNDS_FORM_ERROR, thresholdAlertHasBounds } from './alertFormSchema'
 
 export type AlertFormType = Pick<
     AlertType,
@@ -65,33 +67,16 @@ export type AlertFormType = Pick<
     | 'config'
     | 'skip_weekend'
     | 'schedule_restriction'
+    | 'schedule_start_time'
     | 'detector_config'
+    | 'evaluation_delay_intervals'
     | 'investigation_agent_enabled'
     | 'investigation_gates_notifications'
     | 'investigation_inconclusive_action'
 > & {
     id?: AlertType['id']
     created_by?: AlertType['created_by'] | null
-    insight?: QueryBasedInsightModel['id']
-}
-
-export function canCheckOngoingInterval(
-    alert?: AlertType | AlertFormType,
-    { isTrendsFunnel = false }: { isTrendsFunnel?: boolean } = {}
-): boolean {
-    // A funnel conversion rate isn't biased low over a partial period, so a trends funnel can always
-    // check the ongoing one (steps funnels have no periods). A trends count is cumulative, so it's only
-    // safe for an absolute/increase check above an upper bound.
-    if (isFunnelsAlertConfig(alert?.config)) {
-        return isTrendsFunnel
-    }
-    const upper = alert?.threshold?.configuration?.bounds?.upper
-    return (
-        (alert?.condition?.type === AlertConditionType.ABSOLUTE_VALUE ||
-            alert?.condition?.type === AlertConditionType.RELATIVE_INCREASE) &&
-        upper != null &&
-        !isNaN(upper)
-    )
+    insight?: InsightModel['id']
 }
 
 const ONGOING_DISABLED_REASON =
@@ -139,9 +124,31 @@ export function insightAlertKindForQuery(query?: Record<string, any> | null): In
     return 'trends'
 }
 
+const EVALUATION_DELAY_UNSUPPORTED_REASON =
+    "This insight doesn't support an evaluation delay. Set it to 0 to save the alert."
+
+export interface EvaluationDelayField {
+    show: boolean
+    unsupportedReason?: string
+}
+
+/** A saved delay stays editable after its insight stops supporting one, because the API
+ * rejects every save of that alert until the delay is 0. */
+export function evaluationDelayField(
+    insightAlertKind: InsightAlertKind,
+    isNonTimeSeriesDisplay: boolean,
+    savedDelay: number
+): EvaluationDelayField {
+    const supported = insightAlertKind === 'trends' && !isNonTimeSeriesDisplay
+    return {
+        show: supported || savedDelay > 0,
+        unsupportedReason: supported ? undefined : EVALUATION_DELAY_UNSUPPORTED_REASON,
+    }
+}
+
 export interface AlertFormLogicProps {
     alert: AlertType | null
-    insightId: QueryBasedInsightModel['id']
+    insightId: InsightModel['id']
     onEditSuccess: (alertId?: AlertType['id']) => void
     insightVizDataLogicProps?: InsightLogicProps
     insightInterval?: IntervalType
@@ -154,7 +161,6 @@ export interface AlertFormLogicProps {
     /** For funnel insights: whether it's a trends (historical) funnel, which alerts on the overall
      * conversion rate over time rather than a single step snapshot. Drives the preview shape. */
     insightIsTrendsFunnel?: boolean
-    uiVersion?: 'legacy' | 'redesigned'
 }
 
 const defaultConfigForInsight = (kind: AlertFormLogicProps['insightAlertKind']): AlertConfig => {
@@ -233,7 +239,7 @@ function insightIntervalToAlertInterval(interval?: IntervalType | null): AlertCa
     }
 }
 
-function alertToFormType(alert: AlertType, insightId: QueryBasedInsightModel['id']): AlertFormType {
+function alertToFormType(alert: AlertType, insightId: InsightModel['id']): AlertFormType {
     return {
         ...alert,
         insight: insightId,
@@ -244,7 +250,7 @@ function defaultAlertName(props: AlertFormLogicProps, goalLines?: GoalLine[] | n
     if (props.defaultToAnomalyDetection) {
         return props.insightName ? `Anomaly in ${props.insightName}` : 'Anomaly alert'
     }
-    if (props.uiVersion === 'redesigned' && props.insightName) {
+    if (props.insightName) {
         return `${props.insightName} alert`
     }
     return goalLines && goalLines.length > 0 ? `Crossed ${goalLines[0].label}` : ''
@@ -274,6 +280,7 @@ export interface alertFormLogicValues {
     alertFormTouched: boolean
     alertFormTouches: Record<string, boolean>
     alertFormValidationErrors: DeepPartialMap<AlertFormType, ValidationErrorType>
+    clearSnoozeLoading: boolean
     funnelAlertPreview: FunnelAlertPreview | null
     hogqlAlertPreview: HogQLAlertPreview | null
     hogqlConfigPrefill: Partial<Pick<HogQLAlertConfig, 'column' | 'label_column'>> | null
@@ -292,6 +299,7 @@ export interface alertFormLogicValues {
     isAlertFormValid: boolean
     showAlertFormErrors: boolean
     simulationDateFrom: string | null
+    simulationRequestId: number
     simulationResult: AlertSimulationResult | null
     simulationResultLoading: boolean
     thresholdBoundsFormError: string | undefined
@@ -344,6 +352,9 @@ export interface alertFormLogicActions {
     }
     setAlertFormValues: (values: DeepPartial<AlertFormType>) => {
         values: DeepPartial<AlertFormType>
+    }
+    setClearSnoozeLoading: (loading: boolean) => {
+        loading: boolean
     }
     setSimulationDateFrom: (dateFrom: string) => {
         dateFrom: string
@@ -404,12 +415,12 @@ export interface alertFormLogicMeta {
         hogqlAlertPreview: (
             insightData: Record<string, any>,
             arg: AlertConfig,
-            arg2: InsightsThresholdBounds | undefined
+            arg2: InsightsThresholdBounds | null | undefined
         ) => HogQLAlertPreview | null
         funnelAlertPreview: (
             insightData: Record<string, any>,
             arg: AlertConfig,
-            arg2: InsightsThresholdBounds | undefined,
+            arg2: InsightsThresholdBounds | null | undefined,
             arg3: AlertConditionType,
             arg4: InsightThresholdType
         ) => FunnelAlertPreview | null
@@ -473,6 +484,7 @@ export const alertFormLogic = kea<alertFormLogicType>([
         clearSimulation: true,
         setSimulationDateFrom: (dateFrom: string) => ({ dateFrom }),
         setAlertFormSubmitAttempted: true,
+        setClearSnoozeLoading: (loading: boolean) => ({ loading }),
     }),
 
     reducers({
@@ -482,11 +494,26 @@ export const alertFormLogic = kea<alertFormLogicType>([
                 setSimulationDateFrom: (_, { dateFrom }) => dateFrom,
             },
         ],
+        // Counts every request and every clear, so a preview that resolves after the
+        // detector settings changed can be told apart from the one the user is waiting on.
+        simulationRequestId: [
+            0,
+            {
+                simulateAlert: (state) => state + 1,
+                clearSimulation: (state) => state + 1,
+            },
+        ],
         alertFormSubmitAttempted: [
             false,
             {
                 setAlertFormSubmitAttempted: () => true,
                 submitAlertFormSuccess: () => false,
+            },
+        ],
+        clearSnoozeLoading: [
+            false,
+            {
+                setClearSnoozeLoading: (_, { loading }) => loading,
             },
         ],
     }),
@@ -495,23 +522,42 @@ export const alertFormLogic = kea<alertFormLogicType>([
         simulationResult: [
             null as AlertSimulationResult | null,
             {
-                simulateAlert: async (): Promise<AlertSimulationResult | null> => {
+                simulateAlert: async (_, breakpoint): Promise<AlertSimulationResult | null> => {
                     const detectorConfig = values.alertForm.detector_config
                     if (!detectorConfig || !props.insightId) {
                         return null
                     }
+                    const requestId = values.simulationRequestId
                     const formConfig = values.alertForm.config
-                    return await api.alerts.simulate({
-                        insight: props.insightId,
-                        detector_config: detectorConfig,
-                        series_index: isTrendsAlertConfig(formConfig) ? formConfig.series_index : 0,
-                        date_from:
-                            values.simulationDateFrom ??
-                            getDefaultSimulationRange(values.alertForm.calculation_interval),
-                        // SQL insights have no series_index; the config carries the evaluated column
-                        // and read direction so the preview matches what the alert will score.
-                        config: formConfig,
-                    })
+                    let result: AlertSimulationResult
+                    try {
+                        result = (await alertsSimulateCreate(String(ApiConfig.getCurrentProjectId()), {
+                            insight: props.insightId,
+                            detector_config: detectorConfig,
+                            series_index: isTrendsAlertConfig(formConfig) ? formConfig.series_index : 0,
+                            date_from:
+                                values.simulationDateFrom ??
+                                getDefaultSimulationRange(values.alertForm.calculation_interval),
+                            // SQL insights have no series_index; the config carries the evaluated column
+                            // and read direction so the preview matches what the alert will score.
+                            config: formConfig,
+                            evaluation_delay_intervals: values.alertForm.evaluation_delay_intervals ?? 0,
+                            // A saved alert's earlier AI checks are part of what the AI detector reads.
+                            alert: values.alertForm.id ?? null,
+                        })) as AlertSimulationResult
+                    } catch (error) {
+                        if (values.simulationRequestId === requestId) {
+                            throw error
+                        }
+                        // The settings this request ran with are gone, so its failure is not one to report.
+                        breakpoint()
+                        return values.simulationResult
+                    }
+                    // A newer preview owns the loader now: the breakpoint stops this one from settling
+                    // it. After a clear there is nothing to show, because the model never saw the
+                    // current settings.
+                    breakpoint()
+                    return values.simulationRequestId === requestId ? result : values.simulationResult
                 },
                 clearSimulation: () => null,
             },
@@ -530,6 +576,7 @@ export const alertFormLogic = kea<alertFormLogicType>([
                           created_by: null,
                           created_at: '',
                           enabled: true,
+                          evaluation_delay_intervals: 0,
                           config: defaultConfigForInsight(props.insightAlertKind),
                           threshold: {
                               configuration: {
@@ -545,6 +592,7 @@ export const alertFormLogic = kea<alertFormLogicType>([
                           calculation_interval: calculationInterval,
                           skip_weekend: false,
                           schedule_restriction: null,
+                          schedule_start_time: null,
                           detector_config: props.defaultToAnomalyDetection
                               ? getDefaultAnomalyDetectorConfig(calculationInterval)
                               : null,
@@ -653,9 +701,14 @@ export const alertFormLogic = kea<alertFormLogicType>([
 
                 if (isNewAlert) {
                     posthog.capture('alert creation completed', {
-                        ui_version: props.uiVersion ?? 'legacy',
+                        ui_version: 'redesigned',
                     })
                 }
+
+                posthog.capture('alert wizard completed', {
+                    action: isNewAlert ? 'created' : 'updated',
+                    alert_type: 'insight',
+                })
 
                 // The alert is already persisted — any error from the local side-effects below is a
                 // client-side bug, not a save failure. Capture it for investigation but don't surface it
@@ -835,6 +888,10 @@ export const alertFormLogic = kea<alertFormLogicType>([
     })),
 
     listeners(({ props, values, actions }) => {
+        const discardSimulation = (): void => {
+            actions.clearSimulation()
+            getParentLogic()?.actions.clearSimulationAnomalyPoints()
+        }
         const getParentLogic = (): ReturnType<typeof insightAlertsLogic.build> | undefined => {
             if (props.insightVizDataLogicProps) {
                 return insightAlertsLogic({
@@ -864,7 +921,7 @@ export const alertFormLogic = kea<alertFormLogicType>([
                     throw new Error("Cannot snooze alert that doesn't exist")
                 }
                 const updatedAlert: AlertType = await api.alerts.update(values.alertForm.id, {
-                    snoozed_until: snoozeUntil,
+                    snoozed_until: resolveSnoozeUntil(snoozeUntil),
                 })
                 hydrateAlertLogicFromSaveResponse(updatedAlert)
                 const parent = getParentLogic()
@@ -878,18 +935,36 @@ export const alertFormLogic = kea<alertFormLogicType>([
                 if (!values.alertForm.id) {
                     throw new Error("Cannot resolve alert that doesn't exist")
                 }
-                const updatedAlert: AlertType = await api.alerts.update(values.alertForm.id, {
-                    snoozed_until: null,
-                })
-                hydrateAlertLogicFromSaveResponse(updatedAlert)
-                const parent = getParentLogic()
-                if (parent) {
-                    parent.actions.upsertAlert(updatedAlert)
-                    parent.actions.loadAlerts()
+                actions.setClearSnoozeLoading(true)
+                try {
+                    const updatedAlert: AlertType = await api.alerts.update(values.alertForm.id, {
+                        snoozed_until: null,
+                    })
+                    hydrateAlertLogicFromSaveResponse(updatedAlert)
+                    const parent = getParentLogic()
+                    if (parent) {
+                        parent.actions.upsertAlert(updatedAlert)
+                        parent.actions.loadAlerts()
+                    }
+                } catch (error) {
+                    lemonToast.error("We couldn't unsnooze this alert. Please try again.")
+                    posthog.captureException(error, {
+                        action: 'clear alert snooze',
+                        alertId: values.alertForm.id,
+                    })
+                } finally {
+                    actions.setClearSnoozeLoading(false)
                 }
             },
             submitAlertForm: () => {
                 actions.setAlertFormSubmitAttempted()
+                const validationErrors = Object.values(values.alertFormValidationErrors).filter(
+                    (error): error is string => typeof error === 'string'
+                )
+                if (validationErrors.length > 0) {
+                    const message = validationErrors.map((error) => error.replace(/[.!?]+$/, '')).join('. ')
+                    lemonToast.error(`Couldn't save alert: ${message}`)
+                }
             },
             submitAlertFormSuccess: async () => {
                 // Background sync to pick up any server-side changes
@@ -911,6 +986,7 @@ export const alertFormLogic = kea<alertFormLogicType>([
                         : simulationResult.anomaly_count
                     posthog.capture('alert simulation run', {
                         success: true,
+                        evaluation_delay_intervals: values.alertForm.evaluation_delay_intervals ?? 0,
                         detector_type: detectorConfig?.type ?? null,
                         ensemble_operator: detectorConfig?.type === 'ensemble' ? detectorConfig.operator : null,
                         date_from:
@@ -952,6 +1028,18 @@ export const alertFormLogic = kea<alertFormLogicType>([
                 }
 
                 parent.actions.setSimulationAnomalyPoints(anomalyPoints)
+            },
+            setSimulationDateFrom: () => {
+                // A preview is only valid for the range it ran over, whether it has finished or not.
+                discardSimulation()
+            },
+            setAlertFormValue: ({ name }) => {
+                const field = Array.isArray(name) ? name[0] : name
+                // The evaluated series or column, and the detector settings, are inputs to the
+                // preview, so an edit to either leaves nothing the chart can honestly show.
+                if (field === 'config' || field === 'detector_config' || field === 'evaluation_delay_intervals') {
+                    discardSimulation()
+                }
             },
             simulateAlertFailure: ({ error }) => {
                 const detectorConfig = values.alertForm.detector_config

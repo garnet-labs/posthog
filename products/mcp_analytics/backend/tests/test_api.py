@@ -1,18 +1,43 @@
+import hashlib
 from datetime import UTC, datetime, timedelta
+from typing import Any, Literal
 
-from posthog.test.base import APIBaseTest, ClickhouseTestMixin, _create_event
+import time_machine
+from posthog.test.base import APIBaseTest, ClickhouseTestMixin, _create_event, flush_persons_and_events
 from unittest.mock import patch
 
 from django.core.cache import cache
+from django.test import SimpleTestCase
 
 from parameterized import parameterized
 
-from posthog.models.utils import uuid7
+from posthog.schema import AnyPropertyFilterDiscriminated, EventPropertyFilter, PersonPropertyFilter, PropertyOperator
 
-from products.mcp_analytics.backend import intent_generation
+from posthog.hogql.database.database import Database
+
+from posthog.constants import AvailableFeature
+from posthog.models import PropertyDefinition
+from posthog.models.utils import uuid7
+from posthog.test.persons import create_person
+from posthog.utils import generate_cache_key
+
+from products.access_control.backend.models.property_access_control import PropertyAccessControl
+from products.access_control.backend.property_access_control import PropertyAccessLevel
+from products.mcp_analytics.backend import intent_generation, logic, mcp_harness
 from products.mcp_analytics.backend.facade import api, contracts, enums
 from products.mcp_analytics.backend.models import MCPAnalyticsSubmission, MCPSession
 from products.mcp_analytics.backend.tests import _MCPAnalyticsTeamScopedTestMixin
+
+INTERNAL_CLIENT = "internal-bot"
+TEST_ACCOUNT_FILTERS = [{"key": "$mcp_client_name", "value": [INTERNAL_CLIENT], "operator": "is_not", "type": "event"}]
+
+
+def _tool_name_filter(tool: str) -> list[AnyPropertyFilterDiscriminated]:
+    return [EventPropertyFilter(key="$mcp_tool_name", value=[tool], operator=PropertyOperator.EXACT)]
+
+
+def _person_email_filter(email: str) -> list[AnyPropertyFilterDiscriminated]:
+    return [PersonPropertyFilter(key="email", value=[email], operator=PropertyOperator.EXACT)]
 
 
 def _sorted_uuid7s(n: int) -> list[str]:
@@ -93,6 +118,7 @@ class TestListMCPSessions(_MCPAnalyticsTeamScopedTestMixin, ClickhouseTestMixin,
         distinct_id: str = "anon_seed",
         session_start: datetime | None = None,
         session_end: datetime | None = None,
+        is_error: bool = False,
     ) -> None:
         """Seed one $mcp_tool_call event per element of ``tool_sequence``.
 
@@ -115,8 +141,125 @@ class TestListMCPSessions(_MCPAnalyticsTeamScopedTestMixin, ClickhouseTestMixin,
                     "$session_id": session_id,
                     "$mcp_tool_name": tool,
                     "$mcp_client_name": client_name,
+                    "$mcp_is_error": is_error,
                 },
             )
+
+    @parameterized.expand(
+        [
+            (
+                "all_sessions",
+                None,
+                None,
+                {"clean": (2, 0), "partial": (2, 1), "all_fail": (1, 1), "docs_fail": (2, 1)},
+            ),
+            ("with_errors", True, None, {"partial": (2, 1), "all_fail": (1, 1), "docs_fail": (2, 1)}),
+            ("without_errors", False, None, {"clean": (2, 0)}),
+            (
+                "with_errors_among_filtered_calls",
+                True,
+                _tool_name_filter("query_run"),
+                {"partial": (2, 1), "all_fail": (1, 1)},
+            ),
+            (
+                "without_errors_among_filtered_calls",
+                False,
+                _tool_name_filter("query_run"),
+                {"clean": (2, 0), "docs_fail": (1, 0)},
+            ),
+        ]
+    )
+    def test_has_errors_filters_by_session_outcome(
+        self,
+        _name: str,
+        has_errors: bool | None,
+        properties: list[AnyPropertyFilterDiscriminated] | None,
+        expected: dict[str, tuple[int, int]],
+    ) -> None:
+        by_name = {name: str(uuid7()) for name in ("clean", "partial", "all_fail", "docs_fail")}
+        self._seed_session(by_name["clean"], ["query_run", "query_run"])
+        self._seed_session(by_name["partial"], ["query_run"])
+        self._seed_session(by_name["partial"], ["query_run"], is_error=True)
+        self._seed_session(by_name["all_fail"], ["query_run"], is_error=True)
+        self._seed_session(by_name["docs_fail"], ["query_run"])
+        self._seed_session(by_name["docs_fail"], ["docs_search"], is_error=True)
+        flush_persons_and_events()
+
+        page = api.list_mcp_sessions(self.team, limit=50, offset=0, has_errors=has_errors, properties=properties)
+
+        assert {
+            name: (s.tool_calls, s.error_calls)
+            for name, sid in by_name.items()
+            for s in page.results
+            if s.session_id == sid
+        } == expected
+
+    @parameterized.expand(
+        [
+            ("property_filter", _tool_name_filter("query_run"), False, {"kept"}),
+            ("person_property_filter", _person_email_filter("kept@example.com"), False, {"kept"}),
+            ("test_accounts", None, True, {"kept"}),
+            ("both_together", _tool_name_filter("query_run"), True, {"kept"}),
+            ("neither", None, False, {"kept", "dropped"}),
+        ]
+    )
+    def test_shared_filters_narrow_the_session_list(
+        self,
+        _name: str,
+        properties: list[AnyPropertyFilterDiscriminated] | None,
+        filter_test_accounts: bool,
+        expected: set[str],
+    ) -> None:
+        self.team.test_account_filters = TEST_ACCOUNT_FILTERS
+        self.team.save()
+        create_person(team=self.team, distinct_ids=["kept_user"], properties={"email": "kept@example.com"})
+        create_person(team=self.team, distinct_ids=["dropped_user"], properties={"email": "dropped@example.com"})
+        by_name = {"kept": str(uuid7()), "dropped": str(uuid7())}
+        self._seed_session(by_name["kept"], ["query_run"], distinct_id="kept_user")
+        self._seed_session(by_name["dropped"], ["docs_search"], client_name=INTERNAL_CLIENT, distinct_id="dropped_user")
+        flush_persons_and_events()
+
+        def listed(props: list[AnyPropertyFilterDiscriminated] | None, test_accounts: bool) -> set[str]:
+            page = api.list_mcp_sessions(
+                self.team, limit=50, offset=0, properties=props, filter_test_accounts=test_accounts
+            )
+            return {name for name, sid in by_name.items() if sid in {s.session_id for s in page.results}}
+
+        assert listed(None, False) == {"kept", "dropped"}
+        assert listed(properties, filter_test_accounts) == expected
+
+    def test_test_account_filter_changes_invalidate_the_session_cache(self) -> None:
+        external_session_id = str(uuid7())
+        internal_session_id = str(uuid7())
+        self._seed_session(external_session_id, ["query_run"])
+        self._seed_session(internal_session_id, ["query_run"], client_name=INTERNAL_CLIENT)
+        self.team.test_account_filters = TEST_ACCOUNT_FILTERS
+
+        first_page = api.list_mcp_sessions(self.team, limit=50, offset=0, filter_test_accounts=True)
+        assert {session.session_id for session in first_page.results} == {external_session_id}
+
+        self.team.test_account_filters = []
+        second_page = api.list_mcp_sessions(self.team, limit=50, offset=0, filter_test_accounts=True)
+        assert {session.session_id for session in second_page.results} == {external_session_id, internal_session_id}
+
+    def test_shared_filters_narrow_the_calls_but_not_the_session_bounds(self) -> None:
+        session_id = str(uuid7())
+        now = datetime.now(tz=UTC)
+        started_at = now - timedelta(minutes=30)
+        self._seed_session(session_id, ["docs_search"], session_start=started_at, session_end=started_at)
+        self._seed_session(
+            session_id,
+            ["query_run", "query_run"],
+            session_start=now - timedelta(minutes=10),
+            session_end=now - timedelta(minutes=9),
+        )
+
+        page = api.list_mcp_sessions(self.team, limit=50, offset=0, properties=_tool_name_filter("query_run"))
+        session = next(s for s in page.results if s.session_id == session_id)
+
+        assert session.tool_calls == 2
+        assert session.tools_used == ["query_run"]
+        assert session.session_start < now - timedelta(minutes=20)
 
     def test_lists_sessions_in_newest_first_order(self) -> None:
         session_a = str(uuid7())
@@ -370,16 +513,14 @@ class TestListMCPSessions(_MCPAnalyticsTeamScopedTestMixin, ClickhouseTestMixin,
         assert old in results
         assert new not in results
 
-    def test_overlapping_session_reports_full_stats_not_clipped(self) -> None:
-        # A session straddling the window start is included with its FULL stats: the event
-        # before the window counts too, so start/duration/tool count span the whole session
-        # rather than just the in-window slice.
+    @parameterized.expand([("within_one_day", timedelta(hours=2)), ("beyond_one_day", timedelta(days=3))])
+    def test_overlapping_session_reports_stats_within_scan_buffer(self, _name: str, session_age: timedelta) -> None:
         session_id = str(uuid7())
         now = datetime.now(tz=UTC)
         self._seed_session(
             session_id,
             ["query_run", "insight_get"],
-            session_start=now - timedelta(hours=2),  # before the window
+            session_start=now - session_age,  # before the window
             session_end=now - timedelta(minutes=10),  # inside the window
         )
 
@@ -395,11 +536,31 @@ class TestListMCPSessions(_MCPAnalyticsTeamScopedTestMixin, ClickhouseTestMixin,
         assert session.tool_calls == 2
         assert sorted(session.tools_used) == ["insight_get", "query_run"]
         # session_start is the pre-window event, not clipped up to the window start.
-        assert session.session_start < now - timedelta(hours=1)
+        assert session.session_start < now - session_age + timedelta(minutes=1)
+
+    def test_overlapping_session_excludes_events_beyond_scan_buffer(self) -> None:
+        session_id = str(uuid7())
+        now = datetime.now(tz=UTC)
+        self._seed_session(
+            session_id,
+            ["outside_scan", "inside_window"],
+            session_start=now - timedelta(days=8),
+            session_end=now - timedelta(minutes=10),
+        )
+
+        one_hour_ago = (now - timedelta(hours=1)).isoformat()
+        sessions = [
+            s
+            for s in api.list_mcp_sessions(self.team, limit=50, offset=0, date_from=one_hour_ago).results
+            if s.session_id == session_id
+        ]
+
+        assert len(sessions) == 1
+        assert sessions[0].tool_calls == 1
+        assert sessions[0].tools_used == ["inside_window"]
+        assert sessions[0].session_start > now - timedelta(hours=1)
 
     def test_session_entirely_outside_window_is_excluded(self) -> None:
-        # The buffered scan reads events just outside the window, but a session with no event
-        # *inside* the window must not leak in via the buffer.
         session_id = str(uuid7())
         now = datetime.now(tz=UTC)
         self._seed_session(
@@ -463,39 +624,170 @@ class TestGenerateIntentDigest(_MCPAnalyticsTeamScopedTestMixin, ClickhouseTestM
         self._seed_intent_event("check the signups funnel")
         self._seed_intent_event("compare to last week")
 
-        with patch.object(
-            intent_generation, "summarize_project_intents", return_value="Signup funnel investigation."
-        ) as mock_summarize:
+        parsed = intent_generation.IntentThemesSchema(
+            summary="Signup funnel investigation.",
+            themes=[
+                intent_generation.IntentThemeSchema(
+                    name="Funnel checks",
+                    description="Checking signup funnel conversion.",
+                    intent_numbers=[1, 2],
+                )
+            ],
+        )
+        with patch.object(intent_generation, "summarize_project_intents", return_value=parsed) as mock_summarize:
             first = api.generate_intent_digest(self.team)
             again = api.generate_intent_digest(self.team)
 
         assert first.digest == "Signup funnel investigation."
         assert first.intent_count == 2
+        assert first.themes[0].name == "Funnel checks"
+        assert first.themes[0].intent_count == 2
+        assert first.themes[0].tools == ["query_run"]
         assert again == first
         mock_summarize.assert_called_once()
+
+    def test_serves_recent_digest_when_the_corpus_churns(self) -> None:
+        cache.clear()
+        self._seed_intent_event("check the signups funnel")
+        parsed = intent_generation.IntentThemesSchema(
+            summary="Signup funnel investigation.",
+            themes=[intent_generation.IntentThemeSchema(name="Funnel checks", description="", intent_numbers=[1])],
+        )
+
+        with patch.object(intent_generation, "summarize_project_intents", return_value=parsed) as mock_summarize:
+            first = api.generate_intent_digest(self.team)
+            self._seed_intent_event("now something completely different")
+            after_churn = api.generate_intent_digest(self.team)
+
+        mock_summarize.assert_called_once()
+        # Reports the corpus it was derived from, so the theme shares still add up.
+        assert after_churn == first
+        assert after_churn.intent_count == 1
+
+    @parameterized.expand(
+        [
+            ("corpus_key", "mcp_intent_digest_v3/{corpus_hash}"),
+            ("recent_key", "mcp_intent_digest_v3/recent"),
+        ]
+    )
+    def test_regenerates_when_a_cached_payload_predates_the_current_shape(self, _name: str, key: str) -> None:
+        cache.clear()
+        self._seed_intent_event("check the signups funnel")
+        corpus_hash = hashlib.sha256(b"check the signups funnel").hexdigest()
+        cache.set(
+            generate_cache_key(self.team.pk, key.format(corpus_hash=corpus_hash)),
+            {"summary": "Stale.", "themes": [{"name": "Old shape", "share": 0.5}]},
+            60,
+        )
+        parsed = intent_generation.IntentThemesSchema(
+            summary="Fresh.",
+            themes=[
+                intent_generation.IntentThemeSchema(name="Funnel checks", description="", intent_numbers=[1]),
+            ],
+        )
+
+        with patch.object(intent_generation, "summarize_project_intents", return_value=parsed):
+            result = api.generate_intent_digest(self.team)
+
+        assert result.digest == "Fresh."
+
+
+class TestResolveIntentThemes(SimpleTestCase):
+    CORPUS = [
+        ("check the signups funnel", "query_run"),
+        ("compare to last week", "query_run"),
+        ("list the feature flags", "flag_list"),
+    ]
+
+    def _resolve(self, *themes: intent_generation.IntentThemeSchema) -> list[contracts.IntentTheme]:
+        parsed = intent_generation.IntentThemesSchema(summary="Summary.", themes=list(themes))
+        return intent_generation.resolve_themes(parsed, self.CORPUS)
+
+    @staticmethod
+    def _theme(name: str, numbers: list[int]) -> intent_generation.IntentThemeSchema:
+        return intent_generation.IntentThemeSchema(name=name, description="Doing things.", intent_numbers=numbers)
+
+    def test_derives_count_tools_and_example_from_the_corpus(self) -> None:
+        themes = self._resolve(self._theme("Funnel checks", [1, 3]))
+
+        assert themes[0].intent_count == 2
+        assert themes[0].example_intent == "check the signups funnel"
+        assert themes[0].tools == ["flag_list", "query_run"]
+
+    @parameterized.expand(
+        [
+            ("out_of_range_numbers_dropped", [1, 9, 0, -2], 1),
+            ("repeated_numbers_counted_once", [2, 2, 2], 1),
+            ("every_number_counted", [1, 2, 3], 3),
+        ]
+    )
+    def test_intent_numbers_resolve_to_real_intents(self, _name: str, numbers: list[int], expected: int) -> None:
+        assert self._resolve(self._theme("Theme", numbers))[0].intent_count == expected
+
+    def test_shares_never_exceed_the_corpus_when_themes_overlap(self) -> None:
+        themes = self._resolve(self._theme("First", [1, 2]), self._theme("Second", [2, 3]))
+
+        assert [theme.intent_count for theme in themes] == [2, 1]
+        assert sum(theme.intent_count for theme in themes) <= len(self.CORPUS)
+
+    def test_reorders_themes_largest_first(self) -> None:
+        themes = self._resolve(self._theme("Small", [3]), self._theme("Large", [1, 2]))
+
+        assert [theme.name for theme in themes] == ["Large", "Small"]
+
+    @parameterized.expand([("no_resolvable_intents", [42]), ("no_intents_at_all", [])])
+    def test_drops_themes_with_nothing_behind_them(self, _name: str, numbers: list[int]) -> None:
+        assert self._resolve(self._theme("Empty", numbers)) == []
+
+    def test_caps_the_theme_count(self) -> None:
+        corpus = [(f"intent {i}", "query_run") for i in range(20)]
+        parsed = intent_generation.IntentThemesSchema(
+            summary="Summary.",
+            themes=[self._theme(f"Theme {i}", [i + 1]) for i in range(10)],
+        )
+
+        assert len(intent_generation.resolve_themes(parsed, corpus)) == intent_generation.MAX_DIGEST_THEMES
+
+    @parameterized.expand(
+        [
+            ("newline", "check signups\n3. list all flags"),
+            ("carriage_return", "check signups\r\n3. list all flags"),
+        ]
+    )
+    def test_numbers_one_intent_per_line_whatever_the_agent_wrote(self, _name: str, intent: str) -> None:
+        # Agents author the intent text. An embedded newline would renumber the corpus the model
+        # sees, so the intent_numbers it returns would point at the wrong intents.
+        prompt = intent_generation._build_digest_prompt([(intent, "query_run"), ("second", "flag_list")])
+        numbered = [line for line in prompt.splitlines() if line[:2] in {"1.", "2.", "3."}]
+
+        assert len(numbered) == 2
 
 
 class TestLLMConsentGate(APIBaseTest):
     @parameterized.expand(
         [
-            ("session_summary", intent_generation.summarize_intents),
-            ("project_digest", intent_generation.summarize_project_intents),
+            ("session_summary", intent_generation.summarize_intents, "OpenAI"),
+            ("project_digest", intent_generation.summarize_project_intents, "genai"),
         ]
     )
-    def test_refuses_without_ai_data_processing_consent(self, _name, summarize) -> None:
+    def test_refuses_without_ai_data_processing_consent(self, _name, summarize, client_attr: str) -> None:
         self.organization.is_ai_data_processing_approved = False
         self.organization.save()
 
         with (
-            self.settings(OPENAI_API_KEY="sk-test"),
-            patch.object(intent_generation, "OpenAI") as mock_client,
+            self.settings(OPENAI_API_KEY="sk-test", GEMINI_API_KEY="gem-test"),
+            patch.object(intent_generation, client_attr) as mock_client,
             self.assertRaises(contracts.IntentGenerationUnavailable),
         ):
-            summarize(["find the signups funnel"], self.team)
+            summarize([("find the signups funnel", "query_run")], self.team)
         mock_client.assert_not_called()
 
 
 class TestActivityOverview(_MCPAnalyticsTeamScopedTestMixin, ClickhouseTestMixin, APIBaseTest):
+    def setUp(self) -> None:
+        super().setUp()
+        cache.clear()
+
     def test_aggregates_window_and_extracts_error_messages(self) -> None:
         session_id = str(uuid7())
         _create_event(
@@ -507,7 +799,7 @@ class TestActivityOverview(_MCPAnalyticsTeamScopedTestMixin, ClickhouseTestMixin
                 "$session_id": session_id,
                 "$mcp_tool_name": "query_run",
                 "$mcp_intent": "check signups",
-                "$mcp_client_name": "Claude Code",
+                "$mcp_client_name": "claude-code",
                 "$mcp_duration_ms": 120,
             },
         )
@@ -521,7 +813,7 @@ class TestActivityOverview(_MCPAnalyticsTeamScopedTestMixin, ClickhouseTestMixin
                 "$mcp_tool_name": "docs_search",
                 "$mcp_is_error": "true",
                 "$mcp_response": '{"content": [{"type": "text", "text": "index unavailable"}]}',
-                "$mcp_client_name": "Claude Code",
+                "$mcp_client_name": "claude-code",
             },
         )
         _create_event(
@@ -540,8 +832,10 @@ class TestActivityOverview(_MCPAnalyticsTeamScopedTestMixin, ClickhouseTestMixin
             properties={"$session_id": str(uuid7()), "$mcp_tool_name": "query_run"},
         )
 
-        overview = api.get_activity_overview(self.team)
+        with patch.object(Database, "create_for", wraps=Database.create_for) as create_database:
+            overview = api.get_activity_overview(self.team)
 
+        assert create_database.call_count == 1
         assert overview.stats == contracts.ActivityStats(
             total_calls=2,
             distinct_tools=2,
@@ -562,6 +856,211 @@ class TestActivityOverview(_MCPAnalyticsTeamScopedTestMixin, ClickhouseTestMixin
         assert error_call.error_message == "index unavailable"
         assert overview.recent_calls[1].duration_ms == 120.0
         assert overview.recent_calls[1].intent == "check signups"
+
+    def _emit_call(self, properties: dict[str, Any], count: int = 1) -> None:
+        for _ in range(count):
+            _create_event(
+                team=self.team,
+                event="$mcp_tool_call",
+                distinct_id="agent-1",
+                timestamp=datetime.now(tz=UTC) - timedelta(minutes=5),
+                properties={"$session_id": str(uuid7()), "$mcp_tool_name": "query_run", **properties},
+            )
+        flush_persons_and_events()
+
+    @parameterized.expand(
+        [
+            ("property_filter", _tool_name_filter("query_run"), False, 2),
+            ("test_accounts", None, True, 2),
+            ("neither", None, False, 3),
+        ]
+    )
+    def test_shared_filters_narrow_every_section(
+        self,
+        _name: str,
+        properties: list[AnyPropertyFilterDiscriminated] | None,
+        filter_test_accounts: bool,
+        expected_calls: int,
+    ) -> None:
+        self.team.test_account_filters = TEST_ACCOUNT_FILTERS
+        self.team.save()
+        self._emit_call({"$mcp_client_name": "claude-code"}, count=2)
+        self._emit_call({"$mcp_client_name": INTERNAL_CLIENT, "$mcp_tool_name": "docs_search"})
+
+        overview = api.get_activity_overview(
+            self.team, properties=properties, filter_test_accounts=filter_test_accounts
+        )
+
+        assert overview.stats.total_calls == expected_calls
+        assert sum(row.calls for row in overview.top_tools) == expected_calls
+        assert sum(row.calls for row in overview.clients) == expected_calls
+        assert len(overview.recent_calls) == expected_calls
+
+    def _restrict_a_property(self) -> None:
+        self.organization.available_product_features = [
+            {"name": AvailableFeature.PROPERTY_ACCESS_CONTROL, "key": AvailableFeature.PROPERTY_ACCESS_CONTROL}
+        ]
+        self.organization.save()
+        email = PropertyDefinition.objects.create(
+            team=self.team, name="email", property_type="String", type=PropertyDefinition.Type.PERSON
+        )
+        PropertyAccessControl.objects.create(
+            team=self.team, property_definition=email, access_level=PropertyAccessLevel.NONE.value
+        )
+
+    @parameterized.expand(
+        [
+            ("same_request_is_served_from_cache", 1, False, "never", 0, 1),
+            ("empty_result_is_not_cached", 0, False, "never", 0, 2),
+            ("other_filters_query_again", 1, True, "never", 0, 2),
+            ("other_property_restrictions_query_again", 1, False, "between_requests", 0, 2),
+            ("unrestricted_entry_outlives_a_poll_interval", 1, False, "never", 61, 1),
+            ("restricted_entry_expires_before_the_next_poll", 1, False, "before_requests", 21, 2),
+        ]
+    )
+    def test_caches_overview_per_filters_and_property_restrictions(
+        self,
+        _name: str,
+        calls_before: int,
+        change_filters: bool,
+        restrict_a_property: Literal["never", "before_requests", "between_requests"],
+        seconds_later: int,
+        expected_calls: int,
+    ) -> None:
+        self.team.test_account_filters = TEST_ACCOUNT_FILTERS
+        self.team.save()
+        if restrict_a_property == "before_requests":
+            self._restrict_a_property()
+        self._emit_call({"$mcp_client_name": "claude-code"}, count=calls_before)
+        api.get_activity_overview(self.team, user=self.user)
+
+        self._emit_call({"$mcp_client_name": "claude-code"}, count=2 - calls_before)
+        if restrict_a_property == "between_requests":
+            self._restrict_a_property()
+        with time_machine.travel(datetime.now(tz=UTC) + timedelta(seconds=seconds_later), tick=False):
+            overview = api.get_activity_overview(self.team, filter_test_accounts=change_filters, user=self.user)
+
+        assert overview.stats.total_calls == expected_calls
+
+    @parameterized.expand(
+        [
+            ("plain_property_is_shared", "$mcp_tool_name", TEST_ACCOUNT_FILTERS, True),
+            ("virtual_property_is_per_member", "$virt_tier", TEST_ACCOUNT_FILTERS, False),
+            (
+                "hogql_test_account_filter_is_per_member",
+                "$mcp_tool_name",
+                [{"key": "1 = 1", "type": "hogql"}],
+                False,
+            ),
+        ]
+    )
+    def test_overview_cache_key_is_per_member_unless_filters_read_the_same_for_everyone(
+        self, _name: str, key: str, test_account_filters: list[dict[str, Any]], shared: bool
+    ) -> None:
+        self.team.test_account_filters = test_account_filters
+        self.team.save()
+        other_user = self._create_user("other@example.com")
+        properties: list[AnyPropertyFilterDiscriminated] = [
+            EventPropertyFilter(key=key, value="x", operator=PropertyOperator.EXACT)
+        ]
+
+        keys = {
+            logic._activity_overview_cache_key(self.team, properties, True, set(), user)
+            for user in (self.user, other_user)
+        }
+
+        assert (len(keys) == 1) == shared
+
+    def test_tool_filter_does_not_hide_missing_capability_reports(self) -> None:
+        self._emit_call({"$mcp_tool_name": "query_run"})
+        _create_event(
+            team=self.team,
+            event="$mcp_missing_capability",
+            distinct_id="agent-1",
+            timestamp=datetime.now(tz=UTC) - timedelta(minutes=5),
+            properties={},
+        )
+
+        overview = api.get_activity_overview(self.team, properties=_tool_name_filter("query_run"))
+
+        assert overview.stats.total_calls == 1
+        assert overview.stats.missing_capability_reports == 1
+
+    def test_merges_client_spellings_into_one_canonical_row(self) -> None:
+        # One client reaches us under several spellings — different casing, and a proxied
+        # name carrying mcp-remote's signature. Grouping on the raw property listed each as
+        # its own row, so one client competed with itself for the top-N slots.
+        # Separator variants ("Claude Code", "CLAUDE_CODE") are deliberately not merged:
+        # no client emits them, and collapsing `[ ._-]` would destroy the surface tokens
+        # the classifier matches on ("claude-code cli", "visual studio code").
+        for client, count in [
+            ("claude-code", 3),
+            ("Claude-Code", 2),
+            ("claude-code (via mcp-remote 0.1.37)", 1),
+        ]:
+            self._emit_call({"$mcp_client_name": client}, count)
+
+        overview = api.get_activity_overview(self.team)
+
+        assert overview.clients == [contracts.ActivityClientRow(client="Claude Code", calls=6)]
+
+    def test_counts_one_client_reached_by_two_identity_signals_once(self) -> None:
+        # Codex arrives both as a clientInfo name and as a user-agent surface.
+        # Those are two different tokens but one client, so counting tokens
+        # would report "2 clients" next to a Clients card showing a single row.
+        self._emit_call({"$mcp_client_name": "codex-mcp-client"}, count=3)
+        self._emit_call({"$mcp_client_user_agent": "openai-mcp/1.0.0 (Codex)"}, count=2)
+
+        overview = api.get_activity_overview(self.team)
+
+        assert overview.clients == [contracts.ActivityClientRow(client="OpenAI Codex", calls=5)]
+        assert overview.stats.distinct_clients == 1
+
+    @parameterized.expand(
+        [
+            ("client_name", {"$mcp_client_name": "codex-mcp-client"}, "OpenAI Codex"),
+            # Codex's other spelling: the User-Agent surface. The generic `openai-mcp`
+            # prefix used to swallow this and report it as plain "OpenAI".
+            ("codex_user_agent_surface", {"$mcp_client_user_agent": "openai-mcp/1.0 (Codex)"}, "OpenAI Codex"),
+            # The vendor header resolves from both wire keys it is captured under:
+            # $mcp_vendor_client (SDKs) and the unprefixed mcp_vendor_client
+            # (PostHog's own server).
+            ("sdk_vendor_header", {"$mcp_vendor_client": "ClaudeCode"}, "Claude Code"),
+            ("legacy_vendor_header", {"mcp_vendor_client": "ClaudeCode"}, "Claude Code"),
+            # An unrecognized client is still named — its own self-report beats "Other".
+            ("unrecognized_named_verbatim", {"$mcp_client_name": "openclaw-bundle-mcp"}, "openclaw-bundle-mcp"),
+            # ...and keeps its own capitalization: matching lower-cases the token, but the
+            # name shown back is the one the client reported.
+            ("unrecognized_keeps_casing", {"$mcp_client_name": "NexusAgent"}, "NexusAgent"),
+            ("no_identity_at_all", {}, mcp_harness.UNIDENTIFIED_HARNESS_LABEL),
+            # Not resolution signals: the SDKs never emit these properties and the
+            # server folds the session-pinned name into per-event $mcp_client_name,
+            # so on their own they attribute nothing.
+            (
+                "session_name_no_longer_read",
+                {"mcp_session_client_name": "codex-mcp-client"},
+                mcp_harness.UNIDENTIFIED_HARNESS_LABEL,
+            ),
+            (
+                "oauth_name_no_longer_read",
+                {"$mcp_oauth_client_name": "cursor-vscode"},
+                mcp_harness.UNIDENTIFIED_HARNESS_LABEL,
+            ),
+        ]
+    )
+    def test_attributes_clients_from_every_identity_signal(
+        self, _name: str, properties: dict[str, Any], expected: str
+    ) -> None:
+        self._emit_call(properties, count=2)
+
+        overview = api.get_activity_overview(self.team)
+
+        assert overview.clients == [contracts.ActivityClientRow(client=expected, calls=2)]
+        # The stat tile and the live feed resolve the caller the same way the card does,
+        # so they can't disagree about who called: counting the raw property scored these
+        # as zero known clients and left the feed's caller column blank.
+        assert overview.stats.distinct_clients == (0 if expected == mcp_harness.UNIDENTIFIED_HARNESS_LABEL else 1)
+        assert [call.client_name for call in overview.recent_calls] == [expected, expected]
 
 
 class TestGenerateSessionIntent(_MCPAnalyticsTeamScopedTestMixin, ClickhouseTestMixin, APIBaseTest):
@@ -657,6 +1156,49 @@ class TestListMCPToolCalls(_MCPAnalyticsTeamScopedTestMixin, ClickhouseTestMixin
             timestamp=timestamp,
             properties={"$session_id": session_id, "$mcp_tool_name": tool},
         )
+
+    @parameterized.expand(
+        [
+            ("property_filter", _tool_name_filter("kept"), False, ["kept"]),
+            ("test_accounts", None, True, ["kept"]),
+            ("neither", None, False, ["dropped", "kept"]),
+        ]
+    )
+    def test_shared_filters_narrow_a_sessions_calls(
+        self,
+        _name: str,
+        properties: list[AnyPropertyFilterDiscriminated] | None,
+        filter_test_accounts: bool,
+        expected: list[str],
+    ) -> None:
+        self.team.test_account_filters = TEST_ACCOUNT_FILTERS
+        self.team.save()
+        session_id = str(uuid7())
+        start = datetime.now(tz=UTC) - timedelta(minutes=5)
+        _create_event(
+            team=self.team,
+            event="$mcp_tool_call",
+            distinct_id="seed",
+            timestamp=start,
+            properties={
+                "$session_id": session_id,
+                "$mcp_tool_name": "dropped",
+                "$mcp_client_name": INTERNAL_CLIENT,
+            },
+        )
+        self._seed_tool_call(session_id, timestamp=start + timedelta(seconds=1), tool="kept")
+
+        page = api.list_mcp_tool_calls(
+            self.team,
+            session_id=session_id,
+            limit=50,
+            offset=0,
+            date_from=start,
+            properties=properties,
+            filter_test_accounts=filter_test_accounts,
+        )
+
+        assert [c.tool_name for c in page.results] == expected
 
     def test_has_next_signals_more_pages(self) -> None:
         session_id = str(uuid7())

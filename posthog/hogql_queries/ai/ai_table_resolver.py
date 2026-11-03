@@ -6,6 +6,7 @@ from prometheus_client import Counter, Histogram
 
 from posthog.hogql import ast
 from posthog.hogql.context import HogQLContext
+from posthog.hogql.database.database import Database
 from posthog.hogql.query import execute_hogql_query
 
 from posthog.clickhouse.query_tagging import Product, tag_queries, tags_context
@@ -37,7 +38,7 @@ if TYPE_CHECKING:
     from posthog.hogql.timings import HogQLTimings
 
     from posthog.clickhouse.client.connection import Workload
-    from posthog.models import Team
+    from posthog.models import Team, User
 
 
 class AIEventsUnavailableError(Exception):
@@ -75,12 +76,16 @@ def query_ai_events(
     team: Team,
     query_type: str,
     *,
+    user: User | None = None,
     fall_back_to_events: bool = False,
+    fallback_placeholders: dict[str, ast.Expr] | None = None,
     timings: HogQLTimings | None = None,
     modifiers: HogQLQueryModifiers | None = None,
     limit_context: LimitContext | None = None,
     settings: HogQLGlobalSettings | None = None,
     workload: Workload | None = None,
+    posthog_tables_only: bool = False,
+    bypass_property_access_control: bool = False,
 ) -> Any:
     """Execute a query written against the dedicated ai_events table.
 
@@ -98,13 +103,26 @@ def query_ai_events(
       so events is probed only to classify the miss — raising :class:`AIEventsExpiredError`
       (the data aged past the TTL) or :class:`AIEventsNotFoundError` (it never existed).
 
+    ``fallback_placeholders`` lets callers keep predicates required by shared events out of
+    the dedicated table query. They use the ai_events schema and are rewritten before execution.
+
+    Pass the requesting ``user`` for interactive reads so member and role property rules
+    apply on every read path. Userless background reads apply the project's default rules.
+    Online evaluations opt into ``bypass_property_access_control`` to grade complete events
+    as a project workflow, independently of user permissions.
+
     `workload` should be specified explicitly for batch / scheduled callers (e.g. usage
     reports). Inside a Celery task the `task_prerun` signal sets `Workload.OFFLINE` on
     the thread default, but outside Celery (Django shell, pytest, management commands)
     that signal does not fire — so callers that must run on a specific pool should not
     rely on it implicitly.
+
+    ``posthog_tables_only=True`` compiles against PostHog's built-in tables only. Pass it when the
+    query and its placeholders reference no warehouse table, view or group type. Without it, every
+    call builds the team's full HogQL catalog, and on a team with thousands of warehouse tables
+    that build holds the GIL for longer than the query itself takes.
     """
-    kwargs: dict[str, Any] = {"query_type": query_type, "team": team}
+    kwargs: dict[str, Any] = {"query_type": query_type, "team": team, "user": user}
     if timings is not None:
         kwargs["timings"] = timings
     if modifiers is not None:
@@ -115,6 +133,14 @@ def query_ai_events(
         kwargs["settings"] = settings
     if workload is not None:
         kwargs["workload"] = workload
+    if posthog_tables_only or bypass_property_access_control:
+        kwargs["context"] = HogQLContext(
+            team_id=team.pk,
+            team=team,
+            user=user,
+            database=Database.create_for_posthog_tables(team, modifiers=modifiers) if posthog_tables_only else None,
+            restricted_properties=set() if bypass_property_access_control else None,
+        )
 
     with tags_context(product=Product.LLM_ANALYTICS):
         tag_queries(ai_query_source="dedicated_table")
@@ -125,15 +151,21 @@ def query_ai_events(
             AI_EVENTS_QUERY_TOTAL.labels(source="dedicated_table").inc()
             return result
 
-        events_schema = use_new_events_schema(team.pk)
+        events_schema = use_new_events_schema(team.pk, modifiers)
         events_query = rewrite_query_for_events_table(query)
-        events_placeholders = {k: rewrite_expr_for_events_table(v) for k, v in placeholders.items()}
+        fallback_source_placeholders = fallback_placeholders if fallback_placeholders is not None else placeholders
+        events_placeholders = {
+            key: rewrite_expr_for_events_table(value) for key, value in fallback_source_placeholders.items()
+        }
         events_kwargs = {
             **kwargs,
             "context": HogQLContext(
                 team_id=team.pk,
+                user=user,
                 use_new_events_schema=events_schema,
                 property_type_overrides=EVENTS_FALLBACK_PROPERTY_TYPE_OVERRIDES,
+                restricted_properties=set() if bypass_property_access_control else None,
+                database=Database.create_for_posthog_tables(team, modifiers=modifiers) if posthog_tables_only else None,
             ),
         }
 
@@ -156,7 +188,11 @@ def query_ai_events(
         raise AIEventsNotFoundError(f"AI events for {query_type} were not found")
 
 
-# Canonical Python list. Node.js mirror: nodejs/src/ingestion/ai/process-ai-event.ts
+# Query-routing list: event types whose full history lives in the dedicated ai_events table.
+# The ingestion list (nodejs/src/ingestion/common/ai-event-types.ts) additionally
+# contains the AI meta-events ($ai_tag, summaries, eval reports); they are excluded here
+# because ai_events lacks their full history, so their queries must stay on the shared
+# events table to avoid misreading the missing rows as expired data.
 AI_EVENT_NAMES = frozenset(
     {
         "$ai_generation",

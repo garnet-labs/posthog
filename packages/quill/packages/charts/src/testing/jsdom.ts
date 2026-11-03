@@ -1,26 +1,23 @@
+import { cleanup } from '@testing-library/react'
+
+import { buildDimensions } from '../core/canvas-size'
 import { DEFAULT_MARGINS } from '../core/hooks/useChartMargins'
 import type { ChartDimensions, ResolvedSeries, Series } from '../core/types'
-
-export const dimensions: ChartDimensions = {
-    width: 800,
-    height: 400,
-    plotLeft: DEFAULT_MARGINS.left,
-    plotTop: DEFAULT_MARGINS.top,
-    plotWidth: 800 - DEFAULT_MARGINS.left - DEFAULT_MARGINS.right,
-    plotHeight: 400 - DEFAULT_MARGINS.top - DEFAULT_MARGINS.bottom,
-}
+import { TOOLTIP_SELECTOR } from './tooltip'
 
 export const mockRect: DOMRect = {
     x: 0,
     y: 0,
-    width: dimensions.width,
-    height: dimensions.height,
+    width: 800,
+    height: 400,
     top: 0,
     left: 0,
-    bottom: dimensions.height,
-    right: dimensions.width,
+    bottom: 400,
+    right: 800,
     toJSON: () => ({}),
 }
+
+export const dimensions: ChartDimensions = buildDimensions(mockRect, DEFAULT_MARGINS)
 
 export function makeSeries(overrides: Partial<Series> & { key: string; data: number[] }): ResolvedSeries {
     return { label: overrides.key, color: '#000', ...overrides }
@@ -35,7 +32,7 @@ export function clientForIndex(index: number, totalLabels: number): { clientX: n
     }
 }
 
-/** Mock ResizeObserver and getBoundingClientRect so hog-charts components
+/** Mock ResizeObserver and getBoundingClientRect so quill-charts components
  *  render with real dimensions in jsdom. Call in beforeEach, and call the
  *  returned cleanup function in afterEach. */
 export function setupJsdom(): () => void {
@@ -46,8 +43,12 @@ export function setupJsdom(): () => void {
             disconnect(): void {}
         } as unknown as typeof ResizeObserver
     }
-    const spy = jest.spyOn(Element.prototype, 'getBoundingClientRect').mockReturnValue(mockRect)
-    return () => spy.mockRestore()
+    // Not `jest.spyOn`, so the helpers also run under other test runners.
+    const original = Element.prototype.getBoundingClientRect
+    Element.prototype.getBoundingClientRect = () => mockRect
+    return () => {
+        Element.prototype.getBoundingClientRect = original
+    }
 }
 
 /** Run requestAnimationFrame callbacks synchronously for the duration of a
@@ -56,8 +57,22 @@ export function setupJsdom(): () => void {
  *  returned cleanup function in afterEach. */
 export function setupSyncRaf(): () => void {
     const original = global.requestAnimationFrame
+    // A callback that requests its next frame (the hover fade) is queued and run after it returns.
+    // A direct call would add one stack level per frame and overflow before the fade ends.
+    let queue: FrameRequestCallback[] | null = null
     global.requestAnimationFrame = ((cb: FrameRequestCallback) => {
-        cb(0)
+        if (queue) {
+            queue.push(cb)
+            return 0
+        }
+        queue = [cb]
+        try {
+            for (let next = queue.shift(); next; next = queue.shift()) {
+                next(0)
+            }
+        } finally {
+            queue = null
+        }
         return 0
     }) as typeof global.requestAnimationFrame
 
@@ -75,7 +90,7 @@ export function setupSyncRaf(): () => void {
 let jsdomReady = false
 
 /** Idempotent sibling of {@link setupJsdom} + {@link setupSyncRaf}. Called automatically by
- *  `renderHogChart` so simple tests don't need a beforeEach for the mocks; they're installed
+ *  `renderChart` so simple tests don't need a beforeEach for the mocks; they're installed
  *  once for the test run and never torn down (cheap, and `getBoundingClientRect` stubbing is
  *  harmless to leave on for non-chart code in the same file). Tests that want fine-grained
  *  teardown can use the explicit `setupJsdom()` / `setupSyncRaf()` pair instead. */
@@ -86,4 +101,18 @@ export function ensureJsdom(): void {
     jsdomReady = true
     setupJsdom()
     setupSyncRaf()
+}
+
+/** Registers hooks for the jsdom mocks, synchronous animation frames and cleanup. Call once per file or `describe`. */
+export function setupChartTests(): void {
+    let restore: (() => void)[] = []
+    beforeEach(() => {
+        restore = [setupJsdom(), setupSyncRaf()]
+    })
+    afterEach(() => {
+        cleanup()
+        // `cleanup` doesn't always reach the tooltip's FloatingPortal.
+        document.querySelectorAll(TOOLTIP_SELECTOR).forEach((el) => el.remove())
+        restore.forEach((fn) => fn())
+    })
 }

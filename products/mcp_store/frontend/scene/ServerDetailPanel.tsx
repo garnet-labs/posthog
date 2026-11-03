@@ -19,7 +19,7 @@ import { ServerIcon } from './icons'
 import { ToolRow } from './ToolRow'
 
 function authorizeUrl(teamId: number | null, installationId: string): string {
-    return `/api/environments/${teamId}/mcp_server_installations/authorize/?installation_id=${installationId}`
+    return `/api/projects/${teamId}/mcp_server_installations/authorize/?installation_id=${installationId}`
 }
 
 function countBy<T>(items: T[], predicate: (item: T) => boolean): number {
@@ -110,9 +110,9 @@ function ToolsSection({ installation, disabledReason }: ToolsSectionProps): JSX.
             {tools.length > 0 && (
                 <div className="flex items-center justify-between gap-2 flex-wrap bg-surface-secondary rounded p-2">
                     <div className="text-xs text-secondary">
-                        <span className="font-semibold">{approvedCount}</span> approved ·{' '}
-                        <span className="font-semibold">{pendingCount}</span> require approval ·{' '}
-                        <span className="font-semibold">{blockedCount}</span> blocked
+                        <span className="font-semibold">{approvedCount}</span> Always Allow ·{' '}
+                        <span className="font-semibold">{pendingCount}</span> Needs Approval ·{' '}
+                        <span className="font-semibold">{blockedCount}</span> Blocked
                     </div>
                     <div className="flex items-center gap-1">
                         <span className="text-xs text-secondary mr-1">Set all:</span>
@@ -128,7 +128,7 @@ function ToolsSection({ installation, disabledReason }: ToolsSectionProps): JSX.
                             }
                             disabledReason={disabledReason}
                         >
-                            Approve
+                            Always Allow
                         </LemonButton>
                         <LemonButton
                             size="xsmall"
@@ -142,7 +142,7 @@ function ToolsSection({ installation, disabledReason }: ToolsSectionProps): JSX.
                             }
                             disabledReason={disabledReason}
                         >
-                            Require approval
+                            Needs Approval
                         </LemonButton>
                         <LemonButton
                             size="xsmall"
@@ -183,6 +183,7 @@ function ToolsSection({ installation, disabledReason }: ToolsSectionProps): JSX.
                         <ToolRow
                             key={tool.id}
                             tool={tool}
+                            teamScope={installation.scope === 'shared'}
                             disabledReason={disabledReason}
                             onPolicyChange={(state: ToolApprovalState) =>
                                 setToolApprovalState({

@@ -2,10 +2,13 @@ use std::collections::HashMap;
 
 use common_types::ClickHouseEvent;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use uuid::Uuid;
 
-use crate::error::{EventError, UnhandledError};
+use crate::{
+    core::code_variables::mask_code_variables,
+    error::{EventError, UnhandledError},
+};
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct AnyEvent {
@@ -18,6 +21,43 @@ pub struct AnyEvent {
 
     #[serde(flatten)]
     pub others: HashMap<String, Value>,
+}
+
+impl AnyEvent {
+    pub fn drop_code_variables(&mut self) {
+        self.for_each_frame(|frame| {
+            frame.remove("code_variables");
+        });
+    }
+
+    pub fn mask_code_variables(&mut self) {
+        self.for_each_frame(|frame| {
+            if let Some(code_variables) = frame.get_mut("code_variables") {
+                mask_code_variables(code_variables);
+            }
+        });
+    }
+
+    fn for_each_frame(&mut self, mut apply: impl FnMut(&mut Map<String, Value>)) {
+        let Some(exceptions) = self
+            .properties
+            .get_mut("$exception_list")
+            .and_then(Value::as_array_mut)
+        else {
+            return;
+        };
+        for exception in exceptions {
+            let Some(frames) = exception
+                .pointer_mut("/stacktrace/frames")
+                .and_then(Value::as_array_mut)
+            else {
+                continue;
+            };
+            for frame in frames.iter_mut().filter_map(Value::as_object_mut) {
+                apply(frame);
+            }
+        }
+    }
 }
 
 pub trait PropertiesContainer: Send + Clone + 'static {
@@ -70,15 +110,25 @@ impl TryFrom<ClickHouseEvent> for AnyEvent {
 
 #[cfg(test)]
 mod test {
-    use crate::types::exception_event::{ExceptionEvent, Parsed, MAX_EXCEPTION_VALUE_LENGTH};
+    use crate::types::exception_event::{
+        ExceptionEvent, Parsed, MAX_EXCEPTION_TYPE_LENGTH, MAX_EXCEPTION_VALUE_LENGTH,
+        MAX_ISSUE_NAME_LENGTH,
+    };
 
     use super::*;
     use uuid::Uuid;
 
     fn make_exception_event(exception_value: &str) -> ClickHouseEvent {
+        make_exception_event_with_type("Error", exception_value)
+    }
+
+    fn make_exception_event_with_type(
+        exception_type: &str,
+        exception_value: &str,
+    ) -> ClickHouseEvent {
         let props = serde_json::json!({
             "$exception_list": [{
-                "type": "Error",
+                "type": exception_type,
                 "value": exception_value
             }]
         });
@@ -118,7 +168,60 @@ mod test {
         let any_event = AnyEvent::try_from(event).unwrap();
         let exc_props = ExceptionEvent::<Parsed>::try_from(any_event).unwrap();
 
-        let expected = format!("{}...", "x".repeat(MAX_EXCEPTION_VALUE_LENGTH));
-        assert_eq!(exc_props.exception_list()[0].exception_message, expected);
+        let value = &exc_props.exception_list()[0].exception_message;
+        let expected = format!("{}...", "x".repeat(MAX_EXCEPTION_VALUE_LENGTH - 3));
+        assert_eq!(*value, expected);
+        // The ellipsis must not push the result past the cap.
+        assert!(value.len() <= MAX_EXCEPTION_VALUE_LENGTH);
+    }
+
+    #[test]
+    fn test_exception_type_truncation() {
+        // Crash reporters that stuff a base64 minidump into the type field would otherwise
+        // produce a multi-hundred-KB type, bloating downstream Kafka payloads.
+        let long_type = "T".repeat(MAX_EXCEPTION_TYPE_LENGTH + 100);
+        let event = make_exception_event_with_type(&long_type, "boom");
+        let any_event = AnyEvent::try_from(event).unwrap();
+        let exc_props = ExceptionEvent::<Parsed>::try_from(any_event).unwrap();
+
+        let ty = &exc_props.exception_list()[0].exception_type;
+        let expected = format!("{}...", "T".repeat(MAX_EXCEPTION_TYPE_LENGTH - 3));
+        assert_eq!(*ty, expected);
+        assert!(ty.len() <= MAX_EXCEPTION_TYPE_LENGTH);
+    }
+
+    #[test]
+    fn test_exception_type_truncation_respects_utf8_byte_limit() {
+        let long_type = "🦔".repeat(MAX_EXCEPTION_TYPE_LENGTH);
+        let event = make_exception_event_with_type(&long_type, "boom");
+        let any_event = AnyEvent::try_from(event).unwrap();
+        let exc_props = ExceptionEvent::<Parsed>::try_from(any_event).unwrap();
+
+        let ty = &exc_props.exception_list()[0].exception_type;
+        assert!(ty.ends_with("..."));
+        assert!(ty.len() <= MAX_EXCEPTION_TYPE_LENGTH);
+        assert!(ty.is_char_boundary(ty.len()));
+    }
+
+    #[test]
+    fn test_proposed_issue_name_truncation() {
+        // $issue_name is sender-controlled and reaches the notification Kafka payload untruncated,
+        // so an oversized name must be bounded at parse time.
+        let long_name = "N".repeat(MAX_ISSUE_NAME_LENGTH + 100);
+        let props = serde_json::json!({
+            "$issue_name": long_name,
+            "$exception_list": [{ "type": "Error", "value": "boom" }],
+        });
+        let mut event = make_exception_event("boom");
+        event.properties = Some(props.to_string());
+        let any_event = AnyEvent::try_from(event).unwrap();
+        let exc_props = ExceptionEvent::<Parsed>::try_from(any_event).unwrap();
+
+        let name = exc_props.proposed_issue_name().unwrap();
+        assert_eq!(
+            name,
+            format!("{}...", "N".repeat(MAX_ISSUE_NAME_LENGTH - 3))
+        );
+        assert!(name.len() <= MAX_ISSUE_NAME_LENGTH);
     }
 }

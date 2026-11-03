@@ -17,7 +17,9 @@ import type {
     MCPMissingCapabilityCreateApi,
     MCPSessionIntentApi,
     McpAnalyticsFeedbackListParams,
+    McpAnalyticsIntentClustersRetrieveParams,
     McpAnalyticsMissingCapabilitiesListParams,
+    McpAnalyticsSessionsActivityOverviewParams,
     McpAnalyticsSessionsGenerateIntentParams,
     McpAnalyticsSessionsListParams,
     McpAnalyticsSessionsToolCallsParams,
@@ -76,8 +78,23 @@ export const mcpAnalyticsFeedbackCreate = async (
     })
 }
 
-export const getMcpAnalyticsIntentClustersRetrieveUrl = (projectId: string) => {
-    return `/api/projects/${projectId}/mcp_analytics/intent_clusters/`
+export const getMcpAnalyticsIntentClustersRetrieveUrl = (
+    projectId: string,
+    params?: McpAnalyticsIntentClustersRetrieveParams
+) => {
+    const normalizedParams = new URLSearchParams()
+
+    Object.entries(params || {}).forEach(([key, value]) => {
+        if (value !== undefined) {
+            normalizedParams.append(key, value === null ? 'null' : String(value))
+        }
+    })
+
+    const stringifiedParams = normalizedParams.toString()
+
+    return stringifiedParams.length > 0
+        ? `/api/projects/${projectId}/mcp_analytics/intent_clusters/?${stringifiedParams}`
+        : `/api/projects/${projectId}/mcp_analytics/intent_clusters/`
 }
 
 /**
@@ -85,9 +102,10 @@ export const getMcpAnalyticsIntentClustersRetrieveUrl = (projectId: string) => {
  */
 export const mcpAnalyticsIntentClustersRetrieve = async (
     projectId: string,
+    params?: McpAnalyticsIntentClustersRetrieveParams,
     options?: RequestInit
 ): Promise<MCPIntentClusterSnapshotApi[]> => {
-    return apiMutator<MCPIntentClusterSnapshotApi[]>(getMcpAnalyticsIntentClustersRetrieveUrl(projectId), {
+    return apiMutator<MCPIntentClusterSnapshotApi[]>(getMcpAnalyticsIntentClustersRetrieveUrl(projectId, params), {
         ...options,
         method: 'GET',
     })
@@ -266,18 +284,34 @@ export const mcpAnalyticsSessionsToolCalls = async (
     })
 }
 
-export const getMcpAnalyticsSessionsActivityOverviewUrl = (projectId: string) => {
-    return `/api/projects/${projectId}/mcp_analytics/sessions/activity_overview/`
+export const getMcpAnalyticsSessionsActivityOverviewUrl = (
+    projectId: string,
+    params?: McpAnalyticsSessionsActivityOverviewParams
+) => {
+    const normalizedParams = new URLSearchParams()
+
+    Object.entries(params || {}).forEach(([key, value]) => {
+        if (value !== undefined) {
+            normalizedParams.append(key, value === null ? 'null' : String(value))
+        }
+    })
+
+    const stringifiedParams = normalizedParams.toString()
+
+    return stringifiedParams.length > 0
+        ? `/api/projects/${projectId}/mcp_analytics/sessions/activity_overview/?${stringifiedParams}`
+        : `/api/projects/${projectId}/mcp_analytics/sessions/activity_overview/`
 }
 
 /**
- * Aggregate counters, top tools, agent clients, and the most recent tool calls for the last 30 days, computed in one request. Powers the dashboard's activity view; always computed fresh so polling callers watch data arrive.
+ * Aggregate counters, top tools, agent clients, and the most recent tool calls for the last 30 days, computed in one request. Powers the dashboard's activity view. Results are cached for up to 5 minutes, or 20 seconds when the caller has property restrictions. An empty result is never cached.
  */
 export const mcpAnalyticsSessionsActivityOverview = async (
     projectId: string,
+    params?: McpAnalyticsSessionsActivityOverviewParams,
     options?: RequestInit
 ): Promise<MCPActivityOverviewApi> => {
-    return apiMutator<MCPActivityOverviewApi>(getMcpAnalyticsSessionsActivityOverviewUrl(projectId), {
+    return apiMutator<MCPActivityOverviewApi>(getMcpAnalyticsSessionsActivityOverviewUrl(projectId, params), {
         ...options,
         method: 'GET',
     })
@@ -288,7 +322,7 @@ export const getMcpAnalyticsSessionsIntentDigestUrl = (projectId: string) => {
 }
 
 /**
- * Generate (or return the cached) LLM digest of what agents are trying to do with this MCP server, derived from the most recent recorded $mcp_intents across all sessions. Content-addressed cache: only regenerates when new intents arrive. Powers the dashboard's low-volume activity stage.
+ * Generate (or return the cached) LLM digest of what agents are trying to do with this MCP server, derived from the most recent recorded $mcp_intents across all sessions: a one-sentence summary plus semantic themes, each sized and attributed to tools from the intents themselves. Cached by intent corpus and by recency, so repeated calls are cheap and a busy server regenerates at a bounded rate. Powers the dashboard's activity tab.
  */
 export const mcpAnalyticsSessionsIntentDigest = async (
     projectId: string,

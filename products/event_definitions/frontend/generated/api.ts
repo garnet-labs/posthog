@@ -12,6 +12,9 @@ import type {
     BulkUpdateTagsUUIDRequestApi,
     BulkUpdateTagsUUIDResponseApi,
     EnterpriseEventDefinitionApi,
+    EnterpriseEventDefinitionRequestApi,
+    EventDefinitionBulkUpdateVerifiedRequestApi,
+    EventDefinitionBulkUpdateVerifiedResponseApi,
     EventDefinitionRecordApi,
     EventDefinitionsByNameRetrieveParams,
     EventDefinitionsListParams,
@@ -54,6 +57,9 @@ export const getEventDefinitionsListUrl = (projectId: string, params?: EventDefi
         : `/api/projects/${projectId}/event_definitions/`
 }
 
+/**
+ * List the event definitions of a project. On projects with more than 50000 event definitions, `count` stops at 10000 and `count_is_capped` is true, unless the request sets `search`, `exclude_stale`, `verified`, `names`, `tags` or `event_type=event_posthog`. Projects with more than 100000 event definitions also default to ordering by name under the same condition.
+ */
 export const eventDefinitionsList = async (
     projectId: string,
     params?: EventDefinitionsListParams,
@@ -71,14 +77,14 @@ export const getEventDefinitionsCreateUrl = (projectId: string) => {
 
 export const eventDefinitionsCreate = async (
     projectId: string,
-    enterpriseEventDefinitionApi: NonReadonly<EnterpriseEventDefinitionApi>,
+    enterpriseEventDefinitionRequestApi: NonReadonly<EnterpriseEventDefinitionRequestApi>,
     options?: RequestInit
 ): Promise<EnterpriseEventDefinitionApi> => {
     return apiMutator<EnterpriseEventDefinitionApi>(getEventDefinitionsCreateUrl(projectId), {
         ...options,
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...options?.headers },
-        body: JSON.stringify(enterpriseEventDefinitionApi),
+        body: JSON.stringify(enterpriseEventDefinitionRequestApi),
     })
 }
 
@@ -104,14 +110,14 @@ export const getEventDefinitionsUpdateUrl = (projectId: string, id: string) => {
 export const eventDefinitionsUpdate = async (
     projectId: string,
     id: string,
-    enterpriseEventDefinitionApi: NonReadonly<EnterpriseEventDefinitionApi>,
+    enterpriseEventDefinitionRequestApi: NonReadonly<EnterpriseEventDefinitionRequestApi>,
     options?: RequestInit
 ): Promise<EnterpriseEventDefinitionApi> => {
     return apiMutator<EnterpriseEventDefinitionApi>(getEventDefinitionsUpdateUrl(projectId, id), {
         ...options,
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', ...options?.headers },
-        body: JSON.stringify(enterpriseEventDefinitionApi),
+        body: JSON.stringify(enterpriseEventDefinitionRequestApi),
     })
 }
 
@@ -184,6 +190,42 @@ export const eventDefinitionsBulkUpdateTagsCreate = async (
         headers: { 'Content-Type': 'application/json', ...options?.headers },
         body: JSON.stringify(bulkUpdateTagsUUIDRequestApi),
     })
+}
+
+export const getEventDefinitionsBulkUpdateVerifiedCreateUrl = (projectId: string) => {
+    return `/api/projects/${projectId}/event_definitions/bulk_update_verified/`
+}
+
+/**
+ * Mark multiple event definitions as verified or unverified in one request.
+ *
+ * In the same vein as ``bulk_update_tags``, but ``verified`` lives on the enterprise
+ * ``EnterpriseEventDefinition`` extension rather than the base row, so this action:
+ * - requires an enterprise license;
+ * - scopes by project (``team__project_id``) and relies on project membership — the same
+ *   boundary the single-object update path uses — rather than object-level RBAC;
+ * - lazily promotes ingestion-created base rows to ``EnterpriseEventDefinition`` (mirroring
+ *   ``_get_event_definition``) before setting ``verified``;
+ * - mirrors the single-object semantics: verifying stamps ``verified_by``/``verified_at`` and
+ *   unhides the event (an event cannot be both hidden and verified); unverifying clears them;
+ * - logs a "changed" activity per event so the History tab matches the single-object path.
+ *
+ * Events already in the target state are skipped (not re-written, not logged).
+ */
+export const eventDefinitionsBulkUpdateVerifiedCreate = async (
+    projectId: string,
+    eventDefinitionBulkUpdateVerifiedRequestApi: EventDefinitionBulkUpdateVerifiedRequestApi,
+    options?: RequestInit
+): Promise<EventDefinitionBulkUpdateVerifiedResponseApi> => {
+    return apiMutator<EventDefinitionBulkUpdateVerifiedResponseApi>(
+        getEventDefinitionsBulkUpdateVerifiedCreateUrl(projectId),
+        {
+            ...options,
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...options?.headers },
+            body: JSON.stringify(eventDefinitionBulkUpdateVerifiedRequestApi),
+        }
+    )
 }
 
 export const getEventDefinitionsByNameRetrieveUrl = (

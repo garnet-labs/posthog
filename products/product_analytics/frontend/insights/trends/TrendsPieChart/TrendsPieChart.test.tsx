@@ -5,7 +5,7 @@ import { cleanup, screen, waitFor } from '@testing-library/react'
 import { setupJsdom, setupSyncRaf } from '@posthog/quill-charts/testing'
 
 import { NodeKind } from '~/queries/schema/schema-general'
-import { buildTrendsQuery, legend, personsModal, renderInsight } from '~/test/insight-testing'
+import { buildTrendsQuery, getChart, legend, personsModal, renderInsight } from '~/test/insight-testing'
 import { ChartDisplayType } from '~/types'
 
 let cleanupJsdom: () => void
@@ -24,9 +24,9 @@ afterEach(() => {
 })
 
 function sliceLabels(): string[] {
-    return Array.from(document.querySelectorAll('[data-attr="hog-chart-pie-slice-label"]')).map(
-        (el) => el.textContent ?? ''
-    )
+    return getChart()
+        .pie.sliceLabels()
+        .map((label) => label.text)
 }
 
 // Napped × hedgehog fixture: Spike 11, Thistle 4, Bramble 2, Prickles 2, Conker 0.
@@ -39,7 +39,7 @@ const pieByHedgehog = (trendsFilter: Record<string, unknown> = {}): ReturnType<t
         trendsFilter: { display: ChartDisplayType.ActionsPie, showValuesOnSeries: true, ...trendsFilter },
     })
 
-describe('TrendsPieChart (ActionsPie)', () => {
+describe('TrendsPieChart', () => {
     it.each([
         {
             name: 'shows raw slice values when percent stack view is off',
@@ -48,8 +48,19 @@ describe('TrendsPieChart (ActionsPie)', () => {
         },
         {
             name: 'formats slice values as percentages in percent stack view',
-            query: pieByHedgehog({ showPercentStackView: true }),
+            query: pieByHedgehog({ showValuesOnSeries: false, showPercentStackView: true }),
             expectedLabels: ['57.9%', '21.1%', '10.5%', '10.5%'],
+        },
+        {
+            name: 'shows the value and the percentage together when both options are on',
+            query: pieByHedgehog({ showPercentStackView: true }),
+            expectedLabels: ['11 (57.9%)', '4 (21.1%)', '2 (10.5%)', '2 (10.5%)'],
+        },
+        {
+            // Name and value are separate lines, so a slice's text content reads as name then value.
+            name: 'prefixes the slice with its name when labels on series is on',
+            query: pieByHedgehog({ showLabelsOnSeries: true }),
+            expectedLabels: ['Spike11', 'Thistle4', 'Bramble2', 'Prickles2'],
         },
     ])('$name', async ({ query, expectedLabels }) => {
         renderInsight({ query })
@@ -64,22 +75,34 @@ describe('TrendsPieChart (ActionsPie)', () => {
         expect([...sliceLabels()].sort()).toEqual([...expectedLabels].sort())
     })
 
-    describe('quill in-chart legend', () => {
-        const getInChartLegend = (container: HTMLElement): HTMLElement | null =>
-            container.querySelector<HTMLElement>('[data-attr="hog-chart-pie-legend"]')
+    it('floors a negative part at 0 in the total, matching the slices the pie draws', async () => {
+        const { container } = renderInsight({
+            query: buildTrendsQuery({
+                series: [
+                    { kind: NodeKind.EventsNode, event: 'NappedWithNegativePart', name: 'NappedWithNegativePart' },
+                ],
+                breakdownFilter: { breakdown: 'hedgehog', breakdown_type: 'event' },
+                trendsFilter: { display: ChartDisplayType.ActionsPie },
+            }),
+        })
+        await screen.findByLabelText(/pie chart with/i, undefined, { timeout: 5000 })
 
+        expect(container.querySelector('[data-attr="trend-total"]')).toHaveTextContent('10')
+    })
+
+    describe('quill in-chart legend', () => {
         it('renders the in-chart legend and suppresses the legacy side legend', async () => {
             const { container } = renderInsight({ query: pieByHedgehog({ showLegend: true }) })
             await screen.findByLabelText(/pie chart with/i, undefined, { timeout: 5000 })
 
-            const legendEl = getInChartLegend(container)
+            const legendEl = getChart().legend()
             expect(legendEl).not.toBeNull()
             expect(legendEl!.textContent).toContain('Spike')
             expect(container.querySelector('.InsightLegendMenu')).not.toBeInTheDocument()
         })
 
         it('humanizes built-in event names in the legend (no breakdown)', async () => {
-            const { container } = renderInsight({
+            renderInsight({
                 query: buildTrendsQuery({
                     series: [{ kind: NodeKind.EventsNode, event: '$pageview', name: '$pageview' }],
                     trendsFilter: { display: ChartDisplayType.ActionsPie, showLegend: true },
@@ -87,14 +110,14 @@ describe('TrendsPieChart (ActionsPie)', () => {
             })
             await screen.findByLabelText(/pie chart with/i, undefined, { timeout: 5000 })
 
-            const legendEl = getInChartLegend(container)
+            const legendEl = getChart().legend()
             expect(legendEl).not.toBeNull()
             expect(legendEl!.textContent).toContain('Pageview')
             expect(legendEl!.textContent).not.toContain('$pageview')
         })
 
         it('removes a toggled-off slice but keeps it listed (dimmed) so it can be restored', async () => {
-            const { container } = renderInsight({ query: pieByHedgehog({ showLegend: true }) })
+            renderInsight({ query: pieByHedgehog({ showLegend: true }) })
             await screen.findByLabelText(/pie chart with 5 slices/i, undefined, { timeout: 5000 })
 
             await legend.toggle('Spike')
@@ -102,7 +125,7 @@ describe('TrendsPieChart (ActionsPie)', () => {
             await waitFor(() => {
                 expect(screen.getByLabelText(/pie chart with 4 slices/i)).toBeInTheDocument()
             })
-            const dimmed = [...getInChartLegend(container)!.querySelectorAll<HTMLElement>('button')].filter((b) =>
+            const dimmed = [...getChart().legend()!.querySelectorAll<HTMLElement>('button')].filter((b) =>
                 b.className.includes('opacity-40')
             )
             expect(dimmed.map((b) => b.textContent)).toEqual(['Spike'])

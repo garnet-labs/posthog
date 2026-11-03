@@ -13,11 +13,24 @@ from products.demo.backend.logic.matrix.models import SimEvent
 from products.demo.backend.logic.products.hedgebox.matrix import HedgeboxMatrix
 from products.demo.backend.logic.products.hedgebox.taxonomy import (
     EVENT_DOWNGRADED_PLAN,
+    EVENT_LOGGED_IN,
+    EVENT_LOGGED_OUT,
     EVENT_PAID_BILL,
     EVENT_SIGNED_UP,
     EVENT_UPGRADED_PLAN,
     EVENT_UPLOADED_FILE,
 )
+
+
+class TestHedgeboxMatrixSimulation(SimpleTestCase):
+    def test_users_who_log_out_log_back_in(self):
+        matrix = HedgeboxMatrix(seed="login-test", n_clusters=10, days_past=60, days_future=0)
+        matrix.simulate()
+
+        events = [event.event for person in matrix.people for event in person.past_events]
+
+        assert events.count(EVENT_LOGGED_OUT) > 0
+        assert events.count(EVENT_LOGGED_IN) > 0
 
 
 class TestHedgeboxMatrixDemoWarehouseTables(SimpleTestCase):
@@ -278,7 +291,7 @@ class TestHedgeboxMatrixDemoWarehouseTables(SimpleTestCase):
     def test_save_demo_data_warehouse_tables_writes_source_team_files(self, mock_write):
         matrix = HedgeboxMatrix(seed="warehouse-test", n_clusters=0)
         matrix.is_complete = True
-        matrix.clusters = []  # ty: ignore[invalid-assignment]  # no people -> empty rows, keys are what matters
+        matrix.clusters = []  # no people -> empty rows, keys are what matters
         source_team = cast(Any, SimpleNamespace(pk=0))
 
         matrix.save_demo_data_warehouse_tables(source_team)
@@ -317,7 +330,7 @@ class TestHedgeboxMatrixDemoOAuthApplication(SimpleTestCase):
             ("no_oidc_key", "", True, False, True),
         ]
     )
-    @patch("products.demo.backend.logic.products.hedgebox.matrix.OAuthApplication.objects.create")
+    @patch("products.demo.backend.logic.products.hedgebox.matrix.OAuthApplication.objects.update_or_create")
     def test_demo_oauth_app_only_created_in_local_dev(
         self,
         _name: str,
@@ -325,7 +338,7 @@ class TestHedgeboxMatrixDemoOAuthApplication(SimpleTestCase):
         debug: bool,
         cloud: bool,
         should_skip: bool,
-        mock_create: MagicMock,
+        mock_update_or_create: MagicMock,
     ) -> None:
         matrix = HedgeboxMatrix(seed="oauth-test", n_clusters=0)
         team = cast(Any, SimpleNamespace(organization=SimpleNamespace()))
@@ -336,9 +349,10 @@ class TestHedgeboxMatrixDemoOAuthApplication(SimpleTestCase):
                 matrix._set_up_demo_oauth_application(team, user)
 
         if should_skip:
-            mock_create.assert_not_called()
+            mock_update_or_create.assert_not_called()
         else:
-            mock_create.assert_called_once()
-            kwargs = mock_create.call_args.kwargs
-            assert kwargs["is_first_party"] is True
-            assert "example.com" not in kwargs["redirect_uris"]
+            mock_update_or_create.assert_called_once()
+            call_kwargs = mock_update_or_create.call_args.kwargs
+            assert call_kwargs["client_id"] == "DC5uRLVbGI02YQ82grxgnK6Qn12SXWpCqdPb60oZ"
+            assert call_kwargs["defaults"]["is_first_party"] is True
+            assert "example.com" not in call_kwargs["defaults"]["redirect_uris"]

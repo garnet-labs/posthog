@@ -1,28 +1,38 @@
 import json
 import dataclasses
-from collections.abc import Iterable
-from typing import Any, cast
+from typing import Any
 
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-from requests import Request, Response
+import pyarrow as pa
+from requests import Response
+from requests.exceptions import HTTPError, RequestException
+from structlog.testing import capture_logs
 
 from products.warehouse_sources.backend.temporal.data_imports.sources.clerk.clerk import (
     ClerkPaginator,
     ClerkResumeConfig,
-    clerk_source,
+    _convert_timestamps,
+    _strip_sensitive_fields,
+    _webhook_table_transformer,
+    validate_credentials,
 )
-from products.warehouse_sources.backend.temporal.data_imports.sources.common.resumable import ResumableSourceManager
+from products.warehouse_sources.backend.temporal.data_imports.sources.clerk.settings import (
+    CLERK_ENDPOINTS,
+    RETIRED_ENDPOINTS,
+)
+from products.warehouse_sources.backend.temporal.data_imports.sources.clerk.source import ClerkSource
+from products.warehouse_sources.backend.temporal.data_imports.sources.common.testing import (
+    ScriptedResponse,
+    SourceDriver,
+    always,
+    scripted_network,
+)
+from products.warehouse_sources.backend.temporal.data_imports.sources.generated_configs.clerk import ClerkSourceConfig
 
 
 class TestClerkPaginator:
-    def test_initial_state(self) -> None:
-        paginator = ClerkPaginator(limit=100)
-        assert paginator._limit == 100
-        assert paginator._offset == 0
-        assert paginator.has_next_page is True
-
     @pytest.mark.parametrize(
         ("label", "response_body", "has_next", "expected_offset"),
         [
@@ -63,62 +73,25 @@ class TestClerkPaginator:
         assert paginator._offset == 0
 
     @pytest.mark.parametrize(
-        ("label", "seeded_offset", "expected_offset_param"),
+        ("label", "response_body", "has_next", "expected_offset"),
         [
-            ("fresh_run_omits_offset", None, None),
-            ("resumed_sets_offset", 500, 500),
+            ("full_page", {"m2m_tokens": [{"id": f"mt{i}"} for i in range(100)], "total_count": 250}, True, 100),
+            ("terminal_page", {"m2m_tokens": [{"id": "mt1"}], "total_count": 1}, False, 0),
+            # Reading the default `data` key here would see zero rows and stop after page one.
+            ("wrong_key_is_not_read", {"data": [{"id": f"mt{i}"} for i in range(100)]}, False, 0),
         ],
     )
-    def test_init_request(self, label: str, seeded_offset: int | None, expected_offset_param: int | None) -> None:
-        paginator = ClerkPaginator(limit=100)
-        if seeded_offset is not None:
-            paginator.set_resume_state({"offset": seeded_offset})
-
-        request = Request(method="GET", url="https://api.clerk.com/v1/users", params={"limit": 100})
-        paginator.init_request(request)
-
-        if expected_offset_param is None:
-            assert "offset" not in (request.params or {})
-        else:
-            assert request.params["offset"] == expected_offset_param
-
-    def test_update_request_sets_offset_when_next_page(self) -> None:
-        paginator = ClerkPaginator(limit=100)
+    def test_update_state_with_custom_data_key(
+        self, label: str, response_body: Any, has_next: bool, expected_offset: int
+    ) -> None:
+        paginator = ClerkPaginator(limit=100, data_key="m2m_tokens")
         response = MagicMock()
-        response.json.return_value = [{"id": f"u{i}"} for i in range(100)]
+        response.json.return_value = response_body
+
         paginator.update_state(response)
 
-        request = Request(method="GET", url="https://api.clerk.com/v1/users", params={"limit": 100})
-        paginator.update_request(request)
-
-        assert request.params["offset"] == 100
-
-    def test_get_resume_state_returns_current_offset(self) -> None:
-        paginator = ClerkPaginator(limit=100)
-        response = MagicMock()
-        response.json.return_value = [{"id": f"u{i}"} for i in range(100)]
-        paginator.update_state(response)  # _offset advances to 100
-        assert paginator.get_resume_state() == {"offset": 100}
-
-    def test_set_resume_state_round_trip(self) -> None:
-        paginator = ClerkPaginator(limit=100)
-        paginator.set_resume_state({"offset": 500})
-        assert paginator._offset == 500
-        assert paginator.has_next_page is True
-        assert paginator.get_resume_state() == {"offset": 500}
-
-    def test_set_resume_state_ignores_missing_offset(self) -> None:
-        paginator = ClerkPaginator(limit=100)
-        paginator.set_resume_state({})
-        assert paginator._offset == 0
-
-
-def _make_http_response(body: Any, status_code: int = 200) -> Response:
-    resp = Response()
-    resp.status_code = status_code
-    resp._content = json.dumps(body).encode()
-    resp.headers["Content-Type"] = "application/json"
-    return resp
+        assert paginator._has_next_page is has_next
+        assert paginator._offset == expected_offset
 
 
 # ``users``/``invitations`` return direct arrays; ``organizations``/``organization_memberships``
@@ -142,102 +115,359 @@ def _partial_page(endpoint: str, ids: list[str]) -> Any:
     return items
 
 
+def _driver() -> SourceDriver:
+    return SourceDriver(ClerkSource(), ClerkSourceConfig(secret_key="sk_live_test"))
+
+
 class TestClerkSourceResumeBehavior:
     """End-to-end resume behaviour through the shared ``rest_api_resource`` path."""
 
-    def _drive(self, endpoint: str, manager: MagicMock, responses: list[Response]) -> list[dict[str, Any]]:
-        """Drive ``clerk_source`` with a mocked HTTP session and return the
-        params dict sent with each request (shallow copies — the paginator
-        mutates the underlying Request in-place between pages)."""
-        sent_params: list[dict[str, Any]] = []
-        response_iter = iter(responses)
-
-        def fake_send(request: Any, *_args: Any, **_kwargs: Any) -> Response:
-            sent_params.append(dict(request.params))
-            return next(response_iter)
-
-        with patch(
-            "products.warehouse_sources.backend.temporal.data_imports.sources.common.rest_source.rest_client.make_tracked_session"
-        ) as MockSession:
-            mock_session = MockSession.return_value
-            mock_session.headers = {}
-            mock_session.prepare_request.side_effect = lambda req: req
-            mock_session.send.side_effect = fake_send
-
-            source_response = clerk_source(
-                secret_key="sk_live_test",
-                endpoint=endpoint,
-                team_id=123,
-                job_id="test_job",
-                resumable_source_manager=manager,
-            )
-            list(cast(Iterable[Any], source_response.items()))
-            return sent_params
-
     @pytest.mark.parametrize("endpoint", [_DIRECT_ARRAY_ENDPOINT, _WRAPPED_ENDPOINT])
     def test_fresh_run_saves_offset_after_each_non_terminal_page(self, endpoint: str) -> None:
-        manager = MagicMock(spec=ResumableSourceManager)
-        manager.can_resume.return_value = False
-
         responses = [
-            _make_http_response(_full_page(endpoint, "a")),
-            _make_http_response(_full_page(endpoint, "b")),
-            _make_http_response(_partial_page(endpoint, ["c1", "c2"])),
+            ScriptedResponse(json=_full_page(endpoint, "a")),
+            ScriptedResponse(json=_full_page(endpoint, "b")),
+            ScriptedResponse(json=_partial_page(endpoint, ["c1", "c2"])),
         ]
-        sent_params = self._drive(endpoint, manager, responses)
+        result = _driver().run(endpoint, responses)
 
         # First request omits offset (fresh run); subsequent requests include it.
-        assert [p.get("offset") for p in sent_params] == [None, 100, 200]
+        assert result.params("offset") == [None, "100", "200"]
 
-        saved = [call.args[0] for call in manager.save_state.call_args_list]
-        assert saved == [
+        assert result.saved_states == [
             ClerkResumeConfig(offset=100),
             ClerkResumeConfig(offset=200),
         ]
+        assert result.raised is None
 
     @pytest.mark.parametrize("endpoint", [_DIRECT_ARRAY_ENDPOINT, _WRAPPED_ENDPOINT])
     def test_resume_seeds_paginator_with_saved_offset(self, endpoint: str) -> None:
-        manager = MagicMock(spec=ResumableSourceManager)
-        manager.can_resume.return_value = True
-        manager.load_state.return_value = ClerkResumeConfig(offset=200)
-
-        responses = [
-            _make_http_response(_partial_page(endpoint, ["c1", "c2"])),
-        ]
-        sent_params = self._drive(endpoint, manager, responses)
+        result = _driver().run(
+            endpoint,
+            [ScriptedResponse(json=_partial_page(endpoint, ["c1", "c2"]))],
+            resume_state=ClerkResumeConfig(offset=200),
+        )
 
         # The very first request goes out at the resumed offset — no initial
         # offset-less call to re-fetch the already-synced pages.
-        assert [p.get("offset") for p in sent_params] == [200]
+        assert result.params("offset") == ["200"]
+        assert result.raised is None
 
-    @pytest.mark.parametrize("endpoint", [_DIRECT_ARRAY_ENDPOINT, _WRAPPED_ENDPOINT])
-    def test_terminal_single_page_does_not_save_state(self, endpoint: str) -> None:
-        manager = MagicMock(spec=ResumableSourceManager)
-        manager.can_resume.return_value = False
-
-        responses = [
-            _make_http_response(_partial_page(endpoint, ["only"])),
-        ]
-        self._drive(endpoint, manager, responses)
-
-        manager.save_state.assert_not_called()
-
-    @pytest.mark.parametrize("endpoint", [_DIRECT_ARRAY_ENDPOINT, _WRAPPED_ENDPOINT])
-    def test_saved_state_with_zero_offset_is_ignored(self, endpoint: str) -> None:
-        # A zero-offset checkpoint is equivalent to a fresh run — don't seed.
-        manager = MagicMock(spec=ResumableSourceManager)
-        manager.can_resume.return_value = True
-        manager.load_state.return_value = ClerkResumeConfig(offset=0)
-
-        responses = [
-            _make_http_response(_partial_page(endpoint, ["u1"])),
-        ]
-        sent_params = self._drive(endpoint, manager, responses)
-
-        assert [p.get("offset") for p in sent_params] == [None]
-
-    def test_resume_config_serialization_round_trip(self) -> None:
-        cfg = ClerkResumeConfig(offset=1500)
+    @pytest.mark.parametrize(
+        "cfg",
+        [
+            ClerkResumeConfig(offset=1500),
+            ClerkResumeConfig(
+                fan_out={"completed": ["/sessions?user_id=user_1"], "current": None, "child_state": None}
+            ),
+        ],
+    )
+    def test_resume_config_serialization_round_trip(self, cfg: ClerkResumeConfig) -> None:
         as_json = json.dumps(dataclasses.asdict(cfg))
         reconstituted = ClerkResumeConfig(**json.loads(as_json))
         assert reconstituted == cfg
+
+
+class TestClerkEndpoints:
+    @pytest.mark.parametrize(
+        ("endpoint", "path"),
+        [
+            # Clerk renamed these from /commerce/... to /billing/...; the old path now answers
+            # 400 Bad Request instead of serving the list.
+            ("commerce_plans", "/billing/plans"),
+            ("commerce_subscription_items", "/billing/subscription_items"),
+        ],
+    )
+    def test_commerce_endpoints_use_the_renamed_billing_path(self, endpoint: str, path: str) -> None:
+        assert CLERK_ENDPOINTS[endpoint].path == path
+
+    @pytest.mark.parametrize(
+        "item",
+        [
+            # sessions
+            {"created_at": 1700000000000, "expire_at": 1700000600000, "abandon_at": None},
+            # api_keys / m2m_tokens
+            {"created_at": 1700000000000, "expiration": 1700000600000, "last_used_at": 1700000300000},
+            # commerce_subscription_items
+            {"period_start": 1700000000000, "period_end": 1700000600000, "ended_at": 1700000300000},
+            # saml_connections
+            {"idp_certificate_issued_at": 1700000000000, "idp_certificate_expires_at": 1700000600000},
+        ],
+    )
+    def test_millisecond_timestamps_are_converted_to_seconds(self, item: dict[str, Any]) -> None:
+        # Left unconverted these land ~1000x in the future, which breaks the datetime partitioning
+        # the source declares on created_at.
+        converted = _convert_timestamps(dict(item))
+
+        for field, value in item.items():
+            assert converted[field] == (value // 1000 if value is not None else None)
+
+    @pytest.mark.parametrize(
+        "item,paths,expected",
+        [
+            # top-level redeemable link on invitations / organization_invitations
+            (
+                {"id": "inv_1", "email_address": "a@b.com", "url": "https://clerk.example/accept?ticket=secret"},
+                ("url",),
+                {"id": "inv_1", "email_address": "a@b.com"},
+            ),
+            # nested link on waitlist_entries
+            (
+                {"id": "wl_1", "invitation": {"id": "inv_2", "url": "https://clerk.example/accept?ticket=secret"}},
+                ("invitation.url",),
+                {"id": "wl_1", "invitation": {"id": "inv_2"}},
+            ),
+            # nested field absent (no invitation was sent) — nothing to strip, no crash
+            (
+                {"id": "wl_1", "invitation": None},
+                ("invitation.url",),
+                {"id": "wl_1", "invitation": None},
+            ),
+        ],
+    )
+    def test_sensitive_url_fields_are_stripped(
+        self, item: dict[str, Any], paths: tuple[str, ...], expected: dict[str, Any]
+    ) -> None:
+        # Redeemable invitation links must never reach the warehouse table, where any viewer
+        # could copy one and accept the invitation.
+        assert _strip_sensitive_fields(dict(item), paths) == expected
+
+
+class TestClerkFilteredEndpoints:
+    """Clerk rejects `/sessions` and `/m2m_tokens` unless the request carries a parent filter."""
+
+    @pytest.mark.parametrize(
+        ("endpoint", "parent_path", "parent_page", "parent_id", "child_page"),
+        [
+            ("sessions", "/users", [{"id": "user_1"}], "user_1", [{"id": "sess_1"}]),
+            (
+                "m2m_tokens",
+                "/machines",
+                {"data": [{"id": "mch_1"}], "total_count": 1},
+                "mch_1",
+                {"m2m_tokens": [{"id": "mt_1"}], "total_count": 1},
+            ),
+        ],
+    )
+    def test_endpoint_is_filtered_by_its_parent(
+        self,
+        endpoint: str,
+        parent_path: str,
+        parent_page: Any,
+        parent_id: str,
+        child_page: Any,
+    ) -> None:
+        # Unfiltered, Clerk answers 422 (`/sessions`) or 400 (`/m2m_tokens`) and the sync dies.
+        config = CLERK_ENDPOINTS[endpoint]
+        assert config.fan_out is not None
+        result = _driver().run(
+            endpoint,
+            [ScriptedResponse(json=parent_page), ScriptedResponse(json=child_page)],
+        )
+
+        assert result.paths == [f"/v1{parent_path}", f"/v1{config.path}"]
+        assert [request.origin for request in result.requests] == ["https://api.clerk.com"] * 2
+        assert result.params("limit") == ["100", "100"]
+        # The resolve placeholder must not leak into the query params as well.
+        assert result.requests[1].query[config.fan_out.query_param] == (parent_id,)
+        expected_rows = child_page["m2m_tokens"] if endpoint == "m2m_tokens" else child_page
+        assert result.rows == expected_rows
+        # Fan-out state is per parent, not a flat offset — a retry must not restart the walk.
+        saved = result.saved_states[-1]
+        assert saved.fan_out == {
+            "completed": [f"{config.path}?{config.fan_out.query_param}={parent_id}"],
+            "current": None,
+            "child_state": None,
+            "parent": None,
+        }
+        assert result.raised is None
+
+
+class TestClerkFeatureGatedEndpoints:
+    @pytest.mark.parametrize(
+        ("endpoint", "status_code", "body"),
+        [
+            ("allowlist_identifiers", 402, {"errors": [{"code": "payment_required"}]}),
+            ("blocklist_identifiers", 402, {"errors": [{"code": "payment_required"}]}),
+            ("commerce_plans", 400, {"errors": [{"code": "billing_not_enabled"}]}),
+            ("commerce_subscription_items", 400, {"errors": [{"code": "billing_not_enabled"}]}),
+            ("commerce_plans", 403, {"errors": [{"code": "feature_not_enabled"}]}),
+            # Restrictions off: the allow-list endpoint answers 404 resource_not_found, not a 4xx code.
+            ("allowlist_identifiers", 404, {"errors": [{"code": "resource_not_found"}]}),
+            # OAuth applications off: the list endpoint answers the same 404 resource_not_found.
+            ("oauth_applications", 404, {"errors": [{"code": "resource_not_found"}]}),
+            # Domains feature off: the list endpoint answers the same 404 resource_not_found.
+            ("domains", 404, {"errors": [{"code": "resource_not_found"}]}),
+            # Organizations off: the invitations list answers the same 404 resource_not_found.
+            ("organization_invitations", 404, {"errors": [{"code": "resource_not_found"}]}),
+            # Organizations off: every other instance-wide Organizations list answers it too.
+            ("organizations", 404, {"errors": [{"code": "resource_not_found"}]}),
+            ("organization_memberships", 404, {"errors": [{"code": "resource_not_found"}]}),
+            ("organization_domains", 404, {"errors": [{"code": "resource_not_found"}]}),
+            ("organization_roles", 404, {"errors": [{"code": "resource_not_found"}]}),
+            ("organization_permissions", 404, {"errors": [{"code": "resource_not_found"}]}),
+            # Invitations unavailable: the list answers the same 404 resource_not_found.
+            ("invitations", 404, {"errors": [{"code": "resource_not_found"}]}),
+            # SMS off: the SMS template list answers the same 404 resource_not_found.
+            ("sms_templates", 404, {"errors": [{"code": "resource_not_found"}]}),
+            # Machine (M2M) auth off: the machines list answers the same 404 resource_not_found.
+            ("machines", 404, {"errors": [{"code": "resource_not_found"}]}),
+            # m2m_tokens fans out over /machines, so it meets the same 404 on its parent fetch.
+            ("m2m_tokens", 404, {"errors": [{"code": "resource_not_found"}]}),
+            # Organizations off: the lists answer 403 with a feature code instead of a 404.
+            ("organizations", 403, {"errors": [{"code": "organization_not_enabled_in_instance"}]}),
+            ("organization_domains", 403, {"errors": [{"code": "organization_not_enabled_in_instance"}]}),
+            ("organization_roles", 403, {"errors": [{"code": "organization_not_enabled_in_instance"}]}),
+            ("organization_permissions", 403, {"errors": [{"code": "organization_not_enabled_in_instance"}]}),
+            ("api_keys", 403, {"errors": [{"code": "feature_not_enabled"}]}),
+            # Instances without email address sign-in answer 422 for the SSO connection lists.
+            ("saml_connections", 422, {"errors": [{"code": "feature_requires_email_address_enabled"}]}),
+            ("enterprise_connections", 422, {"errors": [{"code": "feature_requires_email_address_enabled"}]}),
+        ],
+    )
+    def test_feature_not_enabled_syncs_no_rows_instead_of_failing(
+        self, endpoint: str, status_code: int, body: dict[str, Any]
+    ) -> None:
+        with capture_logs() as logs:
+            result = _driver().run(endpoint, [ScriptedResponse(status=status_code, json=body)])
+
+        assert result.rows == []
+        assert result.raised is None
+        assert any(CLERK_ENDPOINTS[endpoint].gated_feature in log["event"] for log in logs)
+
+    @pytest.mark.parametrize(
+        ("endpoint", "status_code", "body"),
+        [
+            # A gated endpoint failing for an unrelated reason must still fail the sync.
+            ("commerce_plans", 400, {"errors": [{"code": "invalid_request"}]}),
+            # A 404 with an unrelated code is a real failure, not the feature-off signal.
+            ("allowlist_identifiers", 404, {"errors": [{"code": "invalid_request"}]}),
+            # A table with no feature gate never swallows an error.
+            ("users", 402, {"errors": [{"code": "payment_required"}]}),
+            ("users", 403, {"errors": [{"code": "organization_not_enabled_in_instance"}]}),
+            # A 422 without the feature code is a bad request, not a feature-off signal.
+            ("saml_connections", 422, {"errors": [{"code": "form_param_invalid"}]}),
+            # API keys with the feature on still reject an unfiltered list, which the curated copy covers.
+            ("api_keys", 400, {"errors": [{"code": "bad_request"}]}),
+            # A permission denial on a gated table stays a failure.
+            ("organizations", 403, {"errors": [{"code": "authorization_invalid"}]}),
+        ],
+    )
+    def test_other_errors_still_fail_the_sync(self, endpoint: str, status_code: int, body: dict[str, Any]) -> None:
+        result = _driver().run(endpoint, [ScriptedResponse(status=status_code, json=body)])
+        assert isinstance(result.raised, HTTPError)
+
+
+class TestClerkRetiredEndpoints:
+    @pytest.mark.parametrize("endpoint", sorted(RETIRED_ENDPOINTS))
+    def test_retired_endpoint_is_off_the_catalog_and_explains_itself(self, endpoint: str) -> None:
+        # Discovery drops the table because it left CLERK_ENDPOINTS; a job already in flight has
+        # to say why rather than blow up on a missing key.
+        assert endpoint not in CLERK_ENDPOINTS
+
+        result = _driver().run(endpoint, [])
+        assert isinstance(result.raised, ValueError)
+        assert "Turn off syncing for this table" in str(result.raised)
+        assert result.requests == []
+
+
+class TestClerkValidateCredentials:
+    @pytest.mark.parametrize(
+        ("status_code", "expected_substring"),
+        [
+            (400, "invalid or has been revoked"),
+            (401, "invalid or has been revoked"),
+            (403, "active Clerk instance"),
+            (404, "active Clerk instance"),
+            (500, "Couldn't validate your Clerk secret key"),
+        ],
+    )
+    def test_maps_status_to_curated_message_without_leaking_raw_body(
+        self, status_code: int, expected_substring: str
+    ) -> None:
+        # A regression that forwards Clerk's response body (or errors[0].message) back to the wizard
+        # would surface this sentinel; the curated copy must not.
+        sentinel = "RAW-CLERK-BODY-SENTINEL"
+        response = ScriptedResponse(status=status_code, json={"errors": [{"message": sentinel}]})
+        script = always(response) if status_code == 500 else [response]
+        with scripted_network(script) as network:
+            is_valid, message = validate_credentials("sk_test_key")
+        assert is_valid is False
+        assert expected_substring in (message or "")
+        assert sentinel not in (message or "")
+        assert network.requests_log[0].path == "/v1/users"
+        assert network.requests_log[0].param("limit") == "1"
+
+    @pytest.mark.parametrize(
+        "secret_key",
+        ["\u200bsk_live_key", "sk_live_\u200bkey", "sk_live_key\ufeff", "\u00a0sk_live_key", "sk_live_key\n"],
+    )
+    def test_invisible_paste_debris_is_removed_before_the_request(self, secret_key: str) -> None:
+        with scripted_network([ScriptedResponse(json=[])]) as network:
+            is_valid, message = validate_credentials(secret_key)
+        assert (is_valid, message) == (True, None)
+        assert network.requests_log[0].headers["authorization"] == "Bearer sk_live_key"
+
+    def test_sync_sends_the_cleaned_key(self) -> None:
+        driver = SourceDriver(ClerkSource(), ClerkSourceConfig(secret_key="\u200bsk_live_key\n"))
+        result = driver.run(_DIRECT_ARRAY_ENDPOINT, [ScriptedResponse(json=[])])
+        assert result.raised is None
+        assert result.requests[0].headers["authorization"] == "Bearer sk_live_key"
+
+    @pytest.mark.parametrize("secret_key", ["sk_live_\u3042key", "sk_live_\u00a0key"])
+    def test_non_ascii_key_is_rejected_before_any_request(self, secret_key: str) -> None:
+        # Such a key can't be encoded into the Authorization header, so dispatching the request
+        # raises UnicodeEncodeError; the guard must catch it first and explain what to do.
+        with scripted_network([]) as network:
+            is_valid, message = validate_credentials(secret_key)
+        assert is_valid is False
+        assert "Copy the key again" in (message or "")
+        assert "latin-1" not in (message or "")
+        assert network.requests_log == []
+
+    @pytest.mark.parametrize("secret_key", ["sk_live_key\rextra_pasted_content", "sk_live_key\nextra_pasted_content"])
+    def test_key_with_return_character_is_rejected_before_any_request(self, secret_key: str) -> None:
+        # A carriage return or newline is ASCII, so it passes isascii(), but requests still rejects
+        # it as an invalid header value (InvalidHeader) when dispatching. That exception is a
+        # RequestException subclass, so it was previously swallowed by the generic network-error
+        # handler below and reported as a transient "couldn't reach Clerk" failure instead of
+        # explaining the malformed key.
+        with scripted_network([]) as network:
+            is_valid, message = validate_credentials(secret_key)
+        assert is_valid is False
+        assert "Copy the key again" in (message or "")
+        assert network.requests_log == []
+
+    def test_network_error_returns_actionable_message_without_leaking_exception(self) -> None:
+        def fail_request(_request: Any) -> ScriptedResponse:
+            raise RequestException("connection reset by peer")
+
+        with scripted_network(fail_request) as network:
+            is_valid, message = validate_credentials("sk_test_key")
+        assert is_valid is False
+        assert "Couldn't reach Clerk" in (message or "")
+        assert "connection reset by peer" not in (message or "")
+        assert network.requests_log[0].path == "/v1/users"
+
+
+class TestClerkWebhookTransformer:
+    def test_keeps_latest_event_and_skips_deletes(self) -> None:
+        table = pa.Table.from_pylist(
+            [
+                {
+                    "type": "user.updated",
+                    "timestamp": 1767312000000,
+                    "data": '{"id":"user_1","email":"new@example.com","created_at":1767225600000}',
+                },
+                {
+                    "type": "user.created",
+                    "timestamp": 1767225600000,
+                    "data": '{"id":"user_1","email":"old@example.com","created_at":1767225600000}',
+                },
+                {"type": "user.deleted", "timestamp": 1767398400000, "data": '{"id":"user_1","deleted":true}'},
+            ]
+        )
+
+        assert _webhook_table_transformer(table).to_pylist() == [
+            {"id": "user_1", "email": "new@example.com", "created_at": 1767225600}
+        ]

@@ -1,6 +1,9 @@
 import re
+import itertools
+from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import PurePosixPath
-from typing import Optional
+from typing import Literal, Optional
 from urllib.parse import urlparse, urlunparse
 
 from django.conf import settings
@@ -12,6 +15,149 @@ from posthog.hogql.escape_sql import escape_hogql_identifier
 
 from posthog.clickhouse.client.escape import substitute_params
 
+_AWS_S3_ENDPOINT_RE = re.compile(r"s3(?:[.-][a-z0-9-]+)*\.amazonaws\.com(?:\.cn)?")
+_AWS_S3_VIRTUAL_HOST_RE = re.compile(r"(?P<bucket>.+)\.(?P<endpoint>s3(?:[.-][a-z0-9-]+)*\.amazonaws\.com(?:\.cn)?)")
+_AWS_REGION_RE = re.compile(r"(?:^|[.-])(?P<region>[a-z]{2,4}(?:-[a-z0-9]+)+-\d)(?:\.|$)")
+_AZURE_BLOB_HOST_SUFFIX = ".blob.core.windows.net"
+_AZURE_BLOB_ACCOUNT_URL_RE = re.compile(r"(https://[A-Za-z0-9-]+\.blob\.core\.windows\.net)/")
+_FORMAT_LABELS = {
+    "CSV": "CSV",
+    "CSVWithNames": "CSV with headers",
+    "JSONEachRow": "JSON",
+    "Delta": "Delta",
+    "DeltaS3Wrapper": "Delta",
+}
+# Mirrors ClickHouse's chooseCompressionMethod.
+_COMPRESSION_BY_EXTENSION = {
+    "gz": "gzip",
+    "gzip": "gzip",
+    "deflate": "deflate",
+    "br": "br",
+    "brotli": "br",
+    "xz": "xz",
+    "lzma": "xz",
+    "zst": "zstd",
+    "zstd": "zstd",
+    "lz4": "lz4",
+    "bz2": "bz2",
+    "snappy": "snappy",
+}
+_URL_GLOB_CHARACTERS = frozenset("*?{}")
+_BROTLI_FILE_NAME_RE = re.compile(r"\.(?:br|brotli)(?![\w.-])", re.IGNORECASE)
+_BROTLI_EXTENSION_RE = re.compile(r"(?:br|brotli)[*?]*", re.IGNORECASE)
+_MAX_BRACE_EXPANSIONS = 1000
+
+
+@dataclass(frozen=True, kw_only=True)
+class DuckDBS3Source:
+    uri: str
+    scope: str
+    endpoint: str | None
+    region: str
+    use_ssl: bool
+    url_style: Literal["path", "vhost"]
+
+
+def _split_bucket_and_key(path: str) -> tuple[str, str] | None:
+    bucket, separator, key = path.lstrip("/").partition("/")
+    if not bucket or not separator or not key:
+        return None
+    return bucket, key
+
+
+def _scope_for_s3_uri(uri: str) -> str:
+    wildcard_positions = [position for token in ("*", "?", "[") if (position := uri.find(token)) >= 0]
+    return uri[: min(wildcard_positions)] if wildcard_positions else uri
+
+
+def _region_for_aws_endpoint(endpoint: str) -> str:
+    match = _AWS_REGION_RE.search(endpoint)
+    return match.group("region") if match else "us-east-1"
+
+
+def parse_duckdb_s3_source(url: str) -> DuckDBS3Source | None:
+    parsed = urlparse(url)
+    if parsed.scheme == "s3":
+        if not parsed.netloc or not parsed.path.lstrip("/"):
+            return None
+        uri = f"s3://{parsed.netloc}/{parsed.path.lstrip('/')}"
+        return DuckDBS3Source(
+            uri=uri,
+            scope=_scope_for_s3_uri(uri),
+            endpoint=None,
+            region="us-east-1",
+            use_ssl=True,
+            url_style="vhost",
+        )
+
+    if parsed.scheme not in {"http", "https"} or parsed.hostname is None:
+        return None
+
+    hostname = parsed.hostname.lower()
+    if hostname.endswith(_AZURE_BLOB_HOST_SUFFIX):
+        return None
+
+    endpoint = hostname if parsed.port is None else f"{hostname}:{parsed.port}"
+    key = parsed.path.lstrip("/")
+    virtual_host_match = _AWS_S3_VIRTUAL_HOST_RE.fullmatch(hostname)
+    if virtual_host_match is not None:
+        bucket = virtual_host_match.group("bucket")
+        aws_endpoint = virtual_host_match.group("endpoint")
+        endpoint = aws_endpoint if parsed.port is None else f"{aws_endpoint}:{parsed.port}"
+        url_style: Literal["path", "vhost"] = "vhost"
+        region = _region_for_aws_endpoint(aws_endpoint)
+    else:
+        location = _split_bucket_and_key(parsed.path)
+        if location is None:
+            return None
+        bucket, key = location
+        url_style = "path"
+        region = _region_for_aws_endpoint(hostname) if _AWS_S3_ENDPOINT_RE.fullmatch(hostname) else "us-east-1"
+
+    if not key:
+        return None
+
+    uri = f"s3://{bucket}/{key}"
+    return DuckDBS3Source(
+        uri=uri,
+        scope=_scope_for_s3_uri(uri),
+        endpoint=endpoint,
+        region=region,
+        use_ssl=parsed.scheme == "https",
+        url_style=url_style,
+    )
+
+
+def compression_for_url_pattern(url: str) -> str | None:
+    """None when the pattern can match files with different extensions."""
+    _, dot, extension = url.rsplit("/", 1)[-1].rpartition(".")
+    if _URL_GLOB_CHARACTERS.intersection(extension):
+        return None
+    return _COMPRESSION_BY_EXTENSION.get(extension.lower(), "none") if dot else "none"
+
+
+def _brace_expansions(pattern: str) -> Iterator[str]:
+    match = re.search(r"\{([^{}]*)\}", pattern)
+    if match is None:
+        yield pattern
+        return
+    for alternative in match.group(1).split(","):
+        yield from _brace_expansions(pattern[: match.start()] + alternative + pattern[match.end() :])
+
+
+def _reads_brotli_files(url: str) -> bool:
+    urls = list(itertools.islice(_brace_expansions(url), _MAX_BRACE_EXPANSIONS + 1))
+    if len(urls) > _MAX_BRACE_EXPANSIONS:
+        return _BROTLI_FILE_NAME_RE.search(url) is not None
+    return any(
+        dot and _BROTLI_EXTENSION_RE.fullmatch(extension)
+        for _, dot, extension in (expanded.rsplit("/", 1)[-1].rpartition(".") for expanded in urls)
+    )
+
+
+def is_azure_blob_url(url: str) -> bool:
+    return _AZURE_BLOB_ACCOUNT_URL_RE.match(url) is not None
+
 
 def build_function_call(
     url: str,
@@ -22,6 +168,7 @@ def build_function_call(
     structure: Optional[str] = None,
     context: Optional[HogQLContext] = None,
     table_size_mib: Optional[float] = None,
+    compression: Optional[str] = None,
 ) -> str:
     if access_key is None and access_secret is None and (settings.DEBUG or settings.TEST or settings.USE_LOCAL_SETUP):
         access_key = settings.DATAWAREHOUSE_LOCAL_ACCESS_KEY
@@ -109,19 +256,20 @@ def build_function_call(
 
         return return_expr(expr)
 
+    if _reads_brotli_files(url):
+        raise ExposedHogQLError(
+            "PostHog can't read Brotli-compressed (.br) files. Compress the files with gzip or zstd instead."
+        )
+
     # Azure
-    if re.match(r"^https:\/\/.+\.blob\.core\.windows\.net\/", url):
-        regex_result = re.search(r"(https:\/\/.+\.blob\.core\.windows\.net)\/(.+?)\/(.*)", url)
-        if regex_result is None:
+    if azure_match := _AZURE_BLOB_ACCOUNT_URL_RE.match(url):
+        container_name, separator, blob_name = url[azure_match.end() :].partition("/")
+        if not container_name or not separator:
             raise ExposedHogQLError("Can't parse Azure blob storage URL")
 
-        groups = regex_result.groups()
-        if len(groups) < 3:
-            raise ExposedHogQLError("Can't parse Azure blob storage URL")
-
-        storage_account_url = add_param(groups[0])
-        container = add_param(groups[1])
-        blob_path = add_param(groups[2])
+        storage_account_url = add_param(azure_match.group(1))
+        container = add_param(container_name)
+        blob_path = add_param(blob_name)
 
         if not access_key or not access_secret:
             raise ExposedHogQLError("Azure blob storage has no access key or secret")
@@ -129,8 +277,9 @@ def build_function_call(
         escaped_access_key = add_param(access_key)
         escaped_access_secret = add_param(access_secret)
         escaped_format = add_param(format, False)
+        escaped_compression = add_param(compression, False) if compression else "'auto'"
 
-        expr = f"azureBlobStorage({storage_account_url}, {container}, {blob_path}, {escaped_access_key}, {escaped_access_secret}, {escaped_format}, 'auto'"
+        expr = f"azureBlobStorage({storage_account_url}, {container}, {blob_path}, {escaped_access_key}, {escaped_access_secret}, {escaped_format}, {escaped_compression}"
 
         if structure:
             escaped_structure = add_param(structure, False)
@@ -159,6 +308,12 @@ def build_function_call(
 
     if structure:
         expr += f", {escaped_structure}"
+    elif compression:
+        # s3() only reads the codec after a structure argument.
+        expr += ", 'auto'"
+
+    if compression:
+        expr += f", {add_param(compression, False)}"
 
     return return_expr(expr)
 
@@ -177,6 +332,10 @@ class S3Table(FunctionCallTable):
     # Used to attribute query execution back to the source that was synced, for usage telemetry.
     external_data_source_id: Optional[str] = None
     source_type: Optional[str] = None
+    # Set when this table backs a materialized saved query, so a query that reads the table is attributed to the view.
+    saved_query_id: Optional[str] = None
+    # Set when the table keeps every version of a row, so a query that reads it counts as history usage.
+    is_history_table: bool = False
 
     def to_printed_hogql(self):
         return escape_hogql_identifier(self.name)
@@ -192,6 +351,31 @@ class S3Table(FunctionCallTable):
             context=context,
             table_size_mib=self.table_size_mib,
         )
+
+    def to_printed_duckdb(self, context: HogQLContext) -> str:
+        if self.format != "Parquet":
+            format_label = _FORMAT_LABELS.get(self.format, self.format)
+            raise ExposedHogQLError(
+                "DuckLake currently supports Parquet self-managed tables only. "
+                f"Support for {format_label} is coming soon. "
+                "Use Parquet or run the query without DuckLake for now."
+            )
+
+        source = parse_duckdb_s3_source(self.url)
+        if source is None:
+            hostname = urlparse(self.url).hostname
+            if hostname is not None and hostname.lower().endswith(_AZURE_BLOB_HOST_SUFFIX):
+                raise ExposedHogQLError(
+                    "DuckLake currently supports S3-compatible self-managed sources only. "
+                    "Support for Azure Blob Storage is coming soon. "
+                    "Run the query without DuckLake for now."
+                )
+            raise ExposedHogQLError(
+                "DuckLake currently supports S3-compatible self-managed sources only. "
+                "Use an S3-compatible URL or run the query without DuckLake for now."
+            )
+
+        return f"read_parquet({context.add_value(source.uri)}, hive_partitioning = false)"
 
 
 class DataWarehouseTable(S3Table):

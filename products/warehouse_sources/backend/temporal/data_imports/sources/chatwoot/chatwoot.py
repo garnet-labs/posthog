@@ -14,8 +14,9 @@ from asgiref.sync import async_to_sync
 from structlog.types import FilteringBoundLogger
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential_jitter
 
-from products.warehouse_sources.backend.temporal.data_imports.pipelines.pipeline.typings import SourceResponse
-from products.warehouse_sources.backend.temporal.data_imports.pipelines.pipeline.utils import table_from_py_list
+from posthog.dataclasses import frozen
+
+from products.warehouse_sources.backend.temporal.data_imports.pipelines.core.arrow_utils import table_from_py_list
 from products.warehouse_sources.backend.temporal.data_imports.sources.chatwoot.settings import (
     CHATWOOT_ENDPOINTS,
     DEFAULT_HOST,
@@ -30,9 +31,11 @@ from products.warehouse_sources.backend.temporal.data_imports.sources.common.bas
     WebhookDeletionResult,
     WebhookSyncResult,
 )
+from products.warehouse_sources.backend.temporal.data_imports.sources.common.datetime_utils import parse_datetime_value
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.http import make_tracked_session
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.mixins import _is_host_safe
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.resumable import ResumableSourceManager
+from products.warehouse_sources.backend.temporal.data_imports.sources.common.typings import SourceResponse
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.webhook_s3 import WebhookSourceManager
 
 REQUEST_TIMEOUT_SECONDS = 60
@@ -45,6 +48,8 @@ MAX_MESSAGE_PAGES_PER_CONVERSATION = 10_000
 # hostile server multiply requests without bound (conversations × pages). This aggregate ceiling
 # bounds the total message pages one sync fetches regardless of how many conversations it enumerates.
 MAX_MESSAGE_PAGES_PER_SYNC = 1_000_000
+# Fan-outs issue at least one request per team / inbox / label, so the parent list bounds the request count.
+MAX_MEMBER_FANOUT_PARENTS = 100_000
 
 # The host is customer-controlled (self-hosted Chatwoot), so a malicious or misconfigured server
 # could stream an unbounded body and exhaust a shared worker (requests buffers the whole body into
@@ -61,6 +66,8 @@ HTTP_NOT_ALLOWED_ERROR = "Chatwoot host must use HTTPS"
 RESPONSE_TOO_LARGE_ERROR = "Chatwoot response body was too large"
 RESPONSE_TOO_SLOW_ERROR = "Chatwoot response download was too slow"
 INVALID_ACCOUNT_ID_ERROR = "Chatwoot account ID must be a number"
+REPORTING_EVENTS_UNAVAILABLE_ERROR = "Chatwoot reporting events are not available on this instance"
+AUDIT_LOGS_UNAVAILABLE_ERROR = "Chatwoot audit logs are not available on this instance"
 
 # Authority chars that let `urlparse` and the HTTP client disagree on where the host ends. A userinfo
 # separator or a (raw or percent-encoded) backslash in `https://169.254.169.254\@attacker.example`
@@ -85,7 +92,7 @@ class ChatwootResponseTooSlowError(Exception):
     pass
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class ChatwootResumeConfig:
     # Next page to fetch for page-number endpoints. Stored as a bare page number (not a URL) so
     # stale state can never replay against a different host after the source's host is edited.
@@ -94,6 +101,21 @@ class ChatwootResumeConfig:
     # last message id already yielded within it (the next request sends `after=<message_id>`).
     conversation_id: int | None = None
     after: int | None = None
+    # Fan-out bookmark: the team / inbox / label currently being walked. contact_labels pairs it
+    # with `page` within that label.
+    parent_id: int | None = None
+    # reporting_events and audit_logs: the window end the interrupted attempt paginated against. Page
+    # numbers only line up against the same window, so a resumed attempt must reuse it rather
+    # than recompute "now".
+    until: int | None = None
+
+
+@frozen
+class SinceUntilWindow:
+    """The since/until bounds, in unix seconds, of one reporting_events or audit_logs page walk."""
+
+    since: int
+    until: int
 
 
 def normalize_host(host: str | None) -> str:
@@ -390,6 +412,255 @@ def _get_message_rows(
             resumable_source_manager.save_state(ChatwootResumeConfig(conversation_id=remaining[index + 1], after=0))
 
 
+def _iter_parent_ids(
+    session: requests.Session, base_url: str, parent_endpoint: str, logger: FilteringBoundLogger
+) -> list[int]:
+    """Ids of the rows a member fan-out iterates, read from the parent endpoint."""
+    parent = CHATWOOT_ENDPOINTS[parent_endpoint]
+    if parent.kind != "single":
+        raise ValueError(f"Chatwoot member fan-out parent '{parent_endpoint}' must be an unpaginated endpoint")
+
+    url = _build_url(base_url, parent.path, dict(parent.params))
+    items = _extract_items(_fetch_json(session, url, logger), parent.data_path, url)
+    ids = [item["id"] for item in items if item.get("id") is not None]
+    if len(ids) > MAX_MEMBER_FANOUT_PARENTS:
+        logger.warning(
+            f"Chatwoot: {parent_endpoint} returned more than the {MAX_MEMBER_FANOUT_PARENTS}-parent "
+            "fan-out cap; rows beyond it were skipped"
+        )
+        return ids[:MAX_MEMBER_FANOUT_PARENTS]
+    return ids
+
+
+def _get_member_rows(
+    session: requests.Session,
+    base_url: str,
+    config: ChatwootEndpointConfig,
+    logger: FilteringBoundLogger,
+    resumable_source_manager: ResumableSourceManager[ChatwootResumeConfig],
+) -> Iterator[list[dict[str, Any]]]:
+    """One unpaginated request per team / inbox, stamping the parent id onto each agent row.
+
+    The rows Chatwoot returns are agent records, so `id` repeats across parents and only
+    (parent id, agent id) identifies a membership.
+    """
+    if config.parent is None or config.parent_id_field is None:
+        raise ValueError(f"Chatwoot endpoint '{config.name}' is a member fan-out without a parent")
+
+    parent_ids = _iter_parent_ids(session, base_url, config.parent, logger)
+
+    # If the bookmarked parent is gone, start over from the first one — merge dedupes re-pulled
+    # rows on the primary key.
+    resume = resumable_source_manager.load_state() if resumable_source_manager.can_resume() else None
+    remaining = parent_ids
+    if resume is not None and resume.parent_id is not None and resume.parent_id in parent_ids:
+        remaining = parent_ids[parent_ids.index(resume.parent_id) :]
+        logger.debug(f"Chatwoot: resuming {config.name} from {config.parent_id_field}={resume.parent_id}")
+
+    for index, parent_id in enumerate(remaining):
+        url = _build_url(base_url, config.path.format(parent_id=parent_id), dict(config.params))
+        try:
+            items = _extract_items(_fetch_json(session, url, logger), config.data_path, url)
+        except requests.HTTPError as exc:
+            # A team or inbox deleted between enumeration and this fetch 404s. Skip it rather than
+            # failing the whole sync. Any other HTTP error is re-raised.
+            if exc.response is not None and exc.response.status_code == 404:
+                logger.warning(f"Chatwoot: {config.parent} {parent_id} not found while fetching members, skipping")
+                items = []
+            else:
+                raise
+
+        rows = [{**item, config.parent_id_field: parent_id} for item in items if item.get("id") is not None]
+        if rows:
+            yield rows
+
+        # Advance the bookmark to the next parent so a crash between parents resumes correctly.
+        if index + 1 < len(remaining):
+            resumable_source_manager.save_state(ChatwootResumeConfig(parent_id=remaining[index + 1]))
+
+
+def _since_until_window(db_incremental_field_last_value: Any) -> SinceUntilWindow:
+    """The unix-second bounds for one reporting_events or audit_logs walk.
+
+    `until` is pinned at the start of the walk because page numbers only stay stable against a
+    fixed row set: reporting_events is ordered newest-first, so without a fixed upper bound an
+    event created mid-walk shifts every later page down and the rows at each boundary are never
+    fetched. reporting_events ignores the filter unless both bounds are present, so a full
+    refresh sends epoch 0 rather than omitting `since`. The watermark is an ISO string for
+    reporting_events and a unix int for audit_logs.
+    """
+    if isinstance(db_incremental_field_last_value, int) and not isinstance(db_incremental_field_last_value, bool):
+        since = max(0, db_incremental_field_last_value)
+    else:
+        watermark = parse_datetime_value(db_incremental_field_last_value)
+        since = max(0, int(watermark.timestamp())) if watermark is not None else 0
+    return SinceUntilWindow(since=since, until=int(datetime.now(UTC).timestamp()))
+
+
+def _get_reporting_event_rows(
+    session: requests.Session,
+    base_url: str,
+    config: ChatwootEndpointConfig,
+    logger: FilteringBoundLogger,
+    resumable_source_manager: ResumableSourceManager[ChatwootResumeConfig],
+    db_incremental_field_last_value: Any,
+) -> Iterator[list[dict[str, Any]]]:
+    window = _since_until_window(db_incremental_field_last_value)
+
+    resume = resumable_source_manager.load_state() if resumable_source_manager.can_resume() else None
+    page = 1
+    if resume is not None and resume.page is not None:
+        page = resume.page
+        if resume.until is not None:
+            window = dataclasses.replace(window, until=resume.until)
+        logger.debug(f"Chatwoot: resuming reporting_events from page {page} of the window ending {window.until}")
+
+    while page <= MAX_LIST_PAGES:
+        url = _build_url(base_url, config.path, {"since": window.since, "until": window.until, "page": page})
+        try:
+            data = _fetch_json(session, url, logger)
+        except requests.HTTPError as exc:
+            # The route only exists on enterprise builds, so a community-edition instance has no
+            # endpoint to answer here at all. Say that instead of letting the generic 404 message
+            # send the user off to re-check an account id that is fine.
+            if exc.response is not None and exc.response.status_code == 404:
+                raise Exception(f"{REPORTING_EVENTS_UNAVAILABLE_ERROR}: GET {config.path} returned 404") from exc
+            raise
+
+        items = _extract_items(data, config.data_path, url)
+        if not items:
+            return
+        yield items
+
+        total_pages = data.get("meta", {}).get("total_pages") if isinstance(data, dict) else None
+        page += 1
+        # Save AFTER yielding so a crash re-yields the last page rather than skipping it.
+        resumable_source_manager.save_state(ChatwootResumeConfig(page=page, until=window.until))
+        if isinstance(total_pages, int) and page > total_pages:
+            return
+    logger.warning(f"Chatwoot: reporting_events hit the {MAX_LIST_PAGES}-page cap; rows beyond it were skipped")
+
+
+def _get_audit_log_rows(
+    session: requests.Session,
+    base_url: str,
+    config: ChatwootEndpointConfig,
+    logger: FilteringBoundLogger,
+    resumable_source_manager: ResumableSourceManager[ChatwootResumeConfig],
+    db_incremental_field_last_value: Any,
+) -> Iterator[list[dict[str, Any]]]:
+    window = _since_until_window(db_incremental_field_last_value)
+
+    resume = resumable_source_manager.load_state() if resumable_source_manager.can_resume() else None
+    page = 1
+    if resume is not None and resume.page is not None:
+        page = resume.page
+        if resume.until is not None:
+            window = dataclasses.replace(window, until=resume.until)
+        logger.debug(f"Chatwoot: resuming audit_logs from page {page} of the window ending {window.until}")
+
+    while page <= MAX_LIST_PAGES:
+        params = {**config.params, "since": window.since, "until": window.until, "page": page}
+        url = _build_url(base_url, config.path, params)
+        try:
+            data = _fetch_json(session, url, logger)
+        except requests.HTTPError as exc:
+            # The route only exists on enterprise builds, so a 404 means the instance has no audit
+            # logs, not that the account id is wrong.
+            if exc.response is not None and exc.response.status_code == 404:
+                raise Exception(f"{AUDIT_LOGS_UNAVAILABLE_ERROR}: GET {config.path} returned 404") from exc
+            raise
+
+        items = _extract_items(data, config.data_path, url)
+        if not items:
+            return
+
+        page += 1
+        resumable_source_manager.save_state(ChatwootResumeConfig(page=page, until=window.until))
+        yield items
+
+        total_entries = data.get("total_entries") if isinstance(data, dict) else None
+        per_page = data.get("per_page") if isinstance(data, dict) else None
+        if isinstance(total_entries, int) and isinstance(per_page, int) and per_page > 0:
+            if (page - 1) * per_page >= total_entries:
+                return
+    logger.warning(f"Chatwoot: audit_logs hit the {MAX_LIST_PAGES}-page cap; rows beyond it were skipped")
+
+
+def _list_labels(session: requests.Session, base_url: str, logger: FilteringBoundLogger) -> list[tuple[int, str]]:
+    """(id, title) of every label in the account, the parents of the contact_labels walk."""
+    labels = CHATWOOT_ENDPOINTS["labels"]
+    url = _build_url(base_url, labels.path, dict(labels.params))
+    items = _extract_items(_fetch_json(session, url, logger), labels.data_path, url)
+    result = [
+        (item["id"], item["title"])
+        for item in items
+        if item.get("id") is not None and isinstance(item.get("title"), str) and item["title"]
+    ]
+    if len(result) > MAX_MEMBER_FANOUT_PARENTS:
+        logger.warning(
+            f"Chatwoot: labels returned more than the {MAX_MEMBER_FANOUT_PARENTS}-parent fan-out cap; "
+            "rows beyond it were skipped"
+        )
+        return result[:MAX_MEMBER_FANOUT_PARENTS]
+    return result
+
+
+def _get_contact_label_rows(
+    session: requests.Session,
+    base_url: str,
+    config: ChatwootEndpointConfig,
+    logger: FilteringBoundLogger,
+    resumable_source_manager: ResumableSourceManager[ChatwootResumeConfig],
+) -> Iterator[list[dict[str, Any]]]:
+    """Page the contacts list once per label, filtered to that label, emitting one row per pair.
+
+    The `labels[]` filter on the contacts list costs one request per 15 tagged contacts, where the
+    per-contact /contacts/{id}/labels endpoint would cost one request per contact.
+    """
+    labels = _list_labels(session, base_url, logger)
+    label_ids = [label_id for label_id, _ in labels]
+
+    # If the bookmarked label is gone, start over from the first one — merge dedupes re-pulled
+    # rows on the primary key.
+    resume = resumable_source_manager.load_state() if resumable_source_manager.can_resume() else None
+    remaining = labels
+    resume_page: int | None = None
+    if resume is not None and resume.parent_id is not None and resume.parent_id in label_ids:
+        remaining = labels[label_ids.index(resume.parent_id) :]
+        resume_page = resume.page
+        logger.debug(f"Chatwoot: resuming contact_labels from label_id={resume.parent_id}, page={resume_page}")
+
+    for index, (label_id, title) in enumerate(remaining):
+        page = resume_page or 1
+        resume_page = None  # only the resumed-into label uses the saved page
+
+        if index > 0:
+            # Every row of the previous label is yielded, so this label is a safe place to resume
+            # from. A run of labels with no contacts would otherwise make many requests with no yield.
+            resumable_source_manager.save_state(ChatwootResumeConfig(parent_id=label_id, page=1))
+            resumable_source_manager.safe_point()
+
+        while page <= MAX_LIST_PAGES:
+            url = _build_url(base_url, config.path, {**config.params, "labels[]": title, "page": page})
+            items = _extract_items(_fetch_json(session, url, logger), config.data_path, url)
+            if not items:
+                break
+            rows = [
+                {"label_id": label_id, "label": title, "contact_id": item["id"]}
+                for item in items
+                if item.get("id") is not None
+            ]
+            page += 1
+            resumable_source_manager.save_state(ChatwootResumeConfig(parent_id=label_id, page=page))
+            if rows:
+                yield rows
+        else:
+            logger.warning(
+                f"Chatwoot: label {label_id} hit the {MAX_LIST_PAGES}-page contact cap; rows beyond it were skipped"
+            )
+
+
 def get_rows(
     host: str | None,
     account_id: str | int | None,
@@ -398,6 +669,7 @@ def get_rows(
     team_id: int,
     logger: FilteringBoundLogger,
     resumable_source_manager: ResumableSourceManager[ChatwootResumeConfig],
+    db_incremental_field_last_value: Any = None,
 ) -> Iterator[list[dict[str, Any]]]:
     config = CHATWOOT_ENDPOINTS[endpoint]
     _ensure_host_allowed(host, team_id)
@@ -415,6 +687,26 @@ def get_rows(
 
     if config.kind == "messages":
         yield from _get_message_rows(session, base_url, logger, resumable_source_manager)
+        return
+
+    if config.kind == "member_fanout":
+        yield from _get_member_rows(session, base_url, config, logger, resumable_source_manager)
+        return
+
+    if config.kind == "reporting_events":
+        yield from _get_reporting_event_rows(
+            session, base_url, config, logger, resumable_source_manager, db_incremental_field_last_value
+        )
+        return
+
+    if config.kind == "audit_logs":
+        yield from _get_audit_log_rows(
+            session, base_url, config, logger, resumable_source_manager, db_incremental_field_last_value
+        )
+        return
+
+    if config.kind == "contact_labels":
+        yield from _get_contact_label_rows(session, base_url, config, logger, resumable_source_manager)
         return
 
     resume = resumable_source_manager.load_state() if resumable_source_manager.can_resume() else None
@@ -712,6 +1004,7 @@ def chatwoot_source(
     logger: FilteringBoundLogger,
     resumable_source_manager: ResumableSourceManager[ChatwootResumeConfig],
     webhook_source_manager: Optional[WebhookSourceManager] = None,
+    db_incremental_field_last_value: Any = None,
 ) -> SourceResponse:
     config: ChatwootEndpointConfig = CHATWOOT_ENDPOINTS[endpoint]
 
@@ -733,13 +1026,14 @@ def chatwoot_source(
             team_id=team_id,
             logger=logger,
             resumable_source_manager=resumable_source_manager,
+            db_incremental_field_last_value=db_incremental_field_last_value,
         )
 
     return SourceResponse(
         name=endpoint,
         items=items,
         primary_keys=config.primary_keys,
-        sort_mode="asc",
+        sort_mode=config.sort_mode,
         partition_count=1,
         partition_size=1,
         partition_mode="datetime" if config.partition_key else None,

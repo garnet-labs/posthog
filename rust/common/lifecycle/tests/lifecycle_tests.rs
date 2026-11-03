@@ -2,7 +2,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use lifecycle::{ComponentOptions, LifecycleError, Manager};
+use lifecycle::{ComponentOptions, LifecycleError, Manager, PrestopAction};
 use tokio_util::sync::CancellationToken;
 
 // ---------------------------------------------------------------------------
@@ -1387,6 +1387,94 @@ async fn advisory_rejects_graceful_shutdown() {
     );
 }
 
+/// Advisory handle dropped during normal operation — the app keeps running.
+/// The existing stall tests only drop advisory handles after shutdown has
+/// begun, where any drop is treated as completion; this covers the drop that
+/// actually produces a Died event. A best-effort component that fails to
+/// build, or whose task exits early, must not take the process down with it.
+#[tokio::test]
+async fn advisory_handle_drop_during_normal_operation_does_not_trigger_shutdown() {
+    let mut manager = fast_poll_manager(50);
+    let std_handle = manager.register("worker", ComponentOptions::new());
+    let advisory_handle = manager.register("kafka-health", advisory_opts());
+    let guard = manager.monitor_background();
+
+    drop(advisory_handle);
+
+    // Several poll intervals, so a Died-driven cancel would have landed.
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(
+        !std_handle.is_shutting_down(),
+        "advisory handle drop must not initiate global shutdown"
+    );
+
+    std_handle.request_shutdown();
+    drop(std_handle);
+
+    let result = tokio::time::timeout(Duration::from_secs(10), guard.wait())
+        .await
+        .expect("timed out");
+    assert!(
+        result.is_ok(),
+        "advisory drop must not surface as a lifecycle error, got {result:?}"
+    );
+}
+
+/// A panic in the task owning an advisory handle unwinds and drops the handle
+/// during normal operation. This is the production shape of the case above:
+/// the warnings emitter's background task panicking must not shut capture down.
+#[tokio::test]
+async fn panic_in_advisory_task_does_not_trigger_shutdown() {
+    let mut manager = fast_poll_manager(50);
+    let std_handle = manager.register("worker", ComponentOptions::new());
+    let advisory_handle = manager.register("kafka-health", advisory_opts());
+    let guard = manager.monitor_background();
+
+    let panicked = tokio::spawn(async move {
+        advisory_handle.report_healthy();
+        panic!("boom");
+    })
+    .await;
+    assert!(panicked.is_err(), "task was expected to panic");
+
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(
+        !std_handle.is_shutting_down(),
+        "advisory task panic must not initiate global shutdown"
+    );
+
+    std_handle.request_shutdown();
+    drop(std_handle);
+
+    let result = tokio::time::timeout(Duration::from_secs(10), guard.wait())
+        .await
+        .expect("timed out");
+    assert!(result.is_ok(), "expected clean shutdown, got {result:?}");
+}
+
+/// Regression guard for the advisory exemption: a standard handle dropped
+/// during normal operation must still trigger shutdown even when an advisory
+/// component is registered alongside it. Catches an exemption predicate that
+/// matches too broadly.
+#[tokio::test]
+async fn standard_handle_drop_still_triggers_shutdown_when_advisory_registered() {
+    let mut manager = fast_poll_manager(50);
+    let std_handle = manager.register("worker", ComponentOptions::new());
+    let advisory_handle = manager.register("kafka-health", advisory_opts());
+    let guard = manager.monitor_background();
+
+    advisory_handle.report_healthy();
+    drop(std_handle);
+
+    let result = tokio::time::timeout(Duration::from_secs(10), guard.wait())
+        .await
+        .expect("timed out");
+    assert!(
+        matches!(&result, Err(LifecycleError::ComponentDied { tag }) if tag == "worker"),
+        "expected ComponentDied for the standard component, got {result:?}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Section 9: is_healthy() on non-liveness handles
 //
@@ -1790,4 +1878,81 @@ async fn later_phase_graceful_window_starts_at_its_phase() {
         late_finished.load(Ordering::SeqCst),
         "phase-1 component was timed out against a window measured from shutdown start"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Pre-stop file
+// ---------------------------------------------------------------------------
+
+/// By default the pre-stop file starts shutdown, the same as SIGTERM.
+#[tokio::test]
+async fn prestop_file_starts_shutdown_by_default() {
+    let prestop_dir = tempfile::tempdir().unwrap();
+    let prestop_path = prestop_dir.path().join("shutdown");
+    std::fs::write(&prestop_path, "").unwrap();
+    let mut manager = Manager::builder("test")
+        .with_trap_signals(false)
+        .with_prestop_path(&prestop_path)
+        .with_global_shutdown_timeout(Duration::from_secs(5))
+        .build();
+
+    let handle = manager.register("worker", ComponentOptions::new());
+    let readiness = manager.readiness_handler();
+    let guard = manager.monitor_background();
+
+    let comp = ComponentA { handle };
+    tokio::spawn(async move {
+        comp.process().await;
+    });
+
+    tokio::time::timeout(Duration::from_secs(10), guard.wait())
+        .await
+        .expect("pre-stop file did not start shutdown")
+        .unwrap();
+    assert_eq!(readiness.check().await.as_u16(), 503);
+}
+
+/// Under `PrestopAction::Drain` the pre-stop file fails readiness, and components
+/// keep serving. With no signal, shutdown starts once the drain reaches `max`.
+#[tokio::test]
+async fn prestop_drain_serves_until_max() {
+    let prestop_dir = tempfile::tempdir().unwrap();
+    let prestop_path = prestop_dir.path().join("shutdown");
+    std::fs::write(&prestop_path, "").unwrap();
+    let mut manager = Manager::builder("test")
+        .with_trap_signals(false)
+        .with_prestop_path(&prestop_path)
+        .with_prestop_action(PrestopAction::Drain {
+            max: Duration::from_secs(1),
+        })
+        .with_global_shutdown_timeout(Duration::from_secs(5))
+        .build();
+
+    let handle = manager.register("worker", ComponentOptions::new());
+    let readiness = manager.readiness_handler();
+    let guard = manager.monitor_background();
+
+    let comp = ComponentA {
+        handle: handle.clone(),
+    };
+    tokio::spawn(async move {
+        comp.process().await;
+    });
+
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while readiness.is_ready() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("pre-stop file did not start the drain");
+    assert!(
+        !handle.is_shutting_down(),
+        "a drain must not signal shutdown to components"
+    );
+
+    tokio::time::timeout(Duration::from_secs(10), guard.wait())
+        .await
+        .expect("the drain did not end at max")
+        .unwrap();
 }

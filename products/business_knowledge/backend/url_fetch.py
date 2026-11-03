@@ -22,8 +22,8 @@ from dataclasses import dataclass
 import requests
 import structlog
 
-from posthog.security.pinned_requests import PinnedIPAdapter
-from posthog.security.url_validation import validate_url_and_pin_ips
+from posthog.security.pinned_requests import PinnedIPAdapter, select_pinned_ip
+from posthog.security.url_validation import strip_userinfo, validate_url_and_pin_ips
 
 from .constants import URL_CONNECT_TIMEOUT, URL_MAX_BYTES, URL_MAX_REDIRECTS, URL_READ_TIMEOUT, URL_USER_AGENT
 
@@ -43,22 +43,6 @@ class FetchResult:
     final_url: str
 
 
-def strip_userinfo(url: str) -> str:
-    """
-    Remove `user:pass@` from authority. Userinfo in URLs is a known SSRF
-    smuggling vector (some libraries interpret it as the host when stricter
-    parsers don't).
-    """
-
-    parsed = urlparse.urlparse(url)
-    if parsed.username is None and parsed.password is None:
-        return url
-    netloc = parsed.hostname or ""
-    if parsed.port:
-        netloc = f"{netloc}:{parsed.port}"
-    return urlparse.urlunparse(parsed._replace(netloc=netloc))
-
-
 def normalize_url(raw: str) -> str:
     """
     Canonicalize a user-submitted URL before validating or storing it.
@@ -69,6 +53,10 @@ def normalize_url(raw: str) -> str:
     """
 
     raw = raw.strip()
+    # urlparse silently drops tab and newline characters and keeps the text after them,
+    # so reject control characters before parsing.
+    if any(ord(char) < 0x20 or ord(char) == 0x7F for char in raw):
+        raise UrlFetchError("Invalid URL.")
     parsed = urlparse.urlparse(raw)
     if not parsed.scheme or not parsed.netloc:
         raise UrlFetchError("Invalid URL.")
@@ -142,20 +130,22 @@ def _ssrf_safe_get(
     session.mount("https://", adapter)
     try:
         for _hop in range(URL_MAX_REDIRECTS + 1):
-            allowed, reason, pinned_ips = validate_url_and_pin_ips(current)
-            if not allowed:
+            verdict = validate_url_and_pin_ips(current)
+            if not verdict.allowed:
                 logger.warning(
                     "business_knowledge.url_fetch.ssrf_blocked",
                     url=current,
-                    reason=reason,
+                    reason=verdict.reason,
                 )
                 raise UrlFetchError("URL is not reachable from this environment.")
 
-            # Pin the first validated IP so requests connects to it directly
+            # select_pinned_ip prefers IPv4. An arbitrary member of pinned_ips can be
+            # an AAAA record, and an IPv4-only worker then fails the connection.
             parsed = urlparse.urlparse(current)
             hostname = (parsed.hostname or "").lower()
-            if pinned_ips:
-                adapter.pin(hostname, next(iter(pinned_ips)))
+            chosen_ip = select_pinned_ip(verdict.pinned_ips)
+            if chosen_ip is not None:
+                adapter.pin(hostname, chosen_ip)
 
             merged_headers = dict(headers)
             if etag:

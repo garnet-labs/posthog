@@ -3,7 +3,7 @@ from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import AbstractContextManager
 from datetime import date, datetime, timedelta, tzinfo
-from typing import Any, Optional, Union
+from typing import Any, Optional, Union, cast
 
 from django.conf import settings
 from django.core.cache import cache
@@ -18,11 +18,14 @@ from posthog.schema import (
     EventsNode,
     FunnelsDataWarehouseNode,
     GroupNode,
+    HogQLQueryModifiers,
     LifecycleDataWarehouseNode,
 )
 
 from posthog.hogql import ast
 from posthog.hogql.ast import SelectQuery
+from posthog.hogql.context import HogQLContext
+from posthog.hogql.modifiers import create_default_modifiers_for_team
 from posthog.hogql.property import action_to_expr
 from posthog.hogql.query import execute_hogql_query
 
@@ -30,6 +33,7 @@ from posthog.clickhouse.query_tagging import Feature, Product, get_query_tags, t
 from posthog.hogql_queries.utils.query_date_range import QueryDateRange
 from posthog.models import Team, User
 from posthog.models.event import DEFAULT_EARLIEST_TIME_DELTA
+from posthog.models.event.new_events_schema import get_events_route, use_new_events_schema
 from posthog.models.team import WeekStartDay
 from posthog.utils import get_safe_cache
 
@@ -111,26 +115,39 @@ def _get_earliest_timestamp_cache_key(
     :param node: The series node (optional). If None, returns team-level global cache key.
     :return: A string representing the cache key.
     """
-    if node is None:
-        # Global team-level earliest timestamp (for "all time" date filter)
-        # Use the same cache key as EventsNode(event=None) since they return the same result
-        return f"earliest_timestamp_event_{team.pk}"
-    elif isinstance(node, DataWarehouseNode):
-        return f"earliest_timestamp_data_warehouse_{team.pk}_{node.table_name}_{node.timestamp_field}"
-    elif isinstance(node, FunnelsDataWarehouseNode):
-        return f"earliest_timestamp_funnels_data_warehouse_{team.pk}_{node.table_name}_{node.timestamp_field}"
-    elif isinstance(node, LifecycleDataWarehouseNode):
-        return f"earliest_timestamp_lifecycle_data_warehouse_{team.pk}_{node.table_name}_{node.timestamp_field}"
-    elif isinstance(node, ActionsNode):
-        return f"earliest_timestamp_action_{team.pk}_{node.id}"
-    elif isinstance(node, EventsNode):
-        # node.event can be None, meaning "any event" (no event filter in WHERE clause)
-        # This is the same as the global team earliest
-        if node.event is not None:
-            return f"earliest_timestamp_event_{team.pk}_{node.event}"
-        return f"earliest_timestamp_event_{team.pk}"
-    else:
-        raise ValueError(f"Unsupported node type: {type(node)}")
+    match node:
+        case None:
+            # Global team-level earliest timestamp (for "all time" date filter)
+            # Use the same cache key as EventsNode(event=None) since they return the same result
+            return f"earliest_timestamp_event_{team.pk}"
+        case DataWarehouseNode(table_name=table_name, timestamp_field=timestamp_field):
+            return f"earliest_timestamp_data_warehouse_{team.pk}_{table_name}_{timestamp_field}"
+        case FunnelsDataWarehouseNode(table_name=table_name, timestamp_field=timestamp_field):
+            return f"earliest_timestamp_funnels_data_warehouse_{team.pk}_{table_name}_{timestamp_field}"
+        case LifecycleDataWarehouseNode(table_name=table_name, timestamp_field=timestamp_field):
+            return f"earliest_timestamp_lifecycle_data_warehouse_{team.pk}_{table_name}_{timestamp_field}"
+        case ActionsNode(id=action_id):
+            return f"earliest_timestamp_action_{team.pk}_{action_id}"
+        case EventsNode(event=None):
+            # node.event can be None, meaning "any event" (no event filter in WHERE clause)
+            # This is the same as the global team earliest
+            return f"earliest_timestamp_event_{team.pk}"
+        case EventsNode(event=event):
+            return f"earliest_timestamp_event_{team.pk}_{event}"
+        case _:
+            raise ValueError(f"Unsupported node type: {type(node)}")
+
+
+def _events_route_modifiers(team: Team) -> HogQLQueryModifiers:
+    return create_default_modifiers_for_team(team, get_events_route())
+
+
+def _events_route_cache_key(team: Team, modifiers: HogQLQueryModifiers, cache_key: str) -> str:
+    # Each events table holds its own copy of the events, so one table's result must not answer for the other.
+    # The table goes in front, because legacy keys end in event names and table names that a suffix could collide with.
+    if not use_new_events_schema(team.pk, modifiers):
+        return cache_key
+    return f"events_json:{cache_key}"
 
 
 def _coerce_to_datetime(value: Any, tz: tzinfo) -> datetime:
@@ -171,7 +188,8 @@ def _earliest_timestamp_query_tags() -> AbstractContextManager[None]:
     marketing analytics keep their own attribution.
     """
     current = get_query_tags()
-    overrides: dict[str, Any] = {}
+    # The query-scan trigger uses this tag to leave the lookup out of the run it judges.
+    overrides: dict[str, Any] = {"lookup": "earliest_timestamp"}
     if current.product is None:
         overrides["product"] = Product.PRODUCT_ANALYTICS
     if current.feature is None:
@@ -194,7 +212,8 @@ def _get_earliest_timestamp_from_node(
     """
     # The cache is team-wide (keyed by team + node, not user): the value is table metadata, and row
     # access is still enforced on the insight's main query, so per-user entries aren't worth the misses.
-    cache_key = _get_earliest_timestamp_cache_key(team, node)
+    modifiers = _events_route_modifiers(team)
+    cache_key = _events_route_cache_key(team, modifiers, _get_earliest_timestamp_cache_key(team, node))
     cached_result = get_safe_cache(cache_key)
     if cached_result is not None:
         # Coerce on read too: entries cached before the coercion fix shipped hold a raw
@@ -213,7 +232,7 @@ def _get_earliest_timestamp_from_node(
 
     earliest_timestamp = EARLIEST_EVENT_TIMESTAMP
     with _earliest_timestamp_query_tags():
-        result = execute_hogql_query(query=query, team=team, user=user)
+        result = execute_hogql_query(query=query, team=team, user=user, modifiers=modifiers)
     if result and len(result.results) > 0 and len(result.results[0]) > 0 and result.results[0][0] is not None:
         earliest_timestamp = _coerce_to_datetime(result.results[0][0], team.timezone_info)
 
@@ -250,7 +269,6 @@ def get_earliest_timestamp_from_series(
         else:
             nodes.append(node)
 
-    timestamps = []
     if len(nodes) == 1 or settings.IN_UNIT_TESTING:
         timestamps = [_get_earliest_timestamp_from_node(team, node, user) for node in nodes]
 
@@ -262,7 +280,7 @@ def get_earliest_timestamp_from_series(
                 executor.submit(contextvars.copy_context().run, _get_earliest_timestamp_from_node, team, node, user)
                 for node in nodes
             ]
-            timestamps = [future.result() for future in futures]
+            timestamps = [cast(datetime, future.result()) for future in futures]
 
     return min(timestamps)
 
@@ -275,7 +293,8 @@ def get_earliest_timestamp_unfiltered(team: Team) -> datetime:
     legacy raw-SQL earliest-timestamp helper: floored at 2015-01-01, falling back to
     now - DEFAULT_EARLIEST_TIME_DELTA when the team has no events.
     """
-    cache_key = f"earliest_timestamp_unfiltered_{team.pk}"
+    modifiers = _events_route_modifiers(team)
+    cache_key = _events_route_cache_key(team, modifiers, f"earliest_timestamp_unfiltered_{team.pk}")
     cached_result = get_safe_cache(cache_key)
     if cached_result is not None:
         return _coerce_to_datetime(cached_result, team.timezone_info)
@@ -293,7 +312,13 @@ def get_earliest_timestamp_unfiltered(team: Team) -> datetime:
     )
 
     with _earliest_timestamp_query_tags():
-        result = execute_hogql_query(query=query, team=team)
+        result = execute_hogql_query(
+            query=query,
+            team=team,
+            # The read has no upper bound and no filter, so the first row in sort key order is the answer.
+            context=HogQLContext(team_id=team.pk, order_events_reads_by_sort_key=True),
+            modifiers=modifiers,
+        )
     if result and len(result.results) > 0 and len(result.results[0]) > 0 and result.results[0][0] is not None:
         earliest_timestamp = _coerce_to_datetime(result.results[0][0], team.timezone_info)
         # Only cache real results: a team with no events yet should keep re-checking rather than

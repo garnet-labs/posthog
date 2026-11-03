@@ -1,42 +1,70 @@
 """Tests for the v2 eval report agent output tools (set_title, add_section, add_citation)."""
 
+import re
 import json
+import time
 import datetime as dt
-from typing import NotRequired, TypedDict
+from typing import Any, NotRequired, TypedDict
 
 from posthog.test.base import BaseTest
-from unittest.mock import MagicMock, patch
+from unittest.mock import (
+    MagicMock,
+    call as mock_call,
+    patch,
+)
 
 from django.test import SimpleTestCase
 from django.utils import timezone
 
+from clickhouse_driver.errors import NetworkError, SocketTimeoutError
 from parameterized import parameterized
 
+from posthog.hogql import ast
+
+from posthog.exceptions import (
+    ClickHouseAtCapacity,
+    ClickHouseClusterMemoryLimitExceeded,
+    ClickHouseQueryMemoryLimitExceeded,
+    ClickHouseQueryTimeOut,
+)
 from posthog.temporal.ai_observability.eval_reports.report_agent.schema import (
     MAX_REPORT_SECTIONS,
     Citation,
     EvalReportContent,
     ReportSection,
 )
+from posthog.temporal.ai_observability.eval_reports.report_agent.state import REPORT_RUN_HANDLE_KEY
 from posthog.temporal.ai_observability.eval_reports.report_agent.tools import (
+    _MAX_EVAL_RESULTS_CHARS,
+    _SESSION_TRACES_SQL,
     _UUID_RE,
     _ch_ts,
+    _dead_backticked_ids,
+    _execute_ch_query_with_retry,
+    _fetch_overlapping_backfills,
+    _is_retriable_ch_error,
+    _label_generation_evals,
     _widened_ts_window,
     add_citation,
     add_section,
     get_eval_report_tools,
     get_report_run,
+    get_result_distribution_over_time,
+    get_session_detail,
     get_summary_metrics,
     get_trace_detail,
     list_all_eval_results,
     list_recent_report_runs,
     sample_eval_results,
+    sample_session_details,
     sample_trace_details,
     set_title,
+    strip_dead_backticked_ids,
 )
 
 _VALID_GEN_ID = "12345678-1234-1234-1234-123456789abc"
 _VALID_TRACE_ID = "abcdefab-cdef-abcd-efab-cdefabcdefab"
+_VALID_SESSION_ID = "fedcbafe-dcba-fedc-bafe-dcbafedcbafe"
 
 # LangChain @tool returns StructuredTool which has .func, but mypy types it as BaseTool
 _set_title_fn = set_title.func  # type: ignore[attr-defined]
@@ -45,15 +73,26 @@ _add_citation_fn = add_citation.func  # type: ignore[attr-defined]
 _list_recent_report_runs_fn = list_recent_report_runs.func  # type: ignore[attr-defined]
 _get_report_run_fn = get_report_run.func  # type: ignore[attr-defined]
 _get_summary_metrics_fn = get_summary_metrics.func  # type: ignore[attr-defined]
+_get_result_distribution_over_time_fn = get_result_distribution_over_time.func  # type: ignore[attr-defined]
 _list_all_eval_results_fn = list_all_eval_results.func  # type: ignore[attr-defined]
 _sample_eval_results_fn = sample_eval_results.func  # type: ignore[attr-defined]
 _sample_trace_details_fn = sample_trace_details.func  # type: ignore[attr-defined]
 _get_trace_detail_fn = get_trace_detail.func  # type: ignore[attr-defined]
+_sample_session_details_fn = sample_session_details.func  # type: ignore[attr-defined]
+_get_session_detail_fn = get_session_detail.func  # type: ignore[attr-defined]
+
+
+def _per_query_memory_limit_error() -> ClickHouseQueryMemoryLimitExceeded:
+    error = ClickHouseQueryMemoryLimitExceeded()
+    error.is_per_query_limit = True
+    return error
 
 
 class _ReportToolState(TypedDict):
     report: EvalReportContent
     trace_id_allowlist: list[str]
+    session_id_allowlist: list[str]
+    report_run_handles: NotRequired[dict[str, str]]
     evaluation_target: NotRequired[str]
     team_id: NotRequired[int]
     evaluation_id: NotRequired[str]
@@ -63,23 +102,32 @@ class _ReportToolState(TypedDict):
 
 
 def _state_with_empty_report(*, evaluation_target: str | None = None) -> _ReportToolState:
-    state: _ReportToolState = {"report": EvalReportContent(), "trace_id_allowlist": []}
+    state: _ReportToolState = {
+        "report": EvalReportContent(),
+        "trace_id_allowlist": [],
+        "session_id_allowlist": [],
+    }
     if evaluation_target is not None:
         state["evaluation_target"] = evaluation_target
     return state
 
 
-def _trace_report_tool_state() -> _ReportToolState:
+def _aggregate_report_tool_state(evaluation_target: str = "trace") -> _ReportToolState:
     return {
         "report": EvalReportContent(),
         "trace_id_allowlist": [],
-        "evaluation_target": "trace",
+        "session_id_allowlist": [],
+        "evaluation_target": evaluation_target,
         "team_id": 7,
         "evaluation_id": "eval-id",
         "output_type": "boolean",
         "period_start": "2026-04-08T14:00:00+00:00",
         "period_end": "2026-04-08T15:00:00+00:00",
     }
+
+
+def _trace_report_tool_state() -> _ReportToolState:
+    return _aggregate_report_tool_state("trace")
 
 
 class TestChTs(SimpleTestCase):
@@ -110,29 +158,38 @@ class TestWidenedTsWindow(SimpleTestCase):
             "period_start": "2026-04-08T14:00:00+00:00",
             "period_end": "2026-04-08T15:00:00+00:00",
         }
-        ts_start, ts_end = _widened_ts_window(state)
-        self.assertEqual(ts_start, dt.datetime(2026, 4, 1, 14, 0, tzinfo=dt.UTC))
-        self.assertEqual(ts_end, dt.datetime(2026, 4, 9, 15, 0, tzinfo=dt.UTC))
+        window = _widened_ts_window(state)
+        self.assertEqual(window.ts_start, dt.datetime(2026, 4, 1, 14, 0, tzinfo=dt.UTC))
+        self.assertEqual(window.ts_end, dt.datetime(2026, 4, 9, 15, 0, tzinfo=dt.UTC))
 
     def test_falls_back_to_sentinels_on_missing_keys(self):
-        ts_start, ts_end = _widened_ts_window({})
+        window = _widened_ts_window({})
         # Wide sentinel bounds so a bad state doesn't prevent partition pruning
-        self.assertEqual(ts_start.year, 2020)
-        self.assertEqual(ts_end.year, 2099)
+        self.assertEqual(window.ts_start.year, 2020)
+        self.assertEqual(window.ts_end.year, 2099)
 
     def test_falls_back_on_malformed_timestamps(self):
         state = {"period_start": "not-a-timestamp", "period_end": "also-bad"}
-        ts_start, ts_end = _widened_ts_window(state)
-        self.assertEqual(ts_start.year, 2020)
-        self.assertEqual(ts_end.year, 2099)
+        window = _widened_ts_window(state)
+        self.assertEqual(window.ts_start.year, 2020)
+        self.assertEqual(window.ts_end.year, 2099)
 
 
 class TestSummaryMetrics(SimpleTestCase):
+    def setUp(self) -> None:
+        backfills_patcher = patch(
+            "posthog.temporal.ai_observability.eval_reports.report_agent.tools._fetch_overlapping_backfills",
+            return_value=[],
+        )
+        self.mock_backfills = backfills_patcher.start()
+        self.addCleanup(backfills_patcher.stop)
+
     @patch("posthog.temporal.ai_observability.eval_reports.report_agent.tools._execute_hogql")
     def test_boolean_keeps_pass_rate_separate_from_outcome_distribution(self, mock_execute_hogql):
         mock_execute_hogql.side_effect = [
             [[80, 18, 2, 100]],
             [[7, 2, 1, 10]],
+            [],
         ]
         state = {
             "team_id": 1,
@@ -159,6 +216,7 @@ class TestSummaryMetrics(SimpleTestCase):
         mock_execute_hogql.side_effect = [
             [[0, 0, 4, 4]],
             [[0, 0, 3, 3]],
+            [],
         ]
         state = {
             "team_id": 1,
@@ -179,6 +237,7 @@ class TestSummaryMetrics(SimpleTestCase):
         mock_execute_hogql.side_effect = [
             [[2, 1, 1, 4]],
             [[1, 1, 0, 2]],
+            [],
         ]
         state = {
             "team_id": 1,
@@ -203,16 +262,130 @@ class TestSummaryMetrics(SimpleTestCase):
         current_query = mock_execute_hogql.call_args_list[0].args[1]
         self.assertIn("properties.$ai_sentiment_label = 'positive'", current_query)
         self.assertIn("properties.$ai_evaluation_result_type = 'sentiment'", current_query)
-        self.assertNotIn("properties.$ai_evaluation_result = true", current_query)
+        self.assertNotIn("properties.$ai_evaluation_result = 'true'", current_query)
+
+    @patch("posthog.temporal.ai_observability.eval_reports.report_agent.tools._execute_hogql")
+    def test_detector_polarity_counts_a_false_result_as_the_pass(self, mock_execute_hogql):
+        # 18 clean and 80 flagged results: a detector reports the 80 flagged ones as fails.
+        mock_execute_hogql.side_effect = [
+            [[18, 80, 2, 100]],
+            [[2, 7, 1, 10]],
+            [],
+        ]
+        state = {
+            "team_id": 1,
+            "evaluation_id": "eval-id",
+            "output_type": "boolean",
+            "true_is_failure": True,
+            "period_start": "2026-04-08T14:00:00+00:00",
+            "period_end": "2026-04-08T15:00:00+00:00",
+            "previous_period_start": "2026-04-08T13:00:00+00:00",
+        }
+
+        result = json.loads(_get_summary_metrics_fn(state=state))
+
+        self.assertEqual(result["current_period"]["result_counts"], {"pass": 18, "fail": 80, "na": 2})
+        self.assertEqual(result["current_period"]["pass_rate"], 18.37)
+        pass_column = re.search(r"countIf\((.*?)\) as pass_count", mock_execute_hogql.call_args_list[0].args[1], re.S)
+        assert pass_column is not None
+        self.assertIn("properties.$ai_evaluation_result = 'false'", pass_column.group(1))
+
+    @patch("posthog.temporal.ai_observability.eval_reports.report_agent.tools._execute_hogql")
+    def test_state_without_polarity_counts_a_true_result_as_the_pass(self, mock_execute_hogql):
+        # A report started before the field existed replays with no polarity key at all.
+        mock_execute_hogql.side_effect = [
+            [[80, 18, 2, 100]],
+            [[7, 2, 1, 10]],
+            [],
+        ]
+        state = {
+            "team_id": 1,
+            "evaluation_id": "eval-id",
+            "output_type": "boolean",
+            "period_start": "2026-04-08T14:00:00+00:00",
+            "period_end": "2026-04-08T15:00:00+00:00",
+            "previous_period_start": "2026-04-08T13:00:00+00:00",
+        }
+
+        result = json.loads(_get_summary_metrics_fn(state=state))
+
+        self.assertEqual(result["current_period"]["result_counts"], {"pass": 80, "fail": 18, "na": 2})
+        pass_column = re.search(r"countIf\((.*?)\) as pass_count", mock_execute_hogql.call_args_list[0].args[1], re.S)
+        assert pass_column is not None
+        self.assertIn("properties.$ai_evaluation_result = 'true'", pass_column.group(1))
+
+    @patch("posthog.temporal.ai_observability.eval_reports.report_agent.tools._execute_hogql")
+    def test_splits_each_period_by_judge_model_and_reports_overlapping_backfills(self, mock_execute_hogql):
+        mock_execute_hogql.side_effect = [
+            [[0, 0, 0, 300]],
+            [[0, 0, 0, 100]],
+            [
+                ["previous_period", "judge-a", "2026-04-08 13:00:00", "2026-04-08 13:59:00", 99, 1, 0, 100],
+                ["current_period", "judge-a", "2026-04-08 14:00:00", "2026-04-08 14:29:00", 99, 1, 0, 100],
+                ["current_period", "judge-b", "2026-04-08 14:30:00", "2026-04-08 14:59:00", 96, 4, 0, 100],
+                ["current_period", "", "2026-04-08 14:00:00", "2026-04-08 14:59:00", 0, 0, 100, 100],
+            ],
+        ]
+        backfill = {
+            "status": "running",
+            "window_start": "2026-04-01T00:00:00+00:00",
+            "window_end": "2026-04-08T14:00:00+00:00",
+            "created_at": "2026-04-08T14:05:00+00:00",
+            "finished_at": None,
+        }
+        self.mock_backfills.return_value = [backfill]
+        state = {
+            "team_id": 1,
+            "evaluation_id": "eval-id",
+            "output_type": "boolean",
+            "true_is_failure": True,
+            "period_start": "2026-04-08T14:00:00+00:00",
+            "period_end": "2026-04-08T15:00:00+00:00",
+            "previous_period_start": "2026-04-08T13:00:00+00:00",
+        }
+
+        result = json.loads(_get_summary_metrics_fn(state=state))
+
+        current_models = result["current_period"]["judge_models"]
+        self.assertEqual([model["model"] for model in current_models], ["judge-a", "judge-b"])
+        self.assertEqual(current_models[1]["first_run_at"], "2026-04-08 14:30:00")
+        self.assertEqual(current_models[0]["result_rates"]["fail"], 1.0)
+        self.assertEqual(current_models[1]["result_rates"]["fail"], 4.0)
+        self.assertEqual([model["model"] for model in result["previous_period"]["judge_models"]], ["judge-a"])
+        self.assertEqual(result["backfills"], [backfill])
+
+    @patch("posthog.temporal.ai_observability.eval_reports.report_agent.tools._execute_hogql")
+    def test_distribution_reports_runs_per_judge_model_without_unmodeled_results(self, mock_execute_hogql):
+        mock_execute_hogql.return_value = [
+            ["2026-04-08 14:00:00", {"": 5, "judge-a": 10, "judge-b": 10}, 15, 5, 5, 25],
+            ["2026-04-08 15:00:00", {"judge-b": 10}, 7, 3, 0, 10],
+            ["2026-04-08 16:00:00", {"": 4}, 0, 0, 4, 4],
+        ]
+        state = {
+            "team_id": 1,
+            "evaluation_id": "eval-id",
+            "output_type": "boolean",
+            "period_start": "2026-04-08T14:00:00+00:00",
+            "period_end": "2026-04-08T16:00:00+00:00",
+        }
+
+        result = json.loads(_get_result_distribution_over_time_fn(state=state))
+
+        self.assertEqual(len(result), 3)
+        self.assertEqual(result[0]["total_runs"], 25)
+        self.assertEqual(result[0]["result_counts"], {"pass": 15, "fail": 5, "na": 5})
+        self.assertEqual(result[0]["judge_model_runs"], {"judge-a": 10, "judge-b": 10})
+        self.assertEqual(result[1]["judge_model_runs"], {"judge-b": 10})
+        self.assertNotIn("judge_model_runs", result[2])
 
 
 class TestTargetAwareEvalResults(SimpleTestCase):
-    def _state(self, evaluation_target: str) -> dict:
+    def _state(self, evaluation_target: str, output_type: str = "boolean") -> dict:
         return {
             "team_id": 1,
             "evaluation_id": "eval-id",
             "evaluation_target": evaluation_target,
-            "output_type": "boolean",
+            "output_type": output_type,
             "period_start": "2026-04-08T14:00:00+00:00",
             "period_end": "2026-04-08T15:00:00+00:00",
             "trace_id_allowlist": [],
@@ -227,8 +400,8 @@ class TestTargetAwareEvalResults(SimpleTestCase):
 
         generation_state = self._state("generation")
         trace_state = self._state("trace")
-        generation_result = json.loads(_sample_eval_results_fn(state=generation_state))
-        trace_result = json.loads(_sample_eval_results_fn(state=trace_state))
+        generation_result = json.loads(_sample_eval_results_fn(state=generation_state))["results"]
+        trace_result = json.loads(_sample_eval_results_fn(state=trace_state))["results"]
 
         self.assertEqual(generation_result[0]["generation_id"], _VALID_GEN_ID)
         self.assertNotIn("trace_id", generation_result[0])
@@ -260,6 +433,109 @@ class TestTargetAwareEvalResults(SimpleTestCase):
         query = mock_execute_hogql.call_args_list[1].args[1]
         self.assertIn("properties.$ai_target_id", query)
         self.assertIn("properties.$ai_target_event_id", query)
+
+    @patch("posthog.temporal.ai_observability.eval_reports.report_agent.tools._execute_hogql")
+    def test_sentiment_list_omits_classifier_reasoning(self, mock_execute_hogql):
+        mock_execute_hogql.side_effect = [
+            [[1]],
+            [[_VALID_GEN_ID, "negative", None, 0.9123456789, "identical classifier reasoning"]],
+        ]
+
+        result = _list_all_eval_results_fn(state=self._state("generation", "sentiment"))
+
+        self.assertIn(f"negative (0.91) | {_VALID_GEN_ID}", result)
+        self.assertNotIn("classifier reasoning", result)
+
+    @patch("posthog.temporal.ai_observability.eval_reports.report_agent.tools._execute_hogql")
+    def test_numeric_list_preserves_small_scores(self, mock_execute_hogql):
+        mock_execute_hogql.side_effect = [[[1]], [[_VALID_GEN_ID, 0.00014, True, 0.00014, "cost"]]]
+        state = self._state("generation", "numeric")
+        state["output_config"] = {"passing_rule": {"operator": "lte", "threshold": 0.001}}
+
+        result = _list_all_eval_results_fn(state=state)
+
+        self.assertIn(f"pass (0.00014) | {_VALID_GEN_ID}", result)
+
+    @patch("posthog.temporal.ai_observability.eval_reports.report_agent.tools._execute_hogql")
+    def test_sentiment_sample_orders_by_score_and_omits_reasoning(self, mock_execute_hogql):
+        mock_execute_hogql.return_value = [[_VALID_GEN_ID, "negative", "identical classifier reasoning", None, 0.91]]
+
+        result = json.loads(
+            _sample_eval_results_fn(
+                state=self._state("generation", "sentiment"),
+                outcome="negative",
+                order_by="score",
+            )
+        )
+
+        self.assertEqual(
+            result,
+            {
+                "results": [{"generation_id": _VALID_GEN_ID, "outcome": "negative", "score": 0.91}],
+                "truncated": False,
+            },
+        )
+        self.assertIn("ORDER BY score DESC, timestamp DESC", mock_execute_hogql.call_args.args[1])
+
+    @parameterized.expand(
+        [(tool_name, size) for tool_name in ("list", "sample") for size in ("empty", "small", "large")]
+    )
+    @patch("posthog.temporal.ai_observability.eval_reports.report_agent.tools._execute_hogql")
+    def test_category_results_fit_response_budget_without_partial_categories(
+        self, tool_name: str, size: str, mock_execute_hogql: MagicMock
+    ) -> None:
+        categories = [f"category_{i:03d}_" + "x" * 115 for i in range(100)] if size == "large" else ["ok"]
+        count = {"empty": 0, "small": 3, "large": 500}[size]
+        state = self._state("trace", "categorical")
+        state["output_config"] = {
+            "selection_mode": "multiple",
+            "options": [{"key": key, "label": key} for key in categories],
+            "passing_rule": {"categories": categories},
+        }
+        ids = [f"trace-{i}" for i in range(count)]
+        if tool_name == "list":
+            mock_execute_hogql.side_effect = [
+                [[count]],
+                [[target_id, categories, True, None, ""] for target_id in ids],
+            ]
+            response = _list_all_eval_results_fn(state=state)
+            header, *rows = response.splitlines()
+            self.assertIn(f"Total: {count} results", header)
+            for row in rows:
+                self.assertIn(f"pass ({json.dumps(categories)})", row)
+            self.assertEqual("response size limit" in header, size == "large")
+        else:
+            mock_execute_hogql.return_value = [[target_id, categories, "", True, None] for target_id in ids]
+            response = _sample_eval_results_fn(state=state, limit=500)
+            result = json.loads(response)
+            rows = result["results"]
+            self.assertEqual(result["truncated"], size == "large")
+            for row in rows:
+                self.assertEqual(row["categories"], categories)
+                self.assertEqual(row["outcome"], "pass")
+            if size == "large":
+                self.assertIn("response size limit", result["notice"])
+        self.assertLessEqual(len(response), _MAX_EVAL_RESULTS_CHARS)
+        self.assertEqual(state["trace_id_allowlist"], ids[: len(rows)])
+        if size == "large":
+            self.assertGreater(len(rows), 0)
+            self.assertLess(len(rows), count)
+        else:
+            self.assertEqual(len(rows), count)
+
+    @patch("posthog.temporal.ai_observability.eval_reports.report_agent.tools._execute_hogql")
+    def test_sample_reports_when_one_result_exceeds_the_budget(self, mock_execute_hogql: MagicMock) -> None:
+        mock_execute_hogql.return_value = [["trace-large", True, "x" * _MAX_EVAL_RESULTS_CHARS, True, None]]
+        state = self._state("trace")
+
+        response = _sample_eval_results_fn(state=state)
+        result = json.loads(response)
+
+        self.assertEqual(result["results"], [])
+        self.assertTrue(result["truncated"])
+        self.assertIn("response size limit", result["notice"])
+        self.assertLessEqual(len(response), _MAX_EVAL_RESULTS_CHARS)
+        self.assertEqual(state["trace_id_allowlist"], [])
 
 
 class TestTraceDetailTools(SimpleTestCase):
@@ -347,15 +623,114 @@ class TestTraceDetailTools(SimpleTestCase):
         mock_fetch.assert_not_called()
         mock_execute_hogql.assert_not_called()
 
-    def test_target_specific_tool_sets_do_not_expose_irrelevant_detail_tools(self):
-        generation_tools = {tool.name for tool in get_eval_report_tools("generation")}
-        trace_tools = {tool.name for tool in get_eval_report_tools("trace")}
+    def test_target_and_output_specific_tool_sets_do_not_expose_irrelevant_tools(self):
+        generation_tools = {tool.name for tool in get_eval_report_tools("generation", "boolean")}
+        trace_tools = {tool.name for tool in get_eval_report_tools("trace", "boolean")}
+        session_tools = {tool.name for tool in get_eval_report_tools("session", "boolean")}
+        sentiment_tools = {tool.name for tool in get_eval_report_tools("generation", "sentiment")}
 
         self.assertIn("sample_generation_details", generation_tools)
         self.assertNotIn("sample_trace_details", generation_tools)
         self.assertIn("sample_trace_details", trace_tools)
         self.assertIn("get_trace_detail", trace_tools)
         self.assertNotIn("sample_generation_details", trace_tools)
+        self.assertIn("sample_session_details", session_tools)
+        self.assertIn("get_session_detail", session_tools)
+        # A session is read through its traces, so the trace deep-dive comes along.
+        self.assertIn("get_trace_detail", session_tools)
+        self.assertNotIn("sample_generation_details", session_tools)
+        self.assertNotIn("sample_session_details", trace_tools)
+        self.assertIn("get_top_outcome_reasons", generation_tools)
+        self.assertNotIn("get_top_outcome_reasons", sentiment_tools)
+
+
+class TestSessionTracesQueryFallback(SimpleTestCase):
+    def test_placeholder_names_survive_the_events_table_rewrite(self) -> None:
+        """The rewriter descends into placeholders, so a placeholder named after an ai_events
+        column is rewritten into a column reference and substitution then fails — which only
+        shows up on the events fallback, the path every other session test mocks out."""
+        from posthog.hogql.parser import parse_select
+        from posthog.hogql.visitor import TraversingVisitor
+
+        from posthog.hogql_queries.ai.ai_column_rewriter import rewrite_query_for_events_table
+
+        names: list[str] = []
+
+        class _CollectPlaceholders(TraversingVisitor):
+            def visit_placeholder(self, node: ast.Placeholder) -> None:
+                assert isinstance(node.expr, ast.Field)
+                names.append(".".join(str(part) for part in node.expr.chain))
+
+        _CollectPlaceholders().visit(rewrite_query_for_events_table(parse_select(_SESSION_TRACES_SQL)))
+
+        self.assertEqual(sorted(names), ["limit", "target_session_id", "ts_end", "ts_start"])
+
+
+class TestSessionDetailTools(SimpleTestCase):
+    def _state(self) -> _ReportToolState:
+        return _aggregate_report_tool_state("session")
+
+    def _allowlisted_state(
+        self, mock_execute_hogql: MagicMock, session_id: str = _VALID_SESSION_ID
+    ) -> _ReportToolState:
+        state = self._state()
+        mock_execute_hogql.return_value = [[session_id, True, "matched", True, None]]
+        _sample_eval_results_fn(state=state)
+        mock_execute_hogql.reset_mock()
+        return state
+
+    @patch("posthog.temporal.ai_observability.eval_reports.report_agent.tools._execute_hogql")
+    def test_evaluation_results_fill_the_session_allowlist_not_the_trace_one(
+        self, mock_execute_hogql: MagicMock
+    ) -> None:
+        state = self._allowlisted_state(mock_execute_hogql, "customer/session:42")
+
+        self.assertEqual(state["session_id_allowlist"], ["customer/session:42"])
+        self.assertEqual(state["trace_id_allowlist"], [])
+
+    @patch("posthog.temporal.ai_observability.eval_reports.report_agent.tools._execute_hogql_via_ai_events")
+    def test_detail_rejects_session_no_evaluation_query_returned(self, mock_ai_events: MagicMock) -> None:
+        result = json.loads(_get_session_detail_fn(state=self._state(), session_id=_VALID_SESSION_ID))
+
+        self.assertIn("not available", result["error"])
+        mock_ai_events.assert_not_called()
+
+    @patch("posthog.models.Team.objects.get")
+    @patch("posthog.temporal.ai_observability.eval_reports.report_agent.tools._execute_hogql_via_ai_events")
+    @patch("posthog.temporal.ai_observability.eval_reports.report_agent.tools._execute_hogql")
+    def test_detail_maps_traces_and_unlocks_them_for_the_trace_tools(
+        self, mock_execute_hogql: MagicMock, mock_ai_events: MagicMock, _mock_get_team: MagicMock
+    ) -> None:
+        state = self._allowlisted_state(mock_execute_hogql)
+        started = dt.datetime(2026, 4, 8, 14, 0, tzinfo=dt.UTC)
+        mock_ai_events.return_value = [
+            ["trace-a", 12, 4, started, started],
+            ["trace-b", 3, 1, started, started],
+        ]
+
+        result = json.loads(_get_session_detail_fn(state=state, session_id=_VALID_SESSION_ID))
+
+        self.assertEqual([trace["trace_id"] for trace in result["traces"]], ["trace-a", "trace-b"])
+        self.assertEqual(result["trace_count"], 2)
+        self.assertEqual(result["event_count"], 15)
+        self.assertNotIn("truncated", result)
+        # Without this the agent could map a session and then be refused every trace inside it.
+        self.assertEqual(state["trace_id_allowlist"], ["trace-a", "trace-b"])
+
+    @patch("posthog.models.Team.objects.get")
+    @patch("posthog.temporal.ai_observability.eval_reports.report_agent.tools._execute_hogql_via_ai_events")
+    @patch("posthog.temporal.ai_observability.eval_reports.report_agent.tools._execute_hogql")
+    def test_sample_bounds_the_trace_list_and_says_so(
+        self, mock_execute_hogql: MagicMock, mock_ai_events: MagicMock, _mock_get_team: MagicMock
+    ) -> None:
+        state = self._allowlisted_state(mock_execute_hogql)
+        started = dt.datetime(2026, 4, 8, 14, 0, tzinfo=dt.UTC)
+        mock_ai_events.return_value = [[f"trace-{index}", 1, 1, started, started] for index in range(20)]
+
+        result = json.loads(_sample_session_details_fn(state=state, session_ids=[_VALID_SESSION_ID]))
+
+        self.assertEqual(len(result[0]["traces"]), 10)
+        self.assertIn("first 10 traces", result[0]["truncated"])
 
 
 class TestUuidRegex(SimpleTestCase):
@@ -404,6 +779,21 @@ class TestSetTitle(SimpleTestCase):
         self.assertLessEqual(len(state["report"].title), 200)
         self.assertTrue(state["report"].title.endswith("..."))
 
+    # The title is an email subject, a Slack header, and a heading — never markdown — so
+    # citing the ID does not save it. Rejecting in the loop lets the agent retitle; the
+    # final validation can only discard the whole report.
+    @parameterized.expand([("uncited", False), ("cited", True)])
+    def test_rejects_backticked_id_in_title(self, _name: str, cite: bool) -> None:
+        state = _state_with_empty_report()
+        if cite:
+            state["report"].citations.append(Citation(generation_id=_VALID_GEN_ID, trace_id=_VALID_TRACE_ID))
+
+        result = _set_title_fn(state=state, title=f"Regression in `{_VALID_GEN_ID}`")
+
+        self.assertIn("Error", result)
+        self.assertIn(_VALID_GEN_ID, result)
+        self.assertEqual(state["report"].title, "")
+
 
 class TestAddSection(SimpleTestCase):
     def test_appends_section(self):
@@ -451,6 +841,170 @@ class TestAddSection(SimpleTestCase):
         _add_section_fn(state=state, title="Third", content="c")
         titles = [s.title for s in state["report"].sections]
         self.assertEqual(titles, ["First", "Second", "Third"])
+
+    @parameterized.expand(
+        [
+            # A run_id from list_recent_report_runs is a canonical UUID but not citable.
+            (
+                "uncited_uuid_in_content",
+                "Summary",
+                "Steady since run `{id}`.",
+                [],
+                "0195f0a1-2b3c-7d4e-8f90-1a2b3c4d5e6f",
+            ),
+            # An opaque handled ID is invisible to a UUID-shaped regex, so the in-loop
+            # guard only catches it while it reads the run's allowlists.
+            ("uncited_handled_id_in_content", "Summary", "See `{id}`.", ["chat_thread_9f2b1a"], "chat_thread_9f2b1a"),
+            (
+                "uncited_handled_id_in_title",
+                "Regression in `{id}`",
+                "A finding.",
+                ["chat_thread_9f2b1a"],
+                "chat_thread_9f2b1a",
+            ),
+        ]
+    )
+    def test_rejects_section_with_a_dead_backticked_id(
+        self, _name: str, title: str, content: str, session_allowlist: list[str], dead_id: str
+    ) -> None:
+        state = _state_with_empty_report()
+        state["session_id_allowlist"] = session_allowlist
+        result = _add_section_fn(state=state, title=title.format(id=dead_id), content=content.format(id=dead_id))
+        self.assertIn("Error", result)
+        self.assertIn(dead_id, result)
+        self.assertEqual(state["report"].sections, [])
+
+    def test_allows_section_when_backticked_id_is_cited(self):
+        state = _state_with_empty_report()
+        state["report"].citations.append(Citation(generation_id=_VALID_GEN_ID, trace_id=_VALID_TRACE_ID))
+        result = _add_section_fn(state=state, title="Summary", content=f"See `{_VALID_GEN_ID}` for the regression.")
+        self.assertNotIn("Error", result)
+        self.assertEqual(len(state["report"].sections), 1)
+
+    def test_rejects_section_with_a_backticked_run_handle(self):
+        # A handle is not UUID-shaped, so only the handle map makes the guard read it as an ID.
+        state = _state_with_empty_report()
+        state["report_run_handles"] = {"run_1": _VALID_GEN_ID}
+
+        result = _add_section_fn(state=state, title="Summary", content="Steady since `run_1`.")
+
+        self.assertIn("Error", result)
+        self.assertEqual(state["report"].sections, [])
+
+    def test_rejects_cited_backticked_id_in_a_section_title(self):
+        # Section titles reach the reader as a heading, so citation linking never runs over them.
+        state = _state_with_empty_report()
+        state["report"].citations.append(Citation(generation_id=_VALID_GEN_ID, trace_id=_VALID_TRACE_ID))
+
+        result = _add_section_fn(state=state, title=f"Regression in `{_VALID_GEN_ID}`", content="A finding.")
+
+        self.assertIn("Error", result)
+        self.assertIn(_VALID_GEN_ID, result)
+        self.assertEqual(state["report"].sections, [])
+
+
+class TestDeadBacktickedIds(SimpleTestCase):
+    _OPAQUE_SESSION_ID = "chat_thread_9f2b1a"
+    _RUN_ID = "0195f0a1-2b3c-7d4e-8f90-1a2b3c4d5e6f"
+
+    @parameterized.expand(
+        [
+            # An opaque session ID the session handled is invisible to a UUID-shaped
+            # regex, which is exactly the dead identifier readers still chase.
+            (
+                "opaque_handled_id_uncited_is_dead",
+                f"See `{_OPAQUE_SESSION_ID}`.",
+                [],
+                {_OPAQUE_SESSION_ID},
+                [_OPAQUE_SESSION_ID],
+            ),
+            (
+                "opaque_handled_id_cited_links",
+                f"See `{_OPAQUE_SESSION_ID}`.",
+                [Citation(session_id=_OPAQUE_SESSION_ID)],
+                {_OPAQUE_SESSION_ID},
+                [],
+            ),
+            ("uncited_uuid_is_dead", f"Steady since run `{_RUN_ID}`.", [], set(), [_RUN_ID]),
+            (
+                "cited_uuid_in_one_pair_links",
+                f"See `{_VALID_GEN_ID}`.",
+                [Citation(generation_id=_VALID_GEN_ID, trace_id=_VALID_TRACE_ID)],
+                set(),
+                [],
+            ),
+            (
+                "cited_uuid_upper_case_wrapper_is_dead",
+                f"See `{_VALID_GEN_ID.upper()}`.",
+                [Citation(generation_id=_VALID_GEN_ID, trace_id=_VALID_TRACE_ID)],
+                set(),
+                [_VALID_GEN_ID.upper()],
+            ),
+            (
+                # The renderer links this wrapper, so the guard must not call it dead.
+                "cited_uuid_in_double_backtick_span_links",
+                f"See `` `{_VALID_GEN_ID}` `` for the regression.",
+                [Citation(generation_id=_VALID_GEN_ID, trace_id=_VALID_TRACE_ID)],
+                set(),
+                [],
+            ),
+            (
+                "uncited_uuid_in_double_backtick_span_is_dead",
+                f"Steady since run `` `{_RUN_ID}` ``.",
+                [],
+                set(),
+                [_RUN_ID],
+            ),
+            (
+                "cited_uuid_double_backticks_is_dead",
+                f"See ``{_VALID_GEN_ID}``.",
+                [Citation(generation_id=_VALID_GEN_ID, trace_id=_VALID_TRACE_ID)],
+                set(),
+                [_VALID_GEN_ID],
+            ),
+            ("backticked_prose_is_ignored", "The `total_runs` field.", [], {_OPAQUE_SESSION_ID}, []),
+        ]
+    )
+    def test_dead_backticked_ids(
+        self, _name: str, text: str, citations: list[Citation], handled_ids: set[str], expected: list[str]
+    ) -> None:
+        self.assertEqual(_dead_backticked_ids(text, citations, handled_ids), expected)
+
+    @parameterized.expand(
+        [
+            ("uncited_uuid_loses_its_backticks", f"Steady since run `{_RUN_ID}`.", f"Steady since run {_RUN_ID}."),
+            (
+                "uncited_uuid_loses_its_double_backtick_span",
+                f"Steady since run `` `{_RUN_ID}` ``.",
+                f"Steady since run {_RUN_ID}.",
+            ),
+            (
+                "cited_id_keeps_its_backticks",
+                f"See `{_OPAQUE_SESSION_ID}`.",
+                f"See `{_OPAQUE_SESSION_ID}`.",
+            ),
+            (
+                "cited_id_keeps_its_double_backtick_span",
+                f"See `` `{_OPAQUE_SESSION_ID}` ``.",
+                f"See `` `{_OPAQUE_SESSION_ID}` ``.",
+            ),
+            ("prose_keeps_its_backticks", "The `total_runs` field.", "The `total_runs` field."),
+        ]
+    )
+    def test_strip_dead_backticked_ids(self, _name: str, text: str, expected: str) -> None:
+        citations = [Citation(session_id=self._OPAQUE_SESSION_ID)]
+        self.assertEqual(strip_dead_backticked_ids(text, citations, {self._OPAQUE_SESSION_ID}), expected)
+
+    def test_scan_stays_linear_on_a_whitespace_run(self):
+        # A model that degenerates into whitespace after a stray backtick writes exactly the
+        # input that makes an ambiguous backtick pattern backtrack. The check runs inside the
+        # report activity, so a slow scan hangs the activity instead of returning an error.
+        # Two thousand characters took about seven seconds before the pattern was tightened.
+        text = "The pass rate held. `" + " " * 2000
+
+        started = time.monotonic()
+        self.assertEqual(_dead_backticked_ids(text, [], set()), [])
+        self.assertLess(time.monotonic() - started, 1.0)
 
 
 class TestAddCitation(SimpleTestCase):
@@ -578,6 +1132,72 @@ class TestAddCitation(SimpleTestCase):
         self.assertEqual(state["report"].citations[1].reason, "second")
 
 
+class TestSessionCitations(SimpleTestCase):
+    def _allowlisted_state(self) -> _ReportToolState:
+        state = _aggregate_report_tool_state("session")
+        state["session_id_allowlist"].append(_VALID_SESSION_ID)
+        state["trace_id_allowlist"].append("trace-in-session")
+        return state
+
+    def test_cites_the_session_alone(self):
+        state = self._allowlisted_state()
+
+        result = _add_citation_fn(state=state, session_id=_VALID_SESSION_ID, reason="abandoned midway")
+
+        self.assertNotIn("Error", result)
+        self.assertEqual(
+            state["report"].citations[0],
+            Citation(session_id=_VALID_SESSION_ID, reason="abandoned midway"),
+        )
+
+    def test_cites_a_trace_inside_the_session_for_extra_precision(self):
+        state = self._allowlisted_state()
+
+        result = _add_citation_fn(
+            state=state, session_id=_VALID_SESSION_ID, trace_id="trace-in-session", reason="the failing turn"
+        )
+
+        self.assertNotIn("Error", result)
+        self.assertEqual(state["report"].citations[0].trace_id, "trace-in-session")
+        # The report is about the session, so that is what the text refers to and links to.
+        self.assertEqual(state["report"].citations[0].cited_id(), _VALID_SESSION_ID)
+
+    @parameterized.expand(
+        [
+            # Each of these would put an ID in the report that the agent never verified, or one
+            # from a different ID space than the report's own — a broken or wrong link either way.
+            ("session never returned by a query", {"session_id": "fabricated-session"}),
+            ("trace from outside the mapped session", {"session_id": _VALID_SESSION_ID, "trace_id": "other-trace"}),
+            ("no session at all", {"trace_id": "trace-in-session"}),
+            ("a generation ID on a session report", {"session_id": _VALID_SESSION_ID, "generation_id": _VALID_GEN_ID}),
+            ("a control character in the session ID", {"session_id": "session\nid"}),
+        ]
+    )
+    def test_refuses_citation(self, _name, kwargs):
+        state = self._allowlisted_state()
+
+        result = _add_citation_fn(state=state, reason="r", **kwargs)
+
+        self.assertIn("Error", result)
+        self.assertEqual(state["report"].citations, [])
+
+    @parameterized.expand([("generation",), ("trace",)])
+    def test_other_targets_refuse_a_session_id(self, evaluation_target):
+        state = _state_with_empty_report(evaluation_target=evaluation_target)
+        state["trace_id_allowlist"].append(_VALID_TRACE_ID)
+
+        result = _add_citation_fn(
+            state=state,
+            generation_id=_VALID_GEN_ID if evaluation_target == "generation" else "",
+            trace_id=_VALID_TRACE_ID,
+            session_id=_VALID_SESSION_ID,
+            reason="r",
+        )
+
+        self.assertIn("Error", result)
+        self.assertEqual(state["report"].citations, [])
+
+
 class TestListAndGetReportRun(BaseTest):
     """DB-backed tests for the split list_recent_report_runs + get_report_run tools."""
 
@@ -624,9 +1244,10 @@ class TestListAndGetReportRun(BaseTest):
             period_start=now - dt.timedelta(days=2),
             period_end=now - dt.timedelta(days=1),
         )
-        self.state = {
+        self.state: dict[str, Any] = {
             "evaluation_id": str(self.evaluation.id),
             "period_start": now.isoformat(),
+            REPORT_RUN_HANDLE_KEY: {},
         }
 
     def test_list_returns_compact_index_newest_first(self):
@@ -636,9 +1257,46 @@ class TestListAndGetReportRun(BaseTest):
         self.assertEqual(result[0]["pass_rate"], 94.2)
         self.assertEqual(result[0]["total_runs"], 53)
         self.assertNotIn("result_rates", result[0])
-        self.assertIn("run_id", result[0])
         # Full content intentionally omitted
         self.assertNotIn("content", result[0])
+
+    @parameterized.expand([(80, False), (40, True), (None, None)])
+    def test_numeric_history_identifies_comparison_rule(self, previous_threshold, matches):
+        config = (
+            {"passing_rule": {"operator": "lte", "threshold": previous_threshold}}
+            if previous_threshold is not None
+            else {}
+        )
+        self.recent_run.metadata = {
+            "output_type": "numeric",
+            "output_config": config,
+            "total_runs": 10,
+            "result_counts": {"pass": 8, "fail": 2, "na": 0},
+        }
+        self.recent_run.save()
+        self.state.update(output_type="numeric", output_config={"passing_rule": {"operator": "lte", "threshold": 40}})
+
+        result = json.loads(_list_recent_report_runs_fn(state=self.state))[0]
+
+        self.assertEqual(result["output_config"], config)
+        self.assertEqual(result["passing_rule_matches_current"], matches)
+        self.assertEqual(result["pass_rate"], 80)
+
+    def test_list_hands_out_handles_and_get_resolves_them(self):
+        # A run UUID is UUID-shaped but can never be cited, so an agent that repeats one in
+        # backticked prose writes a dead identifier. It never sees the UUID to repeat.
+        listed = json.loads(_list_recent_report_runs_fn(state=self.state))
+        handles = [run["run_id"] for run in listed]
+
+        self.assertNotIn(str(self.recent_run.id), handles)
+        self.assertEqual(len(set(handles)), len(handles))
+        fetched = json.loads(_get_report_run_fn(state=self.state, run_id=handles[0]))
+        self.assertEqual(fetched["content"]["title"], "Recent report")
+        self.assertEqual(fetched["run_id"], handles[0])
+
+    def test_get_rejects_an_unknown_handle(self):
+        result = json.loads(_get_report_run_fn(state=self.state, run_id="run_9"))
+        self.assertIn("error", result)
 
     def test_list_filters_by_since_days(self):
         result = json.loads(_list_recent_report_runs_fn(state=self.state, since_days=3))
@@ -672,8 +1330,8 @@ class TestListAndGetReportRun(BaseTest):
         trace_state = {**self.state, "evaluation_target": "trace"}
         trace_runs = json.loads(_list_recent_report_runs_fn(state=trace_state))
 
-        self.assertNotIn(str(trace_run.id), {run["run_id"] for run in generation_runs})
-        self.assertEqual([run["run_id"] for run in trace_runs], [str(trace_run.id)])
+        self.assertNotIn("Trace report", {run["title"] for run in generation_runs})
+        self.assertEqual([run["title"] for run in trace_runs], ["Trace report"])
         self.assertIn("error", json.loads(_get_report_run_fn(state=self.state, run_id=str(trace_run.id))))
         self.assertEqual(
             json.loads(_get_report_run_fn(state=trace_state, run_id=str(trace_run.id)))["content"]["title"],
@@ -685,7 +1343,7 @@ class TestListAndGetReportRun(BaseTest):
         # excluded by a strict `lt` filter, dropping the immediately previous report —
         # the most useful one for delta/continuity analysis.
         boundary_start = dt.datetime.fromisoformat(self.state["period_start"])
-        boundary_run = self.EvaluationReportRun.objects.create(
+        self.EvaluationReportRun.objects.create(
             report=self.report,
             content={"title": "Back-to-back report", "sections": []},
             metadata={"pass_rate": 77.7, "total_runs": 11},
@@ -695,7 +1353,7 @@ class TestListAndGetReportRun(BaseTest):
         result = json.loads(_list_recent_report_runs_fn(state=self.state))
         titles = [r["title"] for r in result]
         self.assertIn("Back-to-back report", titles)
-        boundary_entry = next(r for r in result if r["run_id"] == str(boundary_run.id))
+        boundary_entry = next(r for r in result if r["title"] == "Back-to-back report")
         self.assertEqual(boundary_entry["pass_rate"], 77.7)
         self.assertEqual(boundary_entry["total_runs"], 11)
 
@@ -704,7 +1362,7 @@ class TestListAndGetReportRun(BaseTest):
         # downstream store activity mirrors them into metadata. The tool must read
         # either source so it stays correct if the mirror is removed.
         now = timezone.now()
-        content_only_run = self.EvaluationReportRun.objects.create(
+        self.EvaluationReportRun.objects.create(
             report=self.report,
             content={
                 "title": "Content-only metrics",
@@ -719,10 +1377,31 @@ class TestListAndGetReportRun(BaseTest):
             period_end=now - dt.timedelta(hours=1),
         )
         result = json.loads(_list_recent_report_runs_fn(state=self.state))
-        entry = next(r for r in result if r["run_id"] == str(content_only_run.id))
+        entry = next(r for r in result if r["title"] == "Content-only metrics")
         self.assertEqual(entry["pass_rate"], 75.0)
         self.assertEqual(entry["result_rates"], {"pass": 75.0, "fail": 25.0, "na": 0.0})
         self.assertEqual(entry["total_runs"], 8)
+
+    def test_metrics_unavailable_runs_are_not_agent_history(self):
+        now = timezone.now()
+        unavailable_run = self.EvaluationReportRun.objects.create(
+            report=self.report,
+            content={
+                "title": "Metrics temporarily unavailable",
+                "sections": [],
+                "generation_status": "metrics_unavailable",
+                "metrics": None,
+            },
+            metadata={},
+            period_start=now - dt.timedelta(hours=2),
+            period_end=now - dt.timedelta(hours=1),
+        )
+
+        listed_titles = {run["title"] for run in json.loads(_list_recent_report_runs_fn(state=self.state))}
+        fetched = json.loads(_get_report_run_fn(state=self.state, run_id=str(unavailable_run.id)))
+
+        self.assertNotIn("Metrics temporarily unavailable", listed_titles)
+        self.assertIn("error", fetched)
 
     def test_get_rejects_non_uuid(self):
         result = json.loads(_get_report_run_fn(state=self.state, run_id="not-a-uuid"))
@@ -764,6 +1443,104 @@ class TestListAndGetReportRun(BaseTest):
         result = json.loads(_get_report_run_fn(state=self.state, run_id=str(other_run.id)))
         self.assertIn("error", result)
 
+    def test_fetch_overlapping_backfills_returns_only_windows_that_overlap_the_periods(self):
+        from products.ai_observability.backend.models.evaluation_backfill import EvaluationBackfill
+
+        def create_backfill(window_start: dt.datetime, window_end: dt.datetime) -> None:
+            EvaluationBackfill.objects.for_team(self.team.id).create(
+                team=self.team,
+                evaluation=self.evaluation,
+                window_start=window_start,
+                window_end=window_end,
+                status="completed",
+                target="generation",
+                total_count=10,
+            )
+
+        ts_prev_start = dt.datetime(2026, 4, 1, tzinfo=dt.UTC)
+        ts_end = dt.datetime(2026, 4, 15, tzinfo=dt.UTC)
+        create_backfill(dt.datetime(2026, 3, 25, tzinfo=dt.UTC), dt.datetime(2026, 4, 2, tzinfo=dt.UTC))
+        create_backfill(dt.datetime(2026, 3, 1, tzinfo=dt.UTC), dt.datetime(2026, 4, 1, tzinfo=dt.UTC))
+        create_backfill(dt.datetime(2026, 4, 15, tzinfo=dt.UTC), dt.datetime(2026, 4, 20, tzinfo=dt.UTC))
+
+        backfills = _fetch_overlapping_backfills(self.team.id, str(self.evaluation.id), ts_prev_start, ts_end)
+
+        self.assertEqual([backfill["window_start"] for backfill in backfills], ["2026-03-25T00:00:00+00:00"])
+
+
+class TestExecuteChQueryWithRetry(SimpleTestCase):
+    @patch("posthog.temporal.ai_observability.eval_reports.report_agent.tools.time.sleep")
+    @patch(
+        "posthog.temporal.ai_observability.eval_reports.report_agent.tools.random.uniform",
+        side_effect=lambda _minimum, maximum: maximum,
+    )
+    def test_retries_with_exponential_backoff_then_succeeds(
+        self, mock_uniform: MagicMock, mock_sleep: MagicMock
+    ) -> None:
+        attempts = {"n": 0}
+
+        def run_query() -> str:
+            attempts["n"] += 1
+            if attempts["n"] < 4:
+                raise ClickHouseAtCapacity()
+            return "ok"
+
+        result = _execute_ch_query_with_retry(run_query, query_type="Test")
+
+        self.assertEqual(result, "ok")
+        self.assertEqual(attempts["n"], 4)
+        self.assertEqual(
+            mock_uniform.call_args_list,
+            [mock_call(4.0, 8.0), mock_call(8.0, 16.0), mock_call(16.0, 32.0)],
+        )
+        self.assertEqual(mock_sleep.call_args_list, [mock_call(8.0), mock_call(16.0), mock_call(32.0)])
+
+    @patch("posthog.temporal.ai_observability.eval_reports.report_agent.tools.time.sleep")
+    def test_reraises_after_exhausting_retries(self, mock_sleep: MagicMock) -> None:
+        attempts = {"n": 0}
+
+        def run_query() -> str:
+            attempts["n"] += 1
+            raise ClickHouseAtCapacity()
+
+        with self.assertRaises(ClickHouseAtCapacity):
+            _execute_ch_query_with_retry(run_query, query_type="Test", base_delay=0.0)
+
+        self.assertEqual(attempts["n"], 4)
+        self.assertEqual(mock_sleep.call_count, 3)
+
+    @parameterized.expand(
+        [
+            ("network", NetworkError()),
+            ("socket_timeout", SocketTimeoutError()),
+            ("cluster_memory_pressure", ClickHouseClusterMemoryLimitExceeded()),
+        ]
+    )
+    @patch("posthog.temporal.ai_observability.eval_reports.report_agent.tools.time.sleep")
+    def test_retries_additional_transient_errors(self, _name: str, error: Exception, mock_sleep: MagicMock) -> None:
+        attempts = {"n": 0}
+
+        def run_query() -> str:
+            attempts["n"] += 1
+            if attempts["n"] == 1:
+                raise error
+            return "ok"
+
+        result = _execute_ch_query_with_retry(run_query, query_type="Test", max_retries=1, base_delay=0.0)
+
+        self.assertEqual(result, "ok")
+        mock_sleep.assert_called_once_with(0.0)
+
+    @parameterized.expand(
+        [
+            ("query_timeout", ClickHouseQueryTimeOut()),
+            ("per_query_memory_limit", _per_query_memory_limit_error()),
+            ("application_error", ValueError("bug")),
+        ]
+    )
+    def test_does_not_retry_non_transient_error(self, _name: str, error: Exception) -> None:
+        self.assertFalse(_is_retriable_ch_error(error))
+
 
 class TestToolsCoordinate(SimpleTestCase):
     """Smoke: a realistic agent-like sequence of calls produces a valid report."""
@@ -789,3 +1566,72 @@ class TestToolsCoordinate(SimpleTestCase):
         self.assertEqual(len(report.sections), 2)
         self.assertIsInstance(report.sections[0], ReportSection)
         self.assertEqual(len(report.citations), 1)
+
+
+class TestLabelGenerationEvals(SimpleTestCase):
+    def test_numeric_evaluations_use_their_own_rule_and_keep_unrated_scores(self):
+        rows = [
+            [name, "numeric", None, None, None, "reason", True, 7.5, None, None] for name in ["high", "low", "unrated"]
+        ]
+        configs = {
+            "high": {"passing_rule": {"operator": "gte", "threshold": 7}},
+            "low": {"passing_rule": {"operator": "lte", "threshold": 7}},
+        }
+        labeled = _label_generation_evals(rows, set(), configs)
+        self.assertEqual([row["outcome"] for row in labeled], ["pass", "fail", None])
+        self.assertEqual([row["score"] for row in labeled], [7.5, 7.5, 7.5])
+
+    # (eval_id, result_type, result, sentiment_label, sentiment_score, reasoning, applicable, numeric_score, categories, skipped)
+    ROWS: list[list[object]] = [
+        ["detector-eval", "boolean", True, None, None, "struggled", None, None, None, None],
+        ["quality-eval", "boolean", True, None, None, "accurate", None, None, None, None],
+        ["sentiment-eval", "sentiment", None, "negative", 0.9, "", None, None, None, None],
+    ]
+
+    @parameterized.expand(
+        [
+            (True, False, "skipped"),
+            ("true", "false", "skipped"),
+            (1, False, "skipped"),
+            (False, False, "na"),
+            ("false", "false", "na"),
+            (None, False, "na"),
+            ("false", True, "pass"),
+            (None, True, "pass"),
+        ]
+    )
+    def test_categorical_skips_are_distinct_from_na(
+        self, skipped: bool | str | int | None, applicable: bool | str, expected_outcome: str
+    ) -> None:
+        categories = ["resolved"] if applicable is True else []
+        rows = [["categorical-eval", "categorical", None, None, None, "reason", applicable, None, categories, skipped]]
+        configs = {
+            "categorical-eval": {
+                "allows_na": False,
+                "options": [{"key": "resolved", "label": "Resolved"}],
+                "passing_rule": {"categories": ["resolved"]},
+            }
+        }
+
+        labeled = _label_generation_evals(rows, set(), configs)
+
+        self.assertEqual(labeled[0]["outcome"], expected_outcome)
+        self.assertEqual(labeled[0]["reasoning"], "reason")
+        self.assertEqual(labeled[0]["categories"], categories)
+
+    def test_each_evaluation_is_labeled_by_its_own_polarity(self):
+        labeled = _label_generation_evals(self.ROWS, {"detector-eval"})
+
+        outcomes = {row["evaluation_id"]: row["outcome"] for row in labeled}
+        self.assertEqual(outcomes, {"detector-eval": "fail", "quality-eval": "pass", "sentiment-eval": "negative"})
+
+    def test_no_detectors_keeps_every_true_result_a_pass(self):
+        labeled = _label_generation_evals(self.ROWS, set())
+
+        outcomes = {row["evaluation_id"]: row["outcome"] for row in labeled}
+        self.assertEqual(outcomes, {"detector-eval": "pass", "quality-eval": "pass", "sentiment-eval": "negative"})
+
+    def test_unsupported_output_type_is_dropped(self):
+        labeled = _label_generation_evals([["unknown-eval", "unknown", 1, None, None, "", None]], set())
+
+        self.assertEqual(labeled, [])

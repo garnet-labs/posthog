@@ -1,8 +1,9 @@
 /**
  * Per-record property filter evaluator for log drop rules.
  *
- * Ported from `posthog/queries/base.py:match_property`. Keep semantics aligned
- * with the Python implementation; if you change one side, change the other.
+ * Mirrors the operator semantics in `posthog/hogql/property.py` (`_expr_to_compare_op`)
+ * and the Rust flag matcher (`rust/feature-flags/src/properties/property_matching.rs`).
+ * Keep the operator arms aligned; if you change one side, change the others.
  *
  * - `is_set` / `is_not_set` are the only operators that match a missing override.
  * - Date operators (is_date_before / after / exact) are intentionally omitted —
@@ -25,6 +26,10 @@ export type SupportedPropertyOperator =
     | 'is_not_set'
     | 'icontains'
     | 'not_icontains'
+    | 'starts_with'
+    | 'not_starts_with'
+    | 'ends_with'
+    | 'not_ends_with'
     | 'regex'
     | 'not_regex'
     | 'gt'
@@ -102,6 +107,15 @@ export function matchPropertyFilter(
         return !String(overrideValue).toLowerCase().includes(String(value).toLowerCase())
     }
 
+    if (operator === 'starts_with' || operator === 'not_starts_with') {
+        const matches = String(overrideValue).toLowerCase().startsWith(String(value).toLowerCase())
+        return operator === 'starts_with' ? matches : !matches
+    }
+    if (operator === 'ends_with' || operator === 'not_ends_with') {
+        const matches = String(overrideValue).toLowerCase().endsWith(String(value).toLowerCase())
+        return operator === 'ends_with' ? matches : !matches
+    }
+
     if (operator === 'regex' || operator === 'not_regex') {
         // Prefer the compile-time regex if `parseFilterGroup` stamped one onto the
         // leaf. `_compiledRegex === null` means the pattern failed to compile and
@@ -137,7 +151,6 @@ function matchExact(value: PropertyFilterLeaf['value'], overrideValue: string | 
     return String(value).toLowerCase() === String(overrideValue).toLowerCase()
 }
 
-// Mirrors `is_truthy_or_falsy_property_value` in posthog/queries/base.py.
 function isTruthyOrFalsyValue(v: unknown): boolean {
     if (v === true || v === false) {
         return true

@@ -4,30 +4,49 @@ from pathlib import Path
 from typing import Any
 
 from posthog.test.base import BaseTest, ClickhouseTestMixin
+from unittest.mock import patch
 
 import pandas as pd
+from parameterized import parameterized
 
 from posthog.hogql.query import execute_hogql_query
 
 from posthog.clickhouse.client import sync_execute
 
+from products.data_modeling.backend.facade.models import DataWarehouseManagedViewSet, DataWarehouseSavedQuery
 from products.engineering_analytics.backend.facade.warehouse_views import get_expected_warehouse_views
 from products.engineering_analytics.backend.logic.job_logs.constants import CI_LOGS_SERVICE_NAME
-from products.engineering_analytics.backend.logic.sources import WORKFLOW_JOBS_SCHEMA, WORKFLOW_RUNS_SCHEMA
-from products.engineering_analytics.backend.logic.views import ci_failures, ci_job_history, job_costs
+from products.engineering_analytics.backend.logic.sources import (
+    PULL_REQUESTS_SCHEMA,
+    WORKFLOW_JOBS_SCHEMA,
+    WORKFLOW_RUNS_SCHEMA,
+)
+from products.engineering_analytics.backend.logic.views import (
+    ci_failures,
+    ci_job_history,
+    depot_ci,
+    job_costs,
+    pr_friction,
+)
 from products.engineering_analytics.backend.logic.views.source_schema import (
     WORKFLOW_JOBS_COLUMNS,
     WORKFLOW_RUNS_COLUMNS,
 )
+from products.engineering_analytics.backend.tests._github_fixtures import (
+    pr_association_entry,
+    repo_id,
+    seeding_object_storage,
+)
 from products.warehouse_sources.backend.facade.models import DataWarehouseTable, ExternalDataSchema, ExternalDataSource
-from products.warehouse_sources.backend.facade.types import ExternalDataSourceType
-from products.warehouse_sources.backend.test.utils import create_data_warehouse_table_from_csv
+from products.warehouse_sources.backend.facade.testing import create_data_warehouse_table_from_csv
+from products.warehouse_sources.backend.facade.types import DataWarehouseManagedViewSetKind, ExternalDataSourceType
 
 TEST_BUCKET = "test_storage_bucket-posthog.products.engineering_analytics.ci_views"
 GITHUB_SOURCE_PREFIX = "myprefix"
 
 _BASE = "2026-01-01 10:00:00"
 _LATER = "2026-01-01 10:10:00"
+_REPO = "PostHog/posthog"
 
 
 def _job_row(job_id: int, run_id: int, name: str) -> dict[str, Any]:
@@ -52,7 +71,12 @@ def _job_row(job_id: int, run_id: int, name: str) -> dict[str, Any]:
 
 
 def _run_row(
-    run_id: int, head_sha: str, pull_requests: list[dict], head_commit: dict, run_attempt: int = 1
+    run_id: int,
+    head_sha: str,
+    pr_numbers: list[int],
+    head_commit: dict,
+    run_attempt: int = 1,
+    fork_pr_numbers: tuple[int, ...] = (),
 ) -> dict[str, Any]:
     return {
         "id": run_id,
@@ -65,8 +89,11 @@ def _run_row(
         "run_started_at": _BASE,
         "updated_at": _LATER,
         "run_attempt": run_attempt,
-        "pull_requests": json.dumps(pull_requests),
-        "repository": json.dumps({"full_name": "PostHog/posthog"}),
+        "pull_requests": json.dumps(
+            [pr_association_entry(number, base_repo="Mu-L/posthog-1") for number in fork_pr_numbers]
+            + [pr_association_entry(number, base_repo=_REPO) for number in pr_numbers]
+        ),
+        "repository": json.dumps({"full_name": _REPO, "id": repo_id(_REPO)}),
         "head_commit": json.dumps(head_commit),
     }
 
@@ -82,7 +109,7 @@ class TestCIJobHistoryView(ClickhouseTestMixin, BaseTest):
         df.to_csv(tmp.name, index=False)
         tmp.close()
         self.addCleanup(Path(tmp.name).unlink, missing_ok=True)
-        try:
+        with seeding_object_storage(self):
             table, _source, _credential, _df, cleanup = create_data_warehouse_table_from_csv(
                 csv_path=Path(tmp.name),
                 table_name=base_name,
@@ -91,8 +118,6 @@ class TestCIJobHistoryView(ClickhouseTestMixin, BaseTest):
                 team=self.team,
                 source_prefix=GITHUB_SOURCE_PREFIX,
             )
-        except PermissionError as err:
-            self.skipTest(f"object storage unavailable: {err}")
         self.addCleanup(cleanup)
         return table.name
 
@@ -118,7 +143,7 @@ class TestCIJobHistoryView(ClickhouseTestMixin, BaseTest):
                 _run_row(
                     100,
                     head_sha="runsha100",
-                    pull_requests=[{"number": 5}],
+                    pr_numbers=[5],
                     head_commit={
                         "author": {"name": "Alice", "email": "alice@x.com"},
                         "message": "fix(ci): thing (#4242)",
@@ -129,15 +154,18 @@ class TestCIJobHistoryView(ClickhouseTestMixin, BaseTest):
                 _run_row(
                     200,
                     head_sha="runsha200",
-                    pull_requests=[],
+                    pr_numbers=[],
                     head_commit={"author": {"name": "Bob"}, "message": "chore: no pr suffix"},
                 ),
-                # A revert: the message carries the reverted PR's (#N) inside quotes AND the revert
-                # PR's own suffix — the anchored extraction must attribute the reverting PR.
+                # The real master-push shape: GitHub attaches the fork network's PRs (same head SHA,
+                # foreign base repo), which must NOT become pr_number — the commit suffix is the only
+                # attribution. Also a revert, so the reverted PR's (#N) sits inside the quoted title
+                # alongside the revert PR's own suffix and the anchored extraction must pick the latter.
                 _run_row(
                     300,
                     head_sha="runsha300",
-                    pull_requests=[],
+                    pr_numbers=[],
+                    fork_pr_numbers=(1379, 3),
                     head_commit={
                         "author": {"name": "Carol"},
                         "message": 'Revert "feat(ci): thing (#4242)" (#4300)\n\nThis reverts commit abc.',
@@ -148,14 +176,17 @@ class TestCIJobHistoryView(ClickhouseTestMixin, BaseTest):
                 _run_row(
                     400,
                     head_sha="runsha400",
-                    pull_requests=[],
+                    pr_numbers=[],
                     head_commit={"author": {"name": "Dave"}, "message": "fix: rerun me"},
                     run_attempt=2,
                 ),
             ],
         )
 
-        query = ci_job_history.build_query(jobs_table=jobs_table, runs_table=runs_table)
+        query = ci_job_history.build_query(
+            jobs_table=depot_ci.with_depot_jobs(jobs_table, None, runs_table),
+            runs_table=depot_ci.with_depot_runs(runs_table, None, None, None),
+        )
 
         columns = execute_hogql_query(
             query=f"SELECT * FROM ({query})", team=self.team, query_type="engineering_analytics.test"
@@ -194,8 +225,10 @@ class TestCIJobHistoryView(ClickhouseTestMixin, BaseTest):
         assert value("job-b", "commit_message") == "chore: no pr suffix"
 
         # Revert commit: two (#N) occurrences — the anchored extraction must credit the reverting
-        # PR (#4300), never the reverted one quoted in the title (#4242).
+        # PR (#4300), never the reverted one quoted in the title (#4242). Its run also carries the
+        # fork network's PRs; crediting one of those to this repo is the bug pr_number 0 guards.
         assert value("job-d", "commit_pr_number") == 4300
+        assert value("job-d", "pr_number") == 0
 
         # Unjoined run: the LEFT JOIN keeps the job attempt (an INNER join would drop it — the guard
         # here). ClickHouse fills the unmatched run side with type defaults, so attribution is empty
@@ -219,9 +252,12 @@ class TestCIJobHistoryView(ClickhouseTestMixin, BaseTest):
         runs_table = self._create_table(
             "github_workflow_runs",
             WORKFLOW_RUNS_COLUMNS,
-            [_run_row(100, head_sha="s", pull_requests=[{"number": 1}], head_commit={"message": "m"})],
+            [_run_row(100, head_sha="s", pr_numbers=[1], head_commit={"message": "m"})],
         )
-        query = ci_job_history.build_query(jobs_table=jobs_table, runs_table=runs_table)
+        query = ci_job_history.build_query(
+            jobs_table=depot_ci.with_depot_jobs(jobs_table, None, runs_table),
+            runs_table=depot_ci.with_depot_runs(runs_table, None, None, None),
+        )
         unioned = "\nUNION ALL\n".join([query, query])
         rows = execute_hogql_query(
             query=f"SELECT count() FROM ({unioned})", team=self.team, query_type="engineering_analytics.test"
@@ -322,7 +358,7 @@ class TestExpectedWarehouseViews(BaseTest):
     """The facade must expose all three views together for a qualifying GitHub source, and nothing
     for a team without one — so a consumer sees a coherent set, never a partial one."""
 
-    def _qualifying_source(self) -> ExternalDataSource:
+    def _qualifying_source(self, *, with_pull_requests: bool = False) -> ExternalDataSource:
         source = ExternalDataSource.objects.create(
             team=self.team,
             source_id="gh",
@@ -331,7 +367,10 @@ class TestExpectedWarehouseViews(BaseTest):
             source_type=ExternalDataSourceType.GITHUB,
             prefix=GITHUB_SOURCE_PREFIX,
         )
-        for schema_name, endpoint in ((WORKFLOW_RUNS_SCHEMA, "workflow_runs"), (WORKFLOW_JOBS_SCHEMA, "workflow_jobs")):
+        endpoints = [(WORKFLOW_RUNS_SCHEMA, "workflow_runs"), (WORKFLOW_JOBS_SCHEMA, "workflow_jobs")]
+        if with_pull_requests:
+            endpoints.append((PULL_REQUESTS_SCHEMA, "pull_requests"))
+        for schema_name, endpoint in endpoints:
             table = DataWarehouseTable.objects.create(
                 team=self.team,
                 name=f"{GITHUB_SOURCE_PREFIX}github_{endpoint}",
@@ -352,3 +391,36 @@ class TestExpectedWarehouseViews(BaseTest):
         self._qualifying_source()
         names = {view.name for view in get_expected_warehouse_views(self.team)}
         assert names == {job_costs.VIEW_NAME, ci_job_history.VIEW_NAME, ci_failures.VIEW_NAME}
+
+    @parameterized.expand(
+        [
+            ("flag_on", True, None, True),
+            ("flag_off", False, "managed", False),
+            # No answer from the flag service keeps what the team has, so an outage never drops the table.
+            ("no_answer_keeps_the_view", None, "managed", True),
+            ("no_answer_ignores_a_user_query_of_that_name", None, "user", False),
+            ("no_answer_adds_no_view", None, None, False),
+        ]
+    )
+    def test_friction_view_needs_the_pull_request_snapshot_and_the_flag(
+        self, _name: str, flag: bool | None, existing_view: str | None, expected: bool
+    ) -> None:
+        self._qualifying_source(with_pull_requests=True)
+        if existing_view:
+            viewset = (
+                DataWarehouseManagedViewSet.objects.create(
+                    team=self.team, kind=DataWarehouseManagedViewSetKind.ENGINEERING_ANALYTICS
+                )
+                if existing_view == "managed"
+                else None
+            )
+            DataWarehouseSavedQuery.objects.create(
+                team=self.team,
+                name=pr_friction.VIEW_NAME,
+                query={"kind": "HogQLQuery", "query": "SELECT 1"},
+                managed_viewset=viewset,
+            )
+        with patch("posthoganalytics.feature_enabled", return_value=flag):
+            materialized = {view.name: view.materialized for view in get_expected_warehouse_views(self.team)}
+        per_job = {job_costs.VIEW_NAME: False, ci_job_history.VIEW_NAME: False, ci_failures.VIEW_NAME: False}
+        assert materialized == ({**per_job, pr_friction.VIEW_NAME: True} if expected else per_job)

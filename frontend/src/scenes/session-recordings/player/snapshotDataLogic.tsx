@@ -20,7 +20,7 @@ import posthog from 'posthog-js'
 import { keyForSource } from '@posthog/replay-shared'
 import { SnapshotSourceType, SnapshotStore, SourceLoadingState } from '@posthog/replay-shared'
 
-import api, { RecordingDeletedError } from 'lib/api'
+import api, { ApiError, RecordingDeletedError } from 'lib/api'
 import 'lib/dayjs'
 import { parseEncodedSnapshots } from 'scenes/session-recordings/player/snapshot-processing/process-all-snapshots'
 import { windowIdRegistryLogic } from 'scenes/session-recordings/player/windowIdRegistryLogic'
@@ -54,11 +54,13 @@ export interface snapshotDataLogicValues {
     isLoadingSnapshots: boolean
     isPolling: boolean
     isRecordingDeleted: boolean
+    isSnapshotUnauthorized: boolean
     loadAllMode: boolean
     loadingSources: Pick<SessionRecordingSnapshotSource, 'blob_key' | 'end_timestamp' | 'source' | 'start_timestamp'>[]
     pollingInterval: number
     recordingDeletedAt: number | null
     recordingDeletedBy: string | null
+    replayProxyToken: string | null
     seekTarget: SeekTarget | null
     snapshotLoadError: Error | null
     snapshotSources: SessionRecordingSnapshotSource[] | null
@@ -151,11 +153,17 @@ export interface snapshotDataLogicActions {
     resetPollingInterval: () => {
         value: true
     }
+    retrySnapshotLoading: () => {
+        value: true
+    }
     setPlayerActive: (active: boolean) => {
         active: boolean
     }
     setPollingInterval: (intervalMs: number) => {
         intervalMs: number
+    }
+    setReplayProxyToken: (token: string | null) => {
+        token: string | null
     }
     setSnapshots: (snapshots: RecordingSnapshot[]) => {
         snapshots: RecordingSnapshot[]
@@ -219,6 +227,7 @@ export interface snapshotDataLogicMeta {
         isRecordingDeleted: (snapshotLoadError: Error | null) => boolean
         recordingDeletedAt: (snapshotLoadError: Error | null) => number | null
         recordingDeletedBy: (snapshotLoadError: Error | null) => string | null
+        isSnapshotUnauthorized: (snapshotLoadError: Error | null) => boolean
     }
 }
 
@@ -248,6 +257,9 @@ export const snapshotDataLogic = kea<snapshotDataLogicType>([
         // per-attempt loadSnapshotsForSourceFailure so the player can show an error even when other
         // sources already loaded (otherwise seeks into the missing range buffer forever).
         snapshotSourceLoadExhausted: true,
+        // Re-arm loading after a terminal failure: clears the exhausted retry budget and restarts the
+        // load chain, so the user can recover from a transient fetch failure without reloading the page.
+        retrySnapshotLoading: true,
         loadSnapshotSources: (breakpointLength?: number) => ({ breakpointLength }),
         loadNextSnapshotSource: true,
         loadSnapshotsForSource: (sources: Pick<SessionRecordingSnapshotSource, 'source' | 'blob_key'>[]) => ({
@@ -264,8 +276,15 @@ export const snapshotDataLogic = kea<snapshotDataLogicType>([
         loadAllSources: true,
         // dispatch after any mutation to cache.store — it lives outside Kea's reactivity and needs explicit invalidation
         storeUpdated: true,
+        setReplayProxyToken: (token: string | null) => ({ token }),
     }),
     reducers(() => ({
+        replayProxyToken: [
+            null as string | null,
+            {
+                setReplayProxyToken: (_, { token }) => token,
+            },
+        ],
         storeUpdateCount: [
             0,
             {
@@ -337,6 +356,8 @@ export const snapshotDataLogic = kea<snapshotDataLogicType>([
                         // returning [] here would silently dead-end with no error and no polling.
                         throw new Error('Malformed response listing snapshot sources')
                     }
+                    // Each listing mints a new token, so polling the sources keeps the proxy token fresh.
+                    actions.setReplayProxyToken(response.replay_proxy_token ?? null)
                     const anyBlobV2 = response.sources.some((s) => s.source === SnapshotSourceType.blob_v2)
 
                     if (anyBlobV2) {
@@ -354,12 +375,7 @@ export const snapshotDataLogic = kea<snapshotDataLogicType>([
 
                     const source = sources[0]
 
-                    if (source.source === SnapshotSourceType.blob_v2_lts) {
-                        if (!source.blob_key) {
-                            throw new Error('Missing key')
-                        }
-                        params = { blob_key: source.blob_key, source: 'blob_v2_lts' }
-                    } else if (source.source === SnapshotSourceType.blob_v2) {
+                    if (source.source === SnapshotSourceType.blob_v2) {
                         // they all have to be blob_v2
                         if (sources.some((s) => s.source !== SnapshotSourceType.blob_v2)) {
                             throw new Error('Unsupported source for multiple sources')
@@ -436,8 +452,11 @@ export const snapshotDataLogic = kea<snapshotDataLogicType>([
             cache.playbackPosition = timestamp
             cache.playbackWindowId = windowId
             const previousTarget = selectors.seekTarget(previousState)
-            if (previousTarget?.timestamp !== timestamp || previousTarget?.windowId !== windowId) {
-                // A genuinely new target grants fresh retries after the permanent-failure cap.
+            const targetChanged = previousTarget?.timestamp !== timestamp || previousTarget?.windowId !== windowId
+            // A genuinely new target grants fresh retries after the permanent-failure cap, unless the
+            // failure is a 401. Reseeking can never fix that, so it must keep counting toward the cap,
+            // otherwise a permanently-unauthorized source buffers forever.
+            if (targetChanged && !values.isSnapshotUnauthorized) {
                 cache.loadFailureCount = 0
             }
             actions.loadNextSnapshotSource()
@@ -488,6 +507,15 @@ export const snapshotDataLogic = kea<snapshotDataLogicType>([
             if (!values.snapshotSourcesLoading) {
                 actions.loadSnapshotSources()
             }
+        },
+
+        retrySnapshotLoading: () => {
+            // The failure count is what tips a source into snapshotSourceLoadExhausted, so reset it
+            // before restarting — otherwise the very next attempt is already over the cap.
+            cache.loadFailureCount = 0
+            // Re-fetch the source list, which on success re-triggers loadNextSnapshotSource. This
+            // recovers both a failed source listing and a failed per-source fetch.
+            actions.loadSnapshots()
         },
 
         loadSnapshotSourcesSuccess: ({ snapshotSources }) => {
@@ -726,6 +754,15 @@ export const snapshotDataLogic = kea<snapshotDataLogicType>([
                     return snapshotLoadError.deletedBy
                 }
                 return null
+            },
+        ],
+
+        // A missing session doesn't resolve by retrying, so a source failing this way should
+        // never be handed a fresh retry budget.
+        isSnapshotUnauthorized: [
+            (s) => [s.snapshotLoadError],
+            (snapshotLoadError: Error | null): boolean => {
+                return snapshotLoadError instanceof ApiError && snapshotLoadError.status === 401
             },
         ],
     })),

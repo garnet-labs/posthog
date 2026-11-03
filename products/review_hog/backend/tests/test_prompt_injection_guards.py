@@ -3,9 +3,14 @@ from dataclasses import dataclass
 
 from parameterized import parameterized
 
+from products.review_hog.backend.reviewer.artefact_content import ReviewIssueFinding, ValidationVerdict
 from products.review_hog.backend.reviewer.models.github_meta import PRMetadata
 from products.review_hog.backend.reviewer.models.issues_review import Issue, IssuePriority, LineRange
 from products.review_hog.backend.reviewer.models.split_pr_into_chunks import Chunk, FileInfo
+from products.review_hog.backend.reviewer.outcomes.judge import (
+    _SYSTEM_PROMPT as _JUDGE_SYSTEM_PROMPT,
+    _build_prompt as _build_judge_prompt,
+)
 from products.review_hog.backend.reviewer.tools.issue_validation import (
     build_validation_followup_prompt,
     build_validation_prompt,
@@ -13,6 +18,7 @@ from products.review_hog.backend.reviewer.tools.issue_validation import (
 from products.review_hog.backend.reviewer.tools.issues_review import build_review_prompt
 from products.review_hog.backend.reviewer.tools.prompt_helpers import load_template_and_schema
 from products.review_hog.backend.reviewer.tools.select_perspectives import generate_selection_prompt
+from products.review_hog.backend.reviewer.tools.single_agent_review import SingleAgentPrompt, load_core_prompt
 from products.review_hog.backend.reviewer.tools.split_pr_into_chunks import generate_chunking_prompt
 
 
@@ -68,6 +74,12 @@ def _issues_review_prompt() -> str:
     )
 
 
+def _single_agent_prompt() -> str:
+    return SingleAgentPrompt(
+        repository="o/r", pr_metadata=_pr_metadata(), pr_files=[], prior_findings=[], guidelines=load_core_prompt()
+    ).render()
+
+
 def _chunking_prompt() -> str:
     return generate_chunking_prompt(_pr_metadata(), [], [])
 
@@ -98,6 +110,27 @@ def _dedup_prompt() -> str:
     return template.render()
 
 
+def _outcome_judge_system_prompt() -> str:
+    return _JUDGE_SYSTEM_PROMPT
+
+
+def _outcome_judge_prompt() -> str:
+    return _build_judge_prompt(
+        finding=ReviewIssueFinding(
+            issue_key="1-a.py-1",
+            run_index=1,
+            title="t",
+            file="a.py",
+            lines=[LineRange(start=1)],
+            body="the problem",
+            suggestion="the fix",
+            priority=IssuePriority.SHOULD_FIX,
+        ),
+        verdict=ValidationVerdict(issue_key="1-a.py-1", is_valid=True, argumentation="why"),
+        touching_diff="@@ -1 +1 @@\n-a\n+b",
+    )
+
+
 class TestPromptInjectionGuards:
     # Every prompt that embeds PR-author-controlled text (title/body, comments, diffs) must tell
     # the model to treat that text as data, never instructions — otherwise a crafted PR can steer
@@ -106,11 +139,14 @@ class TestPromptInjectionGuards:
     @parameterized.expand(
         [
             ("issues_review", _issues_review_prompt),
+            ("single_agent_review", _single_agent_prompt),
             ("chunking", _chunking_prompt),
             ("perspective_selection", _selection_prompt),
             ("issue_validation", _validation_prompt),
             ("issue_validation_followup", _validation_followup_prompt),
             ("issue_deduplicator", _dedup_prompt),
+            ("outcome_judge_system", _outcome_judge_system_prompt),
+            ("outcome_judge", _outcome_judge_prompt),
         ]
     )
     def test_prompt_carries_the_untrusted_content_guard(self, _name: str, render: Callable[[], str]) -> None:

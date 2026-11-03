@@ -10,6 +10,7 @@ points for producing are in `posthog.kafka_client.routing`:
 
 import os
 import json
+import time
 import asyncio
 import threading
 from collections.abc import Callable
@@ -42,8 +43,41 @@ KAFKA_PRODUCER_MESSAGES_COUNTER = Counter(
     labelnames=["topic", "status", "error"],
 )
 
+_DELIVERY_FAILURE_LOG_INTERVAL_SECONDS = 60.0
+_MAX_LOGGED_KEY_LENGTH = 200
+_delivery_failure_last_logged: dict[tuple[str, str], float] = {}
 
-@dataclass
+
+def _log_delivery_failure(topic: str, error_name: str, msg: Optional[Message]) -> None:
+    """Log a broker-side delivery failure, throttled per (topic, error).
+
+    librdkafka reports delivery failures asynchronously, after its own retries,
+    so no produce() caller can catch them; without this log they surface only
+    as an unattributed counter tick. `msg` is `None` unless the caller opted in
+    via `log_key_on_delivery_failure` (see `produce`), since some callers key
+    on customer-controlled values that must not reach logs. The log is
+    throttled because an outage fails every queued message at once; the counter
+    still counts each failure. The throttle takes no lock, and an occasional
+    double-log from concurrent callbacks is harmless.
+    """
+    now = time.monotonic()
+    last = _delivery_failure_last_logged.get((topic, error_name))
+    if last is not None and now - last < _DELIVERY_FAILURE_LOG_INTERVAL_SECONDS:
+        return
+    _delivery_failure_last_logged[(topic, error_name)] = now
+
+    raw_key = msg.key() if msg is not None else None
+    key = raw_key.decode("utf-8", errors="replace")[:_MAX_LOGGED_KEY_LENGTH] if raw_key is not None else None
+
+    logger.warning(
+        "kafka_producer_delivery_failed",
+        topic=topic,
+        error=error_name,
+        key=key,
+    )
+
+
+@dataclass(frozen=False)
 class ProduceResult:
     """
     A Future-like wrapper for confluent-kafka delivery results.
@@ -60,6 +94,9 @@ class ProduceResult:
         self._error = error
         self._message = message
         self._event.set()
+
+    def done(self) -> bool:
+        return self._event.is_set()
 
     def get(self, timeout: Optional[float] = None) -> Optional[Message]:
         """
@@ -138,7 +175,6 @@ _KAFKA_PYTHON_TO_CONFLUENT_KEYS = {
     "linger_ms": "linger.ms",
     "max_in_flight_requests_per_connection": "max.in.flight.requests.per.connection",
     "buffer_memory": "queue.buffering.max.kbytes",
-    "max_block_ms": "queue.buffering.max.ms",
     "topic_metadata_refresh_interval_ms": "topic.metadata.refresh.interval.ms",
     "queue_buffering_max_messages": "queue.buffering.max.messages",
     "sticky_partitioning_linger_ms": "sticky.partitioning.linger.ms",
@@ -273,11 +309,15 @@ class _KafkaProducer:
         b = json.dumps(d).encode("utf-8")
         return b
 
-    def _on_delivery(self, topic: str, result: ProduceResult, err: Optional[KafkaError], msg: Message):
+    def _on_delivery(
+        self, topic: str, result: ProduceResult, err: Optional[KafkaError], msg: Message, log_key_on_failure: bool
+    ) -> None:
         """Delivery callback for confluent-kafka."""
         result.set_result(err, msg)
         if err is not None:
-            KAFKA_PRODUCER_MESSAGES_COUNTER.labels(topic=topic, status="failure", error=err.name()).inc()
+            error_name = err.name()
+            KAFKA_PRODUCER_MESSAGES_COUNTER.labels(topic=topic, status="failure", error=error_name).inc()
+            _log_delivery_failure(topic, error_name, msg if log_key_on_failure else None)
         else:
             delivered_topic = msg.topic() if msg else topic
             KAFKA_PRODUCER_MESSAGES_COUNTER.labels(topic=delivered_topic, status="success", error="").inc()
@@ -289,7 +329,10 @@ class _KafkaProducer:
         key: Any = None,
         value_serializer: Optional[Callable[[Any], Any]] = None,
         headers: Optional[list[tuple[str, str | bytes]]] = None,
+        log_key_on_delivery_failure: bool = False,
     ) -> ProduceResult:
+        """Set `log_key_on_delivery_failure=True` only when `key` cannot carry
+        customer-controlled data (e.g. it is an internal id like a team id)."""
         if not value_serializer:
             value_serializer = self.json_serializer
         b = value_serializer(data)
@@ -315,12 +358,16 @@ class _KafkaProducer:
                 value=b,
                 key=key,
                 headers=encoded_headers,
-                on_delivery=lambda err, msg: self._on_delivery(topic, result, err, msg),
+                on_delivery=lambda err, msg: self._on_delivery(topic, result, err, msg, log_key_on_delivery_failure),
             )
             # Poll to trigger any pending delivery callbacks (non-blocking)
             self.producer.poll(0)
 
         return result
+
+    def poll(self, timeout: float) -> int:
+        """Run the delivery callbacks that are ready, waiting up to `timeout` seconds for one."""
+        return self.producer.poll(timeout)
 
     def flush(self, timeout: Optional[float] = None) -> int:
         # confluent's flush() returns the count still undelivered (0 once acked);
@@ -435,11 +482,28 @@ class ClickhouseProducer:
     can target the cluster mapped in TOPIC_ROUTING.
     """
 
-    def produce(self, sql: str, topic: str, data: dict[str, Any]):
+    def produce(self, sql: str, topic: str, data: dict[str, Any]) -> ProduceResult:
         if settings.TEST:
             sync_execute(sql, data)
-            return
+            result = ProduceResult(topic=topic)
+            result.set_result(None, None)
+            return result
         # Lazy import: routing imports from this module.
         from posthog.kafka_client.routing import get_producer
 
-        get_producer(topic=topic).produce(topic=topic, data=data)
+        return get_producer(topic=topic).produce(topic=topic, data=data)
+
+    def wait_for_delivery(self, results: list[ProduceResult], timeout: float) -> None:
+        """Raise `TimeoutError` or `KafkaException` unless Kafka acknowledges every result within `timeout` seconds."""
+        if not settings.TEST:
+            from posthog.kafka_client.routing import get_producer
+
+            # The producer runs delivery callbacks only while something polls it. Poll instead of flush,
+            # because a flush also waits for every other message on the shared producer.
+            producers = {result.topic: get_producer(topic=result.topic) for result in results}.values()
+            deadline = time.monotonic() + timeout
+            while not all(result.done() for result in results) and (remaining := deadline - time.monotonic()) > 0:
+                for producer in producers:
+                    producer.poll(min(remaining, 0.1))
+        for result in results:
+            result.get(timeout=0)

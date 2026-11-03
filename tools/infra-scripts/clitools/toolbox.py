@@ -14,8 +14,9 @@ from datetime import datetime, timedelta
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Import functions from the modular package
-from toolbox.kubernetes import select_context, validate_context
+from toolbox.kubernetes import ensure_context_access, select_context, validate_context
 from toolbox.pod import ClaimRaceError, claim_pod, connect_to_pod, delete_pod, get_toolbox_pod
+from toolbox.tailscale import ensure_tailscale_connected
 from toolbox.telemetry import capture_invocation, prompt_for_reason
 from toolbox.user import get_current_user
 
@@ -39,7 +40,8 @@ POOLS = {
         },
     },
     "flags-cache-jumphost": {
-        "default_namespace": "posthog",
+        # Golden-chart deployment in the per-app namespace, in every environment.
+        "default_namespace": "flags-cache-jumphost",
         "app_label": "flags-cache-jumphost",
         "claimed_label_key": "flags-jumphost-claimed",
     },
@@ -61,11 +63,6 @@ def _exit_for_signal(signum, _frame):
 def main():
     """Main entry point for the toolbox command."""
     try:
-        # If we're in a flox environment, exit
-        if "FLOX_ENV" in os.environ:
-            print("⚠️ Please exit the flox environment by typing `exit` before connecting to a toolbox.")  # noqa: T201
-            sys.exit(0)
-
         # Set up argument parser
         parser = argparse.ArgumentParser(
             description="Connect to a toolbox pod and manage pod claims. This script will automatically connect you to your latest claimed pod.",
@@ -93,7 +90,16 @@ def main():
             action="store_true",
             help="Skip the [y/N] prompt on exit and unconditionally delete the claimed pod on normal exit, Ctrl-C, or terminal close.",
         )
+        parser.add_argument(
+            "--kubectl-debug",
+            action="store_true",
+            help="Enable kubectl stream debug logs for the shell connection.",
+        )
         args = parser.parse_args()
+
+        # The cluster endpoints are only reachable over the tailnet; without this
+        # check a disconnected Tailscale surfaces as opaque kubectl timeouts.
+        ensure_tailscale_connected()
 
         # Ask up front (before the kubectl waits) what this session is for; skipped
         # automatically on non-interactive stdin so automation never blocks.
@@ -102,10 +108,24 @@ def main():
         pool = POOLS[args.pool]
         app_label = pool["app_label"]
         claimed_label_key = pool["claimed_label_key"]
-        # Each pool advertises its own default namespace; `KUBE_NAMESPACE`
-        # remains the escape hatch (e.g. to point the toolbox-django pool back
-        # at the legacy `posthog` namespace during migration).
-        namespace = os.environ.get("KUBE_NAMESPACE", pool["default_namespace"])
+        # Each pool advertises its own default namespace. `KUBE_NAMESPACE` remains
+        # the escape hatch (e.g. to point the toolbox-django pool back at the
+        # legacy `posthog` namespace during migration).
+        namespace = os.environ.get("KUBE_NAMESPACE") or pool["default_namespace"]
+        # Resolve which kubernetes context to use without ever calling
+        # `kubectl config use-context`. Switching kubeconfig globally would persist past
+        # this script and silently redirect later operational commands.
+        if kube_context := os.environ.get("KUBE_CONTEXT"):
+            if not validate_context(kube_context):
+                print(f"❌ KUBE_CONTEXT='{kube_context}' is not a known kubernetes context.")  # noqa: T201
+                sys.exit(1)
+            if not ensure_context_access(kube_context, namespace):
+                sys.exit(1)
+            selected_context = kube_context
+        else:
+            selected_context = select_context(namespace)
+        print(f"🔄 Using kubernetes context: {selected_context}")  # noqa: T201
+
         # The base selector is `app.kubernetes.io/name=<app_label>`. Some
         # namespaces also host other workloads that share that label (e.g. the
         # golden chart deploys a per-app pgbouncer under the same name in the
@@ -114,18 +134,6 @@ def main():
         extra_selector = pool.get("extra_selectors_by_namespace", {}).get(namespace)
 
         print(f"🛠️  Connecting to {args.pool} pool in namespace {namespace}...")  # noqa: T201
-
-        # Resolve which kubernetes context to use without ever calling
-        # `kubectl config use-context`. Switching kubeconfig globally would persist past
-        # this script and silently redirect later operational commands.
-        if kube_context := os.environ.get("KUBE_CONTEXT"):
-            if not validate_context(kube_context):
-                print(f"❌ KUBE_CONTEXT='{kube_context}' is not a known kubernetes context.")  # noqa: T201
-                sys.exit(1)
-            selected_context = kube_context
-        else:
-            selected_context = select_context()
-        print(f"🔄 Using kubernetes context: {selected_context}")  # noqa: T201
 
         # Get current user labels
         user_labels = get_current_user(claimed_label_key=claimed_label_key, context=selected_context)
@@ -271,16 +279,20 @@ def main():
             print("✅ Connecting to your existing pod (use --update-claim to extend the duration)")  # noqa: T201
 
         if args.auto_delete:
-            rc = connect_to_pod(pod_name, namespace=namespace, context=selected_context)
+            rc = connect_to_pod(
+                pod_name, namespace=namespace, context=selected_context, kubectl_debug=args.kubectl_debug
+            )
         else:
             try:
-                rc = connect_to_pod(pod_name, namespace=namespace, context=selected_context)
+                rc = connect_to_pod(
+                    pod_name, namespace=namespace, context=selected_context, kubectl_debug=args.kubectl_debug
+                )
             finally:
                 if will_claim:
                     delete_pod(pod_name, namespace=namespace, context=selected_context)
         sys.exit(rc)
     except KeyboardInterrupt:
-        print("\n👋 Goodbye! \n \n Did something not work as expected? Ask in #team-infrastructure")  # noqa: T201
+        print("\n👋 Goodbye! \n \n Did something not work as expected? Ask in #support-infrastructure")  # noqa: T201
         # POSIX convention: SIGINT exits 128 + signum (130). sys.exit(0) here
         # would mask Ctrl-C as a clean success to any wrapper checking $?, and
         # is inconsistent with the SIGTERM/SIGHUP handlers which already use 128 + signum.

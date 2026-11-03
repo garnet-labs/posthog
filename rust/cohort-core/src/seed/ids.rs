@@ -1,11 +1,13 @@
-//! The seed contract's newtyped ids: `RunId`, `ClaimEpoch`, `SChunkMs`, and `ConditionHash`. They
-//! ride the [`super::tile::SeedTile`] wire and the seeder's PostgreSQL ledger (hence the `sqlx`
-//! derives), so both ends resolve them to the same types.
+//! The seed contract's newtyped ids: `RunId`, `ClaimEpoch`, `SChunkMs`, `ScannedAtMs`, and
+//! `ConditionHash`. They ride the [`super::tile::SeedTile`] / [`super::person::PersonSeed`] wires
+//! and the seeder's PostgreSQL ledger (hence the `sqlx` derives), so both ends resolve them to the
+//! same types.
 
 use std::borrow::Borrow;
 use std::fmt;
 use std::str::FromStr;
 
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sqlx::Type;
 use uuid::Uuid;
@@ -32,6 +34,32 @@ pub struct ClaimEpoch(pub i32);
 #[serde(transparent)]
 #[sqlx(transparent)]
 pub struct SChunkMs(pub i64);
+
+/// The persons-scan instant (epoch ms, UTC): the last-write-wins input the apply path weighs
+/// against the stored record's stamp. A separate type from [`SChunkMs`] so it cannot reach the
+/// apply fence, which it would answer wrongly.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Type,
+)]
+#[serde(transparent)]
+#[sqlx(transparent)]
+pub struct ScannedAtMs(pub i64);
+
+/// A run's boundary (epoch ms, Postgres clock).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct RunBoundaryMs(pub i64);
+
+/// When a slice began (epoch ms, processor clock).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct CoverageStartMs(pub i64);
+
+impl CoverageStartMs {
+    pub fn now() -> Self {
+        Self(Utc::now().timestamp_millis())
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ConditionHash([u8; 16]);

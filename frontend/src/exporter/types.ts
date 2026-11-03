@@ -1,7 +1,7 @@
 import { NotebookType } from 'scenes/notebooks/types'
 import { SessionRecordingPlayerMode } from 'scenes/session-recordings/player/sessionRecordingPlayerLogic'
 
-import { AnyResponseType, SharingConfigurationSettings } from '~/queries/schema/schema-general'
+import { AnyResponseType, QuerySchema, SharingConfigurationSettings } from '~/queries/schema/schema-general'
 import {
     CohortType,
     DashboardType,
@@ -17,26 +17,6 @@ export enum ExportType {
     Scene = 'scene',
     Unlock = 'unlock',
     Heatmap = 'heatmap',
-    Interview = 'interview',
-}
-
-export interface InterviewExportPayload {
-    topic_id: string
-    interviewee_identifier: string
-    user_name: string
-    topic: string
-    already_replied: boolean
-    /**
-     * True for a non-personalised (shared) topic link, where every visitor is a new anonymous
-     * respondent who self-identifies with a name before starting. False for a personalised
-     * per-invitee link (which greets a known `user_name`).
-     */
-    shared: boolean
-    /**
-     * NOTE: `agent_context`, `questions`, and the Vapi credentials are intentionally NOT in
-     * this payload. They live behind `POST /api/user_interviews/share/<token>/start_call/`
-     * so the personalized agent context never lands in the public HTML.
-     */
 }
 
 export interface ExportedData extends SharingConfigurationSettings {
@@ -61,6 +41,14 @@ export interface ExportedData extends SharingConfigurationSettings {
      * `<Query cachedResults={…} />` without ever hitting the query API.
      */
     inline_query_results?: Record<string, AnyResponseType>
+    /**
+     * Ad-hoc query for an insight-less image export (`export_context.source`), with its
+     * pre-computed result in `query_results` — same rationale as `inline_query_results`.
+     */
+    query?: QuerySchema
+    query_results?: AnyResponseType
+    /** Optional title shown inside an ad-hoc query image export. */
+    query_title?: string
     autoplay?: boolean
     /** Player adds border by default - we want to remove it **/
     noBorder?: boolean
@@ -70,6 +58,4 @@ export interface ExportedData extends SharingConfigurationSettings {
     heatmap_context?: HeatmapExportContext
     /** Cohort id+name inlined for shared views, which can't reach /api/cohorts. */
     cohorts?: Pick<CohortType, 'id' | 'name'>[]
-    /** AI user interview payload — present only for `type === ExportType.Interview`. */
-    interview?: InterviewExportPayload
 }

@@ -9,6 +9,35 @@
 - pods can scale up and down without service disruptions or inconsistent writes
 - crashed pods can be recovered from with minimal downtime
 
+### API contract: every RPC must be safe under at-least-once delivery
+
+A leader-path request can be delivered more than once: clients retry
+`UNAVAILABLE` after ambiguous failures, and the router internally
+replays fence- and transport-bounced requests. Neither layer can know
+whether an ambiguous first delivery applied, so the safety burden sits
+here, on the RPC's semantics — not in any retry policy.
+
+Be precise about what "safe" means today. Reads are pure.
+`UpdatePersonProperties` is a merge command with no request-level
+identity: re-applying the same merge converges to the same state
+*unless a different caller wrote the same field between the original
+apply and the replay*, in which case the replay clobbers the newer
+write. That interleaved case is the accepted at-least-once residual —
+the exposure is identical under client-driven retries, which the
+platform has always had — and its planned closure is operation
+identity: the router stamps each logical request with an op id, the
+leader keeps a short ring of recently applied ids on the cached person
+entry, and the id rides the produced record so warming rebuilds the
+ring on a new owner (the stamp and the ring land together).
+
+Future RPCs must clear the same bar: convergent under redelivery
+(tombstone-style deletes, max-merge version floors, re-appliable
+merges), or carrying explicit operation identity. An RPC that is
+neither (an unguarded increment, an append) is broken in this
+architecture regardless of router behavior and must not be added; this
+is a review requirement for new leader RPCs (see the
+`adding-personhog-rpc` skill).
+
 ### To Implement
 
 ### Known Implementation Details
@@ -50,6 +79,9 @@ TBD:
 - this offset is the boundary:
 - below the offset: state is durably in Postgres
 - at or above the offset: state is PG + the changes in our distributed log (the kafka topic)
+- death documents (tombstoned persons) stay cached only while their record awaits the writer: once the committed offset passes it, the prune drops the document and reads fall through to Postgres, which then holds the tombstone or a revival that superseded it
+- a revival therefore becomes visible at most one prune tick after the writer applies its tombstone
+- warming leaves no residue for an applied death record — neither the document (unmarked, it would answer not-found forever) nor its earlier records for the same key
 
 #### Admission
 
@@ -84,9 +116,32 @@ update:
    created_at within sane bounds) — corrupt state must never reach the
    changelog.
 
+The merge saga's fold (`FoldPersonDocument`) cannot reject for size — the
+saga would re-drive it forever — so its oversized path always completes:
+trim candidates are the fold's own contribution (a within-limit target
+never loses a key it held), the target's own keys join only when its
+stored document already exceeded the limit, and a trim that cannot reach
+the hysteresis target retries against the hard ceiling, since any document
+at or under the threshold is still applyable. The residual — a stored
+document whose protected keys alone exceed the ceiling, so no applyable
+fold document exists — completes without producing: the person keeps its
+pre-fold state, the fold's property and scalar effects are skipped, and
+the case is surfaced via `personhog_leader_folds_total{outcome=
+"unapplyable"}`, an error log, and a size-violation warning. This is an
+accepted gap: the alternatives are wedging the saga (reject) or halting
+the writer (produce an unapplyable record).
+
 Trims and rejections emit `person_properties_size_violation` ingestion
 warnings (`src/warnings.rs`), throttled per (team, type) to match the Node
-pipeline's limiter. The writer-side weld
+pipeline's limiter. They go through a dedicated fire-and-forget producer,
+not the changelog producer, because the warnings topic can live on a
+different cluster from the changelog. `INGESTION_WARNINGS_ENABLED`
+(default `false`) turns it on, and `INGESTION_WARNINGS_KAFKA_HOSTS`,
+`INGESTION_WARNINGS_KAFKA_TLS` and `INGESTION_WARNINGS_TOPIC` (default
+`clickhouse_ingestion_warnings`) name the destination. Enabled with no
+hosts set, the leader logs a warning and emits nothing. Health reads from
+`ingestion_warnings_emitter_enabled{reason}` and
+`ingestion_warnings_total{source="personhog-leader",outcome}`. The writer-side weld
 (`personhog-writer/tests/admission_weld.rs`) runs hostile property fixtures
 through these exact functions and the writer's real statement against live
 Postgres, asserting byte-exact round-trips.
@@ -118,10 +173,9 @@ and warming can consume to a known endpoint without racing producers.
    (`O_pg_writer(P)`) via a short-lived OffsetFetch consumer. Anything
    at or after this offset still needs to be in cache; anything below
    is already durable in PG.
-2. Resolve the start offset: `committed_offset - lookback_offsets`,
-   clamped to the partition's earliest available offset. The lookback
-   is a configurable safety margin against momentary races between
-   the writer's commit and our read of it.
+2. Resolve the start offset: the committed offset, clamped to the
+   partition's earliest available offset. Every record from there is
+   marked dirty as it warms.
 3. `assign()` (not `subscribe()`) the warming consumer to the
    partition at the resolved start offset and consume until HWM.
 4. Buffer decoded records locally; only commit them to the cache
@@ -136,8 +190,6 @@ and warming can consume to a known endpoint without racing producers.
 
 - `WRITER_CONSUMER_GROUP` — group whose committed offset bounds the
   warming range.
-- `WARM_LOOKBACK_OFFSETS` — safety margin to rewind past the writer's
-  commit.
 - `WARM_COMMITTED_OFFSETS_TIMEOUT_SECS`, `WARM_FETCH_WATERMARKS_TIMEOUT_SECS`,
   `WARM_RECV_TIMEOUT_SECS` — Kafka call timeouts.
 - `WARM_RETRY_MAX_ATTEMPTS`, `WARM_RETRY_INITIAL_BACKOFF_MS`,
@@ -164,15 +216,19 @@ via `LeaderHandoffHandler` (see `src/coordination/mod.rs`):
   "no in-flight" implies "every acked write durable in Kafka."
   Reads are never fenced — until cutover the frozen cache state is
   still the latest.
-- `warm_partition` (Warming): see the section above. Also lifts any
-  fence left over from a previous ownership of the same partition.
-- `release_partition` (Complete): lifts the write fence and drops the
-  partition's cache slot via `PartitionedCache::drop_partition` once
-  the routing table has flipped to the new owner.
+- `warm_partition` (Warming): see the section above. Takes the
+  partition's changelog epoch before the warm read, which fences every
+  predecessor at the broker, and lifts any write fence left over from a
+  previous ownership of the same partition.
+- `release_partition` (Complete): lifts the write fence, gives the
+  changelog epoch back, and drops the partition's cache slot via
+  `PartitionedCache::drop_partition` once the routing table has flipped
+  to the new owner.
 - `resume_partition` (handoff cancelled): a handoff deleted before
   `Complete` while this pod still owns the partition is a
-  cancellation — lifts the write fence so the partition serves writes
-  again.
+  cancellation — re-takes the changelog epoch, which the cancelled
+  handoff's target may have taken, then lifts the write fence so the
+  partition serves writes again.
 
 #### Request Path
 

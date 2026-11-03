@@ -1,17 +1,22 @@
 from typing import TYPE_CHECKING, Any, Optional
+from urllib.parse import quote
 
 from django.conf import settings
 
 import structlog
 
-from posthog.cdp.internal_events import InternalEventEvent, InternalEventPerson, produce_internal_event
 from posthog.exceptions_capture import capture_exception
 from posthog.models import User
+from posthog.models.comment.comment import CANVAS_COMMENT_SCOPES, OBSERVATION_COMMENT_SCOPES
+
+from products.cdp.backend.internal_events import InternalEventEvent, InternalEventPerson, produce_internal_event
 
 if TYPE_CHECKING:
     from posthog.models.comment import Comment
 
 logger = structlog.get_logger(__name__)
+
+DESKTOP_COMMENT_SCOPES = frozenset({"task", "task_artifact", "task_preview", "task_browser", *CANVAS_COMMENT_SCOPES})
 
 SCOPE_TO_SOURCE_TYPE: dict[str, str] = {
     "Replay": "replay",
@@ -22,29 +27,57 @@ SCOPE_TO_SOURCE_TYPE: dict[str, str] = {
     "Survey": "survey",
     "Experiment": "experiment",
     "ErrorTracking": "error_tracking",
-    # Unlike the PascalCase model-name scopes above, ticket comments are written with the literal
-    # "conversations_ticket" scope (see products/conversations). This must match that literal.
+    "ReplayObservation": "replay_observation",
+    # Unlike the PascalCase model-name scopes above, customer-facing ticket messages are written
+    # with the literal "conversations_ticket" scope (see products/conversations), while internal
+    # ticket discussions use the "Ticket" scope. Both are ticket-sourced.
     "conversations_ticket": "ticket",
+    "Ticket": "ticket",
 }
 
 SCOPE_TO_PATH_MAPPING: dict[str, str] = {
     "Replay": "/replay/{item_id}",
     "Notebook": "/notebooks/{item_id}",
     "Insight": "/insights/{item_id}",
-    "FeatureFlag": "/feature_flags/{item_id}",
+    "FeatureFlag": "/feature-flags/{item_id}",
     "Dashboard": "/dashboard/{item_id}",
     "Survey": "/surveys/{item_id}",
     "Experiment": "/experiments/{item_id}",
-    # See note above: ticket comments use the "conversations_ticket" scope literal, not "Ticket".
+    "ReplayObservation": "/replay-vision/observations/{item_id}",
+    # See note above: customer-facing ticket messages use the "conversations_ticket" scope literal,
+    # while internal ticket discussions use the "Ticket" scope. Both land on the ticket page.
     "conversations_ticket": "/support/tickets/{item_id}",
+    "Ticket": "/support/tickets/{item_id}",
 }
+
+# Human-readable scope names for user-facing surfaces (e.g. the mirrored Slack card) —
+# raw scope values are internal CamelCase enums and read as jargon.
+SCOPE_DISPLAY_NAMES: dict[str, str] = {
+    "Replay": "a session recording",
+    "Notebook": "a notebook",
+    "Insight": "an insight",
+    "FeatureFlag": "a feature flag",
+    "Dashboard": "a dashboard",
+    "Survey": "a survey",
+    "Experiment": "an experiment",
+    "ErrorTracking": "an error tracking issue",
+    "ReplayObservation": "a Replay Vision observation",
+    "Ticket": "a support ticket",
+}
+
+
+def comment_scope_display_name(scope: str) -> str:
+    return SCOPE_DISPLAY_NAMES.get(scope, "the discussion")
 
 
 def build_comment_item_url(scope: str, item_id: Optional[str], slug: Optional[str] = None) -> str:
     if slug:
         url = f"{settings.SITE_URL}{slug}"
     elif scope in SCOPE_TO_PATH_MAPPING and item_id:
-        path = SCOPE_TO_PATH_MAPPING[scope].format(item_id=item_id)
+        # item_id is a free-form client-supplied CharField — percent-encode it so characters
+        # with meaning downstream (Slack mrkdwn `|`/`>` in links, URL delimiters) can't break
+        # or redirect the rendered link.
+        path = SCOPE_TO_PATH_MAPPING[scope].format(item_id=quote(str(item_id), safe=""))
         url = f"{settings.SITE_URL}{path}"
     else:
         url = settings.SITE_URL
@@ -85,6 +118,17 @@ def extract_plain_text_from_rich_content(rich_content: Optional[dict]) -> str:
     return "".join(text_parts)
 
 
+# Mention notifications and events outlive the access check made when they are sent, and the notifications
+# API and CDP destinations do not recheck the observation. So they carry this text instead of the note.
+OBSERVATION_NOTE_PLACEHOLDER = "A note on a Replay Vision observation. Open it in PostHog to read it."
+
+
+def _mention_fanout_content(comment: "Comment") -> str | None:
+    if comment.scope in OBSERVATION_COMMENT_SCOPES:
+        return OBSERVATION_NOTE_PLACEHOLDER
+    return extract_plain_text_from_rich_content(comment.rich_content) or comment.content
+
+
 def produce_discussion_mention_events(
     comment: "Comment",
     mentioned_user_ids: list[int],
@@ -100,7 +144,7 @@ def produce_discussion_mention_events(
             return
 
         item_url = build_comment_item_url(comment.scope, comment.item_id, slug)
-        comment_content = extract_plain_text_from_rich_content(comment.rich_content) or comment.content
+        comment_content = _mention_fanout_content(comment)
 
         commenter_data = {
             "id": str(commenter.id),
@@ -160,7 +204,7 @@ def send_mention_notifications(
         if not commenter:
             return
 
-        comment_content = extract_plain_text_from_rich_content(comment.rich_content) or comment.content
+        comment_content = _mention_fanout_content(comment)
         body = comment_content[:200] if comment_content else ""
 
         for user_id in mentioned_user_ids:

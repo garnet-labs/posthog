@@ -17,6 +17,7 @@ const EXPECTED_RECORDING_PROPERTIES = [
             $os: 'Windows',
             $os_name: 'Windows 10',
             $entry_referring_domain: 'google.com',
+            $ip: '192.0.2.1',
         },
     },
     {
@@ -40,6 +41,7 @@ const EXPECTED_RECORDING_PROPERTIES_BY_ID = {
         $os: 'Windows',
         $os_name: 'Windows 10',
         $entry_referring_domain: 'google.com',
+        $ip: '192.0.2.1',
     },
     s2: {
         $browser: 'Safari',
@@ -83,8 +85,20 @@ const mockSessons: SessionRecordingType[] = [
 ]
 
 // matches the order of the base columns in the properties query, after the leading session_id
-const S1_BASE_ROW = ['s1', 'AU', 'Chrome', 'Desktop', 'Windows', 'Windows 10', 'google.com', null, null, null]
-const S2_BASE_ROW = ['s2', 'GB', 'Safari', 'Mobile', 'iOS', 'iOS 14', 'google.com', null, null, null]
+const S1_BASE_ROW = [
+    's1',
+    'AU',
+    'Chrome',
+    'Desktop',
+    'Windows',
+    'Windows 10',
+    'google.com',
+    null,
+    null,
+    null,
+    '192.0.2.1',
+]
+const S2_BASE_ROW = ['s2', 'GB', 'Safari', 'Mobile', 'iOS', 'iOS 14', 'google.com', null, null, null, null]
 
 // mock the query endpoint with a per-request handler that receives the HogQL query string
 const useQueryMocks = (handler: (query: string) => unknown): void => {
@@ -166,11 +180,15 @@ describe('sessionRecordingsListPropertiesLogic', () => {
         }).toDispatchActions(['loadPropertiesForSessionsSuccess'])
 
         expect(issuedQueries).toHaveLength(1)
-        expect(issuedQueries[0]).toContain('any(session.$entry_utm_medium) as $entry_utm_medium')
-        expect(issuedQueries[0]).toContain('any(session.$channel_type) as $channel_type')
+        // The WHERE clause lists every core event name, so a pin can only be found absent by looking
+        // at the select list. Searching the whole query trips over an unrelated event that shares the
+        // pin's name as a substring.
+        const selectList = issuedQueries[0].split('FROM events')[0]
+        expect(selectList).toContain('any(session.$entry_utm_medium) as $entry_utm_medium')
+        expect(selectList).toContain('any(session.$channel_type) as $channel_type')
         // non-session pins must not leak into the query
-        expect(issuedQueries[0]).not.toContain('email')
-        expect(issuedQueries[0]).not.toContain('Start')
+        expect(selectList).not.toContain('email')
+        expect(selectList).not.toContain('Start')
 
         expect(logic.values.recordingPropertiesById['s1']).toMatchObject({
             $browser: 'Chrome',
@@ -269,5 +287,31 @@ describe('sessionRecordingsListPropertiesLogic', () => {
 
         expect(issuedQueries[issuedQueries.length - 1]).toContain('$entry_utm_medium')
         expect(logic.values.recordingPropertiesById['s2']).toMatchObject({ $entry_utm_medium: 'paid' })
+    })
+
+    it('resolves instead of throwing when the base query fails with no pins to fall back on', async () => {
+        useQueryMocks(() => [500, { detail: 'ClickHouse is unavailable' }])
+
+        await expectLogic(logic, () => {
+            logic.actions.loadPropertiesForSessions(mockSessons)
+        })
+            .toDispatchActions(['loadPropertiesForSessionsSuccess'])
+            .toNotHaveDispatchedActions(['loadPropertiesForSessionsFailure'])
+
+        expect(logic.values.recordingPropertiesById).toEqual({})
+    })
+
+    it('resolves instead of throwing when both the wide and fallback queries fail', async () => {
+        useQueryMocks(() => [500, { detail: 'ClickHouse is unavailable' }])
+        sessionRecordingPinnedPropertiesLogic.actions.setPinnedProperties(['$entry_utm_medium'])
+
+        await expectLogic(logic, () => {
+            logic.actions.loadPropertiesForSessions(mockSessons)
+        })
+            .toDispatchActions(['loadPropertiesForSessionsSuccess'])
+            .toNotHaveDispatchedActions(['loadPropertiesForSessionsFailure'])
+
+        // an outage on both queries isn't a 400, so the pin set isn't blacklisted (it's retried next batch)
+        expect(logic.values.unqueryableExtraProperties).toBeNull()
     })
 })

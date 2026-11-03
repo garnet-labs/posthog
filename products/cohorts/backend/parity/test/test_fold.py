@@ -52,6 +52,12 @@ def _marker_without(field: str) -> dict:
     return marker
 
 
+def _withheld(partition: int, *, run_id: str = RUN_1, cohort_id: int = 10) -> dict:
+    marker = _marker(partition, run_id=run_id, cohort_id=cohort_id)
+    del marker["last_updated"]
+    return marker | {"type": "reconcile_withheld", "reason": "partial_coverage", "covered_since_ms": 1}
+
+
 class TestFold(SimpleTestCase):
     def test_last_message_wins_per_pair(self) -> None:
         state, stats = fold_membership_changes(
@@ -107,6 +113,60 @@ class TestFold(SimpleTestCase):
         self.assertEqual(members(state[10]), {"p2"})
         self.assertEqual(stats.dropped_before_since, 1)
 
+    def test_until_bound_converges_the_fold_to_the_pinned_instant(self) -> None:
+        # A pinned comparison clock must see the state as of that instant: an entry stamped after it
+        # is invisible to the oracle's window and would otherwise read as an unexplained over-count,
+        # and a later `left` must not retroactively remove a person who was a member at the instant.
+        state, stats = fold_membership_changes(
+            [
+                _msg("entered", "2026-07-07 19:01:00.000001", person_id="P1"),
+                _msg("left", "2026-07-07 19:09:00.000001", person_id="P1"),
+                _msg("entered", "2026-07-07 19:09:00.000001", person_id="P2"),
+            ],
+            team_id=2,
+            since=SINCE,
+            until=datetime(2026, 7, 7, 19, 5, tzinfo=UTC),
+        )
+        self.assertEqual(members(state[10]), {"p1"})
+        self.assertEqual(stats.dropped_after_until, 2)
+
+    def test_until_by_cohort_bounds_each_cohort_on_its_own_clock(self) -> None:
+        # Each cohort's legacy population is calculated on its own schedule, so the population oracle
+        # bounds per cohort; one cohort's clock leaking onto another silently mis-scopes its fold.
+        # Cohorts absent from the map fall back to the global `until`.
+        state, stats = fold_membership_changes(
+            [
+                _msg("entered", "2026-07-07 19:09:00.000001", cohort_id=10, person_id="P1"),
+                _msg("entered", "2026-07-07 19:09:00.000001", cohort_id=20, person_id="P2"),
+                _msg("entered", "2026-07-07 19:19:00.000001", cohort_id=30, person_id="P3"),
+                _marker(0, cohort_id=20, ts="2026-07-07 19:09:00.000001"),
+                # Past cohort 10's own bound: a marker recorded here would flip has_complete_reconcile
+                # and silence the only_legacy-is-an-upper-bound warning in population mode, where the
+                # global until is always None.
+                _marker(0, cohort_id=10, ts="2026-07-07 19:09:00.000001"),
+            ],
+            team_id=2,
+            since=SINCE,
+            until=datetime(2026, 7, 7, 19, 15, tzinfo=UTC),
+            until_by_cohort={10: datetime(2026, 7, 7, 19, 5, tzinfo=UTC)},
+        )
+        self.assertNotIn(10, state)
+        self.assertEqual(members(state[20]), {"p2"})
+        self.assertNotIn(30, state)
+        self.assertEqual(reconcile_completeness(stats, 20)[0].partitions_seen, 1)
+        self.assertEqual(reconcile_completeness(stats, 10), ())
+        self.assertEqual(stats.dropped_after_until, 3)
+
+    def test_until_bound_drops_later_reconcile_markers(self) -> None:
+        _state, stats = fold_membership_changes(
+            [_marker(0, ts="2026-07-07 19:01:00.000001"), _marker(1, ts="2026-07-07 19:09:00.000001")],
+            team_id=2,
+            since=SINCE,
+            until=datetime(2026, 7, 7, 19, 5, tzinfo=UTC),
+        )
+        self.assertEqual(reconcile_completeness(stats, 10)[0].partitions_seen, 1)
+        self.assertEqual(stats.dropped_after_until, 1)
+
     def test_wrong_team_messages_are_dropped(self) -> None:
         state, stats = fold_membership_changes(
             [
@@ -160,22 +220,30 @@ class TestFold(SimpleTestCase):
         # (41..64); its markers must stay under their own cohort so RUN_1 does not read as a
         # false 64/64 for cohort 10.
         messages.extend(_marker(partition, run_id=RUN_1, cohort_id=20) for partition in range(41, 64))
+        # Withheld markers stay out of the membership fold.
+        messages.append(_withheld(50, run_id=RUN_1))
+        messages.append(_withheld(3, run_id=RUN_2, cohort_id=30))
 
-        _state, stats = fold_membership_changes(messages, team_id=2, since=SINCE)
+        state, stats = fold_membership_changes(messages, team_id=2, since=SINCE)
 
         completeness = reconcile_completeness(stats, cohort_id=10)
         self.assertEqual(
-            [(run.run_id, run.partitions_seen, run.complete) for run in completeness],
-            [(RUN_1, 41, False), (RUN_2, 64, True)],
+            [(run.run_id, run.partitions_seen, run.complete, run.withheld) for run in completeness],
+            [(RUN_1, 41, False, ((50, "partial_coverage"),)), (RUN_2, 64, True, ())],
         )
         self.assertEqual(
             [(run.run_id, run.partitions_seen, run.complete) for run in reconcile_completeness(stats, cohort_id=20)],
             [(RUN_1, 23, False)],
         )
-        # Counts every accepted marker message, including the RUN_1 partition-0 duplicate — 129,
-        # not the 128 distinct partitions the completeness sets hold. Keeps the summary's
-        # folded + drops + markers == total accounting exact.
-        self.assertEqual(stats.reconcile_markers_recorded, 129)
+        self.assertEqual(
+            [(run.run_id, run.partitions_seen, run.withheld) for run in reconcile_completeness(stats, cohort_id=30)],
+            [(RUN_2, 0, ((3, "partial_coverage"),))],
+        )
+        self.assertEqual((state, stats.dropped_malformed), ({}, 0))
+        # Counts every accepted marker message, including the RUN_1 partition-0 duplicate and the
+        # two withheld markers — 131, not the 128 distinct partitions the completeness sets hold.
+        # Keeps the summary's folded + drops + markers == total accounting exact.
+        self.assertEqual(stats.reconcile_markers_recorded, 131)
 
     @parameterized.expand(
         [
@@ -187,6 +255,8 @@ class TestFold(SimpleTestCase):
             ("float_team_id", _marker(1) | {"team_id": 2.0}, 2, 1, 0),
             ("boolean_team_id", _marker(1, team_id=True), 1, 1, 0),
             ("before_since", _marker(1, ts="2026-07-07 18:59:59.999999"), 2, 0, 1),
+            ("withheld_out_of_range_partition", _withheld(64), 2, 1, 0),
+            ("withheld_empty_reason", _withheld(1) | {"reason": ""}, 2, 1, 0),
         ]
     )
     def test_invalid_or_stale_markers_cannot_certify_reconcile(
@@ -200,6 +270,7 @@ class TestFold(SimpleTestCase):
         _state, stats = fold_membership_changes([marker], team_id=team_id, since=SINCE)
 
         self.assertEqual(stats.reconcile_markers, {})
+        self.assertEqual(stats.reconcile_withheld, {})
         self.assertEqual(stats.dropped_malformed, expected_malformed)
         self.assertEqual(stats.dropped_before_since, expected_before_since)
 

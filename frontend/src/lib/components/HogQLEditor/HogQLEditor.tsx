@@ -6,8 +6,8 @@ import { CLICK_OUTSIDE_BLOCK_CLASS } from 'lib/hooks/useOutsideClickHandler'
 import { LemonButton } from 'lib/lemon-ui/LemonButton'
 import { CodeEditorInline } from 'lib/monaco/CodeEditorInline'
 
+import { isActorsQuery } from '~/queries/schema/node-guards'
 import { AnyDataNode } from '~/queries/schema/schema-general'
-import { isActorsQuery } from '~/queries/utils'
 
 export interface HogQLEditorProps {
     onChange: (value: string) => void
@@ -76,8 +76,8 @@ export function HogQLEditor({
                 onPressCmdEnter={
                     disableCmdEnter
                         ? undefined
-                        : (value) => {
-                              onChange(value)
+                        : () => {
+                              onChange(bufferedValue)
                           }
                 }
             />

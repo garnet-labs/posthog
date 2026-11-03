@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 import logging
 
-from products.signals.backend.report_generation.research import (
+from products.signals.backend.facade.research import (
     ActionabilityAssessment,
     ActionabilityChoice,
     PriorityAssessment,
@@ -118,4 +118,4 @@ async def run_cursed_identifier_research(
         findings=findings,
         actionability=actionability,
         priority=priority,
-    )
+    )  # ty: ignore[pydantic-discarded-extra-argument]
