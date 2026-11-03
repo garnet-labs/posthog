@@ -49,6 +49,9 @@ verifyDepsBeforeRun: false
 confirmModulesPurge: false
 # A cold install fetches every package, so retry past brief registry errors.
 fetchRetries: 3
+# Build scripts pnpm has skipped so far; `pnpm approve-builds` records the decision here.
+ignoredBuiltDependencies:
+    - puppeteer
 
 # Fix React versions across the monorepo.
 overrides:
