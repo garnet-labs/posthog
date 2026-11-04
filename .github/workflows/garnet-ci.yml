@@ -7,8 +7,10 @@ name: Garnet Runtime Visibility
 # connection with the execution chain that reached it, bound to the head
 # commit, compared with the last recorded master run.
 #
-# The second job is the dependency proof. It reads the finalized record for this
-# head and, only when nothing new was recorded against master, lists the
+# The third job is the dependency proof. It reads the finalized record for this
+# head from the Garnet App's own PR comment (author `garnet-runtime-review[bot]`,
+# `garnet:commit` equal to the head) through the GitHub API and, only when the
+# App declares nothing new against master, lists the
 # dependency files it judged in one notice annotation titled
 # `stamphog attestation: <base ref>` carrying one `<!-- stamphog:v1 [...] -->`
 # marker, the shape stamphog reads to lift the `deps_toolchain` deny category for
@@ -63,10 +65,9 @@ jobs:
                   ref: ${{ inputs.checkout_ref || github.event.pull_request.head.sha || github.sha }}
 
             - name: Garnet Runtime Visibility
-              uses: garnet-org/action@96e9f81ec0f59f2322e8c67b43c4d4017d932ad3 # v2.4.1
+              uses: garnet-org/action@673a06d87748bec49e4d8df22d371b2a3420aba4 # v2.5.2
               with:
                   api_token: ${{ secrets.GARNET_API_TOKEN }}
-                  jibril_version: v2.17.0
 
             - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
 
@@ -97,10 +98,9 @@ jobs:
                   ref: ${{ inputs.checkout_ref || github.event.pull_request.head.sha || github.sha }}
 
             - name: Garnet Runtime Visibility
-              uses: garnet-org/action@96e9f81ec0f59f2322e8c67b43c4d4017d932ad3 # v2.4.1
+              uses: garnet-org/action@673a06d87748bec49e4d8df22d371b2a3420aba4 # v2.5.2
               with:
                   api_token: ${{ secrets.GARNET_API_TOKEN }}
-                  jibril_version: v2.17.0
 
             - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
               with:
@@ -133,33 +133,34 @@ jobs:
         timeout-minutes: 30
         permissions:
             contents: read
+            issues: read
             pull-requests: read
         env:
             GH_TOKEN: ${{ github.token }}
             PR_NUMBER: ${{ github.event.pull_request.number }}
             HEAD_SHA: ${{ github.event.pull_request.head.sha }}
             BASE_REF: ${{ github.event.pull_request.base.ref }}
-            RUNTIME_REVIEW_MCP: https://garnet-runtime-review-mcp.vercel.app/mcp
+            RECORD_AUTHOR: garnet-runtime-review[bot]
         steps:
             - name: Wait for the finalized record bound to this head
               id: record
               shell: bash
               run: |
                   set -euo pipefail
-                  request=$(jq -cn --arg repo "$GITHUB_REPOSITORY" --argjson pr "$PR_NUMBER" \
-                      '{jsonrpc:"2.0",id:1,method:"tools/call",params:{name:"get_runtime_review",arguments:{repo:$repo,pr:$pr}}}')
+                  # Only the App's sticky comment counts: author pinned, marker bound to this head.
                   for attempt in $(seq 1 40); do
-                      text=$(curl -sS --max-time 60 -X POST "$RUNTIME_REVIEW_MCP" \
-                          -H 'content-type: application/json' -H 'accept: application/json, text/event-stream' \
-                          -d "$request" | jq -r '.result.content[0].text // empty' || true)
-                      record=$(printf '%s\n' "$text" | awk '/^```json$/{f=1;next} /^```$/{f=0} f' | jq -c '.record // empty' 2>/dev/null || true)
-                      if [ -n "$record" ]; then
-                          bound=$(jq -r '.bound_to_head' <<<"$record")
-                          pending=$(jq -r '.pending' <<<"$record")
-                          marker=$(jq -r '.marker_commit // ""' <<<"$record")
-                          if [ "$bound" = "true" ] && [ "$pending" = "false" ] && [ "$marker" = "$HEAD_SHA" ]; then
-                              outcome=$(jq -r '.outcome // "unknown"' <<<"$record")
-                              echo "record for $HEAD_SHA: $(jq -r '.heading // ""' <<<"$record") (outcome: $outcome; compared with: $(jq -r '.compared_with // "nothing"' <<<"$record"))"
+                      body=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
+                          --jq ".[] | select(.user.login == \"$RECORD_AUTHOR\" and (.body | contains(\"<!-- garnet-runtime-review -->\"))) | .body" || true)
+                      marker=$(grep -oE '<!-- garnet:commit [0-9a-f]{40} -->' <<<"$body" | tail -1 | grep -oE '[0-9a-f]{40}' || true)
+                      summary=$(grep -oE '<!-- garnet:summary \{.*\} -->' <<<"$body" | tail -1 | sed -E 's/^<!-- garnet:summary //; s/ -->$//' || true)
+                      if [ "$marker" = "$HEAD_SHA" ] && [ -n "$summary" ] && [ "$(jq -r '.commit // ""' <<<"$summary")" = "$HEAD_SHA" ]; then
+                          status=$(jq -r '.status // ""' <<<"$summary")
+                          if [ "$status" = "finalized" ]; then
+                              outcome=$(jq -r '.outcome // "unknown"' <<<"$summary")
+                              capture=$(jq -r '.capture_quality // "undeclared"' <<<"$summary")
+                              # A partial or undeclared capture cannot back an unchanged claim.
+                              case "$capture" in complete|best-effort) ;; *) outcome="capture-$capture" ;; esac
+                              echo "record for $HEAD_SHA: $(jq -r '.heading // ""' <<<"$summary") (outcome: $outcome; capture: $capture; compared with: $(jq -r '.previous // "nothing"' <<<"$summary"))"
                               echo "outcome=$outcome" >> "$GITHUB_OUTPUT"
                               exit 0
                           fi
@@ -230,7 +231,8 @@ jobs:
                   case "$OUTCOME" in
                       unchanged) reason="the record is unchanged" ;;
                       changed) reason="the record shows new or changed runtime behavior; the pull request stays in review" ;;
-                      recorded) reason="the record has no recorded master run to compare with" ;;
+                      recorded|first) reason="the record has no recorded master run to compare with" ;;
+                      capture-*) reason="the record does not declare a usable capture (${OUTCOME#capture-})" ;;
                       pending) reason="the record did not finalize within the wait" ;;
                       *) reason="the record declares outcome '$OUTCOME', which is not an unchanged install" ;;
                   esac
