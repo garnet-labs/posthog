@@ -197,4 +197,11 @@ def actions_attestation_results(
         print(f"  attestations: workflow run lookup failed ({exc}); nothing lifted")
         return {rule.name: {"completed": True, "conclusion": "lookup_failed"} for rule in actions_rules}
     runs = resp.get("workflow_runs") or [] if isinstance(resp, dict) else []
-    return {rule.name: _actions_run_result(repo, pr_number, base_ref, rule, runs) for rule in actions_rules}
+    results: dict[str, dict] = {}
+    for rule in actions_rules:
+        try:
+            results[rule.name] = _actions_run_result(repo, pr_number, base_ref, rule, runs)
+        except Exception as exc:  # noqa: BLE001 - a failed job or annotation read lifts nothing
+            print(f"  attestations: {rule.name!r} lookup failed ({exc}); nothing lifted")
+            results[rule.name] = {"completed": True, "conclusion": "lookup_failed"}
+    return results

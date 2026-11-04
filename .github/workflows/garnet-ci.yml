@@ -126,7 +126,9 @@ jobs:
         # last step, so the proof reads it from a job of its own. No checkout: the
         # only files this job trusts are this workflow and the record.
         needs: [dep-install, py-install]
-        if: github.event_name == 'pull_request'
+        # Runs after a failed install too: the record then finalizes as changed or
+        # incomplete and the log says why nothing was attested.
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         runs-on: ubuntu-latest
         timeout-minutes: 30
         permissions:

@@ -22,7 +22,8 @@ BOT = "garnet-runtime-review[bot]"
 
 SUMMARY_RE = re.compile(r"<!--\s*garnet:summary\s+(\{.*?\})\s*-->", re.DOTALL)
 EXPLAINER_RE = re.compile(r"<details>\s*<summary><sub>How to read this</sub></summary>.*?</details>", re.DOTALL)
-JOB_FOLD_RE = re.compile(r"<details>\s*<summary><b>([^<]+)</b>(.*?)</summary>(.*?)</details>", re.DOTALL)
+JOB_FOLD_RE = re.compile(r"<details[^>]*>\s*<summary>(.*?)</summary>(.*?)</details>", re.DOTALL)
+JOB_NAME_RE = re.compile(r"<b>([^<]+)</b>|<code>([^<]+)</code>")
 DIFF_FENCE_RE = re.compile(r"```diff\n(.*?)```", re.DOTALL)
 TAG_RE = re.compile(r"<[^>]+>")
 DEFANG_RE = re.compile(r"\[\.\]")
@@ -66,7 +67,9 @@ def changed_destinations(body):
     """
     body = EXPLAINER_RE.sub("", body)
     changes = []
-    for job, _subline, fold in JOB_FOLD_RE.findall(body):
+    for heading, fold in JOB_FOLD_RE.findall(body):
+        names = [b or c for b, c in JOB_NAME_RE.findall(heading)]
+        job = next((n for n in names if not re.fullmatch(r"[+\u2212\-\d&nbsp;\s]+", html.unescape(n))), names[0] if names else "recorded job")
         for fence in DIFF_FENCE_RE.findall(fold):
             rows = []
             for raw in fence.splitlines():
@@ -75,7 +78,7 @@ def changed_destinations(body):
                 mark, line = (raw[:1], raw[1:]) if raw[:1] in "+- " else (" ", raw)
                 stripped = line.lstrip(" │├└─")
                 depth = len(line) - len(stripped)
-                name = plain(DEFANG_RE.sub(".", stripped))
+                name = plain(DEFANG_RE.sub(".", stripped)).lstrip("○→ ").strip()
                 if name:
                     rows.append((mark, depth, name))
             stack = []
