@@ -30,6 +30,9 @@ if TYPE_CHECKING:
 # disable their stamphog copy before any gate runs — the package is only
 # required once a policy actually declares a hogli-resolver ownership source.
 _OWNERS_PKG = Path(__file__).resolve().parents[1] / "owners"
+# The owners resolver moved from tools/owners (module posthog_owners) to packages/owners-yaml
+# (module owners_yaml); it depends only on the standard library and PyYAML.
+_OWNERS_YAML_PKG = Path(__file__).resolve().parents[2] / "packages" / "owners-yaml"
 
 # ── Dependency ecosystems ────────────────────────────────────────
 #
@@ -199,18 +202,20 @@ class _HogliResolver:
 
 
 def _build_hogli_resolver(repo_root: Path, source: OwnershipSource) -> _HogliResolver:
-    if str(_OWNERS_PKG) not in sys.path:
-        sys.path.insert(0, str(_OWNERS_PKG))
+    for pkg in (_OWNERS_YAML_PKG, _OWNERS_PKG):
+        if str(pkg) not in sys.path:
+            sys.path.insert(0, str(pkg))
     try:
-        from posthog_owners.resolver import (
-            OwnersResolver,  # noqa: PLC0415 — absent in vendored copies; needed only for this format
-        )
-    except ImportError as exc:
-        raise RuntimeError(
-            "ownership format 'hogli-resolver' requires the posthog-owners package: "
-            "vendor tools/owners alongside tools/pr-approval-agent, or drop the "
-            "hogli-resolver source from .stamphog/policy.yml"
-        ) from exc
+        from owners_yaml.resolver import OwnersResolver  # noqa: PLC0415 — needed only for this format
+    except ImportError:
+        try:
+            from posthog_owners.resolver import OwnersResolver  # noqa: PLC0415
+        except ImportError as exc:
+            raise RuntimeError(
+                "ownership format 'hogli-resolver' requires the owners resolver package: "
+                "packages/owners-yaml (owners_yaml) or tools/owners (posthog_owners), "
+                "or drop the hogli-resolver source from .stamphog/policy.yml"
+            ) from exc
     assert source.path is not None  # validated by the loader (hogli-resolver uses `path`)
     return _HogliResolver(OwnersResolver(repo_root=repo_root / source.path))
 
