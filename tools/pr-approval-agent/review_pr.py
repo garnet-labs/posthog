@@ -25,6 +25,7 @@ import os
 import json
 import time
 import argparse
+import re
 import subprocess
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -74,7 +75,7 @@ from github import (
 )
 from manifest_risk import manifest_script_changes
 from migration_risk import migration_check_pending, safe_migration_files
-from policy import EffectivePolicy, ScopeBudget, _sanitize_untrusted, repo_root, resolve
+from policy import BotAuthor, EffectivePolicy, ScopeBudget, _sanitize_untrusted, repo_root, resolve
 from reviewer import Reviewer
 from runtime_evidence import (
     RuntimeEvidence,
@@ -231,7 +232,7 @@ class Pipeline:
         """Run the full pipeline, return final verdict string."""
         self._fetch()
 
-        if self.pr.author_is_bot:
+        if self.pr.author_is_bot and self.admitted_bot is None:
             return self._refuse_bot_author()
 
         gate_verdict = self._classify_and_gate()
@@ -287,6 +288,44 @@ class Pipeline:
         if any(not r.passed and r.gate != "deny-list" for r in self.gate_results):
             return False
         return migration_check_pending(self.pr.check_runs, self.pr.file_paths)
+
+    @property
+    def admitted_bot(self) -> BotAuthor | None:
+        """The policy `bot_authors` entry this PR matches on facts GitHub attests: the author's
+        login and numeric id, and a head in this repository on a branch under the entry's prefix."""
+        if not self.pr.author_is_bot:
+            return None
+        return next(
+            (
+                bot
+                for bot in POLICY.bot_authors
+                if bot.login == self.pr.author
+                and bot.id == self.pr.author_id
+                and self.pr.head_repo == self.repo
+                and self.pr.head_ref.startswith(bot.branch_prefix)
+            ),
+            None,
+        )
+
+    @property
+    def unattested_files(self) -> list[str]:
+        """The changed files no passing attestation listed. Without a classification, every file."""
+        return self.classification.get("unattested_files", self.pr.file_paths)
+
+    @property
+    def sized_files(self) -> list[dict]:
+        """The files the size gate counts. CI attested an admitted bot's listed files instead."""
+        if self.admitted_bot is None:
+            return self.pr.files
+        unattested = set(self.unattested_files)
+        return [f for f in self.pr.files if f["filename"] in unattested]
+
+    def _check_every_file_attested(self) -> tuple[bool, str]:
+        unattested = self.unattested_files
+        if not unattested:
+            return True, "CI attested every changed file"
+        listed = ", ".join(unattested[:5]) + (f" and {len(unattested) - 5} more" if len(unattested) > 5 else "")
+        return False, f"PRs by @{self.pr.author} need CI to attest every changed file; not attested: {listed}"
 
     def _refuse_bot_author(self) -> str:
         """Hard gate: stamphog never reviews bot-authored PRs.
@@ -372,14 +411,19 @@ class Pipeline:
         Every denied category must be one a pending attestation could lift; a deny it cannot
         lift (auth, crypto) won't clear when it reports, so it never waits.
         """
-        if any(not r.passed and r.gate != "deny-list" for r in self.gate_results):
+        if any(not r.passed and r.gate not in ("deny-list", "attestations") for r in self.gate_results):
             return False
         pending_names = set(self.classification.get("pending_attestations", []))
         if not pending_names:
             return False
         liftable = {c for rule in POLICY.attestations if rule.name in pending_names for c in rule.lifts}
         deny = set(self.classification.get("deny_categories", []))
-        return bool(deny) and deny <= liftable
+        clears: list[bool] = []
+        if deny:
+            clears.append(deny <= liftable)
+        if self.admitted_bot is not None and self.unattested_files:
+            clears.append(bool(self.classification.get("pending_attestations_attest_every_file")))
+        return bool(clears) and all(clears)
 
     def _refuse_pending_attestations(self) -> str:
         names = ", ".join(f"`{n}`" for n in self.classification.get("pending_attestations", []))
@@ -455,6 +499,15 @@ class Pipeline:
         )
         lifted = lifted_files(POLICY.attestations, attestation_results, file_paths)
         pending_attestations = pending(POLICY.attestations, attestation_results, file_paths)
+        attested_paths = {path for files in lifted.values() for path in files}
+        pending_paths = {
+            path
+            for rule in POLICY.attestations
+            if rule in pending_attestations
+            for path in file_paths
+            if any(re.search(pattern, path) for pattern in rule.paths)
+        }
+        unattested_files = sorted(set(file_paths) - attested_paths)
         deny = detect_deny_categories(file_paths, ignored_files=safe_migrations, lifted=lifted)
         # Garnet runtime evidence (vendored local extension — see README):
         # the kernel-recorded execution tree bound to the head commit. A
@@ -565,6 +618,8 @@ class Pipeline:
             },
             "lifted_files": {category: sorted(files) for category, files in lifted.items()},
             "pending_attestations": [rule.name for rule in pending_attestations],
+            "unattested_files": unattested_files,
+            "pending_attestations_attest_every_file": not (set(unattested_files) - pending_paths),
             "runtime_evidence_status": runtime_evidence.status if runtime_evidence else None,
             "runtime_evidence_block": runtime_evidence_prompt_block(runtime_evidence) if runtime_evidence else None,
             "runtime_evidence_citation": runtime_evidence_citation_block(runtime_evidence)
@@ -681,6 +736,8 @@ class Pipeline:
             ("size", self._check_size),
             ("tier", self._check_tier),
         ]
+        if self.admitted_bot is not None:
+            gates.insert(2, ("attestations", self._check_every_file_attested))
         if self.classification.get("runtime_evidence") is not None:
             gates.insert(2, ("runtime evidence", self._check_runtime_evidence))
         if self.classification.get("gate_profile") is not None:
@@ -832,7 +889,7 @@ class Pipeline:
         return self.classification["ownership_summary"]
 
     def _check_size(self) -> tuple[bool, str]:
-        lines, files = substantive_size(self.pr.files)
+        lines, files = substantive_size(self.sized_files)
         max_lines = self.effective_policy.max_lines if self.effective_policy else MAX_LINES
         binary_count = sum(1 for f in self.pr.files if f.get("binary"))
         exempt_files = len(self.pr.files) - files
@@ -852,7 +909,7 @@ class Pipeline:
         # folder's higher ceiling covers its own files and nothing else.
         for scope in self._size_scopes():
             in_scope = set(scope.files)
-            _, scope_files = substantive_size([f for f in self.pr.files if f["filename"] in in_scope])
+            _, scope_files = substantive_size([f for f in self.sized_files if f["filename"] in in_scope])
             if scope_files > scope.max_files:
                 where = scope.path or "global"
                 return (

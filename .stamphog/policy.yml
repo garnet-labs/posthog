@@ -130,6 +130,12 @@ deny:
                 - 'CODEOWNERS'
                 - 'owners\.yaml'
                 - 'product\.yaml'
+# Bots whose PRs stamphog reviews when CI attests every changed file (the dependency proof).
+bot_authors:
+    - login: 'devin-ai-integration[bot]'
+      id: 158243242
+      branch_prefix: 'chore/'
+      requires: every_file_attested
 allow:
     path_patterns:
         - 'docs/'

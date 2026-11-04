@@ -32,6 +32,10 @@ class PRData:
     review_comments: list[dict]
     check_runs: list[dict]
     author_is_bot: bool = False
+    # GitHub's numeric id for the author; a policy bot_authors entry must match it with the login.
+    author_id: int | None = None
+    head_ref: str = ""
+    head_repo: str = ""
     pr_reactions: list[dict] = field(default_factory=list)
     body: str = ""
     discussion: list[dict] = field(default_factory=list)
@@ -599,6 +603,9 @@ def fetch_pr(pr_number: int, repo: str, repo_root: Path | None = None) -> PRData
         review_comments=review_comments,
         check_runs=check_runs_resp.get("check_runs", []),
         author_is_bot=author_is_bot,
+        author_id=(pr.get("user") or {}).get("id"),
+        head_ref=(pr.get("head") or {}).get("ref") or "",
+        head_repo=((pr.get("head") or {}).get("repo") or {}).get("full_name") or "",
         pr_reactions=pr_reactions,
         body=pr.get("body") or "",
         discussion=discussion,

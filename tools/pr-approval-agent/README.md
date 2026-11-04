@@ -321,3 +321,12 @@ Tier thresholds and deny categories calibrated against 356 PRs that received qui
 - Python-only cluster: median 13 lines/1 file, 3% has tests
 
 Key insight: size alone is not a safe proxy. Small PRs touching CI workflows, auth, or SAML should never be auto-approved regardless of size. The deny-list exists precisely for this.
+
+## Bots admitted by policy
+
+`bot_authors` in `.stamphog/policy.yml` names a bot whose pull requests stamphog reviews. The entry
+carries the bot's login and numeric id, the branch prefix it opens from, and `requires:
+every_file_attested`: the review approves only when a passing attestation lists every changed file.
+Files the attestation lists leave the size gate; a file it does not list fails the `attestations`
+gate. A pending attestation that could still list every file makes the review wait, as a pending
+deny lift does.
