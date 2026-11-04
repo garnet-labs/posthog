@@ -1,7 +1,7 @@
 name: Garnet Runtime Visibility
 
-# Runs the dependency install, where lifecycle scripts execute, under the Garnet
-# eBPF sensor: on every pull request that changes the manifests, and on every
+# Runs the dependency installs, where lifecycle scripts and build steps execute,
+# under the Garnet eBPF sensor: on every pull request that changes the manifests, and on every
 # push to master so a pull request record has a recorded master run to compare
 # against. Garnet posts a sticky comment on the PR: every recorded outbound
 # connection with the execution chain that reached it, bound to the head
@@ -10,9 +10,9 @@ name: Garnet Runtime Visibility
 # The second job is the dependency proof. It reads the finalized record for this
 # head and, only when nothing new was recorded against master, lists the
 # dependency files it judged in one notice annotation titled
-# `stamphog attestation: <base ref>`, the shape stamphog reads to lift the
-# `dependencies` deny category for exactly those files (products/stamphog/AGENTS.md,
-# "Attestations"). A changed record, an incomplete capture, a pending record, or a
+# `stamphog attestation: <base ref>` carrying one `<!-- stamphog:v1 [...] -->`
+# marker, the shape stamphog reads to lift the `deps_toolchain` deny category for
+# exactly those files (products/stamphog/AGENTS.md, "Attestations"). A changed record, an incomplete capture, a pending record, or a
 # pull request that edits this workflow emits nothing, so the PR stays in review.
 on:
     pull_request:
@@ -21,6 +21,8 @@ on:
             - pnpm-lock.yaml
             - pnpm-workspace.yaml
             - .nvmrc
+            - pyproject.toml
+            - uv.lock
             - .github/workflows/garnet-ci.yml
     push:
         branches: [master]
@@ -29,6 +31,8 @@ on:
             - pnpm-lock.yaml
             - pnpm-workspace.yaml
             - .nvmrc
+            - pyproject.toml
+            - uv.lock
             - .github/workflows/garnet-ci.yml
     workflow_dispatch:
         inputs:
@@ -62,7 +66,7 @@ jobs:
               uses: garnet-org/action@96e9f81ec0f59f2322e8c67b43c4d4017d932ad3 # v2.4.1
               with:
                   api_token: ${{ secrets.GARNET_API_TOKEN }}
-                  jibril_version: v2.16.0
+                  jibril_version: v2.17.0
 
             - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
 
@@ -82,13 +86,49 @@ jobs:
             - name: Install dependencies (lifecycle scripts execute here)
               run: pnpm install --no-frozen-lockfile
 
+    py-install:
+        name: Python dependency install (recorded)
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        runs-on: ubuntu-latest
+        timeout-minutes: 30
+        steps:
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+              with:
+                  ref: ${{ inputs.checkout_ref || github.event.pull_request.head.sha || github.sha }}
+
+            - name: Garnet Runtime Visibility
+              uses: garnet-org/action@96e9f81ec0f59f2322e8c67b43c4d4017d932ad3 # v2.4.1
+              with:
+                  api_token: ${{ secrets.GARNET_API_TOKEN }}
+                  jibril_version: v2.17.0
+
+            - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+              with:
+                  python-version: 3.14.7
+
+            - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+              with:
+                  version: '0.13.4'
+                  enable-cache: false
+
+            # The same system libraries the backend CI installs before `uv sync`.
+            - name: Install SAML dependencies
+              run: sudo apt-get update && sudo apt-get install -y libxml2-dev libxmlsec1-dev libxmlsec1-openssl
+
+            # Same command as the backend CI, without its warm cache: a cold sync is
+            # where sdists build and wheels download, which is what this job records.
+            - name: Install Python dependencies (build steps execute here)
+              run: UV_PROJECT_ENVIRONMENT=$pythonLocation uv sync --frozen --dev
+
     dependency-proof:
         name: Dependency proof
-        # The record finalizes in the sensor's post step, after the install job's
-        # last step, so the proof reads it from a second job. No checkout: the
+        # The record finalizes in the sensor's post step, after each install job's
+        # last step, so the proof reads it from a job of its own. No checkout: the
         # only files this job trusts are this workflow and the record.
-        needs: dep-install
-        if: github.event_name == 'pull_request'
+        needs: [dep-install, py-install]
+        # Runs after a failed install too: the record then finalizes as changed or
+        # incomplete and the log says why nothing was attested.
+        if: ${{ !cancelled() && github.event_name == 'pull_request' }}
         runs-on: ubuntu-latest
         timeout-minutes: 30
         permissions:
@@ -138,16 +178,18 @@ jobs:
                   changed=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files" --jq '.[].filename')
                   workflow_changed=false
                   if grep -qx '.github/workflows/garnet-ci.yml' <<<"$changed"; then workflow_changed=true; fi
-                  # The install resolves the root workspace: its lockfile, pnpm-workspace.yaml,
-                  # .nvmrc and every package.json under it. A directory with its own
-                  # pnpm-lock.yaml is a separate workspace this job never installs.
-                  other_lockfile_dirs=$(grep -E '^.+/pnpm-lock\.yaml$' <<<"$changed" | sed 's#/pnpm-lock\.yaml$#/#' || true)
+                  # The installs resolve the root pnpm workspace (its lockfile,
+                  # pnpm-workspace.yaml, .nvmrc and every package.json under it) and the
+                  # root Python project (pyproject.toml, uv.lock). A directory with its own
+                  # pnpm-lock.yaml or uv.lock is a separate project these jobs never install;
+                  # requirements files are never installed here.
+                  other_lockfile_dirs=$(grep -E '^.+/(pnpm-lock\.yaml|uv\.lock)$' <<<"$changed" | sed -E 's#/(pnpm-lock\.yaml|uv\.lock)$#/#' || true)
                   judged=""
                   nl=$'\n'
                   while IFS= read -r file; do
                       [ -n "$file" ] || continue
                       case "$file" in
-                          pnpm-lock.yaml|pnpm-workspace.yaml|.nvmrc|package.json) ;;
+                          pnpm-lock.yaml|pnpm-workspace.yaml|.nvmrc|package.json|pyproject.toml|uv.lock) ;;
                           */package.json) ;;
                           *) continue ;;
                       esac
@@ -174,8 +216,9 @@ jobs:
                   JUDGED: ${{ steps.files.outputs.judged }}
               run: |
                   set -euo pipefail
-                  message=$(printf '%s' "$JUDGED" | awk 'NR>1{printf "%%0A"} {printf "%s", $0}')
-                  echo "::notice title=stamphog attestation: ${BASE_REF}::${message}"
+                  # One marker, the paths as a JSON array; stamphog reads exactly one per job.
+                  marker=$(printf '%s\n' "$JUDGED" | jq -cR 'select(length>0)' | jq -cs '.')
+                  echo "::notice title=stamphog attestation: ${BASE_REF}::<!-- stamphog:v1 ${marker} -->"
 
             - name: Explain a missing attestation
               if: steps.record.outputs.outcome != 'unchanged' || steps.files.outputs.workflow_changed == 'true' || steps.files.outputs.judged == ''

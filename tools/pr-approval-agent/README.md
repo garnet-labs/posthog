@@ -46,6 +46,15 @@ Deterministic safety gates first, then Claude reviews for showstoppers.
 >   per `greptile.json` and root `REVIEW.md`) ground in the same bytes.
 > - `.stamphog/runtime-evidence.yml` — trusted bot logins and bypassable
 >   categories. Covered by the `stamphog_policy` deny.
+> - `attestations.py` (+ tests) and the `attestations` policy entry — upstream's
+>   "CI results that lift a deny" model (products/stamphog/AGENTS.md,
+>   "Attestations"), vendored with one local change: upstream's hosted server
+>   looks the Actions run up because the review sandbox holds no token; this
+>   copy runs as an Actions job with the repository token, so
+>   `actions_attestation_results` does that lookup here. The fork's entry is
+>   the `Dependency proof` job of `.github/workflows/garnet-ci.yml`, which
+>   lifts `deps_toolchain` for the dependency files it lists when the Garnet
+>   record of the recorded installs shows nothing new against master.
 > - `.github/workflows/pr-approval-agent.yml` — runs with `GITHUB_TOKEN` +
 >   `ANTHROPIC_API_KEY` repo secret instead of the Stamphog GitHub App;
 >   the decide-delta/dismiss jobs are kept but post as github-actions[bot].
