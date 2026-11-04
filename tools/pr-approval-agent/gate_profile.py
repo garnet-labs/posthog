@@ -63,7 +63,10 @@ CLEAR = "clear"
 ESCALATE = "escalate"
 UNDETERMINABLE = "undeterminable"
 
-GATE_CONTRACT = (7, 0)
+GATE_CONTRACT = (10, 0)
+# Markers from this contract on state `status` (finalized/recording), `outcome` (unchanged/changed/
+# recorded) and `capture_quality` (complete/best-effort) instead of 7.0's verdict/profile/digest.
+_OUTCOME_CONTRACT = (8, 0)
 
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 _PROFILE_HOSTS = ("https://app.garnet.ai/",)
@@ -71,11 +74,11 @@ _PROFILE_HOSTS = ("https://app.garnet.ai/",)
 # Values the gate understands. Anything else on these axes is unknown, and
 # unknown fails closed rather than being read as its nearest neighbour.
 _CAPTURE_COMPLETE = "complete"
-_CAPTURE_KNOWN = frozenset({"complete", "degraded", "unavailable"})
+_CAPTURE_KNOWN = frozenset({"complete", "degraded", "unavailable", "best-effort"})
 _VERDICT_UNCHANGED = "unchanged"
 _VERDICT_CHANGED = "changed"
 _VERDICT_KNOWN = frozenset({"unchanged", "changed", "undeterminable"})
-_STATUS_KNOWN = frozenset({"complete", "partial", "degraded", "unavailable"})
+_STATUS_KNOWN = frozenset({"complete", "partial", "degraded", "unavailable", "finalized", "recording"})
 
 _CONFIG_FILENAME = "runtime-evidence.yml"
 
@@ -230,7 +233,8 @@ def evaluate(body: str | None, head_sha: str, deny: list[str], config: GateProfi
             marker=marker,
             contract=contract_str,
         )
-    pre_contract7 = contract < GATE_CONTRACT
+    pre_contract7 = contract < (7, 0)
+    outcome_contract = contract >= _OUTCOME_CONTRACT
     if pre_contract7 and not config.pre_contract7_compat:
         return GateDecision(
             outcome=UNDETERMINABLE,
@@ -263,12 +267,12 @@ def evaluate(body: str | None, head_sha: str, deny: list[str], config: GateProfi
             contract=contract_str,
         )
 
-    profile_url, profile_error = _read_profile(marker, pre_contract7, inferred)
+    profile_url, profile_error = _read_profile(marker, pre_contract7 or outcome_contract, inferred)
     if profile_error:
         return GateDecision(
             outcome=UNDETERMINABLE, reason=profile_error, marker=marker, contract=contract_str, inferred=inferred
         )
-    digest, digest_error = _read_digest(marker, pre_contract7, inferred)
+    digest, digest_error = _read_digest(marker, pre_contract7 or outcome_contract, inferred)
     if digest_error:
         return GateDecision(
             outcome=UNDETERMINABLE,
@@ -401,7 +405,7 @@ def _check_capture(marker: dict, pre_contract7: bool, inferred: list[str]) -> st
     if status is not None:
         if status not in _STATUS_KNOWN:
             return f"marker status {status!r} is not a value this gate understands"
-        if status != "complete":
+        if status not in ("complete", "finalized"):
             return f"capture status is {status!r}"
     if quality is not None:
         if quality not in _CAPTURE_KNOWN:
@@ -442,6 +446,10 @@ def _read_delta(marker: dict, pre_contract7: bool, inferred: list[str]) -> tuple
     """Workload/background delta partition, or the pre-7.0 unpartitioned counts."""
     workload = marker.get("workload")
     background = marker.get("background")
+    if workload is None and _is_count(marker.get("added")) and _is_count(marker.get("removed")) and "outcome" in marker:
+        workload = {"added": marker["added"], "removed": marker["removed"]}
+        if _is_count(marker.get("backgroundAdded")) and _is_count(marker.get("backgroundRemoved")):
+            background = {"added": marker["backgroundAdded"], "removed": marker["backgroundRemoved"]}
     if isinstance(workload, dict):
         added, removed = workload.get("added"), workload.get("removed")
         if not _is_count(added) or not _is_count(removed):
@@ -465,6 +473,11 @@ def _read_delta(marker: dict, pre_contract7: bool, inferred: list[str]) -> tuple
 
 def _read_verdict(marker: dict, pre_contract7: bool, delta: dict, inferred: list[str]) -> tuple[str, str]:
     verdict = marker.get("verdict")
+    if verdict is None and "outcome" in marker:
+        outcome = marker.get("outcome")
+        if outcome == "recorded":
+            return "", "marker outcome is 'recorded': a first record with no recorded default-branch run to compare with"
+        verdict = outcome
     if verdict is not None:
         if verdict not in _VERDICT_KNOWN:
             return "", f"marker verdict {verdict!r} is not a value this gate understands"
@@ -510,7 +523,7 @@ def gate_row(decision: GateDecision) -> str:
 def prompt_block(decision: GateDecision) -> str:
     """TRUSTED prompt block: what the machine gate concluded from the marker."""
     lines = [
-        "Runtime Review gate profile (Garnet contract 7.0 machine block, TRUSTED — read from the "
+        "Runtime Review gate profile (Garnet garnet:summary machine block, contract 7.0 to 10.x, TRUSTED — read from the "
         "comment's garnet:summary marker, not its prose):",
         f"  Outcome: {decision.outcome.upper()} — {decision.reason}",
     ]

@@ -1,19 +1,18 @@
 #!/usr/bin/env python3
-"""merge-gate: merge-safety decisions from Garnet execution behavior, at the PR gate.
+"""merge-gate: reads the Garnet Runtime Review comment on a pull request and posts
+what the record says, in the record's own terms, so a reviewer sees the outcome
+without opening the fold.
 
-Runs in GitHub Actions. Triggered when garnet-runtime-review[bot] posts a
-Runtime Review comment on a PR (or manually via workflow_dispatch).
+Garnet decides the outcome (nothing new, changed, capture incomplete); this
+gate only relays it and names the changed destinations with the execution
+chain that reached them. It classifies nothing itself. Missing, pending, stale
+or incomplete evidence is undeterminable, never "no change".
 
-Reads the execution profile from the Runtime Review comment, infers PR type
-from changed files, evaluates v1 merge-safety assertions, posts MERGE / HOLD /
-AUDIT / UNDETERMINABLE as one PR comment, updated in place on every new record.
-Fails closed: a record that is not finalized, not bound to the PR head, or not
-declared complete is UNDETERMINABLE, never MERGE.
-
-v1 policy scope: dependency PRs (manifest/lockfile-only changes).
+Proof of concept. Garnet reports; the reviewer decides.
 """
+
+import html
 import json
-import os
 import re
 import subprocess
 import sys
@@ -21,116 +20,73 @@ import sys
 MARKER = "<!-- merge-gate-poc -->"
 BOT = "garnet-runtime-review[bot]"
 
-DEST_RULES = [
-    (r"^registry\.npmjs\.org$", "package registry", "ok"),
-    (r"^npmjs\.org$", "package registry", "ok"),
-    (r".*\.npmjs\.org$", "package registry", "ok"),
-    (r"^registry\.yarnpkg\.com$", "package registry", "ok"),
-    (r"^nodejs\.org$", "toolchain download", "ok"),
-    (r"^github\.com$", "source host", "ok"),
-    (r"^codeload\.github\.com$", "source host", "ok"),
-    (r"^release-assets\.githubusercontent\.com$", "release assets", "ok"),
-    (r"^objects\.githubusercontent\.com$", "release assets", "ok"),
-    (r"^api\.github\.com$", "CI api", "ok"),
-    (r".*\.ubuntu\.com$", "os updates", "infra"),
-    (r".*\.microsoft\.com$", "runner infra", "infra"),
-    (r".*\.windows\.net$", "runner infra", "infra"),
-    (r"^storage\.googleapis\.com$", "runner infra", "infra"),
-    (r"^169\.254\.169\.254$", "cloud metadata", "infra"),
-    (r"^168\.63\.129\.16$", "cloud metadata", "infra"),
-    (r"^localhost$", "local resolver", "infra"),
-    (r"^ip6-allrouters$", "local network", "infra"),
-    (r"^\d+\.\d+\.\d+\.\d+$", "raw ip", "review"),
-    (r".*\.github\.com$", "github infra", "infra"),
-]
-INFRA_PROCS = re.compile(r"hosted-compute|systemd|python3", re.I)
-SUSPICIOUS_PROCS = re.compile(
-    r"(curl|wget).*(sh|bash)|chmod\s+\+x|/tmp/.*(exec|run)|\.sh\s*$", re.I
+SUMMARY_RE = re.compile(r"<!--\s*garnet:summary\s+(\{.*?\})\s*-->", re.DOTALL)
+EXPLAINER_RE = re.compile(r"<details>\s*<summary><sub>How to read this</sub></summary>.*?</details>", re.DOTALL)
+JOB_FOLD_RE = re.compile(r"<details>\s*<summary><b>([^<]+)</b>(.*?)</summary>(.*?)</details>", re.DOTALL)
+DIFF_FENCE_RE = re.compile(r"```diff\n(.*?)```", re.DOTALL)
+TAG_RE = re.compile(r"<[^>]+>")
+DEFANG_RE = re.compile(r"\[\.\]")
+
+DEPENDENCY_FILE_RE = re.compile(
+    r"(^|/)(package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|yarn\.lock|package-lock\.json|"
+    r"pyproject\.toml|uv\.lock|requirements[^/]*\.txt|Cargo\.toml|Cargo\.lock|go\.mod|go\.sum|\.nvmrc)$"
 )
 
 
 def gh(method, path, fields=None):
     cmd = ["gh", "api", "-X", method, path]
-    for k, v in (fields or {}).items():
-        cmd += ["-f", f"{k}={v}"]
-    r = subprocess.run(cmd, capture_output=True, text=True)
-    if r.returncode != 0:
-        raise RuntimeError(f"gh api {method} {path}: {r.stderr[:300]}")
-    return json.loads(r.stdout) if r.stdout.strip() else {}
+    for key, value in (fields or {}).items():
+        cmd += ["-f", f"{key}={value}"]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"gh api {method} {path}: {result.stderr[:300]}")
+    return json.loads(result.stdout) if result.stdout.strip() else {}
 
 
-def classify(domain, chain=()):
-    if any(INFRA_PROCS.search(p) for p in chain):
-        return "runner infra", "infra"
-    d = domain.replace("[.]", ".")
-    for pat, cat, verdict in DEST_RULES:
-        if re.match(pat, d):
-            return cat, verdict
-    return "unknown", "review"
+def plain(text):
+    return html.unescape(TAG_RE.sub("", text)).strip()
 
 
-def parse_profile(body):
-    m = re.search(r"garnet:summary (\{.*?\}) -->", body)
-    summary = json.loads(m.group(1)) if m else {}
-    pre = re.search(r"<pre>(.*?)</pre>", body, re.S)
-    tree = pre.group(1) if pre else ""
-    dests, stack, step_ctx = [], [], ""
-    for line in tree.split("\n"):
-        sm = re.search(r"\(step:\s*&quot;([^&]+)&quot;\)", line)
-        if sm:
-            step_ctx = sm.group(1)
-        pm = re.search(r"<strong>([^<]+)</strong>", line)
-        if pm and "○" not in line:
-            indent = len(line) - len(line.lstrip(" │├└─"))
-            while stack and stack[-1][0] >= indent:
-                stack.pop()
-            stack.append((indent, pm.group(1)))
-        dm = re.search(r"○\s+([a-z0-9\.\-\[\]]+)", line)
-        if dm:
-            dests.append({
-                "domain": dm.group(1).replace("[.]", "."),
-                "chain": [p for _, p in stack],
-                "step": step_ctx,
-            })
-    seen, uniq = set(), []
-    for d in dests:
-        if d["domain"] not in seen:
-            seen.add(d["domain"])
-            uniq.append(d)
-    return {"summary": summary, "destinations": uniq}
+def parse_summary(body):
+    match = SUMMARY_RE.search(body)
+    if match is None:
+        return None
+    try:
+        summary = json.loads(match.group(1))
+    except json.JSONDecodeError:
+        return None
+    return summary if isinstance(summary, dict) else None
 
 
-def pr_type(owner, repo, pr):
-    files = gh("GET", f"/repos/{owner}/{repo}/pulls/{pr}/files?per_page=100")
-    names = [f["filename"] for f in files]
-    if not names:
-        return "empty"
-    if all(re.search(
-        r"(package\.json|pnpm-lock\.yaml|yarn\.lock|package-lock\.json|pnpm-workspace\.yaml)$", n
-    ) for n in names):
-        return "dependency"
-    if all("test" in n or "e2e" in n for n in names):
-        return "test"
-    return "general"
+def changed_destinations(body):
+    """The `+` destinations of each recorded job with the chain that reached them.
 
-
-def evaluate(profile, ptype):
-    findings = []
-    dests, summary = profile["destinations"], profile["summary"]
-    if not dests:
-        return [("hold", "No execution destinations recorded — nothing to judge.")]
-    for d in dests:
-        cat, verdict = classify(d["domain"], d["chain"])
-        chain = " → ".join(d["chain"][-3:]) if d["chain"] else "?"
-        if verdict == "review":
-            findings.append(("hold",
-                f"Unknown destination `{d['domain']}` ({cat}) reached via {chain}"
-                + (f" during step \"{d['step']}\"" if d["step"] else "") + "."))
-    for d in dests:
-        if SUSPICIOUS_PROCS.search(" ".join(d["chain"])):
-            findings.append(("hold",
-                f"Suspicious execution pattern in chain: {' '.join(d['chain'])}."))
-    return findings
+    Reads only the job folds; the "How to read this" legend is dropped first, so its
+    sample tree is never mistaken for the record.
+    """
+    body = EXPLAINER_RE.sub("", body)
+    changes = []
+    for job, _subline, fold in JOB_FOLD_RE.findall(body):
+        for fence in DIFF_FENCE_RE.findall(fold):
+            rows = []
+            for raw in fence.splitlines():
+                if raw.startswith("@@") or not raw.strip():
+                    continue
+                mark, line = (raw[:1], raw[1:]) if raw[:1] in "+- " else (" ", raw)
+                stripped = line.lstrip(" │├└─")
+                depth = len(line) - len(stripped)
+                name = plain(DEFANG_RE.sub(".", stripped))
+                if name:
+                    rows.append((mark, depth, name))
+            stack = []
+            for index, (mark, depth, name) in enumerate(rows):
+                while stack and stack[-1][0] >= depth:
+                    stack.pop()
+                has_children = index + 1 < len(rows) and rows[index + 1][1] > depth
+                if mark == "+" and not has_children and "." in name:
+                    changes.append({"job": plain(job), "destination": name, "chain": [p for _, p in stack]})
+                stack.append((depth, name))
+    return changes
 
 
 def evidence_gaps(summary, head):
@@ -138,50 +94,63 @@ def evidence_gaps(summary, head):
     if summary.get("status") != "finalized":
         gaps.append(f"record status is `{summary.get('status', 'missing')}`, not finalized")
     if summary.get("commit") != head:
-        gaps.append(f"record is bound to `{str(summary.get('commit', 'missing'))[:12]}`, not the PR head `{head[:12]}`")
-    if summary.get("capture_quality") != "complete":
-        gaps.append(f"capture is `{summary.get('capture_quality', 'undeclared')}`, not declared complete")
+        gaps.append(f"record is bound to `{str(summary.get('commit', 'missing'))[:12]}`, not the head `{head[:12]}`")
+    quality = summary.get("capture_quality")
+    if quality != "complete":
+        gaps.append(f"capture is `{quality or 'undeclared'}`, not declared complete")
     incomplete = summary.get("incomplete")
     if not isinstance(incomplete, int) or incomplete > 0:
-        gaps.append(f"{incomplete if isinstance(incomplete, int) else 'unknown'} job(s) recorded incompletely")
+        gaps.append(f"{incomplete if isinstance(incomplete, int) else 'an unknown number of'} job(s) recorded incompletely")
     return gaps
 
 
-def decide(findings, ptype, gaps=()):
-    holds = [t for s, t in findings if s == "hold"]
-    if holds:
-        return ("HOLD" if ptype == "dependency" else "AUDIT"), holds, list(gaps)
-    if gaps:
-        return "UNDETERMINABLE", [], list(gaps)
-    if ptype != "dependency":
-        return "AUDIT", holds, []
-    return ("HOLD", holds, []) if holds else ("MERGE", [], [])
+def pr_files(owner, repo, pr):
+    files = gh("GET", f"/repos/{owner}/{repo}/pulls/{pr}/files?per_page=100")
+    return [f["filename"] for f in files]
 
 
-def render(profile, ptype, decision, holds, gaps, head):
-    s = profile["summary"]
-    jobs = s.get("jobs")
-    dests = s.get("destinations")
-    lines = [MARKER, f"## Merge gate: **{decision}**", "",
-        f"Head `{head[:12]}` · {jobs if isinstance(jobs, int) else 'unknown'} jobs · "
-        f"{dests if isinstance(dests, int) else len(profile['destinations'])} destinations · "
-        f"recorded {s.get('recorded', 'time unknown')}.",
-        f"PR type inferred from changed files: **{ptype}**.", ""]
+def decide(summary, gaps, changes):
+    """Garnet's outcome, relayed. A finalized, head-bound record that shows new
+    destinations is CHANGED whatever its capture quality; a record that shows
+    nothing new is NOTHING NEW only when the capture is declared complete.
+    Everything else is UNDETERMINABLE."""
+    bound = summary.get("status") == "finalized" and not any(g.startswith("record is bound") for g in gaps)
+    outcome = summary.get("outcome")
+    if bound and outcome == "changed" and changes:
+        return "CHANGED"
+    if not gaps and outcome == "unchanged":
+        return "NOTHING NEW"
+    return "UNDETERMINABLE"
+
+
+def render(summary, decision, gaps, changes, head, files):
+    jobs = summary.get("jobs")
+    destinations = summary.get("destinations")
+    dependency_only = bool(files) and all(DEPENDENCY_FILE_RE.search(f) for f in files)
+    lines = [
+        MARKER,
+        f"## Merge gate: **{decision}**",
+        "",
+        f"Head `{head[:12]}` · {jobs if isinstance(jobs, int) else 'unknown'} recorded job(s) · "
+        f"{destinations if isinstance(destinations, int) else 'unknown'} destinations · "
+        f"recorded {summary.get('recorded', 'time unknown')}.",
+        f"Changed files: {'dependency manifests only' if dependency_only else f'{len(files)} files, not only dependency manifests'}.",
+        "",
+    ]
+    heading = summary.get("line") or summary.get("heading")
+    if heading:
+        lines += [f"Garnet: {heading}", ""]
     if gaps:
-        lines += ["Evidence gaps (no MERGE until these clear):", ""]
-        lines += [f"- {g}" for g in gaps] + [""]
-    if decision == "UNDETERMINABLE":
-        lines += ["No destination needs review, but the record is not complete enough to call this safe.", ""]
-    elif decision == "MERGE":
-        lines += ["Every observed destination classifies as expected package/CI "
-                  "infrastructure. Nothing in the execution behavior contradicts the diff.", ""]
-    elif decision == "AUDIT":
-        lines += ["v1 policy is scoped to dependency PRs, so this is an audit, not a verdict. "
-                  "Destinations outside the dependency allowlist:", ""]
-        lines += [f"- {h}" for h in holds] + [""]
-    else:
-        lines += ["### Findings requiring review", ""]
-        lines += [f"- {h}" for h in holds] + [""]
+        lines += ["Evidence gaps (nothing new cannot be concluded until these clear):", ""]
+        lines += [f"- {gap}" for gap in gaps] + [""]
+    if changes:
+        lines += ["New in this commit, with the execution chain that reached it:", ""]
+        for change in changes:
+            chain = " → ".join(change["chain"][-3:]) or "chain not shown in the comment"
+            lines.append(f"- `{change['destination']}` · {chain} · job {change['job']}")
+        lines.append("")
+    elif decision == "NOTHING NEW":
+        lines += ["Nothing new recorded against the last recorded run on the default branch.", ""]
     lines += ["_Garnet reports; the reviewer decides._"]
     return "\n".join(lines)
 
@@ -195,19 +164,24 @@ def main():
     if not reviews:
         print("no Runtime Review comment found; skipping")
         return
-    profile = parse_profile(reviews[-1])
-    ptype = pr_type(owner, repo, pr)
-    gaps = evidence_gaps(profile["summary"], head)
-    decision, holds, gaps = decide(evaluate(profile, ptype), ptype, gaps)
-    body = render(profile, ptype, decision, holds, gaps, head)
+    body = reviews[-1]
+    summary = parse_summary(body)
+    if summary is None:
+        print("Runtime Review comment carries no readable garnet:summary marker; skipping")
+        return
+    files = pr_files(owner, repo, pr)
+    gaps = evidence_gaps(summary, head)
+    changes = changed_destinations(body)
+    decision = decide(summary, gaps, changes)
+    rendered = render(summary, decision, gaps, changes, head, files)
     mine = [c for c in comments if MARKER in c["body"]]
     if mine:
-        if mine[-1]["body"] == body:
+        if mine[-1]["body"] == rendered:
             print("gate comment already current")
             return
-        gh("PATCH", f"/repos/{owner}/{repo}/issues/comments/{mine[-1]['id']}", {"body": body})
+        gh("PATCH", f"/repos/{owner}/{repo}/issues/comments/{mine[-1]['id']}", {"body": rendered})
     else:
-        gh("POST", f"/repos/{owner}/{repo}/issues/{pr}/comments", {"body": body})
+        gh("POST", f"/repos/{owner}/{repo}/issues/{pr}/comments", {"body": rendered})
     print(f"{decision} for {owner_repo}#{pr} at {head[:12]}")
 
 

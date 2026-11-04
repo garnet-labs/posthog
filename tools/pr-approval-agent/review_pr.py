@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
+from attestations import actions_attestation_results, lifted_files, pending, resolve_results
 from familiarity import AuthorFamiliarity, compute_familiarity, familiarity_evidence
 from gate_profile import (
     CLEAR as GATE_CLEAR,
@@ -237,6 +238,8 @@ class Pipeline:
 
         if self._only_pending_migration_check():
             return self._refuse_pending_migration_check()
+        if self._only_pending_attestations():
+            return self._refuse_pending_attestations()
 
         if self.dry_run:
             self.final_verdict = "DRY-RUN"
@@ -254,6 +257,8 @@ class Pipeline:
                 gate_verdict = self._classify_and_gate()
                 if self._only_pending_migration_check():
                     return self._refuse_pending_migration_check()
+                if self._only_pending_attestations():
+                    return self._refuse_pending_attestations()
 
         try:
             self._maybe_compute_familiarity()
@@ -361,6 +366,37 @@ class Pipeline:
         self._capture_review_completed("SKIPPED", "WAIT")
         return self.final_verdict
 
+    def _only_pending_attestations(self) -> bool:
+        """True when the only thing blocking approval is an attestation that has not reported.
+
+        Every denied category must be one a pending attestation could lift; a deny it cannot
+        lift (auth, crypto) won't clear when it reports, so it never waits.
+        """
+        if any(not r.passed and r.gate != "deny-list" for r in self.gate_results):
+            return False
+        pending_names = set(self.classification.get("pending_attestations", []))
+        if not pending_names:
+            return False
+        liftable = {c for rule in POLICY.attestations if rule.name in pending_names for c in rule.lifts}
+        deny = set(self.classification.get("deny_categories", []))
+        return bool(deny) and deny <= liftable
+
+    def _refuse_pending_attestations(self) -> str:
+        names = ", ".join(f"`{n}`" for n in self.classification.get("pending_attestations", []))
+        self.final_verdict = "REFUSED"
+        self.reviewer_output = {
+            "verdict": "REFUSE",
+            "reasoning": (
+                f"The {names} result has not reported for this commit. Wait for it to finish "
+                "(visible in the PR's Checks tab), then re-apply the `stamphog` label to retry."
+            ),
+            "risk": "unknown",
+            "issues": [],
+        }
+        print(f"\n{_warn('REFUSED')} — attestation pending ({names}); re-label after it reports")
+        self._capture_review_completed("DENIED", "PENDING-ATTESTATION")
+        return self.final_verdict
+
     def _refuse_pending_migration_check(self) -> str:
         self.final_verdict = "REFUSED"
         self.reviewer_output = {
@@ -408,7 +444,18 @@ class Pipeline:
         breadth = scope_breadth(top_dirs)
         cc = parse_conventional_commit(pr.title)
         safe_migrations = safe_migration_files(pr.check_runs, file_paths)
-        deny = detect_deny_categories(file_paths, ignored_files=safe_migrations)
+        # Attestations (vendored from upstream's policy `attestations`): a CI result the
+        # policy trusts lifts named deny categories for the files it lists. This copy runs
+        # with the repository token, so it looks the Actions run up itself.
+        attestation_results = resolve_results(
+            POLICY.attestations,
+            pr.check_runs,
+            actions_attestation_results(self.repo, self.pr_number, pr.head_sha, POLICY.attestations),
+            file_paths,
+        )
+        lifted = lifted_files(POLICY.attestations, attestation_results, file_paths)
+        pending_attestations = pending(POLICY.attestations, attestation_results, file_paths)
+        deny = detect_deny_categories(file_paths, ignored_files=safe_migrations, lifted=lifted)
         # Garnet runtime evidence (vendored local extension — see README):
         # the kernel-recorded execution tree bound to the head commit. A
         # usable tree (recorded/unchanged) may clear a deps_toolchain-only
@@ -512,6 +559,12 @@ class Pipeline:
             "deny_categories": deny,
             "title_scrutiny_flags": title_flags,
             "safe_migration_files": sorted(safe_migrations),
+            "attestations": {
+                name: None if result is None else {"completed": result.completed, "files": sorted(result.files)}
+                for name, result in attestation_results.items()
+            },
+            "lifted_files": {category: sorted(files) for category, files in lifted.items()},
+            "pending_attestations": [rule.name for rule in pending_attestations],
             "runtime_evidence_status": runtime_evidence.status if runtime_evidence else None,
             "runtime_evidence_block": runtime_evidence_prompt_block(runtime_evidence) if runtime_evidence else None,
             "runtime_evidence_citation": runtime_evidence_citation_block(runtime_evidence)
@@ -671,8 +724,15 @@ class Pipeline:
         risky = self.classification.get("manifest_script_changes", [])
         if risky:
             return False, f"matches: {', '.join(deny)} (scripts/hooks changed in {', '.join(risky)})"
+        lifted = self.classification.get("lifted_files", {})
+        lifted_note = "; ".join(
+            f"{category} lifted for {', '.join(files)} by {', '.join(self.classification.get('attestations', {}))}"
+            for category, files in lifted.items()
+        )
         if deny:
-            return False, f"matches: {', '.join(deny)}"
+            return False, f"matches: {', '.join(deny)}" + (f" ({lifted_note})" if lifted_note else "")
+        if lifted_note:
+            return True, f"no hard-deny matches after attestation: {lifted_note}"
         bypassed = self.classification.get("runtime_evidence_bypassed", [])
         if bypassed:
             head = (self.classification.get("runtime_evidence") or {}).get("commit_sha", "")[:7]
@@ -1056,6 +1116,9 @@ class Pipeline:
                 "deny_categories": self.classification.get("deny_categories", []),
                 "title_scrutiny_flags": self.classification.get("title_scrutiny_flags", []),
                 "safe_migration_files": self.classification.get("safe_migration_files", []),
+                "attestations": self.classification.get("attestations", {}),
+                "lifted_files": self.classification.get("lifted_files", {}),
+                "pending_attestations": self.classification.get("pending_attestations", []),
                 "runtime_evidence_status": self.classification.get("runtime_evidence_status"),
                 "runtime_evidence": self.classification.get("runtime_evidence"),
                 "runtime_evidence_bypassed": self.classification.get("runtime_evidence_bypassed", []),
