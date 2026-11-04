@@ -416,12 +416,14 @@ class Pipeline:
         pending_names = set(self.classification.get("pending_attestations", []))
         if not pending_names:
             return False
-        if self.admitted_bot is not None and self.unattested_files:
-            if not self.classification.get("pending_attestations_attest_every_file"):
-                return False
         liftable = {c for rule in POLICY.attestations if rule.name in pending_names for c in rule.lifts}
         deny = set(self.classification.get("deny_categories", []))
-        return bool(deny) and deny <= liftable
+        clears: list[bool] = []
+        if deny:
+            clears.append(deny <= liftable)
+        if self.admitted_bot is not None and self.unattested_files:
+            clears.append(bool(self.classification.get("pending_attestations_attest_every_file")))
+        return bool(clears) and all(clears)
 
     def _refuse_pending_attestations(self) -> str:
         names = ", ".join(f"`{n}`" for n in self.classification.get("pending_attestations", []))
@@ -907,7 +909,7 @@ class Pipeline:
         # folder's higher ceiling covers its own files and nothing else.
         for scope in self._size_scopes():
             in_scope = set(scope.files)
-            _, scope_files = substantive_size([f for f in self.pr.files if f["filename"] in in_scope])
+            _, scope_files = substantive_size([f for f in self.sized_files if f["filename"] in in_scope])
             if scope_files > scope.max_files:
                 where = scope.path or "global"
                 return (
