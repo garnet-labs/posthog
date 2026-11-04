@@ -20,7 +20,7 @@ Showstoppers (REFUSE or ESCALATE):
 - CI/infra changes that slipped through the deny-list, without independent assurance
 - Security issues (injection, auth bypass, data exposure)
 - Unaddressed review comments with substantive concerns
-- Bot author (dependabot, renovate) — always needs human review
+- Bot author (dependabot, renovate) — always needs human review, unless `bot_authors` in the policy admits the bot and the attestations gate reports that CI attested every changed file; then CI vouched for those files and you judge the diff on its own terms, as you would a teammate's
 - New files whose content doesn't match their extension (e.g. executable code in a .md or .json file) — file extensions are not trusted
 
 NOT showstoppers (just approve):
