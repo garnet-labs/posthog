@@ -120,6 +120,21 @@ class Attestation:
     job: str | None = None
 
 
+@dataclass(frozen=True, kw_only=True)
+class BotAuthor:
+    """A bot whose PRs stamphog reviews, on condition that CI attests every file the PR changes.
+
+    GitHub attests `login` and `id` on the PR. The engine admits a PR only when that bot opened it on
+    a same-repository branch under `branch_prefix`. `requires` names the condition, so a future
+    condition is a policy change a reader can see.
+    """
+
+    login: str
+    id: int
+    branch_prefix: str
+    requires: str
+
+
 @dataclass(frozen=True)
 class SizeGate:
     max_lines: int
@@ -202,6 +217,7 @@ class Policy:
     familiarity: FamiliarityPolicy
     ownership: tuple[OwnershipSource, ...]
     attestations: tuple[Attestation, ...] = ()
+    bot_authors: tuple[BotAuthor, ...] = ()
 
     def deny_pattern_defs(self) -> dict[str, dict[str, list[str]]]:
         """Reconstruct the raw scope→patterns mapping the compiler consumes."""
@@ -253,7 +269,9 @@ _TOP_LEVEL_KEYS = {"version", "deny", "allow", "size_gate", "tiers", "dismiss", 
 # not the engine. Allowed at the top level so a repo declaring one doesn't hard-fail every review, but
 # never required and never read here — the engine ignores their contents.
 _SERVER_ONLY_TOP_LEVEL_KEYS = {"digest"}
-_OPTIONAL_TOP_LEVEL_KEYS = {"attestations"}
+_OPTIONAL_TOP_LEVEL_KEYS = {"attestations", "bot_authors"}
+_BOT_AUTHOR_KEYS = {"login", "id", "branch_prefix", "requires"}
+_BOT_AUTHOR_REQUIREMENTS = {"every_file_attested"}
 _DENY_SCOPES = {"any", "titles", "paths"}
 _BREADTH_RULES = {"single-area", "not-cross-cutting"}
 
@@ -348,6 +366,28 @@ def _optional_string(spec: dict, key: str, context: str) -> str | None:
     value = spec.get(key)
     _require(value is None or (isinstance(value, str) and bool(value)), f"{context}.{key}: must be a string")
     return value
+
+
+def _parse_bot_authors(raw: object) -> tuple[BotAuthor, ...]:
+    _require(isinstance(raw, list), "bot_authors: must be a list")
+    parsed: list[BotAuthor] = []
+    for index, spec in enumerate(raw):
+        context = f"bot_authors[{index}]"
+        _require(isinstance(spec, dict), f"{context}: must be a mapping")
+        _require_exact_keys(spec, _BOT_AUTHOR_KEYS, context)
+        login = _optional_string(spec, "login", context) or ""
+        _require(login.endswith("[bot]"), f"{context}.login: must be a bot login ending in [bot]")
+        _require(all(login != other.login for other in parsed), f"{context}.login: duplicate {login!r}")
+        bot_id = _require_positive_int(spec.get("id"), f"{context}.id")
+        prefix = _optional_string(spec, "branch_prefix", context) or ""
+        _require(bool(prefix), f"{context}.branch_prefix: required")
+        requires = spec.get("requires")
+        _require(
+            requires in _BOT_AUTHOR_REQUIREMENTS,
+            f"{context}.requires: must be one of {sorted(_BOT_AUTHOR_REQUIREMENTS)}",
+        )
+        parsed.append(BotAuthor(login=login, id=bot_id, branch_prefix=prefix, requires=str(requires)))
+    return tuple(parsed)
 
 
 def _parse_attestations(raw: object, deny: dict[str, DenyCategory]) -> tuple[Attestation, ...]:
@@ -592,6 +632,7 @@ def load_policy(
         familiarity=_parse_familiarity(raw["familiarity"]),
         ownership=_parse_ownership(raw["ownership"], ownership_formats),
         attestations=_parse_attestations(raw.get("attestations", []), deny),
+        bot_authors=_parse_bot_authors(raw.get("bot_authors", [])),
     )
 
 
