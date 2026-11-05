@@ -301,8 +301,8 @@ jobs:
                               # `<summary>` line: `<b>Garnet Runtime Visibility / <job name></b> ... </span> <state></summary>`.
                               # One `<job name><TAB><state>` row per job; a job the App did not record has no row.
                               job_states=$(grep -E '^<summary><b>Garnet Runtime Visibility / ' <<<"$body" \
-                                  | sed -E 's#^<summary><b>Garnet Runtime Visibility / ([^<]+)</b>.*</span>[[:space:]]*([^<]*)</summary>.*$#\1\t\2#' \
-                                  | sed -E 's/[[:space:]]+$//' || true)
+                                  | sed -E 's#^<summary><b>Garnet Runtime Visibility / ([^<]+)</b>(.*)$#\1\t\2#' \
+                                  | awk -F'\t' '{ s = "changed"; if ($2 ~ /<\/span>[[:space:]]*nothing new<\/summary>[[:space:]]*$/) s = "nothing new"; else if ($2 ~ /first time recorded/) s = "first time recorded"; print $1 "\t" s }' || true)
                               echo "recorded jobs:"; printf '%s\n' "$job_states"
                               {
                                   echo 'job_states<<EOF_JOBS'
