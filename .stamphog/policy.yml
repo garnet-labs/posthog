@@ -238,3 +238,6 @@ attestations:
       paths:
           - '^(pnpm-lock\.yaml|pnpm-workspace\.yaml|\.nvmrc|package\.json|pyproject\.toml|uv\.lock)$'
           - '(?:^|/)package\.json$'
+          - '^products/desktop/(pnpm-lock\.yaml|pnpm-workspace\.yaml|\.node-version)$'
+          - '^services/llm-gateway/(pyproject\.toml|uv\.lock)$'
+          - '^(common/ingestion/acceptance_tests/requirements\.txt|tools/infra-scripts/clitools/(requirements|constraints)\.txt)$'

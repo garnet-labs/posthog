@@ -1,21 +1,24 @@
 name: Garnet Runtime Visibility
 
 # Runs the dependency installs, where lifecycle scripts and build steps execute,
-# under the Garnet eBPF sensor: on every pull request that changes the manifests, and on every
-# push to master so a pull request record has a recorded master run to compare
-# against. Garnet posts a sticky comment on the PR: every recorded outbound
+# under the Garnet eBPF sensor: the root pnpm workspace, the root Python project,
+# the desktop pnpm workspace (products/desktop), the LLM gateway (services/llm-gateway)
+# and the two pinned requirements files, on every pull request that changes their
+# manifests, and on every push to master so a pull request record has a recorded
+# master run to compare against. Garnet posts a sticky comment on the PR: every recorded outbound
 # connection with the execution chain that reached it, bound to the head
 # commit, compared with the last recorded master run.
 #
-# The third job is the dependency proof. It reads the finalized record for this
+# The last job is the dependency proof. It reads the finalized record for this
 # head from the Garnet App's own PR comment (author `garnet-runtime-review[bot]`,
 # `garnet:commit` equal to the head) through the GitHub API and, only when the
-# App declares nothing new against master, lists the
-# dependency files it judged in one notice annotation titled
+# App declares nothing new against master, lists the dependency files whose own
+# recorded install job the App reports as nothing new in one notice annotation titled
 # `stamphog attestation: <base ref>` carrying one `<!-- stamphog:v1 [...] -->`
 # marker, the shape stamphog reads to lift the `deps_toolchain` deny category for
-# exactly those files (products/stamphog/AGENTS.md, "Attestations"). A changed record, an incomplete capture, a pending record, or a
-# pull request that edits this workflow emits nothing, so the PR stays in review.
+# exactly those files (products/stamphog/AGENTS.md, "Attestations"). A changed record, an incomplete capture, a pending record, a
+# file whose install job is absent from the record, or a pull request that edits this
+# workflow emits nothing for it, so the PR stays in review.
 on:
     pull_request:
         paths:
@@ -26,6 +29,16 @@ on:
             - pyproject.toml
             - uv.lock
             - .github/workflows/garnet-ci.yml
+            - products/desktop/package.json
+            - products/desktop/**/package.json
+            - products/desktop/pnpm-lock.yaml
+            - products/desktop/pnpm-workspace.yaml
+            - products/desktop/.node-version
+            - services/llm-gateway/pyproject.toml
+            - services/llm-gateway/uv.lock
+            - common/ingestion/acceptance_tests/requirements.txt
+            - tools/infra-scripts/clitools/requirements.txt
+            - tools/infra-scripts/clitools/constraints.txt
     push:
         branches: [master]
         paths:
@@ -36,6 +49,16 @@ on:
             - pyproject.toml
             - uv.lock
             - .github/workflows/garnet-ci.yml
+            - products/desktop/package.json
+            - products/desktop/**/package.json
+            - products/desktop/pnpm-lock.yaml
+            - products/desktop/pnpm-workspace.yaml
+            - products/desktop/.node-version
+            - services/llm-gateway/pyproject.toml
+            - services/llm-gateway/uv.lock
+            - common/ingestion/acceptance_tests/requirements.txt
+            - tools/infra-scripts/clitools/requirements.txt
+            - tools/infra-scripts/clitools/constraints.txt
     workflow_dispatch:
         inputs:
             checkout_ref:
@@ -120,12 +143,124 @@ jobs:
             - name: Install Python dependencies (build steps execute here)
               run: UV_PROJECT_ENVIRONMENT=$pythonLocation uv sync --frozen --dev
 
+    desktop-install:
+        name: Desktop dependency install (recorded)
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        runs-on: ubuntu-latest
+        timeout-minutes: 30
+        defaults:
+            run:
+                working-directory: products/desktop
+        steps:
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+              with:
+                  ref: ${{ inputs.checkout_ref || github.event.pull_request.head.sha || github.sha }}
+
+            - name: Garnet Runtime Visibility
+              uses: garnet-org/action@673a06d87748bec49e4d8df22d371b2a3420aba4 # v2.5.2
+              with:
+                  api_token: ${{ secrets.GARNET_API_TOKEN }}
+
+            # The desktop workspace pins its own pnpm and Node versions.
+            - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+              with:
+                  package_json_file: products/desktop/package.json
+
+            - uses: actions/setup-node@6044e13b5dc448c55e2357c09f80417699197238 # v6.2.0
+              with:
+                  node-version-file: products/desktop/.node-version
+
+            # Cold install for the same reason as the root job: the lifecycle
+            # scripts (preinstall, postinstall, dependency build scripts) are the measurement.
+            - name: Install desktop dependencies (lifecycle scripts execute here)
+              run: pnpm install --no-frozen-lockfile
+
+    gateway-install:
+        name: LLM gateway dependency install (recorded)
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        runs-on: ubuntu-latest
+        timeout-minutes: 30
+        defaults:
+            run:
+                working-directory: services/llm-gateway
+        steps:
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+              with:
+                  ref: ${{ inputs.checkout_ref || github.event.pull_request.head.sha || github.sha }}
+
+            - name: Garnet Runtime Visibility
+              uses: garnet-org/action@673a06d87748bec49e4d8df22d371b2a3420aba4 # v2.5.2
+              with:
+                  api_token: ${{ secrets.GARNET_API_TOKEN }}
+
+            - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+              with:
+                  python-version: 3.14.7
+
+            - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+              with:
+                  version: '0.13.4'
+                  enable-cache: false
+
+            - name: Install LLM gateway dependencies (build steps execute here)
+              run: uv sync --frozen --dev
+
+    acceptance-requirements-install:
+        name: Acceptance tests requirements install (recorded)
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        runs-on: ubuntu-latest
+        timeout-minutes: 30
+        steps:
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+              with:
+                  ref: ${{ inputs.checkout_ref || github.event.pull_request.head.sha || github.sha }}
+
+            - name: Garnet Runtime Visibility
+              uses: garnet-org/action@673a06d87748bec49e4d8df22d371b2a3420aba4 # v2.5.2
+              with:
+                  api_token: ${{ secrets.GARNET_API_TOKEN }}
+
+            - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+              with:
+                  python-version: '3.12'
+
+            # No lockfile: pip resolves and downloads from the pins directly, in a fresh venv.
+            - name: Install acceptance test requirements (downloads and builds execute here)
+              run: |
+                  python -m venv .venv
+                  .venv/bin/python -m pip install -r common/ingestion/acceptance_tests/requirements.txt
+
+    clitools-requirements-install:
+        name: CLI tools requirements install (recorded)
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+        runs-on: ubuntu-latest
+        timeout-minutes: 30
+        steps:
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+              with:
+                  ref: ${{ inputs.checkout_ref || github.event.pull_request.head.sha || github.sha }}
+
+            - name: Garnet Runtime Visibility
+              uses: garnet-org/action@673a06d87748bec49e4d8df22d371b2a3420aba4 # v2.5.2
+              with:
+                  api_token: ${{ secrets.GARNET_API_TOKEN }}
+
+            - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+              with:
+                  python-version: '3.12'
+
+            # requirements.txt carries `-c constraints.txt`, which pip resolves next to the file.
+            - name: Install CLI tools requirements (downloads and builds execute here)
+              run: |
+                  python -m venv .venv
+                  .venv/bin/python -m pip install -r tools/infra-scripts/clitools/requirements.txt
+
     dependency-proof:
         name: Dependency proof
         # The record finalizes in the sensor's post step, after each install job's
         # last step, so the proof reads it from a job of its own. No checkout: the
         # only files this job trusts are this workflow and the record.
-        needs: [dep-install, py-install]
+        needs: [dep-install, py-install, desktop-install, gateway-install, acceptance-requirements-install, clitools-requirements-install]
         # Runs after a failed install too: the record then finalizes as changed or
         # incomplete and the log says why nothing was attested.
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}
@@ -162,6 +297,18 @@ jobs:
                               case "$capture" in complete|best-effort) ;; *) outcome="capture-$capture" ;; esac
                               echo "record for $HEAD_SHA: $(jq -r '.heading // ""' <<<"$summary") (outcome: $outcome; capture: $capture; compared with: $(jq -r '.previous // "nothing"' <<<"$summary"))"
                               echo "outcome=$outcome" >> "$GITHUB_OUTPUT"
+                              # The App reports every recorded job of this workflow on its own
+                              # `<summary>` line: `<b>Garnet Runtime Visibility / <job name></b> ... </span> <state></summary>`.
+                              # One `<job name><TAB><state>` row per job; a job the App did not record has no row.
+                              job_states=$(grep -E '^<summary><b>Garnet Runtime Visibility / ' <<<"$body" \
+                                  | sed -E 's#^<summary><b>Garnet Runtime Visibility / ([^<]+)</b>.*</span>[[:space:]]*([^<]*)</summary>.*$#\1\t\2#' \
+                                  | sed -E 's/[[:space:]]+$//' || true)
+                              echo "recorded jobs:"; printf '%s\n' "$job_states"
+                              {
+                                  echo 'job_states<<EOF_JOBS'
+                                  printf '%s\n' "$job_states"
+                                  echo 'EOF_JOBS'
+                              } >> "$GITHUB_OUTPUT"
                               exit 0
                           fi
                       fi
@@ -174,32 +321,55 @@ jobs:
             - name: List the dependency files this job judged
               id: files
               shell: bash
+              env:
+                  JOB_STATES: ${{ steps.record.outputs.job_states }}
               run: |
                   set -euo pipefail
                   changed=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files" --jq '.[].filename')
                   workflow_changed=false
                   if grep -qx '.github/workflows/garnet-ci.yml' <<<"$changed"; then workflow_changed=true; fi
-                  # The installs resolve the root pnpm workspace (its lockfile,
-                  # pnpm-workspace.yaml, .nvmrc and every package.json under it) and the
-                  # root Python project (pyproject.toml, uv.lock). A directory with its own
-                  # pnpm-lock.yaml or uv.lock is a separate project these jobs never install;
-                  # requirements files are never installed here.
-                  other_lockfile_dirs=$(grep -E '^.+/(pnpm-lock\.yaml|uv\.lock)$' <<<"$changed" | sed -E 's#/(pnpm-lock\.yaml|uv\.lock)$#/#' || true)
+                  # Each recorded job installs one project: the root pnpm workspace (its
+                  # lockfile, pnpm-workspace.yaml, .nvmrc and every package.json under it),
+                  # the root Python project (pyproject.toml, uv.lock), the desktop pnpm
+                  # workspace, the LLM gateway, and one pinned requirements file each. A
+                  # file is judged only by the job that installs it, and listed only when
+                  # the App reports that job as nothing new. A directory with its own
+                  # pnpm-lock.yaml or uv.lock that none of these jobs install is a separate
+                  # project; its files are never listed.
+                  job_for() {
+                      case "$1" in
+                          products/desktop/pnpm-lock.yaml|products/desktop/pnpm-workspace.yaml|products/desktop/.node-version|products/desktop/package.json|products/desktop/*/package.json)
+                              echo "Desktop dependency install (recorded)" ;;
+                          services/llm-gateway/pyproject.toml|services/llm-gateway/uv.lock)
+                              echo "LLM gateway dependency install (recorded)" ;;
+                          common/ingestion/acceptance_tests/requirements.txt)
+                              echo "Acceptance tests requirements install (recorded)" ;;
+                          tools/infra-scripts/clitools/requirements.txt|tools/infra-scripts/clitools/constraints.txt)
+                              echo "CLI tools requirements install (recorded)" ;;
+                          pyproject.toml|uv.lock)
+                              echo "Python dependency install (recorded)" ;;
+                          pnpm-lock.yaml|pnpm-workspace.yaml|.nvmrc|package.json|*/package.json)
+                              echo "Dependency install (recorded)" ;;
+                          *) echo "" ;;
+                      esac
+                  }
+                  recorded_project_dirs=$'products/desktop/\nservices/llm-gateway/'
+                  other_lockfile_dirs=$(grep -E '^.+/(pnpm-lock\.yaml|uv\.lock)$' <<<"$changed" | sed -E 's#/(pnpm-lock\.yaml|uv\.lock)$#/#' | grep -vxF -f <(printf '%s\n' "$recorded_project_dirs") || true)
                   judged=""
                   nl=$'\n'
                   while IFS= read -r file; do
                       [ -n "$file" ] || continue
-                      case "$file" in
-                          pnpm-lock.yaml|pnpm-workspace.yaml|.nvmrc|package.json|pyproject.toml|uv.lock) ;;
-                          */package.json) ;;
-                          *) continue ;;
-                      esac
+                      job=$(job_for "$file")
+                      [ -n "$job" ] || continue
                       skip=false
                       while IFS= read -r dir; do
                           [ -n "$dir" ] || continue
                           case "$file" in "$dir"*) skip=true ;; esac
                       done <<<"$other_lockfile_dirs"
-                      [ "$skip" = true ] && continue
+                      if [ "$skip" = true ]; then echo "not judged: $file (a project none of the recorded jobs install)"; continue; fi
+                      state=$(awk -F'\t' -v j="$job" '$1 == j { print $2; exit }' <<<"$JOB_STATES")
+                      if [ -z "$state" ]; then echo "not judged: $file (job '$job' is absent from the record)"; continue; fi
+                      if [ "$state" != "nothing new" ]; then echo "not judged: $file (job '$job' reads '$state')"; continue; fi
                       judged="${judged:+$judged$nl}$file"
                   done <<<"$changed"
                   echo "workflow_changed=$workflow_changed" >> "$GITHUB_OUTPUT"
