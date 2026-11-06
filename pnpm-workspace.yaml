@@ -145,6 +145,7 @@ patchedDependencies:
 # Dependencies that require preinstall scripts. Add entries with caution.
 allowBuilds:
     '@modelcontextprotocol/ext-apps': true
+    '@sentry/cli': true
     '@mongodb-js/zstd': true
     '@parcel/watcher': true
     chartjs-plugin-stacked100: true
