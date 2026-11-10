@@ -83,6 +83,7 @@ export interface editSessionReplayWidgetModalLogicValues {
                                 filterId: string
                                 operator:
                                     | 'between'
+                                    | 'ends_with'
                                     | 'exact'
                                     | 'flag_evaluates_to'
                                     | 'gt'
@@ -91,6 +92,7 @@ export interface editSessionReplayWidgetModalLogicValues {
                                     | 'icontains_multi'
                                     | 'in'
                                     | 'is_cleaned_path_exact'
+                                    | 'is_cleaned_path_not_exact'
                                     | 'is_date_after'
                                     | 'is_date_before'
                                     | 'is_date_exact'
@@ -102,10 +104,12 @@ export interface editSessionReplayWidgetModalLogicValues {
                                     | 'max'
                                     | 'min'
                                     | 'not_between'
+                                    | 'not_ends_with'
                                     | 'not_icontains'
                                     | 'not_icontains_multi'
                                     | 'not_in'
                                     | 'not_regex'
+                                    | 'not_starts_with'
                                     | 'regex'
                                     | 'semver_caret'
                                     | 'semver_eq'
@@ -116,6 +120,7 @@ export interface editSessionReplayWidgetModalLogicValues {
                                     | 'semver_neq'
                                     | 'semver_tilde'
                                     | 'semver_wildcard'
+                                    | 'starts_with'
                                 optionId: string
                                 propertyName: string
                                 value?: string | string[] | null | undefined
@@ -222,6 +227,7 @@ export interface editSessionReplayWidgetModalLogicMeta {
                               filterId: string
                               operator:
                                   | 'between'
+                                  | 'ends_with'
                                   | 'exact'
                                   | 'flag_evaluates_to'
                                   | 'gt'
@@ -230,6 +236,7 @@ export interface editSessionReplayWidgetModalLogicMeta {
                                   | 'icontains_multi'
                                   | 'in'
                                   | 'is_cleaned_path_exact'
+                                  | 'is_cleaned_path_not_exact'
                                   | 'is_date_after'
                                   | 'is_date_before'
                                   | 'is_date_exact'
@@ -241,10 +248,12 @@ export interface editSessionReplayWidgetModalLogicMeta {
                                   | 'max'
                                   | 'min'
                                   | 'not_between'
+                                  | 'not_ends_with'
                                   | 'not_icontains'
                                   | 'not_icontains_multi'
                                   | 'not_in'
                                   | 'not_regex'
+                                  | 'not_starts_with'
                                   | 'regex'
                                   | 'semver_caret'
                                   | 'semver_eq'
@@ -255,6 +264,7 @@ export interface editSessionReplayWidgetModalLogicMeta {
                                   | 'semver_neq'
                                   | 'semver_tilde'
                                   | 'semver_wildcard'
+                                  | 'starts_with'
                               optionId: string
                               propertyName: string
                               value?: string | string[] | null | undefined
@@ -308,6 +318,7 @@ export interface editSessionReplayWidgetModalLogicMeta {
                                     filterId: string
                                     operator:
                                         | 'between'
+                                        | 'ends_with'
                                         | 'exact'
                                         | 'flag_evaluates_to'
                                         | 'gt'
@@ -316,6 +327,7 @@ export interface editSessionReplayWidgetModalLogicMeta {
                                         | 'icontains_multi'
                                         | 'in'
                                         | 'is_cleaned_path_exact'
+                                        | 'is_cleaned_path_not_exact'
                                         | 'is_date_after'
                                         | 'is_date_before'
                                         | 'is_date_exact'
@@ -327,10 +339,12 @@ export interface editSessionReplayWidgetModalLogicMeta {
                                         | 'max'
                                         | 'min'
                                         | 'not_between'
+                                        | 'not_ends_with'
                                         | 'not_icontains'
                                         | 'not_icontains_multi'
                                         | 'not_in'
                                         | 'not_regex'
+                                        | 'not_starts_with'
                                         | 'regex'
                                         | 'semver_caret'
                                         | 'semver_eq'
@@ -341,6 +355,7 @@ export interface editSessionReplayWidgetModalLogicMeta {
                                         | 'semver_neq'
                                         | 'semver_tilde'
                                         | 'semver_wildcard'
+                                        | 'starts_with'
                                     optionId: string
                                     propertyName: string
                                     value?: string | string[] | null | undefined
@@ -391,6 +406,7 @@ export interface editSessionReplayWidgetModalLogicMeta {
                                         filterId: string
                                         operator:
                                             | 'between'
+                                            | 'ends_with'
                                             | 'exact'
                                             | 'flag_evaluates_to'
                                             | 'gt'
@@ -399,6 +415,7 @@ export interface editSessionReplayWidgetModalLogicMeta {
                                             | 'icontains_multi'
                                             | 'in'
                                             | 'is_cleaned_path_exact'
+                                            | 'is_cleaned_path_not_exact'
                                             | 'is_date_after'
                                             | 'is_date_before'
                                             | 'is_date_exact'
@@ -410,10 +427,12 @@ export interface editSessionReplayWidgetModalLogicMeta {
                                             | 'max'
                                             | 'min'
                                             | 'not_between'
+                                            | 'not_ends_with'
                                             | 'not_icontains'
                                             | 'not_icontains_multi'
                                             | 'not_in'
                                             | 'not_regex'
+                                            | 'not_starts_with'
                                             | 'regex'
                                             | 'semver_caret'
                                             | 'semver_eq'
@@ -424,6 +443,7 @@ export interface editSessionReplayWidgetModalLogicMeta {
                                             | 'semver_neq'
                                             | 'semver_tilde'
                                             | 'semver_wildcard'
+                                            | 'starts_with'
                                         optionId: string
                                         propertyName: string
                                         value?: string | string[] | null | undefined
@@ -485,6 +505,7 @@ export interface editSessionReplayWidgetModalLogicMeta {
                                         filterId: string
                                         operator:
                                             | 'between'
+                                            | 'ends_with'
                                             | 'exact'
                                             | 'flag_evaluates_to'
                                             | 'gt'
@@ -493,6 +514,7 @@ export interface editSessionReplayWidgetModalLogicMeta {
                                             | 'icontains_multi'
                                             | 'in'
                                             | 'is_cleaned_path_exact'
+                                            | 'is_cleaned_path_not_exact'
                                             | 'is_date_after'
                                             | 'is_date_before'
                                             | 'is_date_exact'
@@ -504,10 +526,12 @@ export interface editSessionReplayWidgetModalLogicMeta {
                                             | 'max'
                                             | 'min'
                                             | 'not_between'
+                                            | 'not_ends_with'
                                             | 'not_icontains'
                                             | 'not_icontains_multi'
                                             | 'not_in'
                                             | 'not_regex'
+                                            | 'not_starts_with'
                                             | 'regex'
                                             | 'semver_caret'
                                             | 'semver_eq'
@@ -518,6 +542,7 @@ export interface editSessionReplayWidgetModalLogicMeta {
                                             | 'semver_neq'
                                             | 'semver_tilde'
                                             | 'semver_wildcard'
+                                            | 'starts_with'
                                         optionId: string
                                         propertyName: string
                                         value?: string | string[] | null | undefined
@@ -720,6 +745,7 @@ export const editSessionReplayWidgetModalLogic = kea<editSessionReplayWidgetModa
                                             filterId: string
                                             operator:
                                                 | 'between'
+                                                | 'ends_with'
                                                 | 'exact'
                                                 | 'flag_evaluates_to'
                                                 | 'gt'
@@ -728,6 +754,7 @@ export const editSessionReplayWidgetModalLogic = kea<editSessionReplayWidgetModa
                                                 | 'icontains_multi'
                                                 | 'in'
                                                 | 'is_cleaned_path_exact'
+                                                | 'is_cleaned_path_not_exact'
                                                 | 'is_date_after'
                                                 | 'is_date_before'
                                                 | 'is_date_exact'
@@ -739,10 +766,12 @@ export const editSessionReplayWidgetModalLogic = kea<editSessionReplayWidgetModa
                                                 | 'max'
                                                 | 'min'
                                                 | 'not_between'
+                                                | 'not_ends_with'
                                                 | 'not_icontains'
                                                 | 'not_icontains_multi'
                                                 | 'not_in'
                                                 | 'not_regex'
+                                                | 'not_starts_with'
                                                 | 'regex'
                                                 | 'semver_caret'
                                                 | 'semver_eq'
@@ -753,6 +782,7 @@ export const editSessionReplayWidgetModalLogic = kea<editSessionReplayWidgetModa
                                                 | 'semver_neq'
                                                 | 'semver_tilde'
                                                 | 'semver_wildcard'
+                                                | 'starts_with'
                                             optionId: string
                                             propertyName: string
                                             value?: string | string[] | null | undefined
@@ -823,6 +853,7 @@ export const editSessionReplayWidgetModalLogic = kea<editSessionReplayWidgetModa
                                             filterId: string
                                             operator:
                                                 | 'between'
+                                                | 'ends_with'
                                                 | 'exact'
                                                 | 'flag_evaluates_to'
                                                 | 'gt'
@@ -831,6 +862,7 @@ export const editSessionReplayWidgetModalLogic = kea<editSessionReplayWidgetModa
                                                 | 'icontains_multi'
                                                 | 'in'
                                                 | 'is_cleaned_path_exact'
+                                                | 'is_cleaned_path_not_exact'
                                                 | 'is_date_after'
                                                 | 'is_date_before'
                                                 | 'is_date_exact'
@@ -842,10 +874,12 @@ export const editSessionReplayWidgetModalLogic = kea<editSessionReplayWidgetModa
                                                 | 'max'
                                                 | 'min'
                                                 | 'not_between'
+                                                | 'not_ends_with'
                                                 | 'not_icontains'
                                                 | 'not_icontains_multi'
                                                 | 'not_in'
                                                 | 'not_regex'
+                                                | 'not_starts_with'
                                                 | 'regex'
                                                 | 'semver_caret'
                                                 | 'semver_eq'
@@ -856,6 +890,7 @@ export const editSessionReplayWidgetModalLogic = kea<editSessionReplayWidgetModa
                                                 | 'semver_neq'
                                                 | 'semver_tilde'
                                                 | 'semver_wildcard'
+                                                | 'starts_with'
                                             optionId: string
                                             propertyName: string
                                             value?: string | string[] | null | undefined

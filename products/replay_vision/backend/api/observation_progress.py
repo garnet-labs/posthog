@@ -1,6 +1,7 @@
 import json
 import time
 import asyncio
+import datetime as dt
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from typing import Any
@@ -11,7 +12,11 @@ import structlog
 from posthog.sync import database_sync_to_async
 from posthog.temporal.common.client import async_connect
 
-from products.replay_vision.backend.models.replay_observation import ObservationStatus, ReplayObservation
+from products.replay_vision.backend.models.replay_observation import (
+    TERMINAL_STATUSES,
+    ObservationStatus,
+    ReplayObservation,
+)
 from products.replay_vision.backend.temporal.types import (
     OBSERVATION_PHASE_INDEX,
     OBSERVATION_PHASE_ORDER,
@@ -27,7 +32,10 @@ PROGRESS_POLL_INTERVAL_S = 1.5
 # client never disconnects. Observations finish in minutes; well past that we close and free the worker.
 MAX_STREAM_DURATION_S = 10 * 60
 
-_TERMINAL_STATUSES = frozenset({ObservationStatus.SUCCEEDED, ObservationStatus.FAILED, ObservationStatus.INELIGIBLE})
+# A query or describe waits on a busy worker; without a bound one slow call stalls every tick behind it.
+TEMPORAL_RPC_TIMEOUT = dt.timedelta(seconds=5)
+
+RASTERIZE_ACTIVITY_TYPE = "rasterize-recording"
 
 
 def _sse_event(label: str, data: str) -> str:
@@ -60,6 +68,7 @@ def _fallback_progress(status: str) -> ObservationProgress:
         "step": OBSERVATION_PHASE_INDEX[phase],
         "total_steps": len(OBSERVATION_PHASE_ORDER),
         "rasterizer_workflow_id": None,
+        "phase_started_at": None,
     }
 
 
@@ -67,11 +76,15 @@ async def _read_rasterizer_frame_progress(client: Any, rasterizer_workflow_id: s
     """Frame counts come from the rasterizer activity's heartbeats. Errors swallowed — progress is best-effort."""
     try:
         child_handle = client.get_workflow_handle(rasterizer_workflow_id)
-        desc = await child_handle.describe()
+        desc = await child_handle.describe(rpc_timeout=TEMPORAL_RPC_TIMEOUT)
         pending = getattr(desc.raw_description, "pending_activities", None) or []
-        if not pending:
+        render = next((p for p in pending if p.activity_type.name == RASTERIZE_ACTIVITY_TYPE), None)
+        if render is None:
             return None
-        raw_payloads = list(pending[0].heartbeat_details.payloads)
+        # Heartbeat details carry over to a retry, so details older than the current attempt are a dead attempt's.
+        if render.last_heartbeat_time.ToDatetime() < render.last_started_time.ToDatetime():
+            return None
+        raw_payloads = list(render.heartbeat_details.payloads)
         if not raw_payloads:
             return None
         codec = getattr(client.data_converter, "payload_codec", None)
@@ -84,9 +97,14 @@ async def _read_rasterizer_frame_progress(client: Any, rasterizer_workflow_id: s
 async def _query_progress(client: Any, workflow_id: str) -> dict[str, Any] | None:
     """Query the running workflow's `get_progress`; attach rasterizer frame progress while rendering."""
     try:
-        payload: dict[str, Any] = await client.get_workflow_handle(workflow_id).query("get_progress")
+        payload: dict[str, Any] = await client.get_workflow_handle(workflow_id).query(
+            "get_progress", rpc_timeout=TEMPORAL_RPC_TIMEOUT
+        )
     except Exception:
-        return None  # Workflow not queryable yet/anymore — caller falls back to a status-derived payload.
+        return None  # Workflow not queryable yet/anymore — caller repeats its last tick or a status-derived one.
+    phase_started_at = payload.get("phase_started_at")
+    # Elapsed rather than a timestamp, so the client needs no clock agreement with the server.
+    payload["phase_elapsed_s"] = max(0.0, time.time() - phase_started_at) if phase_started_at else None
     rasterizer_workflow_id = payload.get("rasterizer_workflow_id")
     if payload.get("phase") == "rendering" and rasterizer_workflow_id:
         payload["rasterizer"] = await _read_rasterizer_frame_progress(client, rasterizer_workflow_id)
@@ -100,12 +118,13 @@ async def stream_observation_progress(observation: ReplayObservation) -> AsyncGe
 
     Emits `observation-progress` ticks, then a single `observation-complete` (carrying the terminal status) once the
     row settles; `observation-error` on an unexpected failure. The client refetches the row to render the final result.
+    At the duration cap the stream closes without a terminal event, and the client reconnects.
     """
     observation_id = observation.id
     team_id = observation.team_id
 
     # Fast path: already settled (e.g. details page opened after completion) — close immediately.
-    if observation.status in _TERMINAL_STATUSES:
+    if observation.status in TERMINAL_STATUSES:
         yield _sse_event("observation-complete", json.dumps({"status": observation.status}))
         return
 
@@ -115,24 +134,27 @@ async def stream_observation_progress(observation: ReplayObservation) -> AsyncGe
         client = None  # Without Temporal we still tick a status-derived payload so the bar moves.
 
     deadline = time.monotonic() + MAX_STREAM_DURATION_S
+    last_payload: dict[str, Any] | None = None
     try:
         while True:
             if time.monotonic() > deadline:
                 # Free the ASGI worker rather than hold it open indefinitely on a stuck workflow.
                 logger.info("replay_vision.observation_progress_stream_timeout", observation_id=str(observation_id))
-                yield _sse_event("observation-error", "Progress stream timed out.")
                 return
             state = await _read_observation_state(observation_id, team_id)
             if state is None:
                 yield _sse_event("observation-error", "Observation not found")
                 return
             status, workflow_id = state.status, state.workflow_id
-            if status in _TERMINAL_STATUSES:
+            if status in TERMINAL_STATUSES:
                 yield _sse_event("observation-complete", json.dumps({"status": status}))
                 return
 
             payload = await _query_progress(client, workflow_id) if client and workflow_id else None
-            yield _sse_event("observation-progress", json.dumps(payload or _fallback_progress(status)))
+            if payload is not None:
+                last_payload = payload
+            # A failed query repeats the last real tick; the status fallback would report an earlier phase.
+            yield _sse_event("observation-progress", json.dumps(last_payload or _fallback_progress(status)))
             await asyncio.sleep(PROGRESS_POLL_INTERVAL_S)
     except Exception:
         # Don't leak the raw exception (DB hosts, internal details) to the client; it's logged server-side.

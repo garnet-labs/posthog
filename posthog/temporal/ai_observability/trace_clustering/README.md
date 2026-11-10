@@ -345,7 +345,9 @@ Key constants in `constants.py`:
 | `DEFAULT_LOOKBACK_DAYS`             | 7                                 | Days of trace history to analyze                                     |
 | `DEFAULT_MAX_SAMPLES`               | 1500                              | Maximum traces to sample                                             |
 | `MIN_TRACES_FOR_CLUSTERING`         | 1000                              | Minimum items per level required for workflow                        |
-| `COMPUTE_ACTIVITY_TIMEOUT`          | 120s                              | Clustering compute timeout                                           |
+| `WORKFLOW_EXECUTION_TIMEOUT`        | 45m                               | Per-team workflow execution timeout                                  |
+| `COMPUTE_ACTIVITY_TIMEOUT`          | 300s                              | Per-attempt clustering compute timeout                               |
+| `COMPUTE_SCHEDULE_TO_CLOSE_TIMEOUT` | 720s                              | Total compute timeout including retries, backoff, and queueing       |
 | `EMIT_ACTIVITY_TIMEOUT`             | 60s                               | Event emission timeout                                               |
 | `LABELING_AGENT_MODEL`              | gpt-5.4                           | OpenAI model for labeling agent                                      |
 | `LABELING_AGENT_MAX_ITERATIONS`     | 50                                | Max agent iterations before finalization                             |
@@ -396,7 +398,7 @@ Key constants in `constants.py`:
 ## Error Handling
 
 - **Insufficient data**: Skip clustering if fewer than 1000 items (per analysis level)
-- **Compute activity retries**: 3 attempts with exponential backoff
+- **Compute activity retries**: 3 attempts with exponential backoff, capped by the 720s schedule-to-close budget. `ClickHouseAtCapacity` and `ConcurrencyLimitExceeded` wait a jittered 20–60s before the retry instead, and reach error tracking only on the last attempt
 - **LLM activity retries**: 2 attempts with longer intervals (for rate limits)
 - **Emit activity retries**: 3 attempts with exponential backoff
 - **LLM fallback**: If label generation fails, use "Cluster N" as title

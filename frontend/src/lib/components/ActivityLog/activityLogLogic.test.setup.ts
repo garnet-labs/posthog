@@ -4,8 +4,15 @@ import { activityLogLogic } from 'lib/components/ActivityLog/activityLogLogic'
 import { ActivityChange, ActivityLogItem, PersonMerge, Trigger } from 'lib/components/ActivityLog/humanizeActivity'
 
 import { useMocks } from '~/mocks/jest'
+import { cohortsModel } from '~/models/cohortsModel'
+import { propertyDefinitionsModel } from '~/models/propertyDefinitionsModel'
 import { initKeaTests } from '~/test/init'
 import { ActivityScope } from '~/types'
+
+// The first test in each suite pays the one-time dynamic import of the
+// describers registry — every product's describer and its dependency graph —
+// which can exceed jest's 5s default on a loaded CI runner.
+jest.setTimeout(15000)
 
 interface APIMockSetup {
     name: string
@@ -52,6 +59,8 @@ async function testSetup(
         },
     })
     initKeaTests()
+    cohortsModel.mount()
+    propertyDefinitionsModel.mount()
     const logic = activityLogLogic({ scope, id: 7 })
     logic.mount()
 

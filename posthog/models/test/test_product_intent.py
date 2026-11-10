@@ -1,7 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from freezegun import freeze_time
+import time_machine
 from posthog.test.base import BaseTest
 from unittest.mock import patch
 
@@ -11,9 +11,8 @@ from parameterized import parameterized
 
 from posthog.schema import ProductIntentContext, ProductKey
 
-from posthog.models.file_system.user_product_list import UserProductList
+from posthog.models.file_system.file_system_shortcut import FileSystemShortcut
 from posthog.models.product_intent.product_intent import (
-    MANAGED_WAREHOUSE_ACTIVATION_CPU_SECONDS,
     ProductIntent,
     _fetch_product_intents,
     _team_product_intents_cache_key,
@@ -27,22 +26,19 @@ from posthog.utils import get_instance_realm
 
 from products.dashboards.backend.models.dashboard import Dashboard
 from products.event_definitions.backend.models.event_definition import EventDefinition
-from products.experiments.backend.models.experiment import Experiment
+from products.experiments.backend.facade.testing import create_experiment
 from products.feature_flags.backend.models.feature_flag import FeatureFlag
-from products.product_analytics.backend.models.insight import Insight
+from products.product_analytics.backend.facade.models import Insight
 from products.surveys.backend.models import Survey
-from products.workflows.backend.models.hog_flow.hog_flow import HogFlow
+from products.workflows.backend.facade.testing import create_workflow_for_test
 
 
 class TestProductIntent(BaseTest):
     def setUp(self):
         super().setUp()
-        # Joining the org seeds the fixed default product set; these tests assert on
-        # product-intent-driven rows, so start from a clean slate.
-        UserProductList.objects.filter(user=self.user, team=self.team).delete()
-        # The managed warehouse activation check debounces via the cache; clear it so the
-        # per-team key from one test can't suppress the ClickHouse check in the next.
-        cache.clear()
+        # Joining the org stars the default products. These tests assert on the stars that
+        # product intents add, so they start without any.
+        FileSystemShortcut.objects.filter(user=self.user, team=self.team).delete()
         self.product_intent = ProductIntent.objects.create(team=self.team, product_type=ProductKey.DATA_WAREHOUSE)
 
     def test_str_representation(self):
@@ -68,7 +64,7 @@ class TestProductIntent(BaseTest):
         assert intent is not None
         assert intent.contexts == {ProductIntentContext.QUICK_START_PRODUCT_SELECTED: 2}
 
-    @freeze_time("2024-01-01T12:00:00Z")
+    @time_machine.travel("2024-01-01T12:00:00Z", tick=False)
     def test_register_with_onboarding_sets_onboarding_completed_at(self):
         ProductIntent.register(
             team=self.team,
@@ -82,7 +78,7 @@ class TestProductIntent(BaseTest):
         assert intent.onboarding_completed_at == datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC)
         assert intent.contexts == {ProductIntentContext.ONBOARDING_PRODUCT_SELECTED___PRIMARY: 1}
 
-    @freeze_time("2024-01-01T12:00:00Z")
+    @time_machine.travel("2024-01-01T12:00:00Z", tick=False)
     def test_register_without_onboarding_does_not_set_onboarding_completed_at(self):
         ProductIntent.register(
             team=self.team,
@@ -96,7 +92,7 @@ class TestProductIntent(BaseTest):
         assert intent.onboarding_completed_at is None
         assert intent.contexts == {ProductIntentContext.TAXONOMIC_FILTER_EMPTY_STATE: 1}
 
-    @freeze_time("2024-06-15T12:00:00Z")
+    @time_machine.travel("2024-06-15T12:00:00Z", tick=False)
     def test_has_activated_data_warehouse_with_valid_query(self):
         Insight.objects.create(
             team=self.team, query={"kind": "DataVisualizationNode", "source": {"query": "SELECT * FROM custom_table"}}
@@ -104,7 +100,7 @@ class TestProductIntent(BaseTest):
 
         self.assertTrue(self.product_intent.has_activated_data_warehouse())
 
-    @freeze_time("2024-06-15T12:00:00Z")
+    @time_machine.travel("2024-06-15T12:00:00Z", tick=False)
     def test_has_activated_data_warehouse_with_excluded_table(self):
         Insight.objects.create(
             team=self.team, query={"kind": "DataVisualizationNode", "source": {"query": "SELECT * FROM events"}}
@@ -112,9 +108,9 @@ class TestProductIntent(BaseTest):
 
         self.assertFalse(self.product_intent.has_activated_data_warehouse())
 
-    @freeze_time("2024-06-15T12:00:00Z")
+    @time_machine.travel("2024-06-15T12:00:00Z", tick=False)
     def test_has_activated_data_warehouse_with_old_insight(self):
-        with freeze_time("2024-05-15T12:00:00Z"):  # Before June 1st, 2024
+        with time_machine.travel("2024-05-15T12:00:00Z", tick=False):  # Before June 1st, 2024
             Insight.objects.create(
                 team=self.team,
                 query={"kind": "DataVisualizationNode", "source": {"query": "SELECT * FROM custom_table"}},
@@ -122,7 +118,7 @@ class TestProductIntent(BaseTest):
 
         self.assertFalse(self.product_intent.has_activated_data_warehouse())
 
-    @freeze_time("2024-06-15T12:00:00Z")
+    @time_machine.travel("2024-06-15T12:00:00Z", tick=False)
     def test_check_and_update_activation_sets_activated_at(self):
         Insight.objects.create(
             team=self.team, query={"kind": "DataVisualizationNode", "source": {"query": "SELECT * FROM custom_table"}}
@@ -133,7 +129,7 @@ class TestProductIntent(BaseTest):
         self.product_intent.refresh_from_db()
         assert self.product_intent.activated_at == datetime(2024, 6, 15, 12, 0, 0, tzinfo=UTC)
 
-    @freeze_time("2024-06-15T12:00:00Z")
+    @time_machine.travel("2024-06-15T12:00:00Z", tick=False)
     def test_calculate_product_activation_task(self):
         # Create an insight that should trigger activation
         Insight.objects.create(
@@ -155,13 +151,13 @@ class TestProductIntent(BaseTest):
         self.product_intent.refresh_from_db()
         self.assertIsNone(self.product_intent.activated_at)
 
-    @freeze_time("2024-06-15T12:00:00Z")
+    @time_machine.travel("2024-06-15T12:00:00Z", tick=False)
     def test_calculate_product_activation_skips_activated_products(self):
         # Set product as already activated
         self.product_intent.activated_at = datetime.now(tz=UTC)
         self.product_intent.save()
 
-        with freeze_time(datetime.now(tz=UTC) + timedelta(days=2)):
+        with time_machine.travel(datetime.now(tz=UTC) + timedelta(days=2), tick=False):
             calculate_product_activation(self.team.id)
             self.product_intent.refresh_from_db()
             assert self.product_intent.activated_at == datetime(2024, 6, 15, 12, 0, 0, tzinfo=UTC)
@@ -179,7 +175,7 @@ class TestProductIntent(BaseTest):
         )
 
         # Create an experiment without a start date (not launched)
-        Experiment.objects.create(team=self.team, name="Not launched", feature_flag=feature_flag)
+        create_experiment(team_id=self.team.id, name="Not launched", feature_flag_id=feature_flag.id)
         self.assertFalse(self.product_intent.has_activated_experiments())
 
         # Create another feature flag for the launched experiment
@@ -191,8 +187,8 @@ class TestProductIntent(BaseTest):
         )
 
         # Create an experiment with a start date (launched)
-        Experiment.objects.create(
-            team=self.team, name="Launched", start_date=datetime.now(tz=UTC), feature_flag=launched_flag
+        create_experiment(
+            team_id=self.team.id, name="Launched", start_date=datetime.now(tz=UTC), feature_flag_id=launched_flag.id
         )
         self.assertTrue(self.product_intent.has_activated_experiments())
 
@@ -218,6 +214,23 @@ class TestProductIntent(BaseTest):
         )
         self.assertTrue(self.product_intent.has_activated_feature_flags())
 
+    def test_has_activated_feature_flags_ignores_flags_in_another_config_format(self):
+        self.product_intent.product_type = "feature_flags"
+        self.product_intent.save()
+        FeatureFlag.objects.create(
+            team=self.team,
+            key="other-format",
+            filters={"version": 2, "return_type": "boolean", "default_value": False, "rules": []},
+        )
+        for index in (1, 2):
+            FeatureFlag.objects.create(
+                team=self.team,
+                key=f"flag-{index}",
+                filters={"groups": [{"properties": [{"key": "email", "value": "test@test.com"}]}]},
+            )
+
+        self.assertTrue(self.product_intent.has_activated_feature_flags())
+
     def test_has_activated_feature_flags_excludes_experiment_and_survey_flags(self):
         self.product_intent.product_type = "feature_flags"
         self.product_intent.save()
@@ -229,7 +242,7 @@ class TestProductIntent(BaseTest):
             name="Feature Flag for Experiment Test",
             filters={"groups": [{"properties": [{"key": "email", "value": "test@test.com"}]}]},
         )
-        Experiment.objects.create(team=self.team, name="Experiment Test", feature_flag=feature_flag)
+        create_experiment(team_id=self.team.id, name="Experiment Test", feature_flag_id=feature_flag.id)
         survey_flag = FeatureFlag.objects.create(
             team=self.team,
             key="targeting-flag-for-survey-test",
@@ -240,7 +253,7 @@ class TestProductIntent(BaseTest):
 
         self.assertFalse(self.product_intent.has_activated_feature_flags())
 
-    @freeze_time("2024-06-15T12:00:00Z")
+    @time_machine.travel("2024-06-15T12:00:00Z", tick=False)
     def test_has_activated_session_replay_with_five_recordings_viewed_and_filters_set(self):
         # Create 5 recordings and mark them as viewed
         for i in range(5):
@@ -260,7 +273,7 @@ class TestProductIntent(BaseTest):
 
         self.assertTrue(self.product_intent.has_activated_session_replay())
 
-    @freeze_time("2024-06-15T12:00:00Z")
+    @time_machine.travel("2024-06-15T12:00:00Z", tick=False)
     def test_has_not_activated_session_replay_with_less_than_five_recordings(self):
         # Create a product intent with the filters set
         ProductIntent.objects.create(
@@ -280,7 +293,7 @@ class TestProductIntent(BaseTest):
 
         assert self.product_intent.has_activated_session_replay() is False
 
-    @freeze_time("2024-06-15T12:00:00Z")
+    @time_machine.travel("2024-06-15T12:00:00Z", tick=False)
     def test_has_not_activated_session_replay_with_unviewed_recordings(self):
         # Create a product intent with the filters set
         ProductIntent.objects.create(
@@ -323,7 +336,7 @@ class TestProductIntent(BaseTest):
 
         assert self.product_intent.has_activated_session_replay() is False
 
-    @freeze_time("2024-01-01T12:00:00Z")
+    @time_machine.travel("2024-01-01T12:00:00Z", tick=False)
     @patch("posthog.event_usage.report_user_action")
     def test_register_reports_correct_user_action_for_onboarding(self, mock_report_user_action):
         ProductIntent.register(
@@ -351,7 +364,7 @@ class TestProductIntent(BaseTest):
             team=self.team,
         )
 
-    @freeze_time("2024-01-01T12:00:00Z")
+    @time_machine.travel("2024-01-01T12:00:00Z", tick=False)
     @patch("posthog.event_usage.report_user_action")
     def test_register_reports_correct_user_action_for_non_onboarding(self, mock_report_user_action):
         ProductIntent.register(
@@ -379,13 +392,12 @@ class TestProductIntent(BaseTest):
             team=self.team,
         )
 
-    @freeze_time("2024-01-01T12:00:00Z")
-    @patch("posthog.models.product_intent.product_intent.get_managed_warehouse_compute_usage", return_value=0.0)
+    @time_machine.travel("2024-01-01T12:00:00Z", tick=False)
     @patch("posthog.event_usage.report_user_action")
-    def test_register_managed_warehouse_intent(self, mock_report_user_action, mock_compute_usage):
+    def test_register_managed_warehouse_intent(self, mock_report_user_action):
         # Managed warehouse is a distinct product from data_warehouse imports. Provisioning is the
-        # intent; activation requires compute usage above a threshold within 30 days, which cannot
-        # be true at intent time (usage only accrues after provisioning), so it never auto-activates here.
+        # intent; there is no activation criterion yet (it depends on a per-org usage signal that
+        # isn't available in production), so registering intent never auto-activates.
         ProductIntent.register(
             team=self.team,
             product_type=ProductKey.MANAGED_WAREHOUSE,
@@ -413,62 +425,6 @@ class TestProductIntent(BaseTest):
             },
             team=self.team,
         )
-
-    @parameterized.expand(
-        [
-            ("zero", 0.0, False),
-            ("below_threshold", float(MANAGED_WAREHOUSE_ACTIVATION_CPU_SECONDS - 1), False),
-            ("at_threshold", float(MANAGED_WAREHOUSE_ACTIVATION_CPU_SECONDS), True),
-            ("above_threshold", float(MANAGED_WAREHOUSE_ACTIVATION_CPU_SECONDS * 2), True),
-        ]
-    )
-    @patch("posthog.models.product_intent.product_intent.get_managed_warehouse_compute_usage")
-    def test_has_activated_managed_warehouse(self, _name, usage, expected, mock_compute_usage):
-        mock_compute_usage.return_value = usage
-        EventDefinition.objects.create(team=self.team, name="managed warehouse compute usage")
-        intent = ProductIntent.objects.create(team=self.team, product_type=ProductKey.MANAGED_WAREHOUSE)
-        assert intent.has_activated_managed_warehouse() is expected
-
-    @freeze_time("2024-01-01T12:00:00Z")
-    @patch("posthog.models.product_intent.product_intent.get_managed_warehouse_compute_usage", return_value=0.0)
-    def test_managed_warehouse_activation_uses_30_day_window(self, mock_compute_usage):
-        # Usage is only counted within 30 days of the intent, so the compute lookup must be
-        # bounded to [created_at, created_at + 30 days).
-        EventDefinition.objects.create(team=self.team, name="managed warehouse compute usage")
-        intent = ProductIntent.objects.create(team=self.team, product_type=ProductKey.MANAGED_WAREHOUSE)
-        assert intent.has_activated_managed_warehouse() is False
-        mock_compute_usage.assert_called_once_with(
-            self.team.id,
-            datetime(2024, 1, 1, 12, 0, 0, tzinfo=UTC),
-            datetime(2024, 1, 31, 12, 0, 0, tzinfo=UTC),
-        )
-
-    @patch("posthog.models.product_intent.product_intent.get_managed_warehouse_compute_usage")
-    def test_managed_warehouse_activation_skips_clickhouse_without_usage_event(self, mock_compute_usage):
-        # A team that never emitted the compute-usage heartbeat must not trigger a ClickHouse query.
-        intent = ProductIntent.objects.create(team=self.team, product_type=ProductKey.MANAGED_WAREHOUSE)
-        assert intent.has_activated_managed_warehouse() is False
-        mock_compute_usage.assert_not_called()
-
-    @patch("posthog.models.product_intent.product_intent.get_managed_warehouse_compute_usage")
-    def test_managed_warehouse_activation_skips_clickhouse_after_window(self, mock_compute_usage):
-        # Once the 30-day window has closed, activation is impossible, so no ClickHouse query runs.
-        EventDefinition.objects.create(team=self.team, name="managed warehouse compute usage")
-        with freeze_time("2024-01-01T12:00:00Z"):
-            intent = ProductIntent.objects.create(team=self.team, product_type=ProductKey.MANAGED_WAREHOUSE)
-        with freeze_time("2024-03-01T12:00:00Z"):
-            assert intent.has_activated_managed_warehouse() is False
-        mock_compute_usage.assert_not_called()
-
-    @patch("posthog.models.product_intent.product_intent.get_managed_warehouse_compute_usage", return_value=0.0)
-    def test_managed_warehouse_activation_query_is_debounced(self, mock_compute_usage):
-        # register() runs this check synchronously on every intent PATCH, so repeated calls must
-        # not each hit ClickHouse — the per-team cache TTL collapses them to one query.
-        EventDefinition.objects.create(team=self.team, name="managed warehouse compute usage")
-        intent = ProductIntent.objects.create(team=self.team, product_type=ProductKey.MANAGED_WAREHOUSE)
-        assert intent.has_activated_managed_warehouse() is False
-        assert intent.has_activated_managed_warehouse() is False
-        mock_compute_usage.assert_called_once()
 
     def test_has_activated_product_analytics_with_all_criteria(self):
         self.product_intent.product_type = ProductKey.PRODUCT_ANALYTICS
@@ -572,7 +528,7 @@ class TestProductIntent(BaseTest):
 
         assert self.product_intent.has_activated_product_analytics() is True
 
-    @freeze_time("2024-06-15T12:00:00Z")
+    @time_machine.travel("2024-06-15T12:00:00Z", tick=False)
     @patch("posthog.event_usage.report_user_action")
     def test_register_tracks_intent_even_when_already_activated(self, mock_report_user_action):
         # Create an insight that should trigger activation for data_warehouse
@@ -641,7 +597,7 @@ class TestProductIntent(BaseTest):
         Survey.objects.create(team=self.team, name="Survey Test")
         assert self.product_intent.has_activated_surveys() is False
 
-    @freeze_time("2024-06-15T12:00:00Z")
+    @time_machine.travel("2024-06-15T12:00:00Z", tick=False)
     def test_check_and_update_activation_skips_if_already_activated(self):
         # First activate it
         Insight.objects.create(
@@ -652,7 +608,7 @@ class TestProductIntent(BaseTest):
         initial_last_checked = self.product_intent.activation_last_checked_at
 
         # Move time forward and check again
-        with freeze_time("2024-06-16T12:00:00Z"):
+        with time_machine.travel("2024-06-16T12:00:00Z", tick=False):
             result = self.product_intent.check_and_update_activation()
             self.product_intent.refresh_from_db()
 
@@ -660,7 +616,7 @@ class TestProductIntent(BaseTest):
             assert self.product_intent.activated_at == initial_activated_at  # Activation time unchanged
             assert self.product_intent.activation_last_checked_at == initial_last_checked  # Last checked unchanged
 
-    @freeze_time("2024-06-15T12:00:00Z")
+    @time_machine.travel("2024-06-15T12:00:00Z", tick=False)
     def test_check_and_update_activation_updates_last_checked_for_non_activated(self):
         initial_last_checked = self.product_intent.activation_last_checked_at
         result = self.product_intent.check_and_update_activation()
@@ -671,163 +627,39 @@ class TestProductIntent(BaseTest):
         assert self.product_intent.activation_last_checked_at == datetime(2024, 6, 15, 12, 0, 0, tzinfo=UTC)
         assert self.product_intent.activation_last_checked_at != initial_last_checked
 
-    def test_register_creates_user_product_list_entries_for_single_product_intent(self):
-        ProductIntent.register(
-            self.team, ProductKey.SESSION_REPLAY, ProductIntentContext.SESSION_REPLAY_SET_FILTERS, self.user
-        )
+    def _starred_paths(self) -> set[str]:
+        return set(FileSystemShortcut.objects.filter(user=self.user, team=self.team).values_list("path", flat=True))
 
-        user_product_lists = UserProductList.objects.filter(user=self.user, team=self.team)
-        assert user_product_lists.count() == 1
-
-        upl = user_product_lists.get()
-        assert upl.product_path == "Session replay"
-        assert upl.enabled is True
-        assert upl.reason == UserProductList.Reason.PRODUCT_INTENT
-
-    def test_register_creates_user_product_list_entries_for_multiple_product_intent(self):
-        ProductIntent.register(
-            self.team, ProductKey.DATA_WAREHOUSE, ProductIntentContext.DATA_WAREHOUSE_SOURCES_TABLE, self.user
-        )
-
-        user_product_lists = UserProductList.objects.filter(user=self.user, team=self.team).order_by("product_path")
-        assert user_product_lists.count() == 2
-
-        product_paths = {upl.product_path for upl in user_product_lists}
-        assert product_paths == {"Data warehouse", "SQL editor"}
-
-        enabled = [upl.enabled for upl in user_product_lists]
-        assert all(enabled)
-
-        reasons = [upl.reason for upl in user_product_lists]
-        assert all(reason == UserProductList.Reason.PRODUCT_INTENT for reason in reasons)
-
-    def test_register_ignores_product_key_without_products(self):
-        ProductIntent.register(
-            self.team, ProductKey.ANNOTATIONS, ProductIntentContext.DATA_WAREHOUSE_SOURCES_TABLE, self.user
-        )
-
-        user_product_lists = UserProductList.objects.filter(user=self.user, team=self.team)
-        assert user_product_lists.count() == 0
-
-    def test_register_respects_allow_sidebar_suggestions_false(self):
-        self.user.allow_sidebar_suggestions = False
+    @parameterized.expand(
+        [
+            ("single_product", ProductKey.SESSION_REPLAY, None, {"Session replay"}),
+            ("several_products", ProductKey.PRODUCT_ANALYTICS, None, {"Dashboards", "Product analytics"}),
+            ("no_products", ProductKey.ANNOTATIONS, None, set()),
+            ("suggestions_on", ProductKey.SURVEYS, True, {"Surveys"}),
+            ("suggestions_off", ProductKey.SURVEYS, False, set()),
+        ]
+    )
+    def test_register_stars_the_products_of_a_new_intent(
+        self, _name: str, product_key: ProductKey, allow_sidebar_suggestions: bool | None, expected: set[str]
+    ) -> None:
+        self.user.allow_sidebar_suggestions = allow_sidebar_suggestions
         self.user.save()
 
-        ProductIntent.register(
-            self.team, ProductKey.DATA_WAREHOUSE, ProductIntentContext.DATA_WAREHOUSE_SOURCES_TABLE, self.user
-        )
+        ProductIntent.register(self.team, product_key, ProductIntentContext.QUICK_START_PRODUCT_SELECTED, self.user)
 
-        user_product_lists = UserProductList.objects.filter(user=self.user, team=self.team)
-        assert user_product_lists.count() == 0
+        assert self._starred_paths() == expected
 
-    def test_register_does_not_create_duplicates_on_multiple_calls(self):
-        assert UserProductList.objects.filter(user=self.user, team=self.team).count() == 0
-
+    def test_register_does_not_star_again_once_the_intent_exists(self) -> None:
         ProductIntent.register(
             self.team, ProductKey.SESSION_REPLAY, ProductIntentContext.ONBOARDING_PRODUCT_SELECTED___PRIMARY, self.user
         )
-        assert UserProductList.objects.filter(user=self.user, team=self.team).count() == 1
+        FileSystemShortcut.objects.filter(user=self.user, team=self.team, path="Session replay").delete()
 
         ProductIntent.register(
             self.team, ProductKey.SESSION_REPLAY, ProductIntentContext.QUICK_START_PRODUCT_SELECTED, self.user
         )
-        assert UserProductList.objects.filter(user=self.user, team=self.team).count() == 1
 
-    def test_register_creates_user_product_list_for_different_intents(self):
-        ProductIntent.register(
-            self.team, ProductKey.SESSION_REPLAY, ProductIntentContext.QUICK_START_PRODUCT_SELECTED, self.user
-        )
-        assert UserProductList.objects.filter(user=self.user, team=self.team).count() == 1
-
-        ProductIntent.register(
-            self.team, ProductKey.PRODUCT_ANALYTICS, ProductIntentContext.QUICK_START_PRODUCT_SELECTED, self.user
-        )
-        user_product_lists = UserProductList.objects.filter(user=self.user, team=self.team)
-        assert user_product_lists.count() == 3
-
-        product_paths = {upl.product_path for upl in user_product_lists}
-        assert product_paths == {"Session replay", "Dashboards", "Product analytics"}
-
-    def test_register_allows_creation_when_allow_sidebar_suggestions_is_none(self):
-        self.user.allow_sidebar_suggestions = None
-        self.user.save()
-
-        ProductIntent.register(
-            self.team, ProductKey.SURVEYS, ProductIntentContext.QUICK_START_PRODUCT_SELECTED, self.user
-        )
-
-        user_product_lists = UserProductList.objects.filter(user=self.user, team=self.team)
-        assert user_product_lists.count() == 1
-        assert user_product_lists.get().product_path == "Surveys"
-
-    def test_register_allows_creation_when_allow_sidebar_suggestions_is_true(self):
-        self.user.allow_sidebar_suggestions = True
-        self.user.save()
-
-        ProductIntent.register(
-            self.team, ProductKey.SURVEYS, ProductIntentContext.QUICK_START_PRODUCT_SELECTED, self.user
-        )
-
-        user_product_lists = UserProductList.objects.filter(user=self.user, team=self.team)
-        assert user_product_lists.count() == 1
-        assert user_product_lists.get().product_path == "Surveys"
-
-    def test_register_rejects_creation_when_allow_sidebar_suggestions_is_false(self):
-        self.user.allow_sidebar_suggestions = False
-        self.user.save()
-
-        ProductIntent.register(
-            self.team, ProductKey.SURVEYS, ProductIntentContext.QUICK_START_PRODUCT_SELECTED, self.user
-        )
-        assert UserProductList.objects.filter(user=self.user, team=self.team).count() == 0
-
-    def test_register_with_onboarding_context_creates_user_product_list_with_onboarding_reason(self):
-        self.user.allow_sidebar_suggestions = True
-        self.user.save()
-
-        ProductIntent.register(
-            team=self.team,
-            product_type=ProductKey.SESSION_REPLAY,
-            context=ProductIntentContext.ONBOARDING_PRODUCT_SELECTED___PRIMARY,
-            user=self.user,
-            is_onboarding=True,
-        )
-
-        user_product_lists = UserProductList.objects.filter(user=self.user, team=self.team)
-        assert user_product_lists.count() == 1
-        assert user_product_lists.get().reason == UserProductList.Reason.ONBOARDING
-
-    def test_register_with_quick_start_context_creates_user_product_list_with_onboarding_reason(self):
-        self.user.allow_sidebar_suggestions = True
-        self.user.save()
-
-        ProductIntent.register(
-            team=self.team,
-            product_type=ProductKey.SESSION_REPLAY,
-            context=ProductIntentContext.QUICK_START_PRODUCT_SELECTED,
-            user=self.user,
-            is_onboarding=True,
-        )
-
-        user_product_lists = UserProductList.objects.filter(user=self.user, team=self.team)
-        assert user_product_lists.count() == 1
-        assert user_product_lists.get().reason == UserProductList.Reason.ONBOARDING
-
-    def test_register_without_onboarding_context_creates_user_product_list_with_product_intent_reason(self):
-        self.user.allow_sidebar_suggestions = True
-        self.user.save()
-
-        ProductIntent.register(
-            team=self.team,
-            product_type=ProductKey.SESSION_REPLAY,
-            context=ProductIntentContext.SESSION_REPLAY_SET_FILTERS,
-            user=self.user,
-            is_onboarding=False,
-        )
-
-        user_product_lists = UserProductList.objects.filter(user=self.user, team=self.team)
-        assert user_product_lists.count() == 1
-        assert user_product_lists.get().reason == UserProductList.Reason.PRODUCT_INTENT
+        assert self._starred_paths() == set()
 
     def _make_ai_generation_event_definition(self) -> EventDefinition:
         return EventDefinition.objects.create(team=self.team, name="$ai_generation")
@@ -903,24 +735,73 @@ class TestProductIntent(BaseTest):
 
         assert self.product_intent.has_activated_mcp_analytics() is False
 
+    def _make_metrics_intent(self, contexts: dict) -> ProductIntent:
+        ProductIntent.objects.filter(team=self.team, product_type=ProductKey.METRICS).delete()
+        return ProductIntent.objects.create(
+            team=self.team,
+            product_type=ProductKey.METRICS,
+            contexts=contexts,
+        )
+
+    @parameterized.expand(
+        [
+            # Charting or querying is only possible once metrics have reached the team,
+            # so any engagement signal is itself proof of ingestion + activation.
+            ("charted", {"metrics_viewer_query_run": 1}, False, True),
+            ("queried in sql", {"metrics_sql_query_run": 2}, False, True),
+            (
+                "first-ingested recorded then charted",
+                {"metrics_first_ingested": 1, "metrics_viewer_query_run": 1},
+                False,
+                True,
+            ),
+            # Pre-existing-metrics teams never record the transition-only first-ingested
+            # context, so engagement alone must still activate them.
+            ("charted without first-ingested intent", {"metrics_viewer_query_run": 3}, False, True),
+            # Data flowing activates without any engagement: sending does not require the
+            # viewer, so ingestion alone is the product outcome.
+            ("ingesting but never looked at", {"metrics_first_ingested": 1}, True, True),
+            ("ingesting with no contexts at all", {}, True, True),
+            # No engagement and no data is not activation.
+            ("first-ingested context but no data found", {"metrics_first_ingested": 1}, False, False),
+            ("no engagement at all", {}, False, False),
+        ]
+    )
+    def test_has_activated_metrics(self, _name: str, contexts: dict, has_data: bool, expected: bool) -> None:
+        intent = self._make_metrics_intent(contexts)
+
+        with patch(
+            "products.metrics.backend.facade.api.team_has_metrics",
+            return_value=has_data,
+        ):
+            assert intent.has_activated_metrics() is expected
+
+    def test_check_and_update_activation_activates_metrics(self) -> None:
+        # Guards the registration, not the criterion: an unregistered check never runs.
+        intent = self._make_metrics_intent({"metrics_first_ingested": 1, "metrics_viewer_query_run": 1})
+
+        assert intent.check_and_update_activation(skip_reporting=True) is True
+        intent.refresh_from_db()
+        assert intent.activated_at is not None
+
     def test_has_activated_workflows_with_active_workflow(self):
         self.product_intent.product_type = ProductKey.WORKFLOWS
         self.product_intent.save()
-        HogFlow.objects.create(team=self.team, name="Test workflow", status=HogFlow.State.ACTIVE)
+        create_workflow_for_test(team_id=self.team.id, name="Test workflow", status="active")
 
         assert self.product_intent.has_activated_workflows() is True
 
     def test_has_not_activated_workflows_with_draft_workflow_only(self):
         self.product_intent.product_type = ProductKey.WORKFLOWS
         self.product_intent.save()
-        HogFlow.objects.create(team=self.team, name="Test workflow", status=HogFlow.State.DRAFT)
+        create_workflow_for_test(team_id=self.team.id, name="Test workflow", status="draft")
 
         assert self.product_intent.has_activated_workflows() is False
 
     def test_has_not_activated_workflows_with_archived_workflow_only(self):
         self.product_intent.product_type = ProductKey.WORKFLOWS
         self.product_intent.save()
-        HogFlow.objects.create(team=self.team, name="Test workflow", status=HogFlow.State.ARCHIVED)
+        create_workflow_for_test(team_id=self.team.id, name="Test workflow", status="archived")
 
         assert self.product_intent.has_activated_workflows() is False
 

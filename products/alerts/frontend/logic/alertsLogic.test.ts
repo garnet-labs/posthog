@@ -1,9 +1,12 @@
+import { router } from 'kea-router'
 import { expectLogic } from 'kea-test-utils'
 
 import api from 'lib/api'
+import { urls } from 'scenes/urls'
 
 import { AlertState } from '~/queries/schema/schema-general'
 import { initKeaTests } from '~/test/init'
+import { HogFunctionType } from '~/types'
 
 import { AlertType } from '../types'
 import { alertsLogic } from './alertsLogic'
@@ -24,21 +27,69 @@ const alert = {
 describe('alertsLogic', () => {
     let deleteSpy: jest.SpyInstance
     let listSpy: jest.SpyInstance
+    let hogFunctionsListSpy: jest.SpyInstance
     let updateSpy: jest.SpyInstance
 
     beforeEach(() => {
         initKeaTests()
         listSpy = jest.spyOn(api.alerts, 'list').mockResolvedValue({ results: [alert], count: 1 })
+        hogFunctionsListSpy = jest.spyOn(api.hogFunctions, 'list').mockResolvedValue({ results: [], count: 0 })
     })
 
     afterEach(() => {
         deleteSpy?.mockRestore()
         listSpy.mockRestore()
+        hogFunctionsListSpy.mockRestore()
         updateSpy?.mockRestore()
     })
 
-    it('deletes an alert and reloads the list', async () => {
+    it('keeps the creator filter and URL in sync', async () => {
+        router.actions.push(
+            urls.alerts(),
+            { tab: 'insights', alert_id: alert.id, created_by: 'creator-from-link' },
+            { section: 'alerts' }
+        )
+        const logic = alertsLogic()
+        logic.mount()
+        await expectLogic(logic).toFinishAllListeners()
+        expect(listSpy).toHaveBeenCalledTimes(1)
+        expect(hogFunctionsListSpy).toHaveBeenCalledTimes(1)
+        expect(logic.values.filters.createdBy).toEqual('creator-from-link')
+        expect(listSpy).toHaveBeenLastCalledWith(
+            undefined,
+            expect.objectContaining({ created_by: 'creator-from-link' })
+        )
+
+        await expectLogic(logic, () => logic.actions.setFilters({ createdBy: 'creator-1' })).toFinishAllListeners()
+        expect(router.values.searchParams).toEqual({
+            tab: 'insights',
+            alert_id: alert.id,
+            created_by: 'creator-1',
+        })
+        expect(router.values.hashParams).toEqual({ section: 'alerts' })
+        expect(listSpy).toHaveBeenLastCalledWith(undefined, expect.objectContaining({ created_by: 'creator-1' }))
+
+        await expectLogic(logic, () => logic.actions.setFilters({ createdBy: 'All users' })).toFinishAllListeners()
+        expect(router.values.searchParams).toEqual({ tab: 'insights', alert_id: alert.id })
+        expect(listSpy.mock.lastCall?.[1]).not.toHaveProperty('created_by')
+
+        await expectLogic(logic, () => router.actions.push(urls.alerts(), { created_by: 'creator-2' }))
+            .toFinishAllListeners()
+            .toMatchValues({ filters: { search: '', createdBy: 'creator-2' } })
+
+        await expectLogic(logic, () => router.actions.push(urls.alerts()))
+            .toFinishAllListeners()
+            .toMatchValues({ filters: { search: '', createdBy: 'All users' } })
+        logic.unmount()
+    })
+
+    it('keeps a deleted alert out of a reloaded list', async () => {
         deleteSpy = jest.spyOn(api.alerts, 'delete').mockResolvedValue()
+        const nextAlert = { ...alert, id: 'alert-2', name: 'Newer alert' }
+        listSpy.mockReset()
+        listSpy
+            .mockResolvedValueOnce({ results: [alert], count: 1 })
+            .mockResolvedValueOnce({ results: [alert, nextAlert], count: 2 })
 
         const logic = alertsLogic()
         logic.mount()
@@ -48,6 +99,7 @@ describe('alertsLogic', () => {
 
         expect(deleteSpy).toHaveBeenCalledWith(alert.id)
         expect(listSpy).toHaveBeenCalledTimes(2)
+        expect(logic.values.alertsResponse).toEqual({ results: [nextAlert], count: 1 })
 
         logic.unmount()
     })
@@ -101,6 +153,40 @@ describe('alertsLogic', () => {
                     count: 2,
                 },
                 togglingAlertIds: new Set(),
+            })
+
+        logic.unmount()
+    })
+
+    it('counts only enabled destinations for alerts on the current page', async () => {
+        hogFunctionsListSpy.mockResolvedValue({
+            count: 3,
+            results: [
+                {
+                    id: 'destination-1',
+                    enabled: true,
+                    filters: { properties: [{ key: 'alert_id', value: alert.id }] },
+                },
+                {
+                    id: 'destination-2',
+                    enabled: false,
+                    filters: { properties: [{ key: 'alert_id', value: alert.id }] },
+                },
+                {
+                    id: 'destination-for-other-alert',
+                    enabled: true,
+                    filters: { properties: [{ key: 'alert_id', value: 'other-alert' }] },
+                },
+            ] as unknown as HogFunctionType[],
+        })
+
+        const logic = alertsLogic()
+        logic.mount()
+
+        await expectLogic(logic)
+            .toFinishAllListeners()
+            .toMatchValues({
+                alertDestinationCounts: { [alert.id]: 1 },
             })
 
         logic.unmount()

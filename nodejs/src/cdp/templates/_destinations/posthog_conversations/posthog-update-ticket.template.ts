@@ -1,5 +1,7 @@
 import { HogFunctionTemplate } from '~/cdp/types'
 
+import { hogApiErrorMessageFn } from '../../hog-helpers'
+
 export const template: HogFunctionTemplate = {
     free: true,
     status: 'hidden',
@@ -12,6 +14,8 @@ export const template: HogFunctionTemplate = {
     category: ['Custom'],
     code_language: 'hog',
     code: `
+${hogApiErrorMessageFn}
+
 if (empty(inputs.ticket_id)) {
   throw Error('Ticket ID is required')
 }
@@ -61,7 +65,7 @@ let response := postHogUpdateTicket({
 })
 
 if (response.status >= 400) {
-  throw Error(f'Failed to update ticket: {response.status}')
+  throw Error(f'Failed to update ticket ({response.status}): {apiErrorMessage(response)}')
 }
 
 return response.body
@@ -101,6 +105,7 @@ return response.body
                 { label: 'Low', value: 'low' },
                 { label: 'Medium', value: 'medium' },
                 { label: 'High', value: 'high' },
+                { label: 'Critical', value: 'critical' },
             ],
             description: 'New priority for the ticket. Leave empty to keep current.',
         },

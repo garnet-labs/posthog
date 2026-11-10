@@ -1,7 +1,6 @@
 import base64
 
-from freezegun import freeze_time
-from posthog.test.base import BaseTest
+import time_machine
 from unittest.mock import patch
 
 from django.test import SimpleTestCase, override_settings
@@ -59,13 +58,13 @@ def _decrypt_with(keys: list[str], token: str) -> str:
         return EncryptedFieldMixin().decrypt(token)
 
 
-class TestEncryptedFields(BaseTest):
+class TestEncryptedFields(SimpleTestCase):
     def test_simple_encryption_and_decryption(self):
         """
         Simple test case to be replicated in node tests or anywhere else that the same secrets will be used
         """
         ef = EncryptedFieldMixin()
-        with freeze_time("2024-01-01T00:01:00Z"):
+        with time_machine.travel("2024-01-01T00:01:00Z", tick=False):
             with patch("os.urandom", return_value=b"\x00" * 16):
                 encrypted = ef.f.encrypt(bytes("test-case", "utf-8")).decode("utf-8")
 

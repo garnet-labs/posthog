@@ -28,17 +28,31 @@ class CohortBackfillRunStatus(models.TextChoices):
     BLOCKED = "blocked", "Blocked"
     SEEDING = "seeding", "Seeding"
     RECONCILING = "reconciling", "Reconciling"
+    TRAILING = "trailing", "Trailing"
     COMPLETED = "completed", "Completed"
     SUPERSEDED = "superseded", "Superseded"
     CANCELLED = "cancelled", "Cancelled"
     FAILED = "failed", "Failed"
 
 
+# `trailing` is not active. Such a run has already stamped readiness and owes only its trailing days,
+# which the seeder scans after they end. Their tiles merge with `max`, so a newer run for the same
+# cohort cannot conflict with them, and the run holds no uniqueness slot. It also stays out of the
+# active-run age gauge, which would otherwise read every wait until the team's midnight as a stall.
+# It therefore lands in the derived terminal tuple below: `finished_at` is set when readiness stamps
+# and again when the seeder completes the run, so `runs_recent` counts each transition under its
+# own status.
 ACTIVE_COHORT_BACKFILL_RUN_STATUSES = (
     CohortBackfillRunStatus.AWAITING_BOUNDARY,
     CohortBackfillRunStatus.BLOCKED,
     CohortBackfillRunStatus.SEEDING,
     CohortBackfillRunStatus.RECONCILING,
+)
+
+# Derived, so the two tuples always partition the enum: a ninth status joins one or the other, and
+# cannot fall out of both and into no gauge.
+TERMINAL_COHORT_BACKFILL_RUN_STATUSES = tuple(
+    status for status in CohortBackfillRunStatus if status not in ACTIVE_COHORT_BACKFILL_RUN_STATUSES
 )
 
 
@@ -66,10 +80,22 @@ class CohortBackfillRun(TeamScopedRootMixin, UUIDTModel):
     )
     timezone = models.CharField(max_length=240)
     boundary_at = models.DateTimeField(null=True, blank=True)
+    person_scan_since = models.DateTimeField(null=True, blank=True)
     boundary_established_at = models.DateTimeField(null=True, blank=True)
     pinned = models.JSONField(default=dict)
     preconditions = models.JSONField(default=dict)
     reconcile_hwms = models.JSONField(null=True, blank=True)
+    chunks_planned_at = models.DateTimeField(null=True, blank=True)
+    reconcile_dispatched_at = models.DateTimeField(null=True, blank=True)
+    reconcile_observed_at = models.DateTimeField(null=True, blank=True)
+    marker_watch = models.JSONField(
+        null=True,
+        blank=True,
+        help_text=(
+            "Opaque watcher resume state written by the Rust seeder, shape "
+            '{"schema":2,"topic":"...","positions":{...},"ends":{...}|null}. Django never interprets it.'
+        ),
+    )
     blocked_reason = models.TextField(blank=True, default="")
     error = models.TextField(blank=True, default="")
     superseded_by = models.ForeignKey(
@@ -84,17 +110,25 @@ class CohortBackfillRun(TeamScopedRootMixin, UUIDTModel):
         indexes = [
             models.Index(fields=["team", "status"], name="cohort_bfr_team_status_idx"),
             models.Index(fields=["team", "-created_at"], name="cohort_bfr_team_created_idx"),
+            # The finalizer discovers observed runs across all teams, so it can't use the
+            # team-prefixed indexes above. Partial on status keeps that scan proportional to the
+            # live run set instead of to the table's ever-growing terminal history.
+            models.Index(
+                fields=["backfill_kind", "reconcile_observed_at"],
+                condition=Q(status=CohortBackfillRunStatus.RECONCILING),
+                name="cohort_bfr_reconciling_idx",
+            ),
         ]
         constraints = [
             models.UniqueConstraint(
-                fields=["cohort"],
+                fields=["cohort", "backfill_kind"],
                 condition=Q(cohort__isnull=False, status__in=ACTIVE_COHORT_BACKFILL_RUN_STATUSES),
-                name="cohort_bfr_active_cohort_uq",
+                name="cohort_bfr_active_cohort_kind_uq",
             ),
             models.UniqueConstraint(
-                fields=["team"],
+                fields=["team", "backfill_kind"],
                 condition=Q(scope=CohortBackfillScope.TEAM, status__in=ACTIVE_COHORT_BACKFILL_RUN_STATUSES),
-                name="cohort_bfr_active_team_uq",
+                name="cohort_bfr_active_team_kind_uq",
             ),
         ]
 
@@ -105,9 +139,20 @@ class CohortBackfillRunCohort(TeamScopedRootMixin, UUIDModel):
     cohort = models.ForeignKey("cohorts.Cohort", on_delete=models.CASCADE, related_name="backfill_participations")
     filters_shape_hash = models.CharField(max_length=64)
     behavioral_filters_shape_hash = models.CharField(max_length=64, default="")
+    person_filters_shape_hash = models.CharField(max_length=64, default="")
     pinned_filters = models.JSONField()
     stamped_at = models.DateTimeField(null=True, blank=True)
     superseded_at = models.DateTimeField(null=True, blank=True)
+    reconcile_completed_at = models.DateTimeField(null=True, blank=True)
+    reconcile_marker_bits = models.BigIntegerField(
+        default=0,
+        db_default=0,
+        help_text=(
+            "Bitmap of seed partitions whose reconcile_complete marker was observed, maintained "
+            "as an i64 by the Rust seeder (bits |= 1 << partition; all 64 partitions full is -1). "
+            "Django never interprets the bits."
+        ),
+    )
     error = models.TextField(blank=True, default="")
 
     class Meta:
@@ -130,9 +175,41 @@ class CohortBackfillChunk(TeamScopedRootMixin, UUIDModel):
     claimed_at = models.DateTimeField(null=True, blank=True)
     lease_expires_at = models.DateTimeField(null=True, blank=True)
     s_chunk_at = models.DateTimeField(null=True, blank=True)
+    person_range_lo = models.UUIDField(null=True, blank=True)
+    person_range_hi = models.UUIDField(null=True, blank=True)
     attempts = models.IntegerField(default=0)
+    next_attempt_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text=(
+            "Earliest instant the Rust seeder may claim this chunk again after a failure, stamped "
+            "by its retry backoff. Null means claimable now; every claim clears it."
+        ),
+    )
+    claimable_after = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text=(
+            "Set only on a trailing chunk: the run's boundary day, or a later day the live path may "
+            "have missed the start of. The instant that day ends in the run's timezone, plus a grace "
+            "period. The Rust seeder never claims the chunk earlier, and the run's readiness does not "
+            "wait for it. Null means a day before the boundary, claimable now."
+        ),
+    )
     last_error = models.TextField(blank=True, default="")
     tiles_produced = models.BigIntegerField(default=0)
+    # db_default, not only default: the Rust seeder raw-INSERTs an explicit column list, so a
+    # Python-side default leaves these NOT NULL columns unfilled by an old image during a rollout.
+    scan_received_bytes = models.BigIntegerField(
+        default=0,
+        db_default=0,
+        help_text="Bytes the chunk's ClickHouse scan received off the wire, written by the Rust seeder.",
+    )
+    scan_decoded_bytes = models.BigIntegerField(
+        default=0,
+        db_default=0,
+        help_text="Bytes the chunk's ClickHouse scan decompressed, written by the Rust seeder.",
+    )
     produce_hwms = models.JSONField(null=True, blank=True)
     confirmed_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(default=django_timezone.now)
@@ -146,3 +223,9 @@ class CohortBackfillChunk(TeamScopedRootMixin, UUIDModel):
         constraints = [
             models.UniqueConstraint(fields=["run", "day", "band"], name="cohort_bfc_run_day_band_uq"),
         ]
+
+
+# The chunks a run's readiness waits for. A trailing chunk carries a claim hold, and the seeder scans
+# it after readiness stamps, so every readiness query leaves it out. The seeder names the same rule
+# `readiness_chunk!()` in `store/completion.rs`.
+READINESS_CHUNKS = Q(claimable_after__isnull=True)

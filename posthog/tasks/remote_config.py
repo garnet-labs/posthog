@@ -5,7 +5,7 @@ from django.conf import settings
 import structlog
 from celery import shared_task
 
-from posthog.models.remote_config import RemoteConfig
+from posthog.models.remote_config import RemoteConfig, RemoteConfigTokenChangeSyncError
 from posthog.models.team import Team
 from posthog.scoping_audit import skip_team_scope_audit
 from posthog.storage.remote_config_cache import cleanup_stale_expiry_tracking, get_cache_stats, refresh_expiring_caches
@@ -19,9 +19,14 @@ logger = structlog.get_logger(__name__)
     queue=CeleryQueue.DEFAULT.value,
     soft_time_limit=300,
     time_limit=360,
+    autoretry_for=(RemoteConfigTokenChangeSyncError,),
+    max_retries=3,
+    retry_backoff=30,
 )
 @skip_team_scope_audit
-def update_team_remote_config(team_id: int, bypass_recordings_quota_cache: bool = False) -> None:
+def update_team_remote_config(
+    team_id: int, bypass_recordings_quota_cache: bool = False, old_token: str | None = None
+) -> None:
     try:
         team = Team.objects.get(id=team_id)
     except Team.DoesNotExist:
@@ -33,7 +38,10 @@ def update_team_remote_config(team_id: int, bypass_recordings_quota_cache: bool 
     except RemoteConfig.DoesNotExist:
         remote_config = RemoteConfig(team=team)
 
-    remote_config.sync(bypass_recordings_quota_cache=bypass_recordings_quota_cache)
+    if old_token:
+        remote_config.sync_after_token_change(old_token)
+    else:
+        remote_config.sync(bypass_recordings_quota_cache=bypass_recordings_quota_cache)
 
 
 @shared_task(ignore_result=True, queue=CeleryQueue.DEFAULT.value)
@@ -67,7 +75,7 @@ def refresh_expiring_remote_config_cache_entries() -> None:
     logger.info("Starting remote config cache refresh")
 
     try:
-        successful, failed = refresh_expiring_caches(ttl_threshold_hours=24)
+        counts = refresh_expiring_caches(ttl_threshold_hours=24)
 
         # Scan after refresh to push coverage/TTL metrics to Pushgateway.
         stats_after = get_cache_stats()
@@ -76,8 +84,8 @@ def refresh_expiring_remote_config_cache_entries() -> None:
 
         logger.info(
             "Completed remote config cache refresh",
-            successful_refreshes=successful,
-            failed_refreshes=failed,
+            successful_refreshes=counts.successful,
+            failed_refreshes=counts.failed,
             total_cached=stats_after.get("total_cached", 0),
             total_teams=stats_after.get("total_teams", 0),
             cache_coverage=stats_after.get("cache_coverage", "unknown"),

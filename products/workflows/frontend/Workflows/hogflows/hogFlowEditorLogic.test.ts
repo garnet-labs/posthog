@@ -1,8 +1,16 @@
+import { MOCK_DEFAULT_TEAM } from 'lib/api.mock'
+
 import { expectLogic } from 'kea-test-utils'
+
+import { FEATURE_FLAGS } from 'lib/constants'
+import { featureFlagLogic } from 'lib/logic/featureFlagLogic'
+import { teamLogic } from 'scenes/teamLogic'
 
 import { initKeaTests } from '~/test/init'
 
-import { computeMoveEdges, hogFlowEditorLogic } from './hogFlowEditorLogic'
+import { EXIT_NODE_ID, NEW_WORKFLOW, TRIGGER_NODE_ID, workflowLogic } from '../workflowLogic'
+import { computeInsertEdges, computeMoveEdges, hogFlowEditorLogic } from './hogFlowEditorLogic'
+import * as autolayout from './react_flow_utils/autolayout'
 import { HogFlow, HogFlowAction, HogFlowActionEdge, HogFlowActionNode } from './types'
 
 type Edge = HogFlow['edges'][0]
@@ -76,6 +84,84 @@ describe('computeMoveEdges', () => {
         expect(result).toEqual(expected)
     })
 
+    it('inserts a step after only the nested split paths', () => {
+        const edges = [
+            edge('trigger', 'outer', 'continue'),
+            edge('outer', 'paid', 'branch', 0),
+            edge('outer', 'onboarding', 'branch', 1),
+            edge('outer', 'at-risk', 'continue'),
+            edge('paid', 'shared', 'continue'),
+            edge('at-risk', 'shared', 'continue'),
+            edge('onboarding', 'guided', 'branch', 0),
+            edge('onboarding', 'self-serve', 'branch', 1),
+            edge('onboarding', 'shared', 'continue'),
+            edge('guided', 'shared', 'continue'),
+            edge('self-serve', 'shared', 'continue'),
+            edge('shared', 'exit', 'continue'),
+        ]
+
+        expect(
+            computeInsertEdges(edges, 'after-onboarding', 0, [
+                edge('guided', 'shared', 'continue'),
+                edge('self-serve', 'shared', 'continue'),
+                edge('onboarding', 'shared', 'continue'),
+            ])
+        ).toEqual([
+            edge('trigger', 'outer', 'continue'),
+            edge('outer', 'paid', 'branch', 0),
+            edge('outer', 'onboarding', 'branch', 1),
+            edge('outer', 'at-risk', 'continue'),
+            edge('paid', 'shared', 'continue'),
+            edge('at-risk', 'shared', 'continue'),
+            edge('onboarding', 'guided', 'branch', 0),
+            edge('onboarding', 'self-serve', 'branch', 1),
+            edge('shared', 'exit', 'continue'),
+            edge('onboarding', 'after-onboarding', 'continue'),
+            edge('guided', 'after-onboarding', 'continue'),
+            edge('self-serve', 'after-onboarding', 'continue'),
+            edge('after-onboarding', 'shared', 'continue'),
+        ])
+    })
+
+    it('moves a step after only the nested split paths', () => {
+        const edges = [
+            edge('trigger', 'move', 'continue'),
+            edge('move', 'outer', 'continue'),
+            edge('outer', 'paid', 'branch', 0),
+            edge('outer', 'onboarding', 'branch', 1),
+            edge('outer', 'at-risk', 'continue'),
+            edge('paid', 'shared', 'continue'),
+            edge('at-risk', 'shared', 'continue'),
+            edge('onboarding', 'guided', 'branch', 0),
+            edge('onboarding', 'self-serve', 'branch', 1),
+            edge('onboarding', 'shared', 'continue'),
+            edge('guided', 'shared', 'continue'),
+            edge('self-serve', 'shared', 'continue'),
+            edge('shared', 'exit', 'continue'),
+        ]
+        const joinEdges = [
+            edge('guided', 'shared', 'continue'),
+            edge('self-serve', 'shared', 'continue'),
+            edge('onboarding', 'shared', 'continue'),
+        ]
+
+        expect(computeMoveEdges(edges, 'move', joinEdges[0], true, joinEdges)).toEqual([
+            edge('trigger', 'outer', 'continue'),
+            edge('outer', 'paid', 'branch', 0),
+            edge('outer', 'onboarding', 'branch', 1),
+            edge('outer', 'at-risk', 'continue'),
+            edge('paid', 'shared', 'continue'),
+            edge('at-risk', 'shared', 'continue'),
+            edge('onboarding', 'guided', 'branch', 0),
+            edge('onboarding', 'self-serve', 'branch', 1),
+            edge('shared', 'exit', 'continue'),
+            edge('onboarding', 'move', 'continue'),
+            edge('guided', 'move', 'continue'),
+            edge('self-serve', 'move', 'continue'),
+            edge('move', 'shared', 'continue'),
+        ])
+    })
+
     it('returns null when moving node has no outgoing edge', () => {
         const edges = [edge('trigger', 'A', 'continue')]
         expect(computeMoveEdges(edges, 'A', edge('trigger', 'A', 'continue'), false)).toBeNull()
@@ -95,6 +181,139 @@ describe('hogFlowEditorLogic', () => {
         initKeaTests()
         logic = hogFlowEditorLogic()
         logic.mount()
+    })
+
+    it('resolves the selected action while React Flow nodes are still laying out', () => {
+        const action = logic.values.workflow.actions[0]
+        logic.actions.setNodesRaw([])
+        logic.actions.setSelectedNodeId(action.id)
+
+        expect(logic.values.selectedNode).toMatchObject({ id: action.id, data: action })
+    })
+
+    it('duplicates a linear step below itself', () => {
+        const delay: HogFlowAction = {
+            id: 'delay',
+            name: 'Delay',
+            description: '',
+            type: 'delay',
+            created_at: 0,
+            updated_at: 0,
+            config: { delay_duration: '1d' },
+        }
+        workflowLogic().actions.setWorkflowInfo({
+            actions: [NEW_WORKFLOW.actions[0], delay, NEW_WORKFLOW.actions[1]],
+            edges: [edge(TRIGGER_NODE_ID, delay.id, 'continue'), edge(delay.id, EXIT_NODE_ID, 'continue')],
+        })
+
+        logic.actions.duplicateNodeBelow(delay.id)
+
+        const duplicatedAction = logic.values.workflow.actions.find(
+            (action) => action.id !== delay.id && action.type === delay.type
+        )
+        expect(duplicatedAction).toMatchObject({ name: delay.name, config: delay.config })
+        expect(logic.values.workflow.edges).toEqual([
+            edge(TRIGGER_NODE_ID, delay.id, 'continue'),
+            edge(delay.id, duplicatedAction!.id, 'continue'),
+            edge(duplicatedAction!.id, EXIT_NODE_ID, 'continue'),
+        ])
+    })
+
+    it('keeps edits made while "Save as team default" was saving', () => {
+        const email = {
+            id: 'email',
+            name: 'Send email',
+            description: '',
+            type: 'function_email',
+            created_at: 0,
+            updated_at: 0,
+            config: {
+                template_id: 'template-email',
+                inputs: {},
+                utm_tags_enabled: true,
+                utm_params: { utm_source: 'partner', utm_campaign: 'spring' },
+                utm_params_from_default: [],
+            },
+        } as HogFlowAction
+        workflowLogic().actions.setWorkflowInfo({
+            actions: [NEW_WORKFLOW.actions[0], email, NEW_WORKFLOW.actions[1]],
+            edges: [edge(TRIGGER_NODE_ID, email.id, 'continue'), edge(email.id, EXIT_NODE_ID, 'continue')],
+        })
+        const saved = { utm_source: 'partner', utm_campaign: 'spring' }
+        logic.actions.setWorkflowAction(email.id, {
+            ...email,
+            name: 'Renamed while saving',
+            config: { ...email.config, utm_params: { utm_source: 'partner', utm_campaign: 'summer' } },
+        } as HogFlowAction)
+
+        logic.actions.markUtmSavedAsTeamDefault(email.id, saved)
+
+        const latest = logic.values.workflow.actions.find((action) => action.id === email.id)
+        expect(latest).toMatchObject({
+            name: 'Renamed while saving',
+            config: {
+                utm_params: { utm_source: 'partner', utm_campaign: 'summer' },
+                utm_params_from_default: ['utm_source', 'utm_medium', 'utm_content'],
+            },
+        })
+    })
+
+    it.each([
+        {
+            case: 'a delay',
+            step: {
+                id: 'step',
+                name: 'Delay',
+                description: '',
+                type: 'delay',
+                created_at: 0,
+                updated_at: 0,
+                config: { delay_duration: '1d' },
+            } as HogFlowAction,
+        },
+        {
+            case: 'an email with its own UTM settings',
+            step: {
+                id: 'step',
+                name: 'Send email',
+                description: '',
+                type: 'function_email',
+                created_at: 0,
+                updated_at: 0,
+                config: {
+                    template_id: 'template-email',
+                    inputs: {},
+                    utm_tags_enabled: false,
+                    utm_params: { utm_source: 'partner' },
+                    utm_params_from_default: ['utm_medium'],
+                },
+            } as HogFlowAction,
+        },
+    ])('duplicates $case below itself', ({ step }) => {
+        teamLogic.actions.loadCurrentTeamSuccess({
+            ...MOCK_DEFAULT_TEAM,
+            workflows_config: {
+                capture_workflows_engagement_events: false,
+                email_utm_tags_enabled: true,
+                email_utm_params: { utm_source: 'newsletter' },
+            },
+        })
+        workflowLogic().actions.setWorkflowInfo({
+            actions: [NEW_WORKFLOW.actions[0], step, NEW_WORKFLOW.actions[1]],
+            edges: [edge(TRIGGER_NODE_ID, step.id, 'continue'), edge(step.id, EXIT_NODE_ID, 'continue')],
+        })
+
+        logic.actions.duplicateNodeBelow(step.id)
+
+        const duplicatedAction = logic.values.workflow.actions.find(
+            (action) => action.id !== step.id && action.type === step.type
+        )
+        expect(duplicatedAction).toMatchObject({ name: step.name, config: step.config })
+        expect(logic.values.workflow.edges).toEqual([
+            edge(TRIGGER_NODE_ID, step.id, 'continue'),
+            edge(step.id, duplicatedAction!.id, 'continue'),
+            edge(duplicatedAction!.id, EXIT_NODE_ID, 'continue'),
+        ])
     })
 
     describe('conditional branch naming', () => {
@@ -465,6 +684,45 @@ describe('hogFlowEditorLogic', () => {
 
             expect(branchEdge0?.data?.label).toBe('If cohort #1 matches')
             expect(branchEdge1?.data?.label).toBe('If cohort #2 matches')
+        })
+    })
+
+    describe('legacy graph layout under the tile canvas', () => {
+        const delay: HogFlowAction = {
+            id: 'delay',
+            name: 'Delay',
+            description: '',
+            type: 'delay',
+            created_at: 0,
+            updated_at: 0,
+            config: { delay_duration: '1d' },
+        }
+
+        it.each([
+            {
+                name: 'skips the layout while the tile canvas shows',
+                flags: [FEATURE_FLAGS.WORKFLOWS_TILE_CANVAS],
+                laysOut: false,
+            },
+            { name: 'lays out the graph editor', flags: [], laysOut: true },
+        ])('$name, and keeps the steps the canvas reads', async ({ flags, laysOut }) => {
+            featureFlagLogic.actions.setFeatureFlags(flags, Object.fromEntries(flags.map((flag) => [flag, true])))
+            const editorLogic = hogFlowEditorLogic()
+            editorLogic.mount()
+            editorLogic.actions.setEditorLayout('advanced')
+            await expectLogic(editorLogic).toFinishAllListeners()
+            const layout = jest.spyOn(autolayout, 'getFormattedNodes')
+
+            await expectLogic(editorLogic, () =>
+                workflowLogic().actions.setWorkflowInfo({
+                    actions: [NEW_WORKFLOW.actions[0], delay, NEW_WORKFLOW.actions[1]],
+                    edges: [edge(TRIGGER_NODE_ID, delay.id, 'continue'), edge(delay.id, EXIT_NODE_ID, 'continue')],
+                })
+            ).toFinishAllListeners()
+
+            expect(layout.mock.calls.length > 0).toBe(laysOut)
+            expect(editorLogic.values.nodes.map((node) => node.id)).toEqual([TRIGGER_NODE_ID, delay.id, EXIT_NODE_ID])
+            layout.mockRestore()
         })
     })
 

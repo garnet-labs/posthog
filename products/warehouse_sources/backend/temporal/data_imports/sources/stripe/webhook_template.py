@@ -1,4 +1,4 @@
-from posthog.cdp.templates.hog_function_template import HogFunctionTemplateDC
+from products.cdp.backend.templates.hog_function_template import HogFunctionTemplateDC
 
 template: HogFunctionTemplateDC = HogFunctionTemplateDC(
     status="alpha",
@@ -24,9 +24,10 @@ if (not inputs.bypass_signature_check) {
   if (empty(inputs.signing_secret)) {
     return {
       'httpResponse': {
-        'status': 400,
-        'body': 'Signing secret not configured',
-      }
+        'status': 200,
+        'body': 'Signing secret not configured, delivery dropped',
+      },
+      'appMetric': 'missing_credential'
     }
   }
 
@@ -97,7 +98,11 @@ if (empty(objectType)) {
 
 let schemaId := inputs.schema_mapping?.[objectType]
 
-if (empty(schemaId)) {
+// History tables receive the same events as the object type's primary table, under a
+// ':history'-suffixed mapping key (see PAYMENT_METHOD_HISTORY_MAPPING_KEY in constants.py).
+let historySchemaId := inputs.schema_mapping?.[concat(objectType, ':history')]
+
+if (empty(schemaId) and empty(historySchemaId)) {
   return {
     'httpResponse': {
       'status': 200,
@@ -106,7 +111,13 @@ if (empty(schemaId)) {
   }
 }
 
-produceToWarehouseWebhooks(request.body, schemaId)""",
+if (not empty(schemaId)) {
+  produceToWarehouseWebhooks(request.body, schemaId)
+}
+
+if (not empty(historySchemaId)) {
+  produceToWarehouseWebhooks(request.body, historySchemaId)
+}""",
     inputs_schema=[
         {
             "type": "string",

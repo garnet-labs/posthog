@@ -6,7 +6,8 @@ from posthog.test.base import APIBaseTest
 from unittest.mock import patch
 
 from django.conf import settings
-from django.test import override_settings
+from django.core.cache import cache
+from django.test import SimpleTestCase, override_settings
 
 import requests
 from parameterized import parameterized
@@ -106,7 +107,11 @@ class TestToolbarOAuthPrimitives(APIBaseTest):
         assert first.client_id == second.client_id
 
 
-class TestToolbarOAuthStateCache(APIBaseTest):
+class TestToolbarOAuthStateCache(SimpleTestCase):
+    def setUp(self):
+        super().setUp()
+        cache.clear()
+
     def test_mark_pending_then_claim_succeeds(self):
         nonce = "test-nonce-claim-ok"
         toolbar_oauth_state_cache.mark_pending(nonce)
@@ -281,7 +286,7 @@ class TestToolbarOAuthRefresh(APIBaseTest):
         assert response.status_code == 429
 
 
-class TestTokenEndpointStatusRemapping(APIBaseTest):
+class TestTokenEndpointStatusRemapping(SimpleTestCase):
     @parameterized.expand(
         [
             ("401_becomes_400", 401, 400),
@@ -612,14 +617,36 @@ class TestNormalizeAndValidateAppUrl(APIBaseTest):
 
     @parameterized.expand(
         [
+            ("unterminated_ipv6_literal", "https://[::1"),
+            ("nfkc_unstable_host", "https://exa℀mple.com/"),
+        ]
+    )
+    def test_rejects_unparseable_app_url(self, _name, app_url):
+        with self.assertRaises(ToolbarOAuthError) as cm:
+            normalize_and_validate_app_url(self.team, app_url)
+        assert cm.exception.code == "invalid_app_url"
+        assert cm.exception.status_code == 400
+
+    @parameterized.expand(
+        [
             # urlparse sees hostname='example.com' (the allowed domain), but a browser
             # following the redirect treats `\` as a path separator and routes to
             # attacker.example, leaking the toolbar OAuth code.
             ("raw_backslash", "https://attacker.example\\@example.com/page"),
             ("percent_encoded_backslash", "https://attacker.example%5C@example.com/page"),
+            # Percent-encoded authority terminators: decoded, the authority ends before
+            # the `@`, so the browser lands on attacker.example with the OAuth code.
+            ("percent_encoded_slash", "https://example.com%2F@attacker.example/page"),
+            ("percent_encoded_question_mark", "https://example.com%3F@attacker.example/page"),
+            ("percent_encoded_hash", "https://example.com%23@attacker.example/page"),
         ]
     )
-    def test_rejects_backslash_authority_bypass(self, _name, app_url):
+    def test_rejects_ambiguous_authority(self, _name, app_url):
         with self.assertRaises(ToolbarOAuthError) as cm:
             normalize_and_validate_app_url(self.team, app_url)
         assert cm.exception.code == "forbidden_app_url"
+
+    def test_strips_userinfo_from_returned_app_url(self):
+        assert (
+            normalize_and_validate_app_url(self.team, "https://someone@example.com/page") == "https://example.com/page"
+        )

@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -6,12 +7,13 @@ use serde_json::json;
 use tokio::sync::mpsc;
 use tonic::{Status, Streaming};
 use tracing::{debug, warn};
+use uuid::Uuid;
 
 use crate::error::UnhandledError;
 use crate::langs::native::DebugImage;
 use crate::stages::resolution::exception::ExceptionResolver;
 use crate::stages::resolution::frame::FrameResolver;
-use crate::stages::resolution::ResolutionStage;
+use crate::stages::resolution::LocalResolutionContext;
 use crate::types::Exception;
 use cymbal_proto::cymbal::resolution::v1::{
     resolve_outcome, Accepted, Done, Error as ItemError, ResolveItem, ResolveOutcome,
@@ -20,23 +22,19 @@ use cymbal_proto::cymbal::resolution::v1::{
 use super::codes;
 use crate::modes::resolution::load_monitor::LoadMonitor;
 
-const RESOLVE_REQUEST_DURATION_MS: &str = "cymbal_remote_resolution_server_request_duration_ms";
 const SERVER_ERROR_KINDS: &str = "cymbal_remote_resolution_server_error_kinds_total";
 const SERVER_ITEM_DURATION_MS: &str = "cymbal_remote_resolution_server_item_duration_ms";
 const SERVER_ITEMS_TOTAL: &str = "cymbal_remote_resolution_server_items_total";
 
 pub(super) async fn run_resolve(
     mut input: Streaming<ResolveItem>,
-    stage: ResolutionStage,
+    stage: LocalResolutionContext,
     tx: mpsc::Sender<Result<ResolveOutcome, Status>>,
     load_monitor: LoadMonitor,
 ) {
-    let started_at = Instant::now();
-
     loop {
         let item = tokio::select! {
             _ = tx.closed() => {
-                record_resolve_duration(started_at, "cancelled");
                 return;
             }
             maybe_item = input.message() => {
@@ -45,7 +43,6 @@ pub(super) async fn run_resolve(
                     Ok(None) => break,
                     Err(err) => {
                         warn!(error = %err, "resolve input stream failed");
-                        record_resolve_duration(started_at, "input_error");
                         return;
                     }
                 }
@@ -57,7 +54,6 @@ pub(super) async fn run_resolve(
         if item.deadline_ms == 0 {
             record_item_metrics(item_started_at, "error", "timeout");
             if !send_overloaded(&tx, item.id, "item deadline expired", 0).await {
-                record_resolve_duration(started_at, "cancelled");
                 return;
             }
             continue;
@@ -66,7 +62,6 @@ pub(super) async fn run_resolve(
         if !load_monitor.try_admit() {
             record_item_metrics(item_started_at, "error", "overloaded");
             if !send_overloaded(&tx, item.id, "server overloaded", 0).await {
-                record_resolve_duration(started_at, "cancelled");
                 return;
             }
             continue;
@@ -76,7 +71,6 @@ pub(super) async fn run_resolve(
         let item_stage = stage.clone();
         if !send_accepted(&tx, item.id).await {
             load_monitor.decrement_in_flight();
-            record_resolve_duration(started_at, "cancelled");
             return;
         }
         let in_flight_guard = InFlightGuard::new(load_monitor.clone());
@@ -90,8 +84,6 @@ pub(super) async fn run_resolve(
                 .await;
         });
     }
-
-    record_resolve_duration(started_at, "completed");
 }
 
 async fn send_accepted(tx: &mpsc::Sender<Result<ResolveOutcome, Status>>, id: u64) -> bool {
@@ -139,7 +131,7 @@ impl Drop for InFlightGuard {
 }
 
 async fn process_item(
-    stage: ResolutionStage,
+    stage: LocalResolutionContext,
     item: ResolveItem,
     in_flight_guard: InFlightGuard,
 ) -> ProcessedItem {
@@ -152,7 +144,11 @@ async fn process_item(
         match tokio::time::timeout(deadline, resolve_item(&stage, &item)).await {
             Ok(Ok(resolved)) => (
                 resolve_outcome::Result::Done(Done {
-                    resolved_exception_json: resolved,
+                    resolved_exception_json: resolved.exception_json,
+                    release_id: resolved
+                        .release_id
+                        .map(|id| id.to_string())
+                        .unwrap_or_default(),
                 }),
                 "done",
                 "ok",
@@ -212,11 +208,6 @@ fn error_result(kind: codes::ErrorKind, message: String) -> resolve_outcome::Res
     })
 }
 
-fn record_resolve_duration(started_at: Instant, outcome: &'static str) {
-    metrics::histogram!(RESOLVE_REQUEST_DURATION_MS, "outcome" => outcome)
-        .record(started_at.elapsed().as_secs_f64() * 1000.0);
-}
-
 fn record_item_metrics(started_at: Instant, outcome: &'static str, kind: &'static str) {
     metrics::counter!(SERVER_ITEMS_TOTAL, "outcome" => outcome, "kind" => kind).increment(1);
     metrics::histogram!(SERVER_ITEM_DURATION_MS, "outcome" => outcome, "kind" => kind)
@@ -230,23 +221,60 @@ enum ItemFailure {
     Unhandled(String),
 }
 
-async fn resolve_item(stage: &ResolutionStage, item: &ResolveItem) -> Result<Vec<u8>, ItemFailure> {
+struct ResolvedItem {
+    exception_json: Vec<u8>,
+    release_id: Option<Uuid>,
+}
+
+async fn resolve_item(
+    stage: &LocalResolutionContext,
+    item: &ResolveItem,
+) -> Result<ResolvedItem, ItemFailure> {
     let exception: Exception = serde_json::from_slice(&item.exception_json)
         .map_err(|e| ItemFailure::InvalidPayload(format!("invalid exception_json: {e}")))?;
 
     let debug_images = debug_images_from_metadata(&item.metadata)?;
 
-    let resolved = resolve_one_exception(stage.clone(), item.team_id, exception, debug_images)
-        .await
-        .map_err(|e| match e {
-            ResolveOneError::Overloaded => {
-                ItemFailure::Overloaded("symbol-resolution limiter unavailable".to_string())
-            }
-            ResolveOneError::Unhandled(err) => ItemFailure::Unhandled(err),
-        })?;
+    // The refs come off the raw frames, so the release lookup is independent of symbolication and
+    // runs alongside it rather than after.
+    let symbol_set_refs = symbol_set_refs(&exception, &debug_images);
+    let release_fut = async {
+        stage
+            .symbol_resolver
+            .latest_release_id(item.team_id, &symbol_set_refs)
+            .await
+            .map_err(|err| ItemFailure::Unhandled(err.to_string()))
+    };
+    let resolve_fut = async {
+        resolve_one_exception(stage.clone(), item.team_id, exception, debug_images)
+            .await
+            .map_err(|e| match e {
+                ResolveOneError::Overloaded => {
+                    ItemFailure::Overloaded("symbol-resolution limiter unavailable".to_string())
+                }
+                ResolveOneError::Unhandled(err) => ItemFailure::Unhandled(err),
+            })
+    };
+    let (resolved, release_id) = tokio::try_join!(resolve_fut, release_fut)?;
 
-    serde_json::to_vec(&resolved)
-        .map_err(|e| ItemFailure::Unhandled(format!("serialize resolved exception: {e}")))
+    Ok(ResolvedItem {
+        exception_json: serde_json::to_vec(&resolved)
+            .map_err(|e| ItemFailure::Unhandled(format!("serialize resolved exception: {e}")))?,
+        release_id,
+    })
+}
+
+/// Distinct symbol sets this exception's frames resolve against, in first-seen order. A frame
+/// without a ref (an interpreted language, or a native frame no debug image covers) contributes
+/// nothing, so an exception with no refs at all skips the release lookup entirely.
+fn symbol_set_refs(exception: &Exception, debug_images: &[DebugImage]) -> Vec<String> {
+    let mut seen = HashSet::new();
+    exception
+        .get_raw_frame()
+        .iter()
+        .filter_map(|frame| frame.symbol_set_ref(debug_images))
+        .filter(|set_ref| seen.insert(set_ref.clone()))
+        .collect()
 }
 
 fn debug_images_from_metadata(metadata: &[u8]) -> Result<Vec<DebugImage>, ItemFailure> {
@@ -270,7 +298,7 @@ enum ResolveOneError {
 }
 
 async fn resolve_one_exception(
-    stage: ResolutionStage,
+    stage: LocalResolutionContext,
     team_id: i32,
     exception: Exception,
     debug_images: Vec<DebugImage>,
@@ -299,7 +327,7 @@ async fn resolve_one_exception(
 }
 
 async fn acquire_permit(
-    stage: &ResolutionStage,
+    stage: &LocalResolutionContext,
 ) -> Result<tokio::sync::OwnedSemaphorePermit, ResolveOneError> {
     stage
         .acquire_symbol_resolution_permit()

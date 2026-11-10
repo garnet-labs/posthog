@@ -1,10 +1,18 @@
 from collections.abc import Iterable
 from typing import Any
 
+import structlog
+
 from products.cohorts.backend.models.cohort import Cohort
 from products.cohorts.backend.models.leaf_shape import walk_filter_leaves
+from products.cohorts.backend.parity.eligibility import is_action_key, leaf_drop_reason
 
 _INTERVAL_DAYS = {"day": 1, "week": 7, "month": 30, "year": 365}
+logger = structlog.get_logger(__name__)
+
+
+class PersonPinningCapExceeded(ValueError):
+    pass
 
 
 def derive_window_days(time_value: object, time_interval: object) -> int:
@@ -19,6 +27,17 @@ def derive_window_days(time_value: object, time_interval: object) -> int:
     return normalized_time_value * _INTERVAL_DAYS.get(time_interval, 0)
 
 
+def leaf_unpinnable_reason(leaf: dict[str, Any]) -> str | None:
+    """The catalog's drop label for a leaf the seeder could never resolve, or ``None``.
+
+    Every leaf type, not only behavioral: a cohort that loses any leaf classifies
+    ``Excluded(HasDroppedLeaf)``, so one refused `person_metadata` leaf takes the whole cohort out
+    of composition. Delegates to the processor mirror, which already carries the 16-byte hash and
+    HogVM header rules a second copy here would have to restate.
+    """
+    return leaf_drop_reason(leaf)
+
+
 def pin_conditions_for_cohorts(cohorts: Iterable[Cohort]) -> tuple[dict[str, Any], list[str]]:
     conditions: list[dict[str, Any]] = []
     event_names: set[str] = set()
@@ -30,7 +49,9 @@ def pin_conditions_for_cohorts(cohorts: Iterable[Cohort]) -> tuple[dict[str, Any
                 continue
 
             event_key = leaf.get("key")
-            is_action = leaf.get("event_type") == "actions" or isinstance(event_key, int)
+            # The seeder drops an action-keyed condition, so reading `event_type` here as well would
+            # drop a leaf the gate admits.
+            is_action = is_action_key(event_key)
             event_name = event_key if isinstance(event_key, str) and not is_action else None
             if event_name is not None:
                 event_names.add(event_name)
@@ -54,3 +75,31 @@ def pin_conditions_for_cohorts(cohorts: Iterable[Cohort]) -> tuple[dict[str, Any
 
     conditions.sort(key=lambda item: (item["cohort_id"], item["condition_hash"], item["event_name"] or ""))
     return {"schema_version": 1, "conditions": conditions}, sorted(event_names)
+
+
+def pin_person_conditions_for_cohorts(cohorts: Iterable[Cohort], *, max_conditions: int) -> dict[str, Any]:
+    conditions: list[dict[str, Any]] = []
+
+    for cohort in sorted(cohorts, key=lambda item: item.id):
+        dropped = 0
+        properties = (cohort.filters or {}).get("properties")
+        for leaf in walk_filter_leaves(properties):
+            if leaf.get("type") != "person":
+                continue
+            condition_hash = leaf.get("conditionHash")
+            if condition_hash is None:
+                dropped += 1
+                continue
+            conditions.append({"cohort_id": cohort.id, "condition_hash": condition_hash})
+            if len(conditions) > max_conditions:
+                raise PersonPinningCapExceeded(f"Person backfill has more than {max_conditions} pinned conditions")
+
+        if dropped:
+            logger.warning(
+                "cohort_person_backfill_hashless_leaves_dropped",
+                cohort_id=cohort.id,
+                dropped=dropped,
+            )
+
+    conditions.sort(key=lambda item: (item["cohort_id"], item["condition_hash"]))
+    return {"schema_version": 1, "conditions": conditions}

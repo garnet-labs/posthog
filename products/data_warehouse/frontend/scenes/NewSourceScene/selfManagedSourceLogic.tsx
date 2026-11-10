@@ -7,11 +7,12 @@ import { router } from 'kea-router'
 import { lemonToast } from '@posthog/lemon-ui'
 
 import api from 'lib/api'
+import { readableErrorMessage } from 'lib/api-error'
 import { databaseTableListLogic } from 'scenes/data-management/database/databaseTableListLogic'
 import { urls } from 'scenes/urls'
 
 import { DataTableNode } from '~/queries/schema/schema-general'
-import { AnyPropertyFilter, DataWarehouseTable } from '~/types'
+import { AnyPropertyFilter, DataWarehouseCredential, DataWarehouseTable } from '~/types'
 
 import { sourceSceneLogic } from '../SourceScene/SourceScene'
 
@@ -25,7 +26,8 @@ const NEW_WAREHOUSE_TABLE: DataWarehouseTable = {
     name: '',
     url_pattern: '',
     format: 'Parquet',
-    options: { csv_allow_double_quotes: false },
+    // RFC 4180 is what almost every CSV export produces, and save-time validation redirects the rest.
+    options: { csv_allow_double_quotes: true },
     credential: {
         access_key: '',
         access_secret: '',
@@ -63,6 +65,15 @@ export function selfManagedTableFormErrors({
         }
     }
 
+    // The backend only accepts https bucket URLs and rejects anything else (a bare path, http://,
+    // s3a://, gs://) with a generic error, so catch those here with the same guidance as s3://.
+    if (url_pattern && !url_pattern.startsWith('https://')) {
+        return {
+            url_pattern:
+                'Please use the https URL for your bucket, e.g. https://your-org.s3.amazonaws.com/airbyte/stripe/invoices/*.pqt',
+        }
+    }
+
     return {
         name: !name && 'Please enter a name.',
         url_pattern: !url_pattern && 'Please enter a url pattern.',
@@ -71,6 +82,27 @@ export function selfManagedTableFormErrors({
             access_key: !credential?.access_key && 'Please enter an access key.',
         },
         format: !format && 'Please enter the format of your files.',
+    }
+}
+
+export type SelfManagedTableUpdate = Pick<DataWarehouseTable, 'name' | 'url_pattern' | 'format' | 'options'> & {
+    credential?: Partial<DataWarehouseCredential>
+}
+
+export function selfManagedTableUpdatePayload(table: DataWarehouseTable): SelfManagedTableUpdate {
+    return {
+        name: table.name,
+        url_pattern: table.url_pattern,
+        format: table.format,
+        options: table.options,
+        ...(table.credential?.access_key || table.credential?.access_secret
+            ? {
+                  credential: {
+                      ...(table.credential?.access_key ? { access_key: table.credential.access_key } : {}),
+                      ...(table.credential?.access_secret ? { access_secret: table.credential.access_secret } : {}),
+                  },
+              }
+            : {}),
     }
 }
 
@@ -99,10 +131,12 @@ export interface selfManagedSourceLogicActions {
         args_0?:
             | {
                   force?: boolean
+                  shallow?: boolean
               }
             | undefined
     ) => {
         force?: boolean
+        shallow?: boolean
     } // databaseTableListLogic
     addConditionSet: () => {
         value: true
@@ -255,6 +289,17 @@ export const selfManagedSourceLogic = kea<selfManagedSourceLogicType>([
         },
     })),
     listeners(({ actions, props }) => ({
+        // initKea leaves a validation 400 from these loaders to this logic, so toast the server message here.
+        createTableFailure: ({ errorObject }) => {
+            if (errorObject?.status === 400) {
+                lemonToast.error(readableErrorMessage(errorObject) ?? 'Could not create the table.')
+            }
+        },
+        updateTableFailure: ({ errorObject }) => {
+            if (errorObject?.status === 400) {
+                lemonToast.error(readableErrorMessage(errorObject) ?? 'Could not update the table.')
+            }
+        },
         createTableSuccess: async ({ table }) => {
             lemonToast.success(<>Table {table.name} created</>)
             actions.loadDatabase()
@@ -291,14 +336,10 @@ export const selfManagedSourceLogic = kea<selfManagedSourceLogicType>([
             defaults: { ...NEW_WAREHOUSE_TABLE } as DataWarehouseTable,
             errors: selfManagedTableFormErrors,
             submit: async (tablePayload) => {
-                try {
-                    if (props.id && props.id !== 'new') {
-                        actions.updateTable(tablePayload)
-                    } else {
-                        actions.createTable(tablePayload)
-                    }
-                } catch (e: any) {
-                    lemonToast.error(e.data?.message ?? e.message)
+                if (props.id && props.id !== 'new') {
+                    actions.updateTable(tablePayload)
+                } else {
+                    actions.createTable(tablePayload)
                 }
             },
         },

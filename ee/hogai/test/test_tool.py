@@ -1,14 +1,17 @@
+import pytest
 from posthog.test.base import BaseTest
 from unittest.mock import patch
+
+from django.test import SimpleTestCase
 
 from langgraph.errors import GraphInterrupt
 from pydantic import BaseModel
 
-from posthog.rbac.user_access_control import UserAccessControl
+from products.access_control.backend.facade.user_access_control import UserAccessControl
 
 from ee.hogai.core.context import set_node_path
 from ee.hogai.registry import CONTEXTUAL_TOOL_NAME_TO_TOOL, _import_max_tools
-from ee.hogai.tool import ClientToolCallRequest, MaxTool
+from ee.hogai.tool import ApprovalResumePayload, ClientToolCallRequest, MaxTool
 from ee.hogai.tool_errors import (
     MaxToolAccessDeniedError,
     MaxToolError,
@@ -194,7 +197,7 @@ class TestMaxToolClientExecution(BaseTest):
                 tool.request_client_execution()
 
 
-class TestMaxToolErrorHierarchy(BaseTest):
+class TestMaxToolErrorHierarchy(SimpleTestCase):
     """Test the MaxToolError exception hierarchy and retry strategies."""
 
     def test_max_tool_error_base_has_never_retry_strategy(self):
@@ -321,7 +324,7 @@ class TestMaxToolErrorHierarchy(BaseTest):
         self.assertEqual(summary, "MaxToolFatalError: Error with whitespace")
 
 
-class TestMaxToolAccessDeniedError(BaseTest):
+class TestMaxToolAccessDeniedError(SimpleTestCase):
     """Test the MaxToolAccessDeniedError exception."""
 
     def test_access_denied_error_formats_correctly(self):
@@ -464,7 +467,6 @@ class TestToolAccessControlDeclarations(BaseTest):
         "execute_sql",
         "generate_hogql_query",
         "fix_hogql_query",
-        "analyze_user_interviews",
         "call_mcp_server",  # Scoped to user's own MCP installations (team + user filtered) but no protected resources modified
         "diagnose_proxy",  # Explicit OrganizationMembership.Level >= ADMIN check inside _arun_impl; resource-level RBAC doesn't recognize membership level so we can't use get_required_resource_access here
     }
@@ -490,3 +492,57 @@ class TestToolAccessControlDeclarations(BaseTest):
                 f"Tools without access control declaration: {missing_access_control}. "
                 f"Either add get_required_resource_access() or add to TOOLS_WITHOUT_ACCESS_CONTROL with a reason."
             )
+
+
+class _ApprovalArgs(BaseModel):
+    count: int
+
+
+class TestDangerousOperationBindsApprovedArguments(BaseTest):
+    """An approving user may edit the arguments; the tool must run what they approved, not what was asked."""
+
+    class _SpendingTool(MaxTool):
+        name: str = "create_feature_flag"
+        description: str = "test"
+        thinking_message: str = "test"
+        args_schema: type[BaseModel] = _ApprovalArgs
+
+        def get_required_resource_access(self):
+            # Every registered tool must declare this, and subclassing registers under the shared name.
+            return [("feature_flag", "editor")]
+
+        async def is_dangerous_operation(self, **kwargs) -> bool:
+            return True
+
+        async def _arun_impl(self, count: int) -> tuple[str, dict]:
+            return f"ran with {count}", {"count": count}
+
+    @pytest.mark.asyncio
+    async def test_edited_arguments_reach_the_implementation(self):
+        # The approval payload used to be merged into a local copy of kwargs, so an edit at the prompt
+        # was discarded and the original operation ran. On a tool that spends money, that charges for
+        # something the user did not approve.
+        tool = self._SpendingTool(team=self.team, user=self.user)
+        approved = ApprovalResumePayload(action="approve", payload={"count": 5}, proposal_id="p1")
+
+        with patch("ee.hogai.tool.interrupt", return_value=approved.model_dump()):
+            content, artifact = await tool._arun_with_context(count=200)
+
+        assert artifact["count"] == 5
+        assert "5" in content
+
+    def test_parallel_resumption_keeps_approval_identity(self) -> None:
+        proposals = []
+        for call_id in ("first", "second", "first"):
+            tool = self._SpendingTool(
+                team=self.team,
+                user=self.user,
+                node_path=(NodePath(name="root", tool_call_id=call_id),),
+                config={"configurable": {"thread_id": "approval-test"}},
+            )
+            with patch("ee.hogai.tool.interrupt", side_effect=GraphInterrupt()) as mocked_interrupt:
+                with self.assertRaises(GraphInterrupt):
+                    tool._handle_dangerous_operation({"count": 5}, preview="Change count")
+                proposals.append(mocked_interrupt.call_args.args[0].proposal_id)
+        self.assertEqual(proposals[0], proposals[2])
+        self.assertNotEqual(proposals[0], proposals[1])

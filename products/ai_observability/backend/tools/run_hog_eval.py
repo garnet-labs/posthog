@@ -13,38 +13,93 @@ from posthog.sync import database_sync_to_async
 from products.ai_observability.backend.hog import compile_ai_observability_hog
 from products.ai_observability.backend.models.evaluation_configs import (
     EVALUATION_TEST_LOOKBACK_DAYS,
+    SESSION_EVAL_DEFAULT_QUIET_PERIOD_SECONDS,
+    SESSION_EVAL_MAX_QUIET_PERIOD_SECONDS,
+    SESSION_EVAL_MIN_QUIET_PERIOD_SECONDS,
+    SESSION_TEST_HOG_MAX_SAMPLES,
     TRACE_EVAL_DEFAULT_WINDOW_SECONDS,
     TRACE_EVAL_MAX_WINDOW_SECONDS,
     TRACE_EVAL_MIN_WINDOW_SECONDS,
+    validate_evaluation_configs,
 )
 
 from ee.hogai.tool import MaxTool
 
 TOOL_DESCRIPTION = f"""Test Hog evaluation code against sample data from the last {EVALUATION_TEST_LOOKBACK_DAYS} days.
 
-Returns compilation errors if the code is invalid, or pass/fail/error results for each sample.
+Returns compilation errors if the code is invalid, or raw boolean/numeric/categorical/N/A/error results for each sample.
 
 Set `target` to match how the evaluation will run: `generation` samples individual generations,
-`trace` samples whole traces and exposes trace-level globals. For traces, set `window_seconds`
-to the evaluation's aggregation window so the preview matches online behavior.
+`trace` samples whole traces, and `session` samples whole sessions that have gone quiet. For
+traces, set `window_seconds` to the evaluation's aggregation window; for sessions, set
+`quiet_period_seconds` to its quiet period, so the preview matches online behavior.
 
 Write new evaluations using these globals:
 - `evaluation_events` (array): the events under evaluation — one generation for a generation
-  target, all events of the trace for a trace target. Each item has `uuid`, `event`, `timestamp`,
-  serialized `input` and `output`, readable `input_text` and `output_text`, and `properties`
-  without large input, output, and tool payloads.
-- `target` (object): the sampled unit's `type` ('generation' or 'trace'), `id`, `total_cost_usd`,
-  and `total_latency_seconds`.
+  target, all events of the trace for a trace target, all events of every trace in the session
+  for a session target. Each item has `uuid`, `event`, `timestamp`, serialized `input` and
+  `output`, readable `input_text` and `output_text`, and `properties` without large input,
+  output, and tool payloads.
+- `target` (object): the sampled unit's `type` ('generation', 'trace', or 'session'), `id`,
+  `total_cost_usd`, and `total_latency_seconds`.
 
 Saved evaluations can still use the generation-only compatibility globals `input`, `output`,
-`properties`, and `event`, but do not use them in new source that should also work for traces.
+`properties`, and `event`, but do not use them in new source that should also work for traces
+or sessions.
 
-The code must return a boolean: `true` for pass, `false` for fail.
+The code must return `true` or `false` for boolean output, a finite number for numeric output, or a list of configured category keys for categorical output. Empty lists are valid for multiple selection; null means N/A when allowed.
+Set `output_type` and `output_config` to match the saved evaluation, including bounds and N/A settings. Numeric output disallows N/A by default;
+set output_config.allows_na=true to allow null. Boolean previews allow N/A by default.
 Use `print()` statements to output reasoning.
 """
 
 
+def _format_sample(
+    label: str,
+    unit_id: str,
+    verdict: bool | None,
+    error: str | None,
+    input_preview: str,
+    output_preview: str,
+    reasoning: str,
+    score: float | None = None,
+    categories: list[str] | None = None,
+) -> list[str]:
+    if error:
+        verdict_str = "ERROR"
+    elif categories is not None:
+        verdict_str = str(categories)
+    elif score is not None:
+        verdict_str = str(score)
+    elif verdict is True:
+        verdict_str = "true"
+    elif verdict is False:
+        verdict_str = "false"
+    else:
+        verdict_str = "N/A"
+
+    lines = [
+        f"{label} {unit_id}:",
+        f"  Input:  {input_preview}",
+        f"  Output: {output_preview}",
+        f"  Result: {verdict_str}",
+    ]
+    if reasoning:
+        lines.append(f"  Reasoning: {reasoning}")
+    if error:
+        lines.append(f"  Error: {error}")
+    lines.append("")
+    return lines
+
+
 class RunHogEvalTestArgs(BaseModel):
+    output_type: Literal["boolean", "numeric", "categorical"] = Field(
+        default="boolean", description="The evaluation result type"
+    )
+    output_config: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Output settings: allows_na, and for numeric evaluations optional min, max, step and passing_rule; categorical settings include options, selection_mode and passing categories",
+    )
     source: str = Field(description="Hog evaluation source code to compile and test")
     sample_count: int = Field(
         default=3,
@@ -52,15 +107,24 @@ class RunHogEvalTestArgs(BaseModel):
         le=5,
         description="Number of recent samples to test against (1-5)",
     )
-    target: Literal["generation", "trace"] = Field(
+    target: Literal["generation", "trace", "session"] = Field(
         default="generation",
-        description="What to sample: 'generation' (individual generations) or 'trace' (whole traces)",
+        description=(
+            "What to sample: 'generation' (individual generations), 'trace' (whole traces), "
+            "or 'session' (whole sessions that have gone quiet)."
+        ),
     )
     window_seconds: int = Field(
         default=TRACE_EVAL_DEFAULT_WINDOW_SECONDS,
         ge=TRACE_EVAL_MIN_WINDOW_SECONDS,
         le=TRACE_EVAL_MAX_WINDOW_SECONDS,
         description="Aggregation window for trace samples, in seconds",
+    )
+    quiet_period_seconds: int = Field(
+        default=SESSION_EVAL_DEFAULT_QUIET_PERIOD_SECONDS,
+        ge=SESSION_EVAL_MIN_QUIET_PERIOD_SECONDS,
+        le=SESSION_EVAL_MAX_QUIET_PERIOD_SECONDS,
+        description="For session samples: how long a session must have been inactive to be previewed, in seconds",
     )
 
 
@@ -76,11 +140,21 @@ class RunHogEvalTestTool(MaxTool):
         self,
         source: str,
         sample_count: int = 3,
-        target: Literal["generation", "trace"] = "generation",
+        target: Literal["generation", "trace", "session"] = "generation",
         window_seconds: int = TRACE_EVAL_DEFAULT_WINDOW_SECONDS,
+        quiet_period_seconds: int = SESSION_EVAL_DEFAULT_QUIET_PERIOD_SECONDS,
+        output_type: Literal["boolean", "numeric", "categorical"] = "boolean",
+        output_config: dict[str, Any] | None = None,
     ) -> tuple[str, Any]:
         from posthog.temporal.ai_observability.message_utils import extract_text_from_messages
         from posthog.temporal.ai_observability.run_evaluation import run_hog_eval
+
+        try:
+            _, output_config = validate_evaluation_configs(
+                "hog", output_type, {"source": source}, {"allows_na": output_type == "boolean", **(output_config or {})}
+            )
+        except ValueError as error:
+            return (f"Invalid output configuration: {error}", None)
 
         try:
             bytecode = compile_ai_observability_hog(source, "destination")
@@ -90,7 +164,12 @@ class RunHogEvalTestTool(MaxTool):
         team = self._team
 
         if target == "trace":
-            return await self._run_over_traces(bytecode, sample_count, window_seconds)
+            return await self._run_over_traces(bytecode, sample_count, window_seconds, output_type, output_config)
+
+        if target == "session":
+            return await self._run_over_sessions(
+                bytecode, sample_count, quiet_period_seconds, output_type, output_config
+            )
 
         # Read from ai_events with native heavy columns so the Hog body still
         # sees `event.properties.$ai_input` etc. Falls back to the events table
@@ -134,6 +213,7 @@ class RunHogEvalTestTool(MaxTool):
             query=query,
             placeholders={},
             team=team,
+            user=self._user,
             query_type="RunHogEvalTest",
             fall_back_to_events=True,
         )
@@ -189,7 +269,13 @@ class RunHogEvalTestTool(MaxTool):
             properties = event_data["properties"]
             event_type = event_data["event"]
 
-            result = run_hog_eval(bytecode, event_data, allows_na=True)
+            result = run_hog_eval(
+                bytecode,
+                event_data,
+                allows_na=output_config["allows_na"],
+                output_type=output_type,
+                output_config=output_config,
+            )
 
             if event_type == "$ai_generation":
                 input_raw = properties.get("$ai_input") or properties.get("$ai_input_state", "")
@@ -205,37 +291,41 @@ class RunHogEvalTestTool(MaxTool):
             input_preview = extract_text_from_messages(input_raw)[:200]
             output_preview = extract_text_from_messages(output_raw)[:200]
 
-            verdict = result["verdict"]
-            if result["error"]:
-                verdict_str = "ERROR"
-            elif verdict is True:
-                verdict_str = "PASS"
-            elif verdict is False:
-                verdict_str = "FAIL"
-            else:
-                verdict_str = "N/A"
-
-            lines.append(f"Event {event_data['uuid']} ({event_type}):")
-            lines.append(f"  Input:  {input_preview}")
-            lines.append(f"  Output: {output_preview}")
-            lines.append(f"  Result: {verdict_str}")
-            if result["reasoning"]:
-                lines.append(f"  Reasoning: {result['reasoning']}")
-            if result["error"]:
-                lines.append(f"  Error: {result['error']}")
-            lines.append("")
+            lines.extend(
+                _format_sample(
+                    "Event",
+                    f"{event_data['uuid']} ({event_type})",
+                    result.get("verdict"),
+                    result["error"],
+                    input_preview,
+                    output_preview,
+                    result["reasoning"],
+                    score=result.get("score"),
+                    categories=result.get("categories"),
+                )
+            )
 
         return ("\n".join(lines), None)
 
-    async def _run_over_traces(self, bytecode: list[Any], sample_count: int, window_seconds: int) -> tuple[str, Any]:
+    async def _run_over_traces(
+        self,
+        bytecode: list[Any],
+        sample_count: int,
+        window_seconds: int,
+        output_type: str,
+        output_config: dict[str, Any],
+    ) -> tuple[str, Any]:
         from posthog.temporal.ai_observability.run_trace_evaluation import run_hog_eval_over_recent_traces
 
         trace_results = await database_sync_to_async(run_hog_eval_over_recent_traces)(
             team=self._team,
+            user=self._user,
             bytecode=bytecode,
             condition_filter=None,
             sample_count=sample_count,
-            allows_na=True,
+            allows_na=output_config["allows_na"],
+            output_type=output_type,
+            output_config=output_config,
             window_seconds=window_seconds,
         )
         if not trace_results:
@@ -247,23 +337,67 @@ class RunHogEvalTestTool(MaxTool):
 
         lines: list[str] = [f"Sampled {len(trace_results)} trace(s). Ran against trace-level globals.", ""]
         for r in trace_results:
-            if r.error:
-                verdict_str = "ERROR"
-            elif r.verdict is True:
-                verdict_str = "PASS"
-            elif r.verdict is False:
-                verdict_str = "FAIL"
-            else:
-                verdict_str = "N/A"
+            lines.extend(
+                _format_sample(
+                    "Trace",
+                    r.trace_id,
+                    r.verdict,
+                    r.error,
+                    r.input_preview,
+                    r.output_preview,
+                    r.reasoning,
+                    score=r.score,
+                    categories=r.categories,
+                )
+            )
 
-            lines.append(f"Trace {r.trace_id}:")
-            lines.append(f"  Input:  {r.input_preview}")
-            lines.append(f"  Output: {r.output_preview}")
-            lines.append(f"  Result: {verdict_str}")
-            if r.reasoning:
-                lines.append(f"  Reasoning: {r.reasoning}")
-            if r.error:
-                lines.append(f"  Error: {r.error}")
-            lines.append("")
+        return ("\n".join(lines), None)
+
+    async def _run_over_sessions(
+        self,
+        bytecode: list[Any],
+        sample_count: int,
+        quiet_period_seconds: int,
+        output_type: str,
+        output_config: dict[str, Any],
+    ) -> tuple[str, Any]:
+        from posthog.temporal.ai_observability.run_session_evaluation import run_hog_eval_over_recent_sessions
+
+        session_results = await database_sync_to_async(run_hog_eval_over_recent_sessions)(
+            team=self._team,
+            user=self._user,
+            bytecode=bytecode,
+            condition_filter=None,
+            # Same bound the editor endpoint applies: each sampled session is fetched in full, so
+            # the generic sample_count ceiling is far too high for whole conversations.
+            sample_count=min(sample_count, SESSION_TEST_HOG_MAX_SAMPLES),
+            allows_na=output_config["allows_na"],
+            output_type=output_type,
+            output_config=output_config,
+            quiet_period_seconds=quiet_period_seconds,
+        )
+        if not session_results:
+            return (
+                f"No sessions have been quiet for {quiet_period_seconds} seconds in the last "
+                f"{EVALUATION_TEST_LOOKBACK_DAYS} days. Shorten the quiet period, or ingest "
+                "$ai_generation events carrying $ai_session_id.",
+                None,
+            )
+
+        lines: list[str] = [f"Sampled {len(session_results)} session(s). Ran against session-level globals.", ""]
+        for s in session_results:
+            lines.extend(
+                _format_sample(
+                    "Session",
+                    s.session_id,
+                    s.verdict,
+                    s.error,
+                    s.input_preview,
+                    s.output_preview,
+                    s.reasoning,
+                    score=s.score,
+                    categories=s.categories,
+                )
+            )
 
         return ("\n".join(lines), None)

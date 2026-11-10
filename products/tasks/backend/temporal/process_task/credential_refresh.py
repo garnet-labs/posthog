@@ -1,8 +1,10 @@
+from collections.abc import Callable
 from datetime import timedelta
 from enum import StrEnum
 
 from temporalio import workflow
 from temporalio.common import RetryPolicy
+from temporalio.exceptions import is_cancelled_exception
 
 from products.tasks.backend.temporal.constants import CREDENTIAL_REFRESH_INITIAL_DELAY
 
@@ -13,12 +15,24 @@ from .activities.refresh_sandbox_credentials import RefreshSandboxCredentialsInp
 class CredentialRefreshExitReason(StrEnum):
     SANDBOX_GONE = "sandbox_gone"
     CREDENTIALS_UNAVAILABLE = "credentials_unavailable"
+    TASK_GONE = "task_gone"
 
 
 SANDBOX_GONE_ERROR_MESSAGE = "Sandbox stopped; resume to continue"
+TASK_ROWS_GONE_ERROR_MESSAGE = "Task records were deleted while the run was in progress"
 
 
-async def run_credential_refresh_loop(context: TaskProcessingContext, sandbox_id: str) -> CredentialRefreshExitReason:
+def sandbox_gone_error_message(sandbox_exit_reason: str | None) -> str:
+    if sandbox_exit_reason is None:
+        return SANDBOX_GONE_ERROR_MESSAGE
+    return f"Sandbox stopped: {sandbox_exit_reason}. Resume to continue."
+
+
+async def run_credential_refresh_loop(
+    context: TaskProcessingContext,
+    sandbox_id: str,
+    on_sandbox_gone: Callable[[str | None], None] | None = None,
+) -> CredentialRefreshExitReason:
     """Periodically re-inject fresh credentials into the running sandbox.
 
     Sandbox credentials (GitHub token; user *or* installation, per authorship)
@@ -39,8 +53,13 @@ async def run_credential_refresh_loop(context: TaskProcessingContext, sandbox_id
                 start_to_close_timeout=timedelta(minutes=2),
                 retry_policy=RetryPolicy(maximum_attempts=2),
             )
+            if result.task_gone:
+                workflow.logger.warning("Stopping credential refresh loop: task rows are gone")
+                return CredentialRefreshExitReason.TASK_GONE
             if result.sandbox_gone:
                 workflow.logger.info("Stopping credential refresh loop: sandbox is gone")
+                if on_sandbox_gone is not None:
+                    on_sandbox_gone(result.sandbox_exit_reason)
                 return CredentialRefreshExitReason.SANDBOX_GONE
             for kind in result.orphaned_kinds:
                 if kind not in exclude_kinds:
@@ -50,6 +69,8 @@ async def run_credential_refresh_loop(context: TaskProcessingContext, sandbox_id
                 return CredentialRefreshExitReason.CREDENTIALS_UNAVAILABLE
             next_refresh_seconds = result.next_refresh_seconds
         except Exception as e:
+            if is_cancelled_exception(e):
+                raise
             # Non-fatal: keep the run alive and retry on the default cadence.
             workflow.logger.warning(f"Sandbox credential refresh failed (non-fatal): {e}")
             next_refresh_seconds = CREDENTIAL_REFRESH_INITIAL_DELAY.total_seconds()

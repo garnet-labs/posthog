@@ -284,11 +284,13 @@ class TestVercelResourceAPI(VercelTestBase):
         data = response.json()
         self.assertIn("secrets", data)
         secrets = data["secrets"]
-        self.assertEqual(len(secrets), 2)
+        expected_prefixes = ["NEXT_PUBLIC_", "VITE_", "NUXT_PUBLIC_", "PUBLIC_"]
+        self.assertEqual(len(secrets), 2 * len(expected_prefixes))
 
         secret_names = [s["name"] for s in secrets]
-        self.assertIn("NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN", secret_names)
-        self.assertIn("NEXT_PUBLIC_POSTHOG_HOST", secret_names)
+        for prefix in expected_prefixes:
+            self.assertIn(f"{prefix}POSTHOG_PROJECT_TOKEN", secret_names)
+            self.assertIn(f"{prefix}POSTHOG_HOST", secret_names)
 
         api_key_secret = next(s for s in secrets if s["name"] == "NEXT_PUBLIC_POSTHOG_PROJECT_TOKEN")
         self.assertEqual(api_key_secret["value"], self.team.api_token)
@@ -316,3 +318,23 @@ class TestVercelResourceAPI(VercelTestBase):
 
         response = self.client.post(url, **headers)
         self.assert_not_found(response)
+
+    @parameterized.expand([("a_resource_posthog_holds", None), ("a_resource_whose_project_was_deleted", "99999")])
+    def test_resource_plans_list_the_billing_plans(self, _name, resource_id):
+        resource_id = resource_id or self.primary_resource["resource_id"]
+        url = f"{self.primary_resource['base_url']}/{resource_id}/plans/"
+        headers = self.auth_headers(self.installation_id, "system")
+
+        response = self.client.get(url, **headers)
+
+        self.assert_success(response)
+        self.assertEqual([plan["id"] for plan in response.json()["plans"]], ["posthog-usage-based"])
+
+    def test_resource_plans_reject_a_token_for_another_installation(self):
+        other_installation = self.create_installation()
+        url = f"{self.primary_resource['resource_url']}plans/"
+        headers = self.auth_headers(other_installation["id"], "system")
+
+        response = self.client.get(url, **headers)
+
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)

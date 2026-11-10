@@ -1,5 +1,7 @@
 import os
 import json
+import datetime as dt
+from collections import Counter
 
 from posthog.test.base import APIBaseTest, ClickhouseTestMixin
 
@@ -18,17 +20,37 @@ class TestLogFacetValues(ClickhouseTestMixin, APIBaseTest):
     def setUpTestData(cls):
         super().setUpTestData()
 
+        log_items = []
         with open(os.path.join(os.path.dirname(__file__), "test_logs.jsonnd")) as f:
-            sql = ""
             for line in f:
                 log_item = json.loads(line)
                 log_item["team_id"] = cls.team.id
-                sql += json.dumps(log_item) + "\n"
-            sync_execute(f"""
-                INSERT INTO logs
-                FORMAT JSONEachRow
-                {sql}
-            """)
+                log_items.append(log_item)
+
+        sql = "\n".join(json.dumps(log_item) for log_item in log_items)
+        sync_execute(f"""
+            INSERT INTO logs
+            FORMAT JSONEachRow
+            {sql}
+        """)
+
+        # The severity_text and service_name facets read logs_volume_buckets, not the logs table.
+        # See LogFacetValuesQueryRunner._column_facet_query_from_rollup. Make the rollup rows from
+        # the same fixture, in 5-minute buckets, so that the two tables always agree.
+        bucket_counts: Counter[tuple[int, dt.datetime, str, str]] = Counter()
+        for log_item in log_items:
+            timestamp = dt.datetime.fromisoformat(log_item["timestamp"]).replace(tzinfo=dt.UTC)
+            time_bucket = timestamp.replace(minute=timestamp.minute - timestamp.minute % 5, second=0, microsecond=0)
+            bucket_counts[(log_item["team_id"], time_bucket, log_item["service_name"], log_item["severity_text"])] += 1
+
+        sync_execute(
+            "INSERT INTO logs_volume_buckets "
+            "(team_id, time_bucket, service_name, namespace, environment, severity_text, log_count) VALUES",
+            [
+                (team_id, time_bucket.replace(tzinfo=None), service_name, "", "", severity_text, count)
+                for (team_id, time_bucket, service_name, severity_text), count in bucket_counts.items()
+            ],
+        )
 
     def _facet(self, facet_field: str, **filters) -> dict[str, int]:
         body = {"query": {"facetField": facet_field, "dateRange": self.DATE_RANGE, **filters}}
@@ -36,8 +58,8 @@ class TestLogFacetValues(ClickhouseTestMixin, APIBaseTest):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         return {r["value"]: r["count"] for r in response.json()["results"]}
 
-    def _facet_attr(self, key: str, **filters) -> dict[str, int]:
-        body = {"query": {"facetResourceAttribute": key, "dateRange": self.DATE_RANGE, **filters}}
+    def _facet_attr(self, key: str, target: str = "facetResourceAttribute", **filters) -> dict[str, int]:
+        body = {"query": {target: key, "dateRange": self.DATE_RANGE, **filters}}
         response = self.client.post(f"/api/projects/{self.team.pk}/logs/facet_values", body, format="json")
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         return {r["value"]: r["count"] for r in response.json()["results"]}
@@ -75,6 +97,13 @@ class TestLogFacetValues(ClickhouseTestMixin, APIBaseTest):
             f"{other_filter_key} should re-scope {facet_field} counts",
         )
 
+    def test_column_facet_keeps_the_bucket_that_contains_date_from(self):
+        # The rollup has 5-minute buckets. A date_from inside a bucket must not drop that bucket, or
+        # the counts lose up to 5 minutes of logs. Every fixture log in DATE_RANGE is at or after
+        # 09:00, so a start of 09:02 must give the same counts as a start of 09:00.
+        inside_bucket = {**self.DATE_RANGE, "date_from": "2025-12-16T09:02:00Z"}
+        self.assertEqual(self._facet("severity_text", dateRange=inside_bucket), self._facet("severity_text"))
+
     @parameterized.expand(
         [
             ("service_name", "aws"),
@@ -105,12 +134,33 @@ class TestLogFacetValues(ClickhouseTestMixin, APIBaseTest):
         response = self.client.post(f"/api/projects/{self.team.pk}/logs/facet_values", body, format="json")
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
-    @parameterized.expand([("k8s.namespace.name",), ("k8s.pod.name",), ("k8s.node.name",)])
-    def test_facet_on_resource_attribute_returns_values(self, key):
-        """A resource attribute key can be faceted and returns its values with counts."""
-        result = self._facet_attr(key)
+    # Resource and log attributes share the log_attributes rollup, so every behaviour that doesn't
+    # depend on resource_fingerprint is shared and parameterized over (request field, key).
+    @parameterized.expand(
+        [
+            ("facetResourceAttribute", "k8s.namespace.name"),
+            ("facetResourceAttribute", "k8s.pod.name"),
+            ("facetResourceAttribute", "k8s.node.name"),
+            ("facetAttribute", "log.iostream"),
+            ("facetAttribute", "hostname"),
+            ("facetAttribute", "level"),
+        ]
+    )
+    def test_facet_on_attribute_returns_values(self, target, key):
+        result = self._facet_attr(key, target=target)
         self.assertGreater(len(result), 0)
         self.assertTrue(all(count > 0 for count in result.values()))
+
+    @parameterized.expand(
+        [
+            ("facetAttribute", "k8s.namespace.name"),
+            ("facetResourceAttribute", "log.iostream"),
+        ]
+    )
+    def test_attribute_types_are_not_interchangeable(self, target, key):
+        # One rollup table holds both types, discriminated by attribute_type. A key looked up under
+        # the wrong type must come back empty rather than leaking the other type's values.
+        self.assertEqual(self._facet_attr(key, target=target), {})
 
     def test_resource_facet_excludes_blank_for_missing_key(self):
         """Logs lacking the key read back '' from the map; that bucket must not appear as a facet value."""
@@ -119,52 +169,165 @@ class TestLogFacetValues(ClickhouseTestMixin, APIBaseTest):
         self.assertGreater(len(result), 0)
         self.assertNotIn("", result)
 
-    def test_resource_facet_ignores_its_own_filter(self):
-        """Selecting a value via a log_resource_attribute filter must not change that facet's own counts."""
+    @parameterized.expand([("exact",), ("is_not",)])
+    def test_resource_facet_ignores_its_own_filter(self, operator):
+        """Selecting or excluding a value via a log_resource_attribute filter must not change that facet's own counts."""
         base = self._facet_attr("k8s.namespace.name")
         own_value = next(iter(base))
         filter_group = [
-            {"key": "k8s.namespace.name", "type": "log_resource_attribute", "operator": "exact", "value": own_value}
+            {"key": "k8s.namespace.name", "type": "log_resource_attribute", "operator": operator, "value": own_value}
         ]
         self.assertEqual(self._facet_attr("k8s.namespace.name", filterGroup=filter_group), base)
 
-    def test_resource_facet_honors_severity_filter(self):
-        # severity_text now lives on the log_attributes rollup, so a severity filter re-scopes
-        # resource-attribute facet counts (previously it was accepted but silently ignored).
-        base = self._facet_attr("k8s.namespace.name")
+    @parameterized.expand(
+        [
+            ("severity_text", "severity_level"),
+            ("service_name", "service_name"),
+        ]
+    )
+    def test_facet_ignores_its_own_log_filter_exclusion(self, facet_field, log_filter_key):
+        # The rail stores column-facet exclusions as an is_not log filter in the group; the counts
+        # query must strip it when faceting on that facet's own field, or an excluded value's own
+        # count would zero out.
+        base = self._facet(facet_field)
+        own_value = next(iter(base))
+        filter_group = [{"key": log_filter_key, "type": "log", "operator": "is_not", "value": [own_value]}]
+        self.assertEqual(self._facet(facet_field, filterGroup=filter_group), base)
+
+    @parameterized.expand(
+        [
+            ("service_name", "severity_text", "severity_level"),
+            ("severity_text", "service_name", "service_name"),
+        ]
+    )
+    def test_facet_honors_other_facets_log_filter_exclusion(self, facet_field, other_facet_field, log_filter_key):
+        # An is_not log filter must remove matching rows from other facets' counts — proves the
+        # NOT IN translation end to end on real data.
+        base = self._facet(facet_field)
+        one_value = next(iter(self._facet(other_facet_field)))
+        filter_group = [{"key": log_filter_key, "type": "log", "operator": "is_not", "value": [one_value]}]
+        scoped = self._facet(facet_field, filterGroup=filter_group)
+        self.assertTrue(set(scoped).issubset(set(base)))
+        self.assertLess(sum(scoped.values()), sum(base.values()))
+
+    @parameterized.expand(
+        [
+            ("facetResourceAttribute", "k8s.namespace.name"),
+            ("facetAttribute", "log.iostream"),
+        ]
+    )
+    def test_attribute_facet_honors_severity_filter(self, target, key):
+        # severity_text lives on the log_attributes rollup, so a severity filter re-scopes attribute
+        # facet counts of either type (it used to be accepted but silently ignored).
+        base = self._facet_attr(key, target=target)
         self.assertGreater(len(base), 0)
         one_severity = next(iter(self._facet("severity_text")))
-        scoped = self._facet_attr("k8s.namespace.name", severityLevels=[one_severity])
+        scoped = self._facet_attr(key, target=target, severityLevels=[one_severity])
         self.assertGreater(len(scoped), 0)
         self.assertTrue(set(scoped).issubset(set(base)))
         self.assertLess(sum(scoped.values()), sum(base.values()))
 
-    def test_resource_facet_honors_other_resource_attribute_filter(self):
-        # A different resource-attribute filter re-scopes the counts via the rollup's
-        # resource_fingerprint subquery — proves cross-filtering still works on log_attributes.
-        base = self._facet_attr("k8s.pod.name")
+    @parameterized.expand(
+        [
+            ("facetResourceAttribute", "k8s.namespace.name"),
+            ("facetAttribute", "log.iostream"),
+        ]
+    )
+    def test_attribute_facet_ignores_a_column_filter_with_no_value(self, target, key):
+        # The search bar writes a filter as soon as its key is picked, so a severity filter sits in
+        # the group with no value while the user chooses one. Translating that to `IN ()` matches
+        # nothing and empties the very list they are picking from.
+        base = self._facet_attr(key, target=target)
+        filter_group = [{"key": "severity_level", "type": "log", "operator": "exact", "value": []}]
+
+        self.assertEqual(self._facet_attr(key, target=target, filterGroup=filter_group), base)
+
+    @parameterized.expand(
+        [
+            ("facetResourceAttribute", "k8s.namespace.name", "severity_level", "exact"),
+            ("facetResourceAttribute", "k8s.namespace.name", "severity_level", "is_not"),
+            ("facetResourceAttribute", "k8s.namespace.name", "service_name", "exact"),
+            ("facetResourceAttribute", "k8s.namespace.name", "service_name", "is_not"),
+            ("facetAttribute", "log.iostream", "severity_level", "exact"),
+            ("facetAttribute", "log.iostream", "service_name", "is_not"),
+        ]
+    )
+    def test_attribute_facet_honors_column_filter_in_group(self, target, key, filter_key, operator):
+        # The viewer keeps a level or service selection in filterGroup as a `log` filter, so these
+        # counts read it from there rather than from the dedicated fields. Exclusions have only ever
+        # existed in the group, which is why both polarities are covered.
+        base = self._facet_attr(key, target=target)
+        self.assertGreater(len(base), 0)
+        facet_field = "severity_text" if filter_key == "severity_level" else "service_name"
+        one_value = next(iter(self._facet(facet_field)))
+        filter_group = [{"key": filter_key, "type": "log", "operator": operator, "value": [one_value]}]
+
+        scoped = self._facet_attr(key, target=target, filterGroup=filter_group)
+
+        self.assertGreater(len(scoped), 0)
+        self.assertTrue(set(scoped).issubset(set(base)))
+        self.assertLess(sum(scoped.values()), sum(base.values()))
+
+    @parameterized.expand(
+        [
+            ("facetResourceAttribute", "k8s.pod.name", "exact"),
+            ("facetResourceAttribute", "k8s.pod.name", "is_not"),
+            ("facetAttribute", "log.iostream", "exact"),
+            ("facetAttribute", "log.iostream", "is_not"),
+        ]
+    )
+    def test_attribute_facet_honors_other_resource_attribute_filter(self, target, key, operator):
+        # A resource-attribute filter — include or exclude — re-scopes the counts via the rollup's
+        # resource_fingerprint subquery. Covers both facet types because a log-attribute facet reads
+        # the same rollup and must keep applying resource_filter().
+        base = self._facet_attr(key, target=target)
         one_namespace = next(iter(self._facet_attr("k8s.namespace.name")))
         filter_group = [
-            {"key": "k8s.namespace.name", "type": "log_resource_attribute", "operator": "exact", "value": one_namespace}
+            {
+                "key": "k8s.namespace.name",
+                "type": "log_resource_attribute",
+                "operator": operator,
+                "value": one_namespace,
+            }
         ]
-        scoped = self._facet_attr("k8s.pod.name", filterGroup=filter_group)
+        scoped = self._facet_attr(key, target=target, filterGroup=filter_group)
         self.assertGreater(len(scoped), 0)
         self.assertTrue(set(scoped).issubset(set(base)))
         self.assertLess(sum(scoped.values()), sum(base.values()))
 
-    @parameterized.expand([("argo",), ("ARGO",)])
-    def test_resource_facet_search_is_case_insensitive(self, term):
-        searched = self._facet_attr("k8s.namespace.name", facetSearch=term)
+    @parameterized.expand(
+        [
+            ("facetResourceAttribute", "k8s.namespace.name", "argo"),
+            ("facetResourceAttribute", "k8s.namespace.name", "ARGO"),
+            ("facetAttribute", "log.iostream", "out"),
+            ("facetAttribute", "log.iostream", "OUT"),
+        ]
+    )
+    def test_attribute_facet_search_is_case_insensitive(self, target, key, term):
+        searched = self._facet_attr(key, target=target, facetSearch=term)
         self.assertGreater(len(searched), 0)
         self.assertTrue(all(term.lower() in value.lower() for value in searched))
 
-    def test_resource_facet_search_no_match_returns_empty(self):
-        self.assertEqual(self._facet_attr("k8s.namespace.name", facetSearch="no-such-namespace-xyz"), {})
+    @parameterized.expand(
+        [
+            ("facetResourceAttribute", "k8s.namespace.name"),
+            ("facetAttribute", "log.iostream"),
+        ]
+    )
+    def test_attribute_facet_search_no_match_returns_empty(self, target, key):
+        self.assertEqual(self._facet_attr(key, target=target, facetSearch="no-such-value-xyz"), {})
 
     def test_requires_exactly_one_facet_target(self):
         for query in (
-            {},  # neither
-            {"facetField": "service_name", "facetResourceAttribute": "k8s.pod.name"},  # both
+            {},  # none
+            {"facetField": "service_name", "facetResourceAttribute": "k8s.pod.name"},
+            {"facetField": "service_name", "facetAttribute": "log.iostream"},
+            {"facetResourceAttribute": "k8s.pod.name", "facetAttribute": "log.iostream"},
+            {  # all three
+                "facetField": "service_name",
+                "facetResourceAttribute": "k8s.pod.name",
+                "facetAttribute": "log.iostream",
+            },
         ):
             body = {"query": {**query, "dateRange": self.DATE_RANGE}}
             response = self.client.post(f"/api/projects/{self.team.pk}/logs/facet_values", body, format="json")

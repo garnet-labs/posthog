@@ -9,7 +9,7 @@ from posthog.constants import AvailableFeature
 from posthog.models import Team, User
 from posthog.models.organization import Organization, OrganizationMembership
 
-from ee.models.rbac.access_control import AccessControl
+from products.access_control.backend.models.access_control import AccessControl
 
 
 class TestUser(BaseTest):
@@ -55,6 +55,7 @@ class TestUser(BaseTest):
                     "completed_onboarding_once": False,
                     "organization_id": str(organization.id),
                     "current_organization_membership_level": 15,
+                    "current_organization_membership_level_name": "owner",
                     "project_id": str(team.uuid),
                     "project_setup_complete": False,
                     "has_password_set": True,
@@ -91,6 +92,7 @@ class TestUser(BaseTest):
                     "completed_onboarding_once": True,
                     "organization_id": str(self.organization.id),
                     "current_organization_membership_level": 1,
+                    "current_organization_membership_level_name": "member",
                     "project_id": str(self.team.uuid),
                     "project_setup_complete": True,
                     "has_password_set": True,
@@ -189,9 +191,21 @@ class TestUser(BaseTest):
         newer.last_login = datetime.datetime(2025, 1, 1, tzinfo=datetime.UTC)
         newer.save(update_fields=["last_login"])
 
-        # Exact match wins over case-insensitive fallback when a row matches the typed casing.
-        self.assertEqual(User.objects.get_by_natural_key("dup@example.com"), older)
-        self.assertEqual(User.objects.get_by_natural_key("Dup@example.com"), newer)
+        # Every typed casing resolves to the account in active use, so a login, a password reset,
+        # and the login precheck cannot disagree about who is signing in.
+        for typed_email in ("dup@example.com", "Dup@example.com", "DUP@example.com"):
+            with self.subTest(email=typed_email):
+                self.assertEqual(User.objects.get_by_natural_key(typed_email), newer)
 
-        # When the typed casing matches no row exactly, fallback picks the most recent login.
-        self.assertEqual(User.objects.get_by_natural_key("DUP@example.com"), newer)
+    def test_get_by_natural_key_prefers_the_active_case_variant(self):
+        active = User.objects.create(email="Shadow@example.com")
+        active.last_login = datetime.datetime(2024, 1, 1, tzinfo=datetime.UTC)
+        active.save(update_fields=["last_login"])
+
+        deactivated = User.objects.create(email="shadow@example.com", is_active=False)
+        deactivated.last_login = datetime.datetime(2025, 1, 1, tzinfo=datetime.UTC)
+        deactivated.save(update_fields=["last_login"])
+
+        for typed_email in ("shadow@example.com", "Shadow@example.com"):
+            with self.subTest(email=typed_email):
+                self.assertEqual(User.objects.get_by_natural_key(typed_email), active)

@@ -22,7 +22,6 @@ from urllib.parse import urlencode, urlparse
 
 import requests
 
-from products.warehouse_sources.backend.temporal.data_imports.pipelines.pipeline.typings import SourceResponse
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.http import make_tracked_adapter
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.mixins import _is_host_safe
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.rest_source import (
@@ -37,6 +36,7 @@ from products.warehouse_sources.backend.temporal.data_imports.sources.common.res
 )
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.rest_source.typing import Endpoint
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.resumable import ResumableSourceManager
+from products.warehouse_sources.backend.temporal.data_imports.sources.common.typings import SourceResponse
 from products.warehouse_sources.backend.temporal.data_imports.sources.plunk.settings import (
     PLUNK_ENDPOINTS,
     PlunkEndpointConfig,
@@ -143,7 +143,8 @@ class _BoundedPlunkSession(requests.Session):
         # Never follow redirects: a validated host could 3xx to an internal address (SSRF). Pin the
         # timeout only when the caller didn't set one, and stream so the body is read incrementally.
         kwargs["allow_redirects"] = False
-        kwargs.setdefault("timeout", DEFAULT_TIMEOUT_SECONDS)
+        if kwargs.get("timeout") is None:
+            kwargs["timeout"] = DEFAULT_TIMEOUT_SECONDS
         kwargs["stream"] = True
         response = super().send(request, **kwargs)
         if response.is_redirect or response.is_permanent_redirect:

@@ -1,7 +1,7 @@
 import { Message } from 'node-rdkafka'
 
 import { KafkaProducerWrapper } from '~/common/kafka/producer'
-import { APP_METRICS_OUTPUT, DLQ_OUTPUT, INGESTION_WARNINGS_OUTPUT } from '~/common/outputs'
+import { APP_METRICS_OUTPUT, DLQ_OUTPUT, INGESTION_WARNINGS_OUTPUT, TOPHOG_OUTPUT } from '~/common/outputs'
 import { IngestionOutputs } from '~/common/outputs/ingestion-outputs'
 import { SingleIngestionOutput } from '~/common/outputs/single-ingestion-output'
 import { EventIngestionRestrictionManager } from '~/common/utils/event-ingestion-restrictions'
@@ -14,6 +14,7 @@ import { EventFilterManager } from '~/ingestion/common/event-filters'
 import { createOkContext } from '~/ingestion/framework/helpers'
 import { drop, ok } from '~/ingestion/framework/results'
 import { createTestTeam } from '~/tests/helpers/team'
+import { createNoopTopHog } from '~/tests/helpers/tophog'
 
 import { HEATMAPS_OUTPUT } from './outputs'
 import { HeatmapsPipelineConfig, createHeatmapsPipeline } from './pipeline'
@@ -76,7 +77,7 @@ describe('HeatmapsPipeline', () => {
     const runPipeline = async (messages: Message[]): Promise<void> => {
         const pipeline = createHeatmapsPipeline(config)
         const batch = messages.map((message) => createOkContext({ message }, { message }))
-        await pipeline.feed(batch)
+        await pipeline.feed(batch, {})
         let result = await pipeline.next()
         while (result !== null) {
             // The pipeline handles its own side effects; none may leak to drivers.
@@ -104,6 +105,7 @@ describe('HeatmapsPipeline', () => {
 
         mockTeamManager = {
             getTeamByToken: jest.fn().mockResolvedValue(team),
+            getTeamsByTokens: jest.fn().mockResolvedValue({}),
             getTeam: jest.fn().mockResolvedValue(team),
         } as unknown as jest.Mocked<TeamManager>
 
@@ -114,6 +116,7 @@ describe('HeatmapsPipeline', () => {
 
         mockEventFilterManager = {
             getFilter: jest.fn().mockReturnValue(undefined),
+            dropsAllEvents: jest.fn().mockReturnValue(false),
         } as unknown as jest.Mocked<EventFilterManager>
 
         // Passthrough by default: events round-trip unchanged. The apply step reads `.value.event`
@@ -145,8 +148,11 @@ describe('HeatmapsPipeline', () => {
                     mockKafkaProducer,
                     'test'
                 ),
+                [TOPHOG_OUTPUT]: new SingleIngestionOutput(TOPHOG_OUTPUT, 'tophog_test', mockKafkaProducer, 'test'),
             }),
+            topHog: createNoopTopHog(),
             teamManager: mockTeamManager,
+            teamsPrefetchEnabled: true,
             eventIngestionRestrictionManager: mockEventIngestionRestrictionManager,
             eventFilterManager: mockEventFilterManager,
             cookielessManager: mockCookielessManager,

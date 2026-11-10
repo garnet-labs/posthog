@@ -6,7 +6,6 @@ import React, { useEffect, useRef, useState } from 'react'
 
 import { IconPencil, IconPlusSmall, IconTrash } from '@posthog/icons'
 
-import { Chart } from 'lib/Chart'
 import { TextContent } from 'lib/components/Cards/TextCard/TextCard'
 import { dayjs } from 'lib/dayjs'
 import { LemonBadge } from 'lib/lemon-ui/LemonBadge/LemonBadge'
@@ -17,15 +16,17 @@ import { ProfilePicture } from 'lib/lemon-ui/ProfilePicture'
 import { humanFriendlyDetailedTime } from 'lib/utils/datetime'
 import { pluralize } from 'lib/utils/strings'
 import { shortTimeZone } from 'lib/utils/timezones'
-import { AnnotationModal } from 'scenes/annotations/AnnotationModal'
-import { annotationModalLogic, annotationScopeToName } from 'scenes/annotations/annotationModalLogic'
 import { insightLogic } from 'scenes/insights/insightLogic'
 
 import { annotationsModel } from '~/models/annotationsModel'
 import { AnnotationType, DatedAnnotationType, IntervalType } from '~/types'
 
+import { AnnotationModal } from 'products/annotations/frontend/components/AnnotationModal'
+import { annotationModalLogic, annotationScopeToName } from 'products/annotations/frontend/logics/annotationModalLogic'
+
 import { AnnotationsOverlayLogicProps, annotationsOverlayLogic } from './annotationsOverlayLogic'
-import { useAnnotationsPositioning } from './useAnnotationsPositioning'
+import { useAnnotationPopoverHover } from './useAnnotationPopoverHover'
+import { AnnotationsChartGeometry, useAnnotationsPositioning } from './useAnnotationsPositioning'
 
 const MIN_BADGE_SPACING_PX = 24
 /** Clusters anchor on their starting badge (leftPx) so a chain of near-adjacent badges
@@ -69,10 +70,8 @@ function getInterpolatedDataPointX(dataIndex: number, getDataPointX: (index: num
 export interface AnnotationsOverlayProps {
     insightNumericId: AnnotationsOverlayLogicProps['insightNumericId']
     dates: string[]
-    chart: Chart
+    geometry: AnnotationsChartGeometry
     chartWidth: number
-    chartHeight: number
-    datasetIndex?: number
     /** Forwarded to the kea logic key so multiple overlays on the same insight don't
      *  collide. Used by compare-against-previous bar charts to show one overlay per period. */
     kind?: string
@@ -85,29 +84,22 @@ interface AnnotationsOverlayCSSProperties extends React.CSSProperties {
 }
 
 export const AnnotationsOverlay = React.memo(function AnnotationsOverlay({
-    chart,
+    geometry,
     chartWidth,
-    chartHeight,
     dates,
     insightNumericId,
-    datasetIndex = 0,
     kind,
 }: AnnotationsOverlayProps): JSX.Element {
     const { insightProps } = useValues(insightLogic)
-    const { tickIntervalPx, firstTickLeftPx, getDataPointX } = useAnnotationsPositioning(
-        chart,
-        chartWidth,
-        chartHeight,
-        datasetIndex
-    )
+    const { tickIntervalPx, firstTickLeftPx, getDataPointX } = useAnnotationsPositioning(geometry)
 
     // Memoize ticks by value to prevent unnecessary kea selector cascades.
-    // chart.scales.x.ticks is a Chart.js internal array that is the same object between renders
-    // when the chart hasn't changed, but .map() would create new references every render,
-    // causing all downstream selectors (tickDates → dateRange → relevantAnnotations →
-    // groupedAnnotations) to recompute unnecessarily.
+    // The tick array is the same object between renders while the chart's layout is unchanged,
+    // but .map() would create new references every render, causing all downstream selectors
+    // (tickDates → dateRange → relevantAnnotations → groupedAnnotations) to recompute
+    // unnecessarily.
     const prevTicksRef = useRef<{ value: number }[]>([])
-    const currentChartTicks = chart.scales.x.ticks
+    const currentChartTicks = geometry.xTicks
     if (
         prevTicksRef.current.length !== currentChartTicks.length ||
         prevTicksRef.current.some((t, i) => t.value !== currentChartTicks[i]?.value)
@@ -124,9 +116,10 @@ export const AnnotationsOverlay = React.memo(function AnnotationsOverlay({
         kind,
     }
     const logic = annotationsOverlayLogic(annotationsOverlayLogicProps)
-    const { activeDate, tickDates, annotationBadgeDataIndices, groupedAnnotations } = useValues(logic)
-    const { closePopover } = useActions(logic)
+    const { activeDate, tickDates, annotationBadgeDataIndices, groupedAnnotations, readOnly } = useValues(logic)
+    const { closePopover, deactivateDate } = useActions(logic)
     const { closeModal } = useActions(annotationModalLogic)
+    const hover = useAnnotationPopoverHover(deactivateDate)
 
     useEffect(() => {
         return () => {
@@ -139,7 +132,7 @@ export const AnnotationsOverlay = React.memo(function AnnotationsOverlay({
     const modalContentRef = useRef<HTMLDivElement | null>(null)
     const modalOverlayRef = useRef<HTMLDivElement | null>(null)
     const badgeRefs = useRef<Map<string, HTMLButtonElement>>(new Map())
-    const chartAreaLeft = chart ? chart.scales.x.left : 0
+    const chartAreaLeft = geometry.plotLeft
 
     const clusters = React.useMemo<AnnotationBadgeCluster[]>(() => {
         const positioned = annotationBadgeDataIndices
@@ -194,13 +187,14 @@ export const AnnotationsOverlay = React.memo(function AnnotationsOverlay({
                 style={
                     {
                         '--annotations-overlay-chart-area-left': `${chartAreaLeft}px`,
-                        '--annotations-overlay-chart-area-height': `${chart ? chart.scales.x.top : 0}px`,
+                        '--annotations-overlay-chart-area-height': `${geometry.plotBottom}px`,
                         '--annotations-overlay-chart-width': `${chartWidth}px`,
                     } as AnnotationsOverlayCSSProperties
                 }
                 ref={overlayRef}
             >
-                {tickDates.map((date, index) => {
+                {/* Tick badges are only targets for adding an annotation. */}
+                {(readOnly ? [] : tickDates).map((date, index) => {
                     const leftPx = index * tickIntervalPx + firstTickLeftPx - chartAreaLeft
                     // Strict `<` on both sides mirrors the cluster merge criterion so the
                     // suppression zone matches the merge zone exactly (no boundary gap).
@@ -218,6 +212,8 @@ export const AnnotationsOverlay = React.memo(function AnnotationsOverlay({
                             widthPx={tickIntervalPx}
                             annotations={EMPTY_ANNOTATIONS}
                             badgeRefs={badgeRefs}
+                            onMouseEnter={hover.cancel}
+                            onMouseLeave={hover.start}
                         />
                     )
                 })}
@@ -229,6 +225,8 @@ export const AnnotationsOverlay = React.memo(function AnnotationsOverlay({
                         widthPx={MIN_BADGE_SPACING_PX}
                         annotations={cluster.annotations}
                         badgeRefs={badgeRefs}
+                        onMouseEnter={hover.cancel}
+                        onMouseLeave={hover.start}
                     />
                 ))}
                 {activeBadgeElement && (
@@ -236,6 +234,7 @@ export const AnnotationsOverlay = React.memo(function AnnotationsOverlay({
                         overlayRefs={[overlayRef, modalContentRef, modalOverlayRef]}
                         badgeElement={activeBadgeElement}
                         cluster={activeCluster}
+                        hover={hover}
                     />
                 )}
                 <AnnotationModal
@@ -255,6 +254,8 @@ interface AnnotationsBadgeProps {
     widthPx: number
     annotations: DatedAnnotationType[]
     badgeRefs: React.MutableRefObject<Map<string, HTMLButtonElement>>
+    onMouseEnter: () => void
+    onMouseLeave: (point: { x: number; y: number }) => void
 }
 
 interface AnnotationsBadgeCSSProperties extends React.CSSProperties {
@@ -269,9 +270,11 @@ const AnnotationsBadge = React.memo(function AnnotationsBadgeRaw({
     widthPx,
     annotations,
     badgeRefs,
+    onMouseEnter,
+    onMouseLeave,
 }: AnnotationsBadgeProps): JSX.Element {
     const { isDateLocked, activeDate, isPopoverShown } = useValues(annotationsOverlayLogic)
-    const { activateDate, deactivateDate, lockDate, unlockDate } = useActions(annotationsOverlayLogic)
+    const { activateDate, lockDate, unlockDate } = useActions(annotationsOverlayLogic)
 
     const [hovered, setHovered] = useState(false)
     const buttonRef = useRef<HTMLButtonElement>(null)
@@ -312,14 +315,15 @@ const AnnotationsBadge = React.memo(function AnnotationsBadgeRaw({
             }
             onMouseEnter={() => {
                 setHovered(true)
+                onMouseEnter()
                 if (!isDateLocked) {
                     activateDate(date)
                 }
             }}
-            onMouseLeave={() => {
+            onMouseLeave={(event) => {
                 setHovered(false)
                 if (!isDateLocked) {
-                    deactivateDate()
+                    onMouseLeave({ x: event.clientX, y: event.clientY })
                 }
             }}
             onClick={!isDateLocked ? lockDate : active ? unlockDate : () => activateDate(date)}
@@ -352,15 +356,21 @@ function AnnotationsPopover({
     overlayRefs,
     badgeElement,
     cluster,
+    hover,
 }: {
     overlayRefs: React.MutableRefObject<HTMLDivElement | null>[]
     badgeElement: HTMLButtonElement | null
     cluster: AnnotationBadgeCluster | undefined
+    hover: ReturnType<typeof useAnnotationPopoverHover>
 }): JSX.Element {
-    const { activeDate, groupingUnit, isDateLocked, insightId, isPopoverShown, annotationsOverlayProps } =
+    const { activeDate, groupingUnit, isDateLocked, insightId, isPopoverShown, annotationsOverlayProps, readOnly } =
         useValues(annotationsOverlayLogic)
     const { closePopover } = useActions(annotationsOverlayLogic)
     const { openModalToCreateAnnotation } = useActions(annotationModalLogic)
+    const handleClose = (): void => {
+        hover.cancel()
+        closePopover()
+    }
 
     const popoverAnnotations = cluster?.annotations ?? []
 
@@ -396,31 +406,41 @@ function AnnotationsPopover({
             placement="top"
             fallbackPlacements={['top-end', 'top-start']}
             referenceElement={badgeElement}
+            floatingRef={hover.popupRef}
             visible={isPopoverShown}
-            onClickOutside={closePopover}
+            onClickOutside={handleClose}
+            onMouseEnterInside={hover.cancel}
+            onMouseLeaveInside={isDateLocked ? undefined : hover.leavePopup}
             showArrow
             padded={false}
+            overflowHidden
             overlay={
                 <LemonModal
                     inline
                     title={`${pluralize(popoverAnnotations.length, 'annotation')} • ${titleDate}`}
                     footer={
-                        <LemonButton
-                            type="primary"
-                            onClick={() =>
-                                openModalToCreateAnnotation(activeDate, insightId, annotationsOverlayProps.dashboardId)
-                            }
-                            disabled={!isDateLocked}
-                        >
-                            Add annotation
-                        </LemonButton>
+                        readOnly ? undefined : (
+                            <LemonButton
+                                type="primary"
+                                onClick={() =>
+                                    openModalToCreateAnnotation(
+                                        activeDate,
+                                        insightId,
+                                        annotationsOverlayProps.dashboardId
+                                    )
+                                }
+                                disabled={!isDateLocked}
+                            >
+                                Add annotation
+                            </LemonButton>
+                        )
                     }
                     closable={isDateLocked}
-                    onClose={closePopover}
+                    onClose={handleClose}
                     width="var(--annotations-popover-width)"
                 >
                     {popoverAnnotations.length > 0 ? (
-                        <ul className="flex flex-col gap-2 w-full overflow-y-auto">
+                        <ul className="flex flex-col gap-2 w-full">
                             {popoverAnnotations.map((annotation) => (
                                 <AnnotationCard key={annotation.id} annotation={annotation} />
                             ))}
@@ -435,7 +455,7 @@ function AnnotationsPopover({
 }
 
 function AnnotationCard({ annotation }: { annotation: AnnotationType }): JSX.Element {
-    const { insightId, timezone, annotationsOverlayProps } = useValues(annotationsOverlayLogic)
+    const { insightId, timezone, annotationsOverlayProps, readOnly } = useValues(annotationsOverlayLogic)
     const { deleteAnnotation } = useActions(annotationsModel)
     const { openModalToEditAnnotation } = useActions(annotationModalLogic)
 
@@ -454,7 +474,7 @@ function AnnotationCard({ annotation }: { annotation: AnnotationType }): JSX.Ele
                     {annotationScopeToName[annotation.scope]}
                     -level
                 </h5>
-                {!isSystemAnnotation && (
+                {!isSystemAnnotation && !readOnly && (
                     <>
                         <LemonButton
                             size="small"

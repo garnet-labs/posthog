@@ -19,6 +19,7 @@ from posthog.hogql.functions.mapping import HOGQL_COMPARISON_MAPPING
 from posthog.hogql.helpers.timestamp_visitor import is_simple_timestamp_field_expression, is_time_or_interval_constant
 from posthog.hogql.visitor import CloningVisitor, TraversingVisitor, clone_expr
 
+from posthog.dataclasses import frozen
 from posthog.uuidt import UUIDT
 
 SESSION_BUFFER_DAYS = 3
@@ -281,6 +282,11 @@ class SessionMinTimestampWhereClauseExtractor(WhereClauseExtractor):
 
     def __init__(self, context: HogQLContext):
         super().__init__(context)
+        buffer_minutes = context.modifiers.sessionTimestampBufferMinutes if context.modifiers else None
+        # Any client can set this modifier, so it may only narrow the default buffer. A wider buffer
+        # would let one query scan the whole sessions table.
+        if buffer_minutes is not None and buffer_minutes < SESSION_BUFFER_DAYS * 24 * 60:
+            self.time_buffer = ast.Call(name="toIntervalMinute", args=[ast.Constant(value=max(buffer_minutes, 0))])
 
     def should_apply_default_limit_bound(self, select_query: ast.SelectQuery) -> bool:
         if (
@@ -601,10 +607,24 @@ def _unwrap_field_alias_type(expr_type: Optional[ast.Type]) -> Optional[ast.Type
     return expr_type
 
 
-def _unwrap_table_alias_type(table_type: Optional[ast.Type]) -> Optional[ast.Type]:
+def unwrap_table_alias_type(table_type: Optional[ast.Type]) -> Optional[ast.Type]:
     while isinstance(table_type, (ast.TableAliasType, ast.ColumnAliasedTableType)):
         table_type = table_type.table_type
     return table_type
+
+
+def event_field_type(expr: ast.Expr) -> ast.FieldType | None:
+    """The type of the `event` column that resolved `expr` reads, or None when it reads something else."""
+    # The resolver wraps a field without a table prefix in an alias when the query has several tables.
+    while isinstance(expr, ast.Alias):
+        expr = expr.expr
+    if not isinstance(expr, ast.Field):
+        return None
+    # A select alias used in WHERE wraps the column in one FieldAliasType per alias.
+    field_type = expr.type
+    while isinstance(field_type, ast.FieldAliasType):
+        field_type = field_type.type
+    return field_type if isinstance(field_type, ast.FieldType) and field_type.name == "event" else None
 
 
 def get_events_session_id_table_type(node: ast.Expr) -> Optional[ast.BaseTableType]:
@@ -633,7 +653,7 @@ def get_events_session_id_table_type(node: ast.Expr) -> Optional[ast.BaseTableTy
     else:
         return None
 
-    unwrapped = _unwrap_table_alias_type(table_type)
+    unwrapped = unwrap_table_alias_type(table_type)
     if isinstance(unwrapped, ast.TableType) and isinstance(unwrapped.table, EventsTable):
         return cast(ast.BaseTableType, table_type)
     return None
@@ -653,6 +673,14 @@ def extract_uuid_constants(node: ast.Expr) -> list[ast.Constant]:
     return []
 
 
+def top_level_conjuncts(expr: ast.Expr) -> list[ast.Expr]:
+    if isinstance(expr, ast.And):
+        return [conjunct for sub in expr.exprs for conjunct in top_level_conjuncts(sub)]
+    if isinstance(expr, ast.Call) and expr.name == "and":
+        return [conjunct for sub in expr.args for conjunct in top_level_conjuncts(sub)]
+    return [expr]
+
+
 def build_session_id_literal_pushdown_predicate(
     outer_node: ast.SelectQuery,
     join_to_add: LazyJoinToAdd,
@@ -669,18 +697,11 @@ def build_session_id_literal_pushdown_predicate(
     if events_join is None or not isinstance(events_join.table, ast.Field):
         return None
 
-    events_table_type = _unwrap_table_alias_type(events_join.table.type)
+    events_table_type = unwrap_table_alias_type(events_join.table.type)
     if events_table_type is None:
         return None
 
-    def flatten_and(expr: ast.Expr) -> list[ast.Expr]:
-        if isinstance(expr, ast.And):
-            return [t for sub in expr.exprs for t in flatten_and(sub)]
-        if isinstance(expr, ast.Call) and expr.name == "and":
-            return [t for sub in expr.args for t in flatten_and(sub)]
-        return [expr]
-
-    for term in flatten_and(outer_node.where):
+    for term in top_level_conjuncts(outer_node.where):
         if not isinstance(term, ast.CompareOperation) or term.op not in (
             CompareOperationOp.In,
             CompareOperationOp.Eq,
@@ -690,7 +711,7 @@ def build_session_id_literal_pushdown_predicate(
             continue
         # only push filters owned by the events occurrence this lazy join hangs off
         owner = get_events_session_id_table_type(term.left)
-        if owner is None or _unwrap_table_alias_type(owner) is not events_table_type:
+        if owner is None or unwrap_table_alias_type(owner) is not events_table_type:
             continue
         constants = extract_uuid_constants(term.right)
         if not constants or len(constants) > SESSION_ID_LITERAL_PUSHDOWN_MAX_IDS:
@@ -1298,6 +1319,12 @@ def references_joined_table(
     return finder.found_joined_reference
 
 
+@frozen
+class PushdownSplit:
+    inner_where: Optional[ast.Expr]
+    outer_where: Optional[ast.Expr]
+
+
 class EventsPredicatePushdownExtractor:
     """
     Extracts predicates from a WHERE clause that can be pushed down into an events subquery.
@@ -1320,12 +1347,12 @@ class EventsPredicatePushdownExtractor:
         self.events_table_type = events_table_type
         self.select_aliases = select_aliases or {}
 
-    def get_pushdown_predicates(self, where: ast.Expr) -> tuple[Optional[ast.Expr], Optional[ast.Expr]]:
+    def get_pushdown_predicates(self, where: ast.Expr) -> PushdownSplit:
         """
         Split a WHERE expression into inner (pushable) and outer (non-pushable) parts.
 
         Returns:
-            (inner_where, outer_where) tuple where:
+            PushdownSplit where:
             - inner_where: Predicates to push into events subquery (or None if none)
             - outer_where: Predicates to keep in outer query (or None if none)
         """
@@ -1334,7 +1361,7 @@ class EventsPredicatePushdownExtractor:
         inner_where = self._combine_with_and(inner_exprs)
         outer_where = self._combine_with_and(outer_exprs)
 
-        return (inner_where, outer_where)
+        return PushdownSplit(inner_where=inner_where, outer_where=outer_where)
 
     def _split_expression(self, expr: ast.Expr) -> tuple[list[ast.Expr], list[ast.Expr]]:
         """

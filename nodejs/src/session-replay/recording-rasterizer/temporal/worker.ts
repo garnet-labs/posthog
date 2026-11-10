@@ -10,15 +10,20 @@ import { BrowserPool } from '~/session-replay/recording-rasterizer/capture/brows
 import { playerHtmlCache } from '~/session-replay/recording-rasterizer/capture/capture-page'
 import { config } from '~/session-replay/recording-rasterizer/config'
 import { createLogger } from '~/session-replay/recording-rasterizer/logger'
+import { RasterizationMetrics } from '~/session-replay/recording-rasterizer/metrics'
 import { initMetrics, shutdownMetrics } from '~/session-replay/recording-rasterizer/otel-metrics'
 
 import { createActivities } from './activities'
+import { installUnhandledRejectionGuard } from './install-unhandled-rejection-guard'
 
 prometheus.collectDefaultMetrics()
+RasterizationMetrics.initialize()
 // OTLP push into the PostHog Metrics product; no-op unless OTEL_METRICS_EXPORT_URL/TOKEN are set.
 initMetrics()
 
 const log = createLogger()
+
+installUnhandledRejectionGuard(log, () => RasterizationMetrics.incrementUnhandledRejection())
 
 // Route Temporal SDK logs through our JSON logger so all output is structured.
 Runtime.install({
@@ -100,14 +105,14 @@ function startMetricsServer(): http.Server {
     })
 
     return Object.assign(server, {
-        setReady: () => {
-            ready = true
+        setReady: (value: boolean) => {
+            ready = value
         },
     })
 }
 
 async function main(): Promise<void> {
-    const metricsServer = startMetricsServer() as http.Server & { setReady: () => void }
+    const metricsServer = startMetricsServer() as http.Server & { setReady: (value: boolean) => void }
 
     const address = `${config.temporalHost}:${config.temporalPort}`
     const tls = await buildTLSConfig()
@@ -128,7 +133,20 @@ async function main(): Promise<void> {
         namespace: config.temporalNamespace,
         taskQueue: config.taskQueue,
         activities: createActivities(pool, playerHtml),
-        maxConcurrentActivityTaskExecutions: config.maxConcurrentActivities,
+        // A render's memory grows for minutes after pickup, so a fixed slot count keeps taking work on a
+        // pod that is already near its limit. The tuner stops taking work above these targets, and the
+        // ramp throttle gives each new render time to show its memory before the next slot opens.
+        tuner: {
+            tunerOptions: {
+                targetMemoryUsage: config.tunerTargetMemoryUsage,
+                targetCpuUsage: config.tunerTargetCpuUsage,
+            },
+            activityTaskSlotOptions: {
+                minimumSlots: 1,
+                maximumSlots: config.maxConcurrentActivities,
+                rampThrottle: config.tunerRampThrottleMs,
+            },
+        },
         dataConverter: config.secretKey
             ? { payloadCodecs: [new EncryptionCodec(config.secretKey, config.fallbackKeys)] }
             : undefined,
@@ -138,12 +156,16 @@ async function main(): Promise<void> {
         // parent workflow on short recordings. 2s matches the summary polling cadence.
         defaultHeartbeatThrottleInterval: '2s',
         maxHeartbeatThrottleInterval: '5s',
+        // Let in-flight renders finish after shutdown() instead of cancelling them right away (SDK default 0).
+        shutdownGraceTime: config.shutdownGraceTimeMs,
     })
 
-    metricsServer.setReady()
+    metricsServer.setReady(true)
 
     const shutdown = () => {
         log.info('shutting down')
+        // Flip readiness first so the pod drops out of rotation while activities drain.
+        metricsServer.setReady(false)
         worker.shutdown()
     }
 

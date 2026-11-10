@@ -1,8 +1,14 @@
 import datetime
 from zoneinfo import ZoneInfo
 
-from freezegun.api import freeze_time
-from posthog.test.base import APIBaseTest, ClickhouseDestroyTablesMixin, _create_event, flush_persons_and_events
+import time_machine
+from posthog.test.base import (
+    APIBaseTest,
+    BaseTest,
+    ClickhouseDestroyTablesMixin,
+    _create_event,
+    flush_persons_and_events,
+)
 from unittest.mock import MagicMock, patch
 
 from django.core.cache import cache
@@ -11,18 +17,24 @@ from django.test import override_settings
 from dateutil import parser
 from parameterized import parameterized
 
-from posthog.schema import ActionsNode, DataWarehouseNode, DateRange, EventsNode, IntervalType
+from posthog.schema import ActionsNode, DataWarehouseNode, DateRange, EventsNode, HogQLQueryModifiers, IntervalType
+
+from posthog.hogql.query import execute_hogql_query
 
 from posthog.clickhouse.query_tagging import Feature, Product, get_query_tags, tags_context
 from posthog.hogql_queries.utils.query_date_range import QueryDateRange
 from posthog.hogql_queries.utils.timestamp_utils import (
     EARLIEST_EVENT_TIMESTAMP,
     _coerce_to_datetime,
+    _events_route_cache_key,
+    _events_route_modifiers,
     _get_earliest_timestamp_cache_key,
     format_label_date,
     get_earliest_timestamp_from_series,
     get_earliest_timestamp_unfiltered,
 )
+from posthog.models.event.new_events_schema import events_route_scope
+from posthog.models.instance_setting import override_instance_config
 from posthog.models.team import WeekStartDay
 
 from products.actions.backend.models.action import Action
@@ -352,7 +364,7 @@ class TestTimestampUtils(APIBaseTest, ClickhouseDestroyTablesMixin):
         cached_earliest_timestamp = get_earliest_timestamp_from_series(self.team, series)
         self.assertEqual(cached_earliest_timestamp, earliest_timestamp)
 
-    @freeze_time("2021-01-21")
+    @time_machine.travel("2021-01-21", tick=False)
     def test_unfiltered_earliest_timestamp_returns_earliest_event(self):
         _create_event(team=self.team, event="sign up", distinct_id="1", timestamp="2020-01-04T14:10:00Z")
         _create_event(team=self.team, event="sign up", distinct_id="1", timestamp="2020-01-06T14:10:00Z")
@@ -362,7 +374,7 @@ class TestTimestampUtils(APIBaseTest, ClickhouseDestroyTablesMixin):
             2020, 1, 4, 14, 10, tzinfo=datetime.UTC
         )
 
-    @freeze_time("2021-01-21")
+    @time_machine.travel("2021-01-21", tick=False)
     def test_unfiltered_earliest_timestamp_floors_at_2015(self):
         # Events before 2015-01-01 are treated as corrupt and ignored.
         _create_event(team=self.team, event="sign up", distinct_id="1", timestamp="1984-01-06T14:10:00Z")
@@ -373,12 +385,12 @@ class TestTimestampUtils(APIBaseTest, ClickhouseDestroyTablesMixin):
 
         assert get_earliest_timestamp_unfiltered(self.team) == datetime.datetime(2015, 1, 1, 1, tzinfo=datetime.UTC)
 
-    @freeze_time("2021-01-21")
+    @time_machine.travel("2021-01-21", tick=False)
     def test_unfiltered_earliest_timestamp_falls_back_when_no_events(self):
         # No events: fall back to now - DEFAULT_EARLIEST_TIME_DELTA (one week).
         assert get_earliest_timestamp_unfiltered(self.team) == datetime.datetime(2021, 1, 14, tzinfo=datetime.UTC)
 
-    @freeze_time("2021-01-21")
+    @time_machine.travel("2021-01-21", tick=False)
     def test_unfiltered_earliest_timestamp_caches_real_result(self):
         _create_event(team=self.team, event="sign up", distinct_id="1", timestamp="2021-01-01T12:00:00Z")
         flush_persons_and_events()
@@ -390,6 +402,26 @@ class TestTimestampUtils(APIBaseTest, ClickhouseDestroyTablesMixin):
         flush_persons_and_events()
 
         assert get_earliest_timestamp_unfiltered(self.team) == earliest_timestamp
+
+    def test_unfiltered_earliest_timestamp_reads_in_sort_key_order(self):
+        printed: list[str | None] = []
+        lookups: list[str | None] = []
+
+        def run(*args, **kwargs):
+            lookups.append(get_query_tags().lookup)
+            response = execute_hogql_query(*args, **kwargs)
+            printed.append(response.clickhouse)
+            return response
+
+        with patch("posthog.hogql_queries.utils.timestamp_utils.execute_hogql_query", side_effect=run):
+            get_earliest_timestamp_unfiltered(self.team)
+
+        assert printed[0] is not None
+        self.assertRegex(
+            printed[0],
+            r"ORDER BY\s+toDate\(events\.timestamp\) ASC,\s+toTimeZone\(events\.timestamp, %\(hogql_val_\d+\)s\) ASC\s+LIMIT 1",
+        )
+        self.assertEqual(lookups, ["earliest_timestamp"])
 
     @parameterized.expand(
         [
@@ -504,7 +536,9 @@ class TestTimestampUtils(APIBaseTest, ClickhouseDestroyTablesMixin):
         # TTL window. A cache hit must still pass through _coerce_to_datetime instead of
         # returning the raw value, otherwise downstream date math hits AttributeError/TypeError.
         node = EventsNode(event="$pageview")
-        cache_key = _get_earliest_timestamp_cache_key(self.team, node)
+        cache_key = _events_route_cache_key(
+            self.team, _events_route_modifiers(self.team), _get_earliest_timestamp_cache_key(self.team, node)
+        )
         # team timezone is UTC in tests; "2021-03-15" is the pre-fix raw Date/String shape.
         cache.set(cache_key, "2021-03-15", timeout=3600)
 
@@ -531,10 +565,11 @@ class TestTimestampUtils(APIBaseTest, ClickhouseDestroyTablesMixin):
     def test_single_path_query_tags(self, _name, caller_product, caller_feature, expected_product, expected_feature):
         captured: dict[str, object] = {}
 
-        def capture(query, team, user=None):
+        def capture(query, team, user=None, modifiers=None):
             tags = get_query_tags()
             captured["product"] = tags.product
             captured["feature"] = tags.feature
+            captured["lookup"] = tags.lookup
             result = MagicMock()
             result.results = [[datetime.datetime(2020, 1, 1, tzinfo=datetime.UTC)]]
             return result
@@ -548,3 +583,79 @@ class TestTimestampUtils(APIBaseTest, ClickhouseDestroyTablesMixin):
 
         self.assertEqual(captured["product"], expected_product)
         self.assertEqual(captured["feature"], expected_feature)
+        self.assertEqual(captured["lookup"], "earliest_timestamp")
+
+
+class TestEarliestTimestampRouting(BaseTest):
+    def tearDown(self):
+        super().tearDown()
+        cache.clear()
+
+    @parameterized.expand([("series",), ("unfiltered",)])
+    @override_settings(CLICKHOUSE_HOGQL_USE_NEW_EVENTS_SCHEMA=False)
+    def test_native_route_reads_events_json_and_skips_the_legacy_cache(self, lookup: str) -> None:
+        node = EventsNode(event="$pageview")
+        legacy = datetime.datetime(2022, 1, 1, tzinfo=ZoneInfo("UTC"))
+        native = datetime.datetime(2020, 1, 1, tzinfo=ZoneInfo("UTC"))
+        if lookup == "series":
+            cache.set(_get_earliest_timestamp_cache_key(self.team, node), legacy)
+        else:
+            cache.set(f"earliest_timestamp_unfiltered_{self.team.pk}", legacy)
+
+        def earliest() -> datetime.datetime:
+            if lookup == "series":
+                return get_earliest_timestamp_from_series(self.team, [node])
+            return get_earliest_timestamp_unfiltered(self.team)
+
+        with patch(
+            "posthog.hogql.query.sync_execute", return_value=([(native,)], [("timestamp", "DateTime")])
+        ) as execute:
+            with events_route_scope(HogQLQueryModifiers(useNewEventsSchema=True)):
+                self.assertEqual(earliest(), native)
+                self.assertEqual(earliest(), native)
+            self.assertEqual(earliest(), legacy)
+        execute.assert_called_once()
+        self.assertIn("events_json", execute.call_args.args[0])
+
+    def test_route_keys_never_collide_with_legacy_event_keys(self) -> None:
+        legacy_events_json_event = datetime.datetime(2022, 1, 1, tzinfo=ZoneInfo("UTC"))
+        cache.set(
+            _get_earliest_timestamp_cache_key(self.team, EventsNode(event="events_json")), legacy_events_json_event
+        )
+        native = datetime.datetime(2020, 1, 1, tzinfo=ZoneInfo("UTC"))
+        with (
+            patch("posthog.hogql.query.sync_execute", return_value=([(native,)], [("timestamp", "DateTime")])),
+            events_route_scope(HogQLQueryModifiers(useNewEventsSchema=True)),
+        ):
+            self.assertEqual(get_earliest_timestamp_from_series(self.team, [EventsNode(event=None)]), native)
+
+    @parameterized.expand(
+        [
+            ("allowlisted_project", True, {}, True),
+            ("stored_project_modifier_is_ignored", False, {"useNewEventsSchema": True}, False),
+        ]
+    )
+    @override_settings(CLICKHOUSE_HOGQL_USE_NEW_EVENTS_SCHEMA=False)
+    def test_lookup_outside_a_run_keys_on_the_events_table_it_reads(
+        self, _name: str, allowlisted: bool, team_modifiers: dict[str, bool], reads_events_json: bool
+    ) -> None:
+        self.team.modifiers = team_modifiers
+        node = EventsNode(event="$pageview")
+        legacy = datetime.datetime(2022, 1, 1, tzinfo=ZoneInfo("UTC"))
+        native = datetime.datetime(2020, 1, 1, tzinfo=ZoneInfo("UTC"))
+        cache.set(_get_earliest_timestamp_cache_key(self.team, node), legacy)
+        with (
+            override_instance_config(
+                "CLICKHOUSE_HOGQL_USE_NEW_EVENTS_SCHEMA_TEAMS", str(self.team.pk) if allowlisted else ""
+            ),
+            patch(
+                "posthog.hogql.query.sync_execute", return_value=([(native,)], [("timestamp", "DateTime")])
+            ) as execute,
+        ):
+            earliest = get_earliest_timestamp_from_series(self.team, [node])
+        if reads_events_json:
+            self.assertEqual(earliest, native)
+            self.assertIn("events_json", execute.call_args.args[0])
+        else:
+            self.assertEqual(earliest, legacy)
+            execute.assert_not_called()

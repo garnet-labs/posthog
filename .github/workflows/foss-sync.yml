@@ -4,7 +4,6 @@ on:
     push:
         branches:
             - master
-            - main
 
 concurrency:
     group: foss-sync
@@ -16,6 +15,10 @@ jobs:
         if: github.repository == 'PostHog/posthog'
         runs-on: ubuntu-24.04
         timeout-minutes: 10
+        # The environment holds the app key and admits only master runs, so a branch workflow cannot read it.
+        environment:
+            name: posthog-foss-sync
+            deployment: false
         permissions:
             contents: read
         steps:
@@ -23,7 +26,7 @@ jobs:
               id: app-token
               uses: actions/create-github-app-token@1b10c78c7865c340bc4f6099eb2f838309f1e8c3 # v3.1.1
               with:
-                  client-id: ${{ secrets.GH_APP_POSTHOG_FOSS_SYNC_APP_ID }}
+                  client-id: ${{ vars.GH_APP_POSTHOG_FOSS_SYNC_APP_ID }}
                   private-key: ${{ secrets.GH_APP_POSTHOG_FOSS_SYNC_PRIVATE_KEY }}
                   owner: PostHog
                   repositories: posthog-foss

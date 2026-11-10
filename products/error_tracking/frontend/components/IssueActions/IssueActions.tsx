@@ -1,8 +1,19 @@
 import { useActions, useValues } from 'kea'
 
-import { LemonButton, LemonDialog, LemonSelect } from '@posthog/lemon-ui'
+import { LemonDialog } from '@posthog/lemon-ui'
 
 import { useHogfetti } from 'lib/components/Hogfetti/Hogfetti'
+import {
+    Button,
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+    Tooltip,
+    TooltipContent,
+    TooltipTrigger,
+} from 'lib/ui/quill'
 import { newInternalTab } from 'lib/utils/newInternalTab'
 import { urls } from 'scenes/urls'
 
@@ -23,6 +34,7 @@ export interface IssueActionsProps {
 
 export function IssueActions({ issues, selectedIds }: IssueActionsProps): JSX.Element {
     const { mergeIssues, assignIssues, resolveIssues, suppressIssues, activateIssues } = useActions(issueActionsLogic)
+    const { mergeInFlight } = useValues(issueActionsLogic)
     const { filterGroup } = useValues(issueFiltersLogic)
     const { setFilterGroup } = useActions(issueFiltersLogic)
     const { setSelectedIssueIds } = useActions(bulkSelectLogic)
@@ -74,36 +86,48 @@ export function IssueActions({ issues, selectedIds }: IssueActionsProps): JSX.El
 
     let options: IssueStatus[] = ['active', 'resolved', 'suppressed']
 
+    const mergeButton = (
+        <Button
+            variant="outline"
+            disabled={!hasAtLeastTwoIssues || mergeInFlight}
+            loading={mergeInFlight}
+            onClick={() =>
+                LemonDialog.open({
+                    title: 'Merge Issues',
+                    content: `Are you sure you want to merge these ${selectedIds.length} issues?`,
+                    primaryButton: {
+                        children: 'Merge',
+                        status: 'danger',
+                        onClick: () => {
+                            mergeIssues(selectedIds)
+                        },
+                    },
+                })
+            }
+        >
+            Merge
+        </Button>
+    )
+
     return (
         <div className="flex gap-x-2 justify-between">
             <HogfettiComponent />
             <div className="flex gap-x-2">
-                <LemonButton type="secondary" size="small" onClick={openInNewTabs}>
+                <Button variant="outline" onClick={openInNewTabs}>
                     Open all
-                </LemonButton>
-                <LemonButton
-                    disabledReason={!hasAtLeastTwoIssues ? 'Select at least two issues to merge' : null}
-                    type="secondary"
-                    size="small"
-                    onClick={() =>
-                        LemonDialog.open({
-                            title: 'Merge Issues',
-                            content: `Are you sure you want to merge these ${selectedIds.length} issues?`,
-                            primaryButton: {
-                                children: 'Merge',
-                                status: 'danger',
-                                onClick: () => {
-                                    mergeIssues(selectedIds)
-                                },
-                            },
-                        })
-                    }
-                >
-                    Merge
-                </LemonButton>
-                <LemonSelect
-                    onChange={(value) => {
-                        if (value == currentStatus) {
+                </Button>
+                {hasAtLeastTwoIssues ? (
+                    mergeButton
+                ) : (
+                    <Tooltip>
+                        <TooltipTrigger render={mergeButton} />
+                        <TooltipContent>Select at least two issues to merge</TooltipContent>
+                    </Tooltip>
+                )}
+                <Select
+                    value={currentStatus === 'mixed' ? null : currentStatus}
+                    onValueChange={(value) => {
+                        if (!value || value === currentStatus) {
                             return
                         }
                         switch (value) {
@@ -121,30 +145,40 @@ export function IssueActions({ issues, selectedIds }: IssueActionsProps): JSX.El
                                 break
                         }
                     }}
-                    value={currentStatus == 'mixed' ? null : currentStatus}
-                    placeholder="Mark as"
-                    options={options.map((key) => ({
-                        value: key,
-                        label: <StatusIndicator status={key} size="small" className="w-full" withTooltip="right" />,
-                    }))}
-                    size="small"
-                />
+                >
+                    <SelectTrigger>
+                        <SelectValue>
+                            {currentStatus && currentStatus !== 'mixed' ? (
+                                <StatusIndicator status={currentStatus} size="xsmall" className="w-full" />
+                            ) : (
+                                'Mark as'
+                            )}
+                        </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent align="start" alignItemWithTrigger={false}>
+                        {options.map((status) => (
+                            <SelectItem key={status} value={status}>
+                                <StatusIndicator status={status} size="xsmall" className="w-full" withTooltip="right" />
+                            </SelectItem>
+                        ))}
+                    </SelectContent>
+                </Select>
                 <AssigneeSelect assignee={null} onChange={(assignee) => assignIssues(selectedIds, assignee)}>
                     {(displayAssignee) => (
-                        <LemonButton type="secondary" size="small">
+                        <Button variant="outline">
                             <AssigneeLabelDisplay assignee={displayAssignee} placeholder="Assign" />
-                        </LemonButton>
+                        </Button>
                     )}
                 </AssigneeSelect>
                 {issues.some((issue) => selectedIds.includes(issue.id) && issue.assignee != null) && (
-                    <LemonButton type="secondary" size="small" onClick={() => assignIssues(selectedIds, null)}>
+                    <Button variant="outline" onClick={() => assignIssues(selectedIds, null)}>
                         Unassign
-                    </LemonButton>
+                    </Button>
                 )}
             </div>
-            <LemonButton type="secondary" size="small" onClick={excludeSelectedIssues}>
+            <Button variant="outline" onClick={excludeSelectedIssues}>
                 Hide from search
-            </LemonButton>
+            </Button>
         </div>
     )
 }

@@ -1,23 +1,36 @@
+import io
+import zipfile
 import datetime as dt
 from collections.abc import Iterable
 
 import pytest
 from unittest.mock import MagicMock, Mock, patch
 
+from bingads.v13.reporting import ReportingException
 from parameterized import parameterized
 
 from products.warehouse_sources.backend.temporal.data_imports.sources.bing_ads.bing_ads import (
     BING_ADS_REPORT_RETENTION,
     bing_ads_source,
 )
-from products.warehouse_sources.backend.temporal.data_imports.sources.bing_ads.schemas import BingAdsResource
+from products.warehouse_sources.backend.temporal.data_imports.sources.bing_ads.schemas import (
+    REPORT_CONFIG,
+    RESOURCE_SCHEMAS,
+    BingAdsResource,
+)
+from products.warehouse_sources.backend.temporal.data_imports.sources.bing_ads.source import BingAdsSource
 from products.warehouse_sources.backend.temporal.data_imports.sources.bing_ads.utils import (
+    REPORT_GENERATION_ATTEMPTS,
     BingAdsResumeConfig,
-    download_and_extract_report_csv,
     fetch_data_in_yearly_chunks,
-    parse_csv_to_dicts,
+    iter_csv_row_pages,
+    iter_report_row_pages,
 )
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.resumable import ResumableSourceManager
+from products.warehouse_sources.backend.temporal.data_imports.sources.common.testing import DriveResult, SourceDriver
+from products.warehouse_sources.backend.temporal.data_imports.sources.generated_configs.bingads import (
+    BingAdsSourceConfig,
+)
 from products.warehouse_sources.backend.types import IncrementalFieldType
 
 
@@ -33,117 +46,15 @@ def _mock_resumable_manager(
 class TestBingAdsHelperFunctions:
     """Test helper functions in bing_ads.py and utils.py."""
 
-    def test_parse_csv_to_dicts_valid_data(self):
-        """Test parsing valid CSV report data."""
-        csv_data = """TimePeriod,CampaignId,CampaignName,Impressions,Clicks
-2024-01-01,123,Test Campaign,1000,50
-2024-01-02,123,Test Campaign,1200,60"""
+    @parameterized.expand([(1, [1, 1, 1, 1, 1]), (2, [2, 2, 1]), (5, [5]), (50, [5])])
+    def test_iter_csv_row_pages_splits_into_bounded_pages(self, page_rows: int, expected_sizes: list[int]):
+        header = "TimePeriod,CampaignId\n"
+        body = "".join(f"2024-01-0{day},{day}\n" for day in range(1, 6))
 
-        result = parse_csv_to_dicts(csv_data)
+        pages = list(iter_csv_row_pages(io.StringIO(header + body, newline=""), page_rows=page_rows))
 
-        assert len(result) == 2
-        assert result[0]["TimePeriod"] == "2024-01-01"
-        assert result[0]["CampaignId"] == "123"
-        assert result[0]["Impressions"] == "1000"
-        assert result[1]["TimePeriod"] == "2024-01-02"
-
-    def test_parse_csv_to_dicts_with_null_values(self):
-        """Test parsing CSV with null values (--) and empty strings."""
-        csv_data = """TimePeriod,CampaignId,CampaignName,Impressions,Clicks
-2024-01-01,123,Test Campaign,--,
-2024-01-02,456,--,1000,50"""
-
-        result = parse_csv_to_dicts(csv_data)
-
-        assert len(result) == 2
-        assert result[0]["Impressions"] is None
-        assert result[0]["Clicks"] is None
-        assert result[1]["CampaignName"] is None
-
-    def test_fetch_data_in_yearly_chunks_single_chunk(self):
-        """Test fetching data within a single year."""
-        mock_client = Mock()
-        mock_client.get_data_by_resource.return_value = iter([[{"CampaignId": "123", "Clicks": "100"}]])
-
-        start_date = dt.date(2024, 1, 1)
-        end_date = dt.date(2024, 6, 30)
-
-        manager = _mock_resumable_manager()
-        result = list(
-            fetch_data_in_yearly_chunks(
-                client=mock_client,
-                resource=BingAdsResource.CAMPAIGN_PERFORMANCE_REPORT,
-                account_id=12345,
-                start_date=start_date,
-                end_date=end_date,
-                resumable_source_manager=manager,
-            )
-        )
-
-        assert len(result) == 1
-        assert result[0][0]["CampaignId"] == "123"
-        mock_client.get_data_by_resource.assert_called_once()
-        manager.save_state.assert_called_once_with(
-            BingAdsResumeConfig(next_start_date="2024-07-01", end_date=end_date.isoformat())
-        )
-
-    def test_fetch_data_in_yearly_chunks_multiple_chunks(self):
-        """Test fetching data across multiple years."""
-        mock_client = Mock()
-        mock_client.get_data_by_resource.side_effect = [
-            iter([[{"year": "2023"}]]),
-            iter([[{"year": "2024"}]]),
-            iter([[{"year": "2025"}]]),
-        ]
-
-        start_date = dt.date(2023, 1, 1)
-        end_date = dt.date(2025, 6, 30)
-
-        manager = _mock_resumable_manager()
-        result = list(
-            fetch_data_in_yearly_chunks(
-                client=mock_client,
-                resource=BingAdsResource.CAMPAIGN_PERFORMANCE_REPORT,
-                account_id=12345,
-                start_date=start_date,
-                end_date=end_date,
-                resumable_source_manager=manager,
-            )
-        )
-
-        assert len(result) == 3
-        assert mock_client.get_data_by_resource.call_count == 3
-        # One checkpoint after each chunk
-        assert manager.save_state.call_count == 3
-        first_checkpoint = manager.save_state.call_args_list[0].args[0]
-        assert first_checkpoint == BingAdsResumeConfig(next_start_date="2024-01-02", end_date=end_date.isoformat())
-
-    def test_fetch_data_in_yearly_chunks_same_day(self):
-        mock_client = Mock()
-        mock_client.get_data_by_resource.return_value = iter([[{"CampaignId": "123", "Clicks": "100"}]])
-
-        today = dt.date(2026, 4, 10)
-
-        manager = _mock_resumable_manager()
-        result = list(
-            fetch_data_in_yearly_chunks(
-                client=mock_client,
-                resource=BingAdsResource.CAMPAIGN_PERFORMANCE_REPORT,
-                account_id=12345,
-                start_date=today,
-                end_date=today,
-                resumable_source_manager=manager,
-            )
-        )
-
-        assert len(result) == 1
-        assert result[0][0]["CampaignId"] == "123"
-        mock_client.get_data_by_resource.assert_called_once_with(
-            resource=BingAdsResource.CAMPAIGN_PERFORMANCE_REPORT,
-            account_id=12345,
-            start_date=dt.datetime.combine(today, dt.time.min),
-            end_date=dt.datetime.combine(today, dt.time.max),
-        )
+        assert [len(page) for page in pages] == expected_sizes
+        assert [row["CampaignId"] for page in pages for row in page] == ["1", "2", "3", "4", "5"]
 
     def test_fetch_data_in_yearly_chunks_failure_fails_sync(self):
         """A chunk failure propagates so the sync fails rather than completing with missing data.
@@ -216,20 +127,69 @@ class TestBingAdsHelperFunctions:
         # The skipped chunk still advances the checkpoint, so all three chunks are accounted for
         assert manager.save_state.call_count == 3
 
-    def test_download_and_extract_report_csv_no_file_returns_empty(self):
-        # Bing returns no file (download_file -> None) when a report has zero rows for the range;
-        # treat it as an empty report instead of crashing on Path(None).
-        manager = Mock()
-        manager.download_file.return_value = None
+    def test_iter_report_row_pages_streams_the_zipped_csv(self, tmp_path):
+        # The BOM Bing prefixes the report with must not survive into the first column name.
+        report_zip = tmp_path / "report.zip"
+        with zipfile.ZipFile(report_zip, "w") as archive:
+            rows = "".join(f"2024-01-0{day},{day}\n" for day in range(1, 5))
+            archive.writestr("report.csv", ("\ufeffTimePeriod,CampaignId\n" + rows).encode("utf-8"))
 
-        result = download_and_extract_report_csv(
-            reporting_service_manager=manager,
-            report_request=Mock(),
-            report_type="CampaignPerformanceReportRequest",
-            account_id=12345,
+        manager = Mock()
+        manager.download_file.return_value = str(report_zip)
+
+        pages = list(
+            iter_report_row_pages(
+                reporting_service_manager=manager,
+                report_request=Mock(),
+                report_type="CampaignPerformanceReportRequest",
+                account_id=12345,
+                page_rows=3,
+            )
         )
 
-        assert result == ""
+        assert [len(page) for page in pages] == [3, 1]
+        assert pages[0][0] == {"TimePeriod": "2024-01-01", "CampaignId": "1"}
+
+    @patch("products.warehouse_sources.backend.temporal.data_imports.sources.bing_ads.utils.time.sleep")
+    def test_iter_report_row_pages_resubmits_failed_report_generation(self, _mock_sleep):
+        # Bing sometimes finishes building a report in a failed state and the SDK raises a detail-free
+        # ReportingException. Resubmitting recovers it, instead of failing the run over a Bing-side flake.
+        manager = Mock()
+        manager.download_file.side_effect = [
+            ReportingException("Exceptions while reporting download.", "Error"),
+            None,
+        ]
+
+        result = list(
+            iter_report_row_pages(
+                reporting_service_manager=manager,
+                report_request=Mock(),
+                report_type="KeywordPerformanceReportRequest",
+                account_id=12345,
+            )
+        )
+
+        assert result == []
+        assert manager.download_file.call_count == 2
+
+    @patch("products.warehouse_sources.backend.temporal.data_imports.sources.bing_ads.utils.time.sleep")
+    def test_iter_report_row_pages_gives_up_after_repeated_generation_failures(self, _mock_sleep):
+        # A report that keeps failing to build propagates, so the sync fails and the pipeline can
+        # retry it, instead of recording an empty report.
+        manager = Mock()
+        manager.download_file.side_effect = ReportingException("Exceptions while reporting download.", "Error")
+
+        with pytest.raises(ReportingException):
+            list(
+                iter_report_row_pages(
+                    reporting_service_manager=manager,
+                    report_request=Mock(),
+                    report_type="KeywordPerformanceReportRequest",
+                    account_id=12345,
+                )
+            )
+
+        assert manager.download_file.call_count == REPORT_GENERATION_ATTEMPTS
 
     def test_fetch_data_in_yearly_chunks_resumes_from_saved_state(self):
         """When resume state exists, the loop starts at the saved chunk boundary and does not re-fetch earlier chunks."""
@@ -262,6 +222,25 @@ class TestBingAdsHelperFunctions:
         )
 
 
+class TestKeywordPerformanceReport:
+    """The keyword performance report rides the generic report path, so these guard the two
+    ways it can be mis-wired without any live call catching it."""
+
+    def test_keyword_report_wired_through_report_path(self):
+        # get_data_by_resource routes a resource through the report path only if it's in REPORT_CONFIG;
+        # adding the enum member but forgetting the config would raise "Unsupported resource" at sync time.
+        assert BingAdsResource.KEYWORD_PERFORMANCE_REPORT in REPORT_CONFIG
+        assert BingAdsResource.KEYWORD_PERFORMANCE_REPORT in RESOURCE_SCHEMAS
+
+    def test_keyword_report_grain_is_keyword_per_day(self):
+        # KeywordId + TimePeriod is the intended one-row-per-keyword-per-day grain. DeliveredMatchType
+        # would split a keyword-day into one row per served match type; if it slips into the column list
+        # the merge dedup on this primary key silently drops rows, so lock both facts down together.
+        schema = RESOURCE_SCHEMAS[BingAdsResource.KEYWORD_PERFORMANCE_REPORT]
+        assert schema["primary_key"] == ["KeywordId", "TimePeriod"]
+        assert "DeliveredMatchType" not in schema["field_names"]
+
+
 class TestBingAdsSource:
     """Test suite for main Bing Ads source function."""
 
@@ -271,11 +250,24 @@ class TestBingAdsSource:
         self.access_token = "test_access_token"
         self.refresh_token = "test_refresh_token"
 
+    def _drive(self, schema_name: str, account_id: str | None = None, **inputs: object) -> DriveResult:
+        config = BingAdsSourceConfig(
+            account_id=account_id if account_id is not None else self.account_id, bing_ads_integration_id=1
+        )
+        integration = Mock(access_token=self.access_token, refresh_token=self.refresh_token)
+        with patch.object(BingAdsSource, "get_oauth_integration", return_value=integration):
+            return SourceDriver(BingAdsSource(), config).run(schema_name, [], **inputs)
+
     @patch("products.warehouse_sources.backend.temporal.data_imports.sources.bing_ads.bing_ads.BingAdsClient")
-    @patch("products.warehouse_sources.backend.temporal.data_imports.sources.bing_ads.bing_ads.integrations")
-    def test_bing_ads_source_campaigns(self, mock_integrations, mock_client_class):
-        """Test source function for campaigns (non-report endpoint)."""
-        mock_integrations.BING_ADS_DEVELOPER_TOKEN = "test_dev_token"
+    @patch(
+        "products.warehouse_sources.backend.temporal.data_imports.sources.bing_ads.bing_ads.credentials_service.get_secrets"
+    )
+    def test_bing_ads_source_campaigns(self, mock_secrets, mock_client_class):
+        mock_secrets.return_value = {
+            "BING_ADS_DEVELOPER_TOKEN": "test_dev_token",
+            "BING_ADS_CLIENT_ID": "test_client_id",
+            "BING_ADS_CLIENT_SECRET": "test_client_secret",
+        }
 
         mock_client = Mock()
         mock_client.get_data_by_resource.return_value = iter([[{"Id": "123", "Name": "Test Campaign"}]])
@@ -304,10 +296,15 @@ class TestBingAdsSource:
         "products.warehouse_sources.backend.temporal.data_imports.sources.bing_ads.bing_ads.fetch_data_in_yearly_chunks"
     )
     @patch("products.warehouse_sources.backend.temporal.data_imports.sources.bing_ads.bing_ads.BingAdsClient")
-    @patch("products.warehouse_sources.backend.temporal.data_imports.sources.bing_ads.bing_ads.integrations")
-    def test_bing_ads_source_report_full_refresh(self, mock_integrations, mock_client_class, mock_fetch_chunks):
-        """Test source function for report endpoint with full refresh."""
-        mock_integrations.BING_ADS_DEVELOPER_TOKEN = "test_dev_token"
+    @patch(
+        "products.warehouse_sources.backend.temporal.data_imports.sources.bing_ads.bing_ads.credentials_service.get_secrets"
+    )
+    def test_bing_ads_source_report_full_refresh(self, mock_secrets, mock_client_class, mock_fetch_chunks):
+        mock_secrets.return_value = {
+            "BING_ADS_DEVELOPER_TOKEN": "test_dev_token",
+            "BING_ADS_CLIENT_ID": "test_client_id",
+            "BING_ADS_CLIENT_SECRET": "test_client_secret",
+        }
 
         mock_client = Mock()
         mock_client_class.return_value = mock_client
@@ -347,12 +344,17 @@ class TestBingAdsSource:
         "products.warehouse_sources.backend.temporal.data_imports.sources.bing_ads.bing_ads.fetch_data_in_yearly_chunks"
     )
     @patch("products.warehouse_sources.backend.temporal.data_imports.sources.bing_ads.bing_ads.BingAdsClient")
-    @patch("products.warehouse_sources.backend.temporal.data_imports.sources.bing_ads.bing_ads.integrations")
+    @patch(
+        "products.warehouse_sources.backend.temporal.data_imports.sources.bing_ads.bing_ads.credentials_service.get_secrets"
+    )
     def test_bing_ads_source_report_incremental(
-        self, _name, last_value, mock_integrations, mock_client_class, mock_fetch_chunks
+        self, _name, last_value, mock_secrets, mock_client_class, mock_fetch_chunks
     ):
-        """Test source function for report endpoint with incremental sync."""
-        mock_integrations.BING_ADS_DEVELOPER_TOKEN = "test_dev_token"
+        mock_secrets.return_value = {
+            "BING_ADS_DEVELOPER_TOKEN": "test_dev_token",
+            "BING_ADS_CLIENT_ID": "test_client_id",
+            "BING_ADS_CLIENT_SECRET": "test_client_secret",
+        }
 
         mock_client = Mock()
         mock_client_class.return_value = mock_client
@@ -387,13 +389,19 @@ class TestBingAdsSource:
         "products.warehouse_sources.backend.temporal.data_imports.sources.bing_ads.bing_ads.fetch_data_in_yearly_chunks"
     )
     @patch("products.warehouse_sources.backend.temporal.data_imports.sources.bing_ads.bing_ads.BingAdsClient")
-    @patch("products.warehouse_sources.backend.temporal.data_imports.sources.bing_ads.bing_ads.integrations")
+    @patch(
+        "products.warehouse_sources.backend.temporal.data_imports.sources.bing_ads.bing_ads.credentials_service.get_secrets"
+    )
     def test_bing_ads_source_first_sync_caps_lookback_to_retention(
-        self, mock_integrations, mock_client_class, mock_fetch_chunks
+        self, mock_secrets, mock_client_class, mock_fetch_chunks
     ):
         # On the first sync (no prior incremental value) the lookback is capped to Bing's 36-month
         # retention window rather than reaching years back for data Bing no longer retains.
-        mock_integrations.BING_ADS_DEVELOPER_TOKEN = "test_dev_token"
+        mock_secrets.return_value = {
+            "BING_ADS_DEVELOPER_TOKEN": "test_dev_token",
+            "BING_ADS_CLIENT_ID": "test_client_id",
+            "BING_ADS_CLIENT_SECRET": "test_client_secret",
+        }
         mock_client_class.return_value = Mock()
         mock_fetch_chunks.return_value = iter([[{"CampaignId": "123"}]])
 
@@ -414,23 +422,22 @@ class TestBingAdsSource:
 
         assert mock_fetch_chunks.call_args.kwargs["start_date"] == dt.date.today() - BING_ADS_REPORT_RETENTION
 
-    @patch("products.warehouse_sources.backend.temporal.data_imports.sources.bing_ads.bing_ads.integrations")
-    def test_bing_ads_source_missing_developer_token(self, mock_integrations):
-        """Test source function raises error when developer token is missing."""
-        mock_integrations.BING_ADS_DEVELOPER_TOKEN = None
+    @patch(
+        "products.warehouse_sources.backend.temporal.data_imports.sources.bing_ads.bing_ads.credentials_service.get_secrets"
+    )
+    def test_bing_ads_source_missing_developer_token(self, mock_secrets):
+        mock_secrets.return_value = {
+            "BING_ADS_DEVELOPER_TOKEN": "",
+            "BING_ADS_CLIENT_ID": "test_client_id",
+            "BING_ADS_CLIENT_SECRET": "test_client_secret",
+        }
 
-        result = bing_ads_source(
-            account_id=self.account_id,
-            resource_name="campaigns",
-            access_token=self.access_token,
-            refresh_token=self.refresh_token,
-            resumable_source_manager=_mock_resumable_manager(),
-        )
+        result = self._drive("campaigns")
 
-        with pytest.raises(ValueError, match="Bing Ads developer token not configured"):
-            items = result.items()
-            assert isinstance(items, Iterable)
-            list(items)
+        assert result.response is not None
+        assert isinstance(result.raised, ValueError)
+        assert str(result.raised) == "Bing Ads developer token not configured"
+        assert result.requests == []
 
     @parameterized.expand(
         [
@@ -439,29 +446,27 @@ class TestBingAdsSource:
             ("both_missing", "", ""),
         ]
     )
-    @patch("products.warehouse_sources.backend.temporal.data_imports.sources.bing_ads.bing_ads.integrations")
-    def test_bing_ads_source_missing_oauth_app_credentials(self, _name, client_id, client_secret, mock_integrations):
+    @patch(
+        "products.warehouse_sources.backend.temporal.data_imports.sources.bing_ads.bing_ads.credentials_service.get_secrets"
+    )
+    def test_bing_ads_source_missing_oauth_app_credentials(self, _name, client_id, client_secret, mock_secrets):
         """An empty OAuth app client id/secret raises a deterministic error instead of a doomed token request.
 
         Without the guard the SDK posts a token request omitting client_id and Microsoft returns the opaque
         AADSTS900144, which was being mis-surfaced as a customer "reconnect your integration" error.
         """
-        mock_integrations.BING_ADS_DEVELOPER_TOKEN = "test_dev_token"
-        mock_integrations.BING_ADS_CLIENT_ID = client_id
-        mock_integrations.BING_ADS_CLIENT_SECRET = client_secret
+        mock_secrets.return_value = {
+            "BING_ADS_DEVELOPER_TOKEN": "test_dev_token",
+            "BING_ADS_CLIENT_ID": client_id,
+            "BING_ADS_CLIENT_SECRET": client_secret,
+        }
 
-        result = bing_ads_source(
-            account_id=self.account_id,
-            resource_name="campaigns",
-            access_token=self.access_token,
-            refresh_token=self.refresh_token,
-            resumable_source_manager=_mock_resumable_manager(),
-        )
+        result = self._drive("campaigns")
 
-        with pytest.raises(ValueError, match="Bing Ads OAuth application credentials not configured"):
-            items = result.items()
-            assert isinstance(items, Iterable)
-            list(items)
+        assert result.response is not None
+        assert isinstance(result.raised, ValueError)
+        assert str(result.raised) == "Bing Ads OAuth application credentials not configured"
+        assert result.requests == []
 
     @parameterized.expand(
         [
@@ -470,44 +475,41 @@ class TestBingAdsSource:
             ("empty", ""),
         ]
     )
-    @patch("products.warehouse_sources.backend.temporal.data_imports.sources.bing_ads.bing_ads.BingAdsClient")
-    @patch("products.warehouse_sources.backend.temporal.data_imports.sources.bing_ads.bing_ads.integrations")
-    def test_bing_ads_source_non_numeric_account_id(self, _name, account_id, mock_integrations, mock_client_class):
+    @patch(
+        "products.warehouse_sources.backend.temporal.data_imports.sources.bing_ads.bing_ads.credentials_service.get_secrets"
+    )
+    def test_bing_ads_source_non_numeric_account_id(self, _name, account_id, mock_secrets):
         """A non-numeric account ID raises a deterministic, non-retryable error instead of a bare int() crash."""
-        mock_integrations.BING_ADS_DEVELOPER_TOKEN = "test_dev_token"
+        mock_secrets.return_value = {
+            "BING_ADS_DEVELOPER_TOKEN": "test_dev_token",
+            "BING_ADS_CLIENT_ID": "test_client_id",
+            "BING_ADS_CLIENT_SECRET": "test_client_secret",
+        }
 
-        result = bing_ads_source(
-            account_id=account_id,
-            resource_name="campaigns",
-            access_token=self.access_token,
-            refresh_token=self.refresh_token,
-            resumable_source_manager=_mock_resumable_manager(),
-        )
+        result = self._drive("campaigns", account_id=account_id)
 
-        with pytest.raises(ValueError, match="Bing Ads Account ID must be numeric"):
-            items = result.items()
-            assert isinstance(items, Iterable)
-            list(items)
+        assert result.response is not None
+        assert isinstance(result.raised, ValueError)
+        assert "Bing Ads Account ID must be numeric" in str(result.raised)
+        assert result.requests == []
 
-    @patch("products.warehouse_sources.backend.temporal.data_imports.sources.bing_ads.bing_ads.BingAdsClient")
-    @patch("products.warehouse_sources.backend.temporal.data_imports.sources.bing_ads.bing_ads.integrations")
-    def test_bing_ads_source_incremental_missing_field(self, mock_integrations, mock_client_class):
-        """Test source function raises error when incremental field is missing."""
-        mock_integrations.BING_ADS_DEVELOPER_TOKEN = "test_dev_token"
+    @patch(
+        "products.warehouse_sources.backend.temporal.data_imports.sources.bing_ads.bing_ads.credentials_service.get_secrets"
+    )
+    def test_bing_ads_source_incremental_missing_field(self, mock_secrets):
+        mock_secrets.return_value = {
+            "BING_ADS_DEVELOPER_TOKEN": "test_dev_token",
+            "BING_ADS_CLIENT_ID": "test_client_id",
+            "BING_ADS_CLIENT_SECRET": "test_client_secret",
+        }
 
-        result = bing_ads_source(
-            account_id=self.account_id,
-            resource_name="campaign_performance_report",
-            access_token=self.access_token,
-            refresh_token=self.refresh_token,
-            resumable_source_manager=_mock_resumable_manager(),
+        result = self._drive(
+            "campaign_performance_report",
             should_use_incremental_field=True,
             db_incremental_field_last_value=dt.date(2024, 1, 1),
         )
 
-        with pytest.raises(
-            ValueError, match="incremental_field and incremental_field_type required for incremental sync"
-        ):
-            items = result.items()
-            assert isinstance(items, Iterable)
-            list(items)
+        assert result.response is not None
+        assert isinstance(result.raised, ValueError)
+        assert str(result.raised) == "incremental_field and incremental_field_type required for incremental sync"
+        assert result.requests == []

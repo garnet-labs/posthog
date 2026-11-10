@@ -6,20 +6,15 @@ import orjson
 import pyarrow as pa
 from asgiref.sync import async_to_sync
 
-from posthog.schema import (
+from products.warehouse_sources.backend.facade.codebase_detection import detect
+from products.warehouse_sources.backend.facade.source_config import (
     DataWarehouseSourceCategory,
-    ExternalDataSourceType as SchemaExternalDataSourceType,
     ReleaseStatus,
     SourceConfig,
     SourceFieldInputConfig,
     SourceFieldInputConfigType,
 )
-
-from products.warehouse_sources.backend.temporal.data_imports.pipelines.pipeline.typings import (
-    SourceInputs,
-    SourceResponse,
-)
-from products.warehouse_sources.backend.temporal.data_imports.pipelines.pipeline.utils import table_from_py_list
+from products.warehouse_sources.backend.temporal.data_imports.pipelines.core.arrow_utils import table_from_py_list
 from products.warehouse_sources.backend.temporal.data_imports.sources.attentive import api_client
 from products.warehouse_sources.backend.temporal.data_imports.sources.attentive.constants import (
     ATTENTIVE_WEBHOOK_SCHEMA_NAMES,
@@ -39,6 +34,7 @@ from products.warehouse_sources.backend.temporal.data_imports.sources.common.can
 )
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.registry import SourceRegistry
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.schema import SourceSchema
+from products.warehouse_sources.backend.temporal.data_imports.sources.common.typings import SourceInputs, SourceResponse
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.webhook_s3 import WebhookSourceManager
 from products.warehouse_sources.backend.temporal.data_imports.sources.generated_configs.attentive import (
     AttentiveSourceConfig,
@@ -46,7 +42,7 @@ from products.warehouse_sources.backend.temporal.data_imports.sources.generated_
 from products.warehouse_sources.backend.types import ExternalDataSourceType
 
 if TYPE_CHECKING:
-    from posthog.cdp.templates.hog_function_template import HogFunctionTemplateDC
+    from products.cdp.backend.templates.hog_function_template import HogFunctionTemplateDC
 
 
 def _webhook_table_transformer(table: pa.Table) -> pa.Table:
@@ -75,6 +71,14 @@ class AttentiveSource(
     SimpleSource[AttentiveSourceConfig],
     WebhookSource[AttentiveSourceConfig],
 ):
+    codebase_detection = detect(
+        script_hosts=("cdn.attn.tv",),
+        npm=("@attentive-mobile/attentive-react-native-sdk",),
+        cocoapods=("ATTNSDKFramework", "attentive-ios-sdk"),
+        maven=("com.attentive:attentive-android-sdk",),
+        swiftpm=("github.com/attentive-mobile/attentive-ios-sdk",),
+    )
+
     api_docs_url = "https://docs.attentive.com"
 
     lists_tables_without_credentials = True  # static endpoint catalog — safe for public docs
@@ -96,7 +100,7 @@ class AttentiveSource(
     @property
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
-            name=SchemaExternalDataSourceType.ATTENTIVE,
+            name=ExternalDataSourceType.ATTENTIVE,
             category=DataWarehouseSourceCategory.MARKETING___EMAIL,
             label="Attentive",
             caption=(
@@ -106,7 +110,7 @@ class AttentiveSource(
             ),
             iconPath="/static/services/attentive.com.png",
             docsUrl="https://posthog.com/docs/cdp/sources/attentive",
-            releaseStatus=ReleaseStatus.ALPHA,
+            releaseStatus=ReleaseStatus.GA,
             fields=cast(
                 list[FieldType],
                 [
@@ -164,14 +168,8 @@ class AttentiveSource(
 
     def get_non_retryable_errors(self) -> dict[str, str | None]:
         return {
-            "401 Client Error: Unauthorized": (
-                "Attentive rejected the API key. Create a private app under Marketplace > Create app "
-                "in Attentive and reconnect with its API key."
-            ),
-            "403 Client Error: Forbidden": (
-                "The API key doesn't have permission for this endpoint. Make sure the private app has "
-                "the Webhooks permission."
-            ),
+            "401 Client Error: Unauthorized": api_client.API_KEY_REJECTED_ERROR,
+            "403 Client Error: Forbidden": api_client.WEBHOOKS_PERMISSION_ERROR,
         }
 
     def get_schemas(

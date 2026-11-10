@@ -1,17 +1,13 @@
-from datetime import UTC, datetime
-from typing import Any
-
 from django.contrib import admin
+from django.db.models import QuerySet
 from django.http import HttpRequest
 
 from products.replay_vision.backend.models import (
     ReplayObservation,
-    ReplayQuotaGrant,
+    ReplayObservationMedia,
     ReplayScanner,
-    VisionAction,
-    VisionActionRun,
+    ReplayVisionLearnedRuleset,
 )
-from products.replay_vision.backend.quota import next_month_start
 
 
 @admin.register(ReplayScanner)
@@ -26,6 +22,8 @@ class ReplayScannerAdmin(admin.ModelAdmin):
 @admin.register(ReplayObservation)
 class ReplayObservationAdmin(admin.ModelAdmin):
     list_display = ("scanner", "session_id", "status", "triggered_by", "created_at", "completed_at")
+    # The product's largest table: without this the changelist runs a query per row for the FK columns.
+    list_select_related = ("scanner", "team")
     list_filter = ("status", "triggered_by")
     search_fields = ("session_id", "workflow_id")
     # Observations are workflow-created and immutable post-create except for status/error_reason.
@@ -36,6 +34,7 @@ class ReplayObservationAdmin(admin.ModelAdmin):
         "session_id",
         "triggered_by",
         "triggered_by_user",
+        "backfill",
         "scanner_snapshot",
         "scanner_result",
         "workflow_id",
@@ -49,65 +48,38 @@ class ReplayObservationAdmin(admin.ModelAdmin):
         return False
 
 
-@admin.register(ReplayQuotaGrant)
-class ReplayQuotaGrantAdmin(admin.ModelAdmin):
-    list_display = ("organization", "amount", "granted_at", "expires_at", "granted_by", "reason")
-    list_filter = ("granted_at", "expires_at")
-    search_fields = ("organization__name", "reason")
-    raw_id_fields = ("organization", "granted_by")
-    readonly_fields = ("id", "granted_at")
-
-    def get_changeform_initial_data(self, request: HttpRequest) -> dict[str, Any]:
-        initial: dict[str, Any] = super().get_changeform_initial_data(request)
-        # Pre-fill but don't force — admins can clear either field on the add form.
-        # Pass native types (not strings): the admin's SplitDateTimeWidget calls
-        # `to_current_timezone(value)` on initial, which AttributeErrors on a str.
-        initial.setdefault("expires_at", next_month_start(datetime.now(UTC)))
-        initial.setdefault("granted_by", request.user.pk)
-        return initial
-
-
-@admin.register(VisionAction)
-class VisionActionAdmin(admin.ModelAdmin):
-    list_display = (
-        "name",
-        "team",
-        "scanner",
-        "trigger_type",
-        "mode",
-        "enabled",
-        "max_observations",
-        "next_run_at",
-        "created_at",
-    )
-    list_filter = ("trigger_type", "mode", "enabled")
-    search_fields = ("name",)
-    raw_id_fields = ("team", "scanner", "hog_flow", "created_by")
-    readonly_fields = ("id", "next_run_at", "last_run_at", "created_at", "updated_at")
-
-
-@admin.register(VisionActionRun)
-class VisionActionRunAdmin(admin.ModelAdmin):
-    list_display = ("id", "vision_action", "team", "status", "observation_count", "scheduled_at", "created_at")
-    list_filter = ("status",)
-    search_fields = ("idempotency_key", "temporal_workflow_id")
-    raw_id_fields = ("vision_action", "team")
-    readonly_fields = (
-        "id",
-        "vision_action",
-        "team",
-        "temporal_workflow_id",
-        "idempotency_key",
-        "scheduled_at",
-        "status",
-        "synthesized_markdown",
-        "output",
-        "observation_count",
-        "error",
-        "created_at",
-        "updated_at",
-    )
+@admin.register(ReplayObservationMedia)
+class ReplayObservationMediaAdmin(admin.ModelAdmin):
+    list_display = ("observation", "kind", "position", "created_at")
+    list_select_related = ("observation", "team")
+    list_filter = ("kind",)
+    # raw_id_fields, not the default select: each of these targets a table too large to enumerate per row.
+    raw_id_fields = ("observation", "asset", "small_asset", "team")
+    readonly_fields = ("id", "created_at")
 
     def has_add_permission(self, request: HttpRequest) -> bool:
-        # Created by the vision-action workflow, never via admin.
+        # Written by the media workflow, never via admin.
+        return False
+
+
+@admin.register(ReplayVisionLearnedRuleset)
+class ReplayVisionLearnedRulesetAdmin(admin.ModelAdmin):
+    """Read-only: users never see these rules, so this is the only place staff can check what a team's
+    ratings taught its scanners."""
+
+    list_display = ("team", "scanner", "version", "created_at")
+    list_select_related = ("team", "scanner")
+    raw_id_fields = ("team", "scanner")
+    readonly_fields = ("id", "team", "scanner", "version", "rules", "model", "trace_id", "created_at")
+    ordering = ("-created_at",)
+
+    def get_queryset(self, request: HttpRequest) -> QuerySet[ReplayVisionLearnedRuleset]:
+        # Staff browse across teams; the default manager fails closed without a team context.
+        return ReplayVisionLearnedRuleset.objects.unscoped().select_related("team", "scanner")
+
+    def has_add_permission(self, request: HttpRequest) -> bool:
+        # Written by the learned rules job, never via admin.
+        return False
+
+    def has_change_permission(self, request: HttpRequest, obj: ReplayVisionLearnedRuleset | None = None) -> bool:
         return False

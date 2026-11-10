@@ -1,27 +1,26 @@
+from datetime import date
 from typing import cast
 
-from posthog.schema import (
+from posthog.integrations import IntegrationNotFound
+
+from products.warehouse_sources.backend.facade.codebase_detection import detect
+from products.warehouse_sources.backend.facade.source_config import (
     DataWarehouseSourceCategory,
-    ExternalDataSourceType as SchemaExternalDataSourceType,
     ReleaseStatus,
     SourceConfig,
     SourceFieldInputConfig,
     SourceFieldInputConfigType,
     SourceFieldOauthAccountSelectConfig,
     SourceFieldOauthConfig,
+    SourceFieldSelectConfig,
+    SourceFieldSelectConfigOption,
     SuggestedTable,
-)
-
-from posthog.models.integration import Integration
-
-from products.warehouse_sources.backend.temporal.data_imports.pipelines.pipeline.typings import (
-    SourceInputs,
-    SourceResponse,
 )
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.base import (
     MARKETING_ANALYTICS_SUGGESTED_TABLE_TOOLTIP,
     FieldType,
     ResumableSource,
+    VersionDeprecation,
 )
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.canonical_descriptions import (
     CanonicalDescriptions,
@@ -37,11 +36,20 @@ from products.warehouse_sources.backend.temporal.data_imports.sources.common.sch
     SourceSchema,
     build_endpoint_schemas,
 )
+from products.warehouse_sources.backend.temporal.data_imports.sources.common.typings import SourceInputs, SourceResponse
 from products.warehouse_sources.backend.temporal.data_imports.sources.generated_configs.metaads import (
     MetaAdsSourceConfig,
 )
 from products.warehouse_sources.backend.temporal.data_imports.sources.meta_ads.meta_ads import (
+    ENTITY_PAGE_REFUSED_ERROR_MESSAGE,
+    META_ADS_API_VERSION_V25,
+    META_ADS_API_VERSION_V26,
     META_AUTH_ERROR_MESSAGE,
+    META_CHECKPOINT_ERROR_MESSAGE,
+    META_INVALID_CURSOR_ERROR_MESSAGE,
+    META_RATE_LIMIT_ERROR_MESSAGE,
+    META_TOKEN_REFRESH_ERROR_MESSAGE,
+    SHRINK_EXHAUSTED_ERROR_MESSAGE,
     MetaAdsAuthError,
     MetaAdsRateLimitError,
     MetaAdsResumeConfig,
@@ -53,6 +61,7 @@ from products.warehouse_sources.backend.temporal.data_imports.sources.meta_ads.m
 from products.warehouse_sources.backend.temporal.data_imports.sources.meta_ads.schemas import (
     ENDPOINTS,
     INCREMENTAL_FIELDS,
+    SHOULD_SYNC_DEFAULT,
 )
 from products.warehouse_sources.backend.types import ExternalDataSourceType
 
@@ -78,11 +87,40 @@ def _status_badges(account: dict) -> tuple[str, ...]:
 
 @SourceRegistry.register
 class MetaAdsSource(ResumableSource[MetaAdsSourceConfig, MetaAdsResumeConfig], OAuthMixin):
+    codebase_detection = detect(
+        env=("^META_ADS_", "^FACEBOOK_ADS_", "^FACEBOOK_PIXEL_ID$", "^NEXT_PUBLIC_FACEBOOK_PIXEL_ID$"),
+        npm=(
+            "facebook-nodejs-business-sdk",
+            "capi-param-builder-nodejs",
+            "meta-capi-param-builder-clientjs",
+            "react-facebook-pixel",
+            "@types/facebook-pixel",
+            "gatsby-plugin-facebook-pixel",
+            "nuxt-facebook-pixel-module",
+        ),
+        pypi=("facebook-business", "capi-param-builder-python", "facebookads"),
+        cocoapods=("FBAEMKit", "FBSDKMarketingKit"),
+        composer=(
+            "facebook/php-business-sdk",
+            "facebook/capi-param-builder-php",
+            "facebook/php-ads-sdk",
+            "facebook/facebook-for-magento2",
+        ),
+        maven=(
+            "com.facebook.business.sdk:facebook-java-business-sdk",
+            "com.facebook.capi.sdk:capi-param-builder",
+            "com.facebook.android:facebook-marketing",
+        ),
+        pub=("facebook_app_events",),
+        rubygems=("facebookbusiness", "capi_param_builder_ruby"),
+    )
+
     lists_tables_without_credentials = True  # static endpoint catalog — safe for public docs
 
-    supported_versions = ("v25.0",)
-    default_version = "v25.0"
+    supported_versions = (META_ADS_API_VERSION_V25, META_ADS_API_VERSION_V26)
+    default_version = META_ADS_API_VERSION_V26
     api_docs_url = "https://developers.facebook.com/docs/graph-api/changelog"
+    deprecated_versions = (VersionDeprecation(version=META_ADS_API_VERSION_V25, sunset_at=date(2028, 7, 29)),)
 
     @property
     def source_type(self) -> ExternalDataSourceType:
@@ -97,7 +135,7 @@ class MetaAdsSource(ResumableSource[MetaAdsSourceConfig, MetaAdsResumeConfig], O
 
     def get_non_retryable_errors(self) -> dict[str, str | None]:
         return {
-            "Failed to refresh token for Meta Ads integration. Please re-authorize the integration.": None,
+            META_TOKEN_REFRESH_ERROR_MESSAGE: None,
             # The data warehouse source still references a `meta_ads_integration_id` whose
             # Integration row no longer exists for the team (the integration was deleted or
             # de-authorized). `get_integration` then raises Django's `Integration.DoesNotExist`
@@ -106,18 +144,18 @@ class MetaAdsSource(ResumableSource[MetaAdsSourceConfig, MetaAdsResumeConfig], O
             "Integration matching query does not exist.": (
                 "The Meta Ads integration for this source no longer exists. Please reconnect the Meta Ads integration."
             ),
-            # Permanent auth/permission failures from the Graph API (e.g. revoked or expired
-            # access tokens, checkpoint-required, invalidated sessions, permission denials).
-            # `meta_ads._raise_meta_api_error` prefixes these with this exact message.
-            META_AUTH_ERROR_MESSAGE: META_AUTH_ERROR_MESSAGE,
+            # `_fetch_integration_row` raises `IntegrationNotFound("Integration not found: <id>")` for the same case.
+            "Integration not found": (
+                "The Meta Ads integration for this source no longer exists. Please reconnect the Meta Ads integration."
+            ),
+            META_CHECKPOINT_ERROR_MESSAGE: META_CHECKPOINT_ERROR_MESSAGE,
             # Graph API code 200: "Ad account owner has NOT granted ads_management or ads_read
             # permission." The connected Meta user can't read this ad account's data. Retrying
             # can't grant the permission — the account owner has to. Without a message here the
             # raw Graph API JSON blob surfaces to the user, so give actionable guidance instead.
             "Ad account owner has NOT": (
-                "Meta denied access to this ad account — the connected Meta account is missing the "
-                "ads_read permission needed to sync its data. Ask the ad account owner to grant that "
-                "access, then reconnect the Meta Ads integration."
+                "The Meta account you connected doesn't have ads_read access to this ad account. Ask "
+                "the ad account owner to grant it, then reconnect your Meta Ads account."
             ),
             # Graph API code 100: "This endpoint cannot be loaded due to missing permissions." A
             # specific endpoint can't be read with the permissions the user granted. Same as above:
@@ -127,19 +165,113 @@ class MetaAdsSource(ResumableSource[MetaAdsSourceConfig, MetaAdsResumeConfig], O
                 "required to read your ads data. Please reconnect the Meta Ads integration and grant "
                 "all requested permissions."
             ),
+            # Graph API code 100: "Missing perms" — the shorter, generic sibling of the message
+            # above for the same missing-permission condition on a specific field or endpoint.
+            "Missing perms": (
+                "Meta blocked this request because the connected account is missing a permission "
+                "required to read your ads data. Please reconnect the Meta Ads integration and grant "
+                "all requested permissions."
+            ),
+            # Graph API code 200: "Requires business_management permission to manage the object."
+            # Distinct from the generic re-authorize message above — re-authorizing can never grant
+            # this scope, since the Meta OAuth consent only requests `ads_read` (see
+            # `AD_ACCOUNT_FIELDS` in meta_ads.py). Only the account owner granting
+            # `business_management`, or PostHog dropping the field that needs it, fixes this.
+            "Requires business_management permission": (
+                "Meta needs the business_management permission for part of this table, which PostHog "
+                "doesn't request, so reconnecting won't fix it. Contact PostHog support about this table."
+            ),
+            # Graph API code 100: the source's "Attribution windows for insights" setting (a
+            # free-text field, see `SourceFieldInputConfig` above) contains a value Meta's
+            # Insights API doesn't recognise. Retrying resends the same invalid parameter, so
+            # only editing the source config fixes it. Matches the message regardless of which
+            # array index Meta reports as invalid.
+            "action_attribution_windows[": (
+                'Meta rejected the "Attribution windows for insights" setting on this source — one '
+                "of the configured values isn't a window Meta supports (e.g. 1d_click, 7d_click, "
+                "28d_click, 1d_view, 7d_view, 28d_view). Fix it in your Meta Ads source settings, "
+                "then run the sync again."
+            ),
             # Meta returns this 500 when the requested query is too large for their backend to
             # service. Both pagination paths adapt to it (stats chunks shrink 30 → 7 → 1 day, and
             # both paths shrink the per-page limit 500 → 100 → 50); if it still escapes after those
             # fallbacks are exhausted, retrying the whole job won't help.
             "Please reduce the amount of data you're asking for": None,
+            # Raised by `meta_ads._raise_shrink_exhausted_error` once both ladders
+            # have bottomed out. The next attempt would re-issue the identical
+            # single-day, smallest-page request that just failed, so the only thing
+            # left is for the user to narrow the sync window.
+            SHRINK_EXHAUSTED_ERROR_MESSAGE: (
+                "Meta couldn't return this data even at the smallest request size. Lower the sync "
+                "history for insights in your Meta Ads source settings, then run the sync again."
+            ),
+            # Graph API code 2642: the pagination cursor was rejected as invalid. The resumable
+            # source manager would resume this exact job with the same saved cursor and fail the
+            # same way every time, so retrying is pointless — only a fresh sync run (a new job,
+            # with a fresh cursor) can recover. `meta_ads._raise_meta_api_error` raises this
+            # message for that code.
+            META_INVALID_CURSOR_ERROR_MESSAGE: META_INVALID_CURSOR_ERROR_MESSAGE,
+            # The schema's sync type wants an incremental cursor (incremental/append) but no
+            # incremental field is stored in its config, so `meta_ads_source.get_rows` raises this
+            # before any request. The stored config stays fixed until the customer edits it, so
+            # every retry hits the same error.
+            "incremental_field and incremental_field_type can't be None": (
+                "This table is set to sync incrementally but has no incremental field selected. "
+                "Choose date_start as the incremental field in the table's sync settings, or switch "
+                "it to full refresh, then run the sync again."
+            ),
+            # Permanent auth/permission failures from the Graph API (e.g. revoked or expired
+            # access tokens, invalidated sessions, permission denials).
+            # `meta_ads._raise_meta_api_error` prefixes these with this exact message. Last, because
+            # the first matching entry supplies the message, and the code 200 entries above match
+            # the same prefixed errors with more specific guidance.
+            META_AUTH_ERROR_MESSAGE: META_AUTH_ERROR_MESSAGE,
         }
 
     def get_retryable_errors(self) -> set[str]:
-        # Meta error codes 1 ("API Unknown") and 2 ("API Service") are momentary backend blips
-        # Meta's own docs recommend simply retrying. `meta_ads._raise_meta_api_error` tags them
-        # with this marker once `_get_with_transient_retry`'s in-process retries are exhausted, so
-        # the eventual Temporal-level retry doesn't page us as a bug.
-        return {"Meta API request failed (retryable)"}
+        return {
+            # Meta error codes 1 ("API Unknown") and 2 ("API Service") are momentary backend blips
+            # Meta's own docs recommend simply retrying. `meta_ads._raise_meta_api_error` tags them
+            # with this marker once `_get_with_transient_retry`'s in-process retries are exhausted, so
+            # the eventual Temporal-level retry doesn't page us as a bug.
+            "Meta API request failed (retryable)",
+            # Meta throttling (rate limiting) — the request itself is fine, Meta just rejected it
+            # for volume. Only waiting helps, and the sync already retries via Temporal, so this
+            # shouldn't page us as a bug either.
+            META_RATE_LIMIT_ERROR_MESSAGE,
+            ENTITY_PAGE_REFUSED_ERROR_MESSAGE,
+        }
+
+    def get_retry_exhausted_errors(self) -> dict[str, str]:
+        # Both markers above are raised with Meta's raw response appended for debugging
+        # (`_raise_meta_api_error`), so a failure that also outlives Temporal's retries stores that
+        # JSON blob, HTTP status and trace id included, as the error the customer reads.
+        return {
+            "Meta API request failed (retryable)": (
+                "Meta kept returning temporary errors, so this sync run did not finish. This usually "
+                "clears on its own and the next sync runs on schedule."
+            ),
+            META_RATE_LIMIT_ERROR_MESSAGE: (
+                "Meta is rate limiting requests for this connection, so this sync run did not finish. "
+                "The next sync runs on schedule."
+            ),
+            ENTITY_PAGE_REFUSED_ERROR_MESSAGE: (
+                "Meta was too busy to return this table's data, so this sync run did not finish. "
+                "This usually clears on its own and the next sync runs on schedule."
+            ),
+            # Graph API code 100, subcode 2446211: Meta refuses to serve an Advantage+ creative
+            # ("degrees of freedom") ad whose asset feed disagrees with its object story spec. The
+            # raw 400 body lands in the stored error otherwise. Keyed on the subcode because Meta
+            # localizes the title and message to the connected user's language.
+            '"error_subcode":2446211': (
+                "Meta refused to return an Advantage+ creative ad whose asset variations don't match "
+                "its main creative. Fix that ad in Ads Manager; the next sync runs on schedule."
+            ),
+            '"error_subcode":1443048': (
+                "Meta refused to return an ad creative whose story is incomplete, such as one with no "
+                "Page. Fix or delete that creative in Ads Manager; the next sync runs on schedule."
+            ),
+        }
 
     def get_schemas(
         self,
@@ -150,7 +282,7 @@ class MetaAdsSource(ResumableSource[MetaAdsSourceConfig, MetaAdsResumeConfig], O
         force_refresh: bool = False,
         api_version: str | None = None,
     ) -> list[SourceSchema]:
-        return build_endpoint_schemas(ENDPOINTS, INCREMENTAL_FIELDS, names)
+        return build_endpoint_schemas(ENDPOINTS, INCREMENTAL_FIELDS, names, should_sync_default=SHOULD_SYNC_DEFAULT)
 
     def get_resumable_source_manager(self, inputs: SourceInputs) -> ResumableSourceManager[MetaAdsResumeConfig]:
         return ResumableSourceManager[MetaAdsResumeConfig](inputs, MetaAdsResumeConfig)
@@ -166,6 +298,7 @@ class MetaAdsSource(ResumableSource[MetaAdsSourceConfig, MetaAdsResumeConfig], O
             config=config,
             team_id=inputs.team_id,
             resumable_source_manager=resumable_source_manager,
+            api_version=self.resolve_api_version(inputs.api_version),
             should_use_incremental_field=inputs.should_use_incremental_field,
             incremental_field=inputs.incremental_field if inputs.should_use_incremental_field else None,
             incremental_field_type=inputs.incremental_field_type if inputs.should_use_incremental_field else None,
@@ -177,10 +310,20 @@ class MetaAdsSource(ResumableSource[MetaAdsSourceConfig, MetaAdsResumeConfig], O
     @property
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
-            name=SchemaExternalDataSourceType.META_ADS,
+            name=ExternalDataSourceType.METAADS,
             category=DataWarehouseSourceCategory.ADVERTISING,
             featured=True,
-            keywords=["facebook ads", "instagram ads", "facebook", "instagram", "fb"],
+            keywords=[
+                "facebook ads",
+                "instagram ads",
+                "facebook",
+                "instagram",
+                "fb",
+                "meta business",
+                "meta business suite",
+                "business manager",
+                "facebook business",
+            ],
             label="Meta Ads",
             caption="Ensure you have granted PostHog access to your Meta Ads account, learn how to do this in the [documentation](https://posthog.com/docs/cdp/sources/meta-ads).",
             iconPath="/static/services/meta-ads.png",
@@ -202,11 +345,40 @@ class MetaAdsSource(ResumableSource[MetaAdsSourceConfig, MetaAdsResumeConfig], O
                     ),
                     SourceFieldInputConfig(
                         name="sync_lookback_days",
-                        label="Sync history for insights (days) - applies to AdStats, AdsetStats, CampaignStats",
+                        sync_setting=True,
+                        label="Sync history for insights (days) - applies to every stats table",
                         type=SourceFieldInputConfigType.NUMBER,
                         required=False,
                         placeholder="90",
                         secret=False,
+                        caption=(
+                            "A stats table that already imported keeps its current start date. A higher "
+                            "value pulls in older data only after you resync that table."
+                        ),
+                    ),
+                    # Attribution settings for insights (spend/conversion) tables. Left unset, Meta
+                    # applies its own default, so existing connections are unaffected. Set them to
+                    # reconcile PostHog's numbers with Ads Manager, which reports on a specific window.
+                    SourceFieldInputConfig(
+                        name="action_attribution_windows",
+                        sync_setting=True,
+                        label="Attribution windows for insights (comma-separated, e.g. 7d_click,1d_view)",
+                        type=SourceFieldInputConfigType.TEXT,
+                        required=False,
+                        placeholder="7d_click,1d_view",
+                        secret=False,
+                    ),
+                    SourceFieldSelectConfig(
+                        name="use_unified_attribution_setting",
+                        sync_setting=True,
+                        label="Use Meta's unified attribution setting",
+                        required=False,
+                        defaultValue="",
+                        options=[
+                            SourceFieldSelectConfigOption(label="Use Meta's default", value=""),
+                            SourceFieldSelectConfigOption(label="Yes", value="true"),
+                            SourceFieldSelectConfigOption(label="No", value="false"),
+                        ],
                     ),
                 ],
             ),
@@ -229,7 +401,7 @@ class MetaAdsSource(ResumableSource[MetaAdsSourceConfig, MetaAdsResumeConfig], O
         # A Meta user's ad accounts are few, so `search` is ignored here and the endpoint filters the list.
         try:
             integration = get_integration_by_id(integration_id, team_id)
-        except Integration.DoesNotExist as e:
+        except IntegrationNotFound as e:
             raise IntegrationAccountListingError(
                 "The linked Meta Ads integration could not be found. Please reconnect your Meta Ads integration."
             ) from e
@@ -239,9 +411,7 @@ class MetaAdsSource(ResumableSource[MetaAdsSourceConfig, MetaAdsResumeConfig], O
         try:
             accounts = list_ad_accounts(integration)
         except MetaAdsAuthError as e:
-            raise IntegrationAccountListingError(
-                f"{META_AUTH_ERROR_MESSAGE} Make sure the connected account can access your ad accounts."
-            ) from e
+            raise IntegrationAccountListingError(META_AUTH_ERROR_MESSAGE) from e
         except MetaAdsRateLimitError as e:
             # Throttling is not a bug: surface it as an actionable 400 the user can retry, rather
             # than a 500 that pages us.

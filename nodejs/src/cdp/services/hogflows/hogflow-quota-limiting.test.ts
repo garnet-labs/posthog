@@ -43,9 +43,8 @@ describe('HogFlow Quota Limiting', () => {
             const result = await checkHogFlowQuotaLimits(hogFlow, teamId, mockQuotaLimiting)
 
             expect(result.isLimited).toBe(false)
-            expect(mockQuotaLimiting.isTeamQuotaLimited).toHaveBeenCalledTimes(3)
+            expect(mockQuotaLimiting.isTeamQuotaLimited).toHaveBeenCalledTimes(2)
             expect(mockQuotaLimiting.isTeamQuotaLimited).toHaveBeenCalledWith(teamId, 'workflow_emails')
-            expect(mockQuotaLimiting.isTeamQuotaLimited).toHaveBeenCalledWith(teamId, 'workflow_push')
             expect(mockQuotaLimiting.isTeamQuotaLimited).toHaveBeenCalledWith(
                 teamId,
                 'workflow_destinations_dispatched'
@@ -68,9 +67,58 @@ describe('HogFlow Quota Limiting', () => {
             expect(result.isLimited).toBe(true)
         })
 
-        it('should limit workflow with push action when team has push quota limit', async () => {
+        const transactionalEmail = { type: 'function_email', config: { message_category_type: 'transactional' } }
+        const marketingEmail = { type: 'function_email', config: { message_category_type: 'marketing' } }
+
+        it.each([
+            {
+                name: 'only transactional emails are not limited',
+                trigger: { type: 'event' },
+                actions: [transactionalEmail, transactionalEmail],
+                limitedResources: ['workflow_emails'],
+                expected: false,
+            },
+            {
+                name: 'an api trigger alone does not exempt an uncategorized email',
+                trigger: { type: 'api' },
+                actions: [{ type: 'function_email', config: {} }],
+                limitedResources: ['workflow_emails'],
+                expected: true,
+            },
+            {
+                name: 'a marketing email next to a transactional one is limited',
+                trigger: { type: 'event' },
+                actions: [transactionalEmail, marketingEmail],
+                limitedResources: ['workflow_emails'],
+                expected: true,
+            },
+            {
+                name: 'a destination next to transactional emails is still limited by the destination quota',
+                trigger: { type: 'event' },
+                actions: [transactionalEmail, { type: 'function', config: {} }],
+                limitedResources: ['workflow_emails', 'workflow_destinations_dispatched'],
+                expected: true,
+            },
+        ])('$name', async ({ trigger, actions, limitedResources, expected }) => {
+            mockQuotaLimiting.isTeamQuotaLimited.mockImplementation((_teamId, resource) =>
+                Promise.resolve(limitedResources.includes(resource))
+            )
+
+            const hogFlow: HogFlow = {
+                ...baseHogFlow,
+                trigger,
+                actions,
+                billable_action_types: [...new Set(actions.map((action) => action.type))],
+            } as unknown as HogFlow
+
+            const result = await checkHogFlowQuotaLimits(hogFlow, teamId, mockQuotaLimiting)
+
+            expect(result.isLimited).toBe(expected)
+        })
+
+        it('should limit workflow with push action when team has destination quota limit', async () => {
             mockQuotaLimiting.isTeamQuotaLimited.mockImplementation((_teamId, resource) => {
-                return Promise.resolve(resource === 'workflow_push')
+                return Promise.resolve(resource === 'workflow_destinations_dispatched')
             })
 
             const hogFlow: HogFlow = {
@@ -157,9 +205,8 @@ describe('HogFlow Quota Limiting', () => {
             const result = await checkHogFlowQuotaLimits(hogFlow, teamId, mockQuotaLimiting)
 
             expect(result.isLimited).toBe(false)
-            expect(mockQuotaLimiting.isTeamQuotaLimited).toHaveBeenCalledTimes(3)
+            expect(mockQuotaLimiting.isTeamQuotaLimited).toHaveBeenCalledTimes(2)
             expect(mockQuotaLimiting.isTeamQuotaLimited).toHaveBeenCalledWith(teamId, 'workflow_emails')
-            expect(mockQuotaLimiting.isTeamQuotaLimited).toHaveBeenCalledWith(teamId, 'workflow_push')
             expect(mockQuotaLimiting.isTeamQuotaLimited).toHaveBeenCalledWith(
                 teamId,
                 'workflow_destinations_dispatched'
@@ -182,6 +229,7 @@ describe('HogFlow Quota Limiting', () => {
                 actions: [],
                 trigger: { type: 'event' },
                 billable_action_types: [],
+                version: 4,
             } as unknown as HogFlow,
         } as CyclotronJobInvocationHogFlow
 
@@ -244,6 +292,7 @@ describe('HogFlow Quota Limiting', () => {
                     metric_kind: 'failure',
                     metric_name: 'quota_limited',
                     count: 1,
+                    app_source_version: { id: expect.any(String), version: 4 },
                 },
                 'hog_flow'
             )

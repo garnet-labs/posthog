@@ -79,6 +79,10 @@ export const PropertyFilterTypeEnumApi = {
  * * `is_not` - is_not
  * * `icontains` - icontains
  * * `not_icontains` - not_icontains
+ * * `starts_with` - starts_with
+ * * `not_starts_with` - not_starts_with
+ * * `ends_with` - ends_with
+ * * `not_ends_with` - not_ends_with
  * * `regex` - regex
  * * `not_regex` - not_regex
  */
@@ -89,6 +93,10 @@ export const StringMatchOperatorEnumApi = {
     IsNot: 'is_not',
     Icontains: 'icontains',
     NotIcontains: 'not_icontains',
+    StartsWith: 'starts_with',
+    NotStartsWith: 'not_starts_with',
+    EndsWith: 'ends_with',
+    NotEndsWith: 'not_ends_with',
     Regex: 'regex',
     NotRegex: 'not_regex',
 } as const
@@ -140,6 +148,10 @@ export interface StringPropertyFilterApi {
      * * `is_not` - is_not
      * * `icontains` - icontains
      * * `not_icontains` - not_icontains
+     * * `starts_with` - starts_with
+     * * `not_starts_with` - not_starts_with
+     * * `ends_with` - ends_with
+     * * `not_ends_with` - not_ends_with
      * * `regex` - regex
      * * `not_regex` - not_regex */
     operator?: StringMatchOperatorEnumApi
@@ -438,8 +450,16 @@ export interface ActionStepJSONApi {
      * @nullable
      */
     selector?: string | null
-    /** @nullable */
+    /**
+     * Compiled regex the selector matches against the event elements chain. Null when no selector is set.
+     * @nullable
+     */
     readonly selector_regex: string | null
+    /**
+     * Set when the selector compiles to a matcher that cannot match any event. Null when the selector is valid or absent.
+     * @nullable
+     */
+    readonly selector_warning: string | null
     /**
      * HTML tag name to match (e.g. "button", "a", "input").
      * @nullable
@@ -488,6 +508,7 @@ export interface ActionStepJSONApi {
  * * `leadership` - Leadership
  * * `marketing` - Marketing
  * * `sales` - Sales / Success
+ * * `student` - Student
  * * `other` - Other
  */
 export type RoleAtOrganizationEnumApi = (typeof RoleAtOrganizationEnumApi)[keyof typeof RoleAtOrganizationEnumApi]
@@ -500,6 +521,7 @@ export const RoleAtOrganizationEnumApi = {
     Leadership: 'leadership',
     Marketing: 'marketing',
     Sales: 'sales',
+    Student: 'student',
     Other: 'other',
 } as const
 
@@ -582,12 +604,10 @@ export interface ActionApi {
     readonly user_access_level: string | null
 }
 
-export interface PaginatedActionListApi {
+export interface ActionListResponseApi {
+    /** Number of actions that match the filters. Without `limit`, it is `offset` plus the number of actions returned. */
     count: number
-    /** @nullable */
-    next?: string | null
-    /** @nullable */
-    previous?: string | null
+    /** Actions on this page, or every matching action without `limit`. */
     results: ActionApi[]
 }
 
@@ -681,7 +701,11 @@ export interface BulkUpdateTagsRequestApi {
      * * `remove` - remove
      * * `set` - set */
     action: BulkUpdateTagsActionEnumApi
-    /** Tag names to add, remove, or set. */
+    /**
+     * Tag names to add, remove, or set (up to 100 per request, 255 characters each).
+     * @maxItems 100
+     * @items.maxLength 255
+     */
     tags: string[]
 }
 
@@ -698,6 +722,18 @@ export interface BulkUpdateTagsErrorApi {
 export interface BulkUpdateTagsResponseApi {
     updated: BulkUpdateTagsItemApi[]
     skipped: BulkUpdateTagsErrorApi[]
+}
+
+export interface ActionSelectorMatchChangeApi {
+    /** ID of an affected action. */
+    action_id: number
+    /**
+     * Name of the affected action, or null when it has no name.
+     * @nullable
+     */
+    action_name: string | null
+    /** CSS selectors whose matching behavior changed, in action step order. */
+    selectors: string[]
 }
 
 export type ActionsListParams = {
@@ -809,6 +845,22 @@ export type ActionsBulkUpdateTagsCreateFormat =
     (typeof ActionsBulkUpdateTagsCreateFormat)[keyof typeof ActionsBulkUpdateTagsCreateFormat]
 
 export const ActionsBulkUpdateTagsCreateFormat = {
+    Csv: 'csv',
+    Json: 'json',
+} as const
+
+export type ActionsSelectorMatchChangesListParams = {
+    /**
+     * Action IDs used by the insight. Accepts repeated or comma-separated values.
+     */
+    action_ids: number[]
+    format?: ActionsSelectorMatchChangesListFormat
+}
+
+export type ActionsSelectorMatchChangesListFormat =
+    (typeof ActionsSelectorMatchChangesListFormat)[keyof typeof ActionsSelectorMatchChangesListFormat]
+
+export const ActionsSelectorMatchChangesListFormat = {
     Csv: 'csv',
     Json: 'json',
 } as const

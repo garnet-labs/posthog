@@ -2,7 +2,6 @@ import uuid
 import datetime as dt
 
 import pytest
-from freezegun import freeze_time
 from unittest.mock import MagicMock, patch
 
 from django.conf import settings
@@ -11,8 +10,6 @@ import pytest_asyncio
 from temporalio.common import RetryPolicy
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import UnsandboxedWorkflowRunner, Worker
-
-from posthog.temporal.tests.utils.models import acreate_batch_export, adelete_batch_export, afetch_batch_export_runs
 
 from products.batch_exports.backend.models.batch_export import BatchExportRun
 from products.batch_exports.backend.service import afetch_batch_export_runs_in_range
@@ -32,6 +29,11 @@ from products.batch_exports.backend.temporal.monitoring import (
 from products.batch_exports.backend.tests.temporal.utils.clickhouse import (
     create_clickhouse_tables_and_views,
     truncate_events,
+)
+from products.batch_exports.backend.tests.temporal.utils.models import (
+    acreate_batch_export,
+    adelete_batch_export,
+    afetch_batch_export_runs,
 )
 
 pytestmark = [pytest.mark.asyncio, pytest.mark.django_db]
@@ -57,7 +59,7 @@ async def truncate(clickhouse_client):
 async def batch_export(ateam, temporal_client):
     """Provide a batch export for tests, not intended to be used."""
     destination_data = {
-        "type": "S3",
+        "type": "AwsS3",
         "config": {
             "bucket_name": "a-bucket",
             "region": "us-east-1",
@@ -132,29 +134,30 @@ async def generate_batch_export_runs(
 async def _run_workflow(batch_export):
     workflow_id = str(uuid.uuid4())
     inputs = BatchExportMonitoringInputs(batch_export_id=batch_export.id)
-    async with await WorkflowEnvironment.start_time_skipping() as activity_environment:
-        async with Worker(
-            activity_environment.client,
-            task_queue=settings.BATCH_EXPORTS_TASK_QUEUE,
-            workflows=[BatchExportMonitoringWorkflow],
-            activities=[
-                get_batch_export,
-                get_clickhouse_event_counts,
-                fetch_exported_event_counts,
-                update_batch_export_runs,
-                reconcile_event_counts,
-            ],
-            workflow_runner=UnsandboxedWorkflowRunner(),
-        ):
-            batch_export_runs_updated = await activity_environment.client.execute_workflow(
-                BatchExportMonitoringWorkflow.run,
-                inputs,
-                id=workflow_id,
+    with patch("products.batch_exports.backend.temporal.monitoring.workflow.now", return_value=NOW):
+        async with await WorkflowEnvironment.start_time_skipping() as activity_environment:
+            async with Worker(
+                activity_environment.client,
                 task_queue=settings.BATCH_EXPORTS_TASK_QUEUE,
-                retry_policy=RetryPolicy(maximum_attempts=1),
-                execution_timeout=dt.timedelta(seconds=30),
-            )
-            return batch_export_runs_updated
+                workflows=[BatchExportMonitoringWorkflow],
+                activities=[
+                    get_batch_export,
+                    get_clickhouse_event_counts,
+                    fetch_exported_event_counts,
+                    update_batch_export_runs,
+                    reconcile_event_counts,
+                ],
+                workflow_runner=UnsandboxedWorkflowRunner(),
+            ):
+                batch_export_runs_updated = await activity_environment.client.execute_workflow(
+                    BatchExportMonitoringWorkflow.run,
+                    inputs,
+                    id=workflow_id,
+                    task_queue=settings.BATCH_EXPORTS_TASK_QUEUE,
+                    retry_policy=RetryPolicy(maximum_attempts=1),
+                    execution_timeout=dt.timedelta(seconds=30),
+                )
+                return batch_export_runs_updated
 
 
 async def test_monitoring_workflow_when_no_event_data(batch_export):
@@ -177,7 +180,6 @@ async def test_monitoring_workflow_when_no_event_data(batch_export):
     ["every 5 minutes"],
     indirect=True,
 )
-@freeze_time(NOW)
 async def test_monitoring_workflow_no_issues(
     batch_export,
     generate_test_data,
@@ -234,7 +236,6 @@ async def test_monitoring_workflow_no_issues(
     ["every 5 minutes"],
     indirect=True,
 )
-@freeze_time(NOW)
 async def test_monitoring_workflow_when_missing_batch_export_runs(
     batch_export,
     generate_test_data,
@@ -258,6 +259,7 @@ async def test_monitoring_workflow_when_missing_batch_export_runs(
     assert len(runs) == 1
     for run in runs:
         assert run.data_interval_start is not None
+        assert run.data_interval_end is not None
         expected_missing_runs.append((run.data_interval_start, run.data_interval_end))
         await run.adelete()
 
@@ -296,7 +298,6 @@ async def test_monitoring_workflow_when_missing_batch_export_runs(
     ["every 5 minutes"],
     indirect=True,
 )
-@freeze_time(NOW)
 async def test_monitoring_workflow_when_missing_events(
     batch_export,
     generate_test_data,
@@ -318,6 +319,7 @@ async def test_monitoring_workflow_when_missing_events(
     for run in runs:
         if run.records_completed and run.records_completed > 1:
             assert run.data_interval_start is not None
+            assert run.data_interval_end is not None
             missing_events = run.records_completed // 2
             expected_missing_events.append(
                 EventCount(

@@ -11,19 +11,38 @@ import { apiMutator } from '../../../../frontend/src/lib/api-orval-mutator'
 import type {
     AddOptOutRequestApi,
     AddSuppressionRequestApi,
+    BulkAddOptOutsRequestApi,
+    BulkAddOptOutsResultApi,
+    EmailStatusApi,
+    GenerateLinkRequestApi,
+    ImportProviderOptionApi,
+    MakeTransactionalApi,
     MessageCategoryApi,
     MessagePreferencesApi,
     MessageSuppressionApi,
     MessageTemplateApi,
     MessagingCategoriesListParams,
+    MessagingPreferencesExportOptOutsCsvRetrieveParams,
+    MessagingPreferencesOptOutsRetrieveParams,
     MessagingSuppressionsSuppressionsRetrieveParams,
     MessagingTemplatesListParams,
     PaginatedMessageCategoryListApi,
     PaginatedMessageSuppressionApi,
     PaginatedMessageTemplateListApi,
+    PaginatedOptOutsApi,
     PatchedDesignPatchApi,
     PatchedMessageCategoryApi,
     PatchedMessageTemplateApi,
+    PatchedSupabaseAuthEmailSettingsUpdateApi,
+    PreferencesLinkApi,
+    ProviderImportRunApi,
+    RemoveOptOutRequestApi,
+    SendEmailApi,
+    SendTransactionalEmailApi,
+    SendTransactionalEmailResponseApi,
+    StartProviderImportApi,
+    SupabaseAuthEmailSettingsApi,
+    WebhookUrlApi,
 } from './api.schemas'
 
 // https://stackoverflow.com/questions/49579094/typescript-conditional-types-filter-out-readonly-properties-pick-only-requir/49579497#49579497
@@ -42,6 +61,46 @@ type NonReadonly<T> = [T] extends [UnionToIntersection<T>]
           [P in keyof Writable<T>]: T[P] extends object ? NonReadonly<NonNullable<T[P]>> : T[P]
       }
     : DistributeReadOnlyOverUnions<T>
+
+export const getMessagingEmailsRetrieveUrl = (projectId: string, id: string) => {
+    return `/api/projects/${projectId}/messaging/emails/${id}/`
+}
+
+/**
+ * Get the status of one transactional email by the `message_id` that the send returned, for 30 days after the send. Needs a project secret API key with the `hog_flow:read` scope.
+ * @summary Get a transactional email's status
+ */
+export const messagingEmailsRetrieve = async (
+    projectId: string,
+    id: string,
+    options?: RequestInit
+): Promise<EmailStatusApi> => {
+    return apiMutator<EmailStatusApi>(getMessagingEmailsRetrieveUrl(projectId, id), {
+        ...options,
+        method: 'GET',
+    })
+}
+
+export const getMessagingSendEmailCreateUrl = (projectId: string) => {
+    return `/api/projects/${projectId}/messaging/send/email/`
+}
+
+/**
+ * Send one transactional email to one recipient from the template named in `template_id`. The template must be made transactional first. `message_data` fills the template's `{{ variables.* }}` placeholders. Transactional emails skip opt-outs and frequency caps. Send an `Idempotency-Key` header to retry safely without sending the email twice.
+ * @summary Send a transactional email
+ */
+export const messagingSendEmailCreate = async (
+    projectId: string,
+    sendEmailApi: SendEmailApi,
+    options?: RequestInit
+): Promise<SendTransactionalEmailResponseApi> => {
+    return apiMutator<SendTransactionalEmailResponseApi>(getMessagingSendEmailCreateUrl(projectId), {
+        ...options,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...options?.headers },
+        body: JSON.stringify(sendEmailApi),
+    })
+}
 
 export const getMessagingCategoriesListUrl = (projectId: string, params?: MessagingCategoriesListParams) => {
     const normalizedParams = new URLSearchParams()
@@ -184,7 +243,7 @@ export const getMessagingCategoriesImportPreferencesCsvCreateUrl = (projectId: s
 
 /**
  * Import customer preferences from CSV file
- * Expected CSV columns: id, email, cio_subscription_preferences
+ * Expected CSV columns: id, email, unsubscribed, cio_subscription_preferences
  */
 export const messagingCategoriesImportPreferencesCsvCreate = async (
     projectId: string,
@@ -354,34 +413,134 @@ export const messagingPreferencesAddOptOutCreate = async (
     })
 }
 
+export const getMessagingPreferencesBulkAddOptOutsCreateUrl = (projectId: string) => {
+    return `/api/projects/${projectId}/messaging_preferences/bulk_add_opt_outs/`
+}
+
+/**
+ * Opt every recipient in the list out of the category named on their entry, or a default category.
+ * @summary Add multiple recipients to the opt-out list
+ */
+export const messagingPreferencesBulkAddOptOutsCreate = async (
+    projectId: string,
+    bulkAddOptOutsRequestApi: BulkAddOptOutsRequestApi,
+    options?: RequestInit
+): Promise<BulkAddOptOutsResultApi> => {
+    return apiMutator<BulkAddOptOutsResultApi>(getMessagingPreferencesBulkAddOptOutsCreateUrl(projectId), {
+        ...options,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...options?.headers },
+        body: JSON.stringify(bulkAddOptOutsRequestApi),
+    })
+}
+
+export const getMessagingPreferencesExportOptOutsCsvRetrieveUrl = (
+    projectId: string,
+    params?: MessagingPreferencesExportOptOutsCsvRetrieveParams
+) => {
+    const normalizedParams = new URLSearchParams()
+
+    Object.entries(params || {}).forEach(([key, value]) => {
+        if (value !== undefined) {
+            normalizedParams.append(key, value === null ? 'null' : String(value))
+        }
+    })
+
+    const stringifiedParams = normalizedParams.toString()
+
+    return stringifiedParams.length > 0
+        ? `/api/projects/${projectId}/messaging_preferences/export_opt_outs_csv/?${stringifiedParams}`
+        : `/api/projects/${projectId}/messaging_preferences/export_opt_outs_csv/`
+}
+
+/**
+ * Stream the opt-out list for a category as a CSV file that can be re-imported as-is.
+ * @summary Download the opt-out list as a CSV file
+ */
+export const messagingPreferencesExportOptOutsCsvRetrieve = async (
+    projectId: string,
+    params?: MessagingPreferencesExportOptOutsCsvRetrieveParams,
+    options?: RequestInit
+): Promise<string> => {
+    return apiMutator<string>(getMessagingPreferencesExportOptOutsCsvRetrieveUrl(projectId, params), {
+        ...options,
+        method: 'GET',
+    })
+}
+
 export const getMessagingPreferencesGenerateLinkCreateUrl = (projectId: string) => {
     return `/api/projects/${projectId}/messaging_preferences/generate_link/`
 }
 
 /**
  * Generate an unsubscribe link for the current user's email address
+ * @summary Generate a preferences page link for a recipient
  */
 export const messagingPreferencesGenerateLinkCreate = async (
     projectId: string,
+    generateLinkRequestApi?: GenerateLinkRequestApi,
     options?: RequestInit
-): Promise<void> => {
-    return apiMutator<void>(getMessagingPreferencesGenerateLinkCreateUrl(projectId), {
+): Promise<PreferencesLinkApi> => {
+    return apiMutator<PreferencesLinkApi>(getMessagingPreferencesGenerateLinkCreateUrl(projectId), {
         ...options,
         method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...options?.headers },
+        body: JSON.stringify(generateLinkRequestApi),
     })
 }
 
-export const getMessagingPreferencesOptOutsRetrieveUrl = (projectId: string) => {
-    return `/api/projects/${projectId}/messaging_preferences/opt_outs/`
+export const getMessagingPreferencesOptOutsRetrieveUrl = (
+    projectId: string,
+    params?: MessagingPreferencesOptOutsRetrieveParams
+) => {
+    const normalizedParams = new URLSearchParams()
+
+    Object.entries(params || {}).forEach(([key, value]) => {
+        if (value !== undefined) {
+            normalizedParams.append(key, value === null ? 'null' : String(value))
+        }
+    })
+
+    const stringifiedParams = normalizedParams.toString()
+
+    return stringifiedParams.length > 0
+        ? `/api/projects/${projectId}/messaging_preferences/opt_outs/?${stringifiedParams}`
+        : `/api/projects/${projectId}/messaging_preferences/opt_outs/`
 }
 
 /**
  * Get opt-outs filtered by category or overall opt-outs if no category specified
+ * @summary List recipients opted out of a message category
  */
-export const messagingPreferencesOptOutsRetrieve = async (projectId: string, options?: RequestInit): Promise<void> => {
-    return apiMutator<void>(getMessagingPreferencesOptOutsRetrieveUrl(projectId), {
+export const messagingPreferencesOptOutsRetrieve = async (
+    projectId: string,
+    params?: MessagingPreferencesOptOutsRetrieveParams,
+    options?: RequestInit
+): Promise<PaginatedOptOutsApi> => {
+    return apiMutator<PaginatedOptOutsApi>(getMessagingPreferencesOptOutsRetrieveUrl(projectId, params), {
         ...options,
         method: 'GET',
+    })
+}
+
+export const getMessagingPreferencesRemoveOptOutCreateUrl = (projectId: string) => {
+    return `/api/projects/${projectId}/messaging_preferences/remove_opt_out/`
+}
+
+/**
+ * Opt a recipient back in to a specific category, or to all marketing messages.
+ * @summary Remove a recipient from the opt-out list
+ */
+export const messagingPreferencesRemoveOptOutCreate = async (
+    projectId: string,
+    removeOptOutRequestApi: RemoveOptOutRequestApi,
+    options?: RequestInit
+): Promise<MessagePreferencesApi> => {
+    return apiMutator<MessagePreferencesApi>(getMessagingPreferencesRemoveOptOutCreateUrl(projectId), {
+        ...options,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...options?.headers },
+        body: JSON.stringify(removeOptOutRequestApi),
     })
 }
 
@@ -391,15 +550,178 @@ export const getMessagingPreferencesWebhookUrlRetrieveUrl = (projectId: string) 
 
 /**
  * Return the webhook URL for Customer.io integration setup.
+ * @summary Get the Customer.io webhook URL for the team
  */
 export const messagingPreferencesWebhookUrlRetrieve = async (
     projectId: string,
     options?: RequestInit
-): Promise<void> => {
-    return apiMutator<void>(getMessagingPreferencesWebhookUrlRetrieveUrl(projectId), {
+): Promise<WebhookUrlApi> => {
+    return apiMutator<WebhookUrlApi>(getMessagingPreferencesWebhookUrlRetrieveUrl(projectId), {
         ...options,
         method: 'GET',
     })
+}
+
+export const getMessagingProviderImportsListUrl = (projectId: string) => {
+    return `/api/projects/${projectId}/messaging_provider_imports/`
+}
+
+/**
+ * Background imports from other messaging tools, such as Customer.io suppressions and global unsubscribes.
+ *
+ * A run executes outside the request, so a long provider list does not time out. Poll a run to show its progress.
+ * @summary List the most recent provider imports
+ */
+export const messagingProviderImportsList = async (
+    projectId: string,
+    options?: RequestInit
+): Promise<ProviderImportRunApi[]> => {
+    return apiMutator<ProviderImportRunApi[]>(getMessagingProviderImportsListUrl(projectId), {
+        ...options,
+        method: 'GET',
+    })
+}
+
+export const getMessagingProviderImportsCreateUrl = (projectId: string) => {
+    return `/api/projects/${projectId}/messaging_provider_imports/`
+}
+
+/**
+ * Background imports from other messaging tools, such as Customer.io suppressions and global unsubscribes.
+ *
+ * A run executes outside the request, so a long provider list does not time out. Poll a run to show its progress.
+ * @summary Start a background import from another messaging tool
+ */
+export const messagingProviderImportsCreate = async (
+    projectId: string,
+    startProviderImportApi: StartProviderImportApi,
+    options?: RequestInit
+): Promise<ProviderImportRunApi> => {
+    return apiMutator<ProviderImportRunApi>(getMessagingProviderImportsCreateUrl(projectId), {
+        ...options,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...options?.headers },
+        body: JSON.stringify(startProviderImportApi),
+    })
+}
+
+export const getMessagingProviderImportsRetrieveUrl = (projectId: string, id: string) => {
+    return `/api/projects/${projectId}/messaging_provider_imports/${id}/`
+}
+
+/**
+ * Background imports from other messaging tools, such as Customer.io suppressions and global unsubscribes.
+ *
+ * A run executes outside the request, so a long provider list does not time out. Poll a run to show its progress.
+ * @summary Get a provider import and its progress
+ */
+export const messagingProviderImportsRetrieve = async (
+    projectId: string,
+    id: string,
+    options?: RequestInit
+): Promise<ProviderImportRunApi> => {
+    return apiMutator<ProviderImportRunApi>(getMessagingProviderImportsRetrieveUrl(projectId, id), {
+        ...options,
+        method: 'GET',
+    })
+}
+
+export const getMessagingProviderImportsProvidersListUrl = (projectId: string) => {
+    return `/api/projects/${projectId}/messaging_provider_imports/providers/`
+}
+
+/**
+ * Background imports from other messaging tools, such as Customer.io suppressions and global unsubscribes.
+ *
+ * A run executes outside the request, so a long provider list does not time out. Poll a run to show its progress.
+ * @summary List the providers and what each can import
+ */
+export const messagingProviderImportsProvidersList = async (
+    projectId: string,
+    options?: RequestInit
+): Promise<ImportProviderOptionApi[]> => {
+    return apiMutator<ImportProviderOptionApi[]>(getMessagingProviderImportsProvidersListUrl(projectId), {
+        ...options,
+        method: 'GET',
+    })
+}
+
+export const getMessagingSupabaseAuthEmailsSettingsRetrieveUrl = (projectId: string) => {
+    return `/api/projects/${projectId}/messaging_supabase_auth_emails/settings/`
+}
+
+/**
+ * Send a Supabase project's auth emails through transactional email templates.
+ * @summary Get the Supabase auth email settings
+ */
+export const messagingSupabaseAuthEmailsSettingsRetrieve = async (
+    projectId: string,
+    options?: RequestInit
+): Promise<SupabaseAuthEmailSettingsApi> => {
+    return apiMutator<SupabaseAuthEmailSettingsApi>(getMessagingSupabaseAuthEmailsSettingsRetrieveUrl(projectId), {
+        ...options,
+        method: 'GET',
+    })
+}
+
+export const getMessagingSupabaseAuthEmailsSettingsPartialUpdateUrl = (projectId: string) => {
+    return `/api/projects/${projectId}/messaging_supabase_auth_emails/settings/`
+}
+
+/**
+ * Send a Supabase project's auth emails through transactional email templates.
+ * @summary Update the Supabase auth email settings
+ */
+export const messagingSupabaseAuthEmailsSettingsPartialUpdate = async (
+    projectId: string,
+    patchedSupabaseAuthEmailSettingsUpdateApi?: PatchedSupabaseAuthEmailSettingsUpdateApi,
+    options?: RequestInit
+): Promise<SupabaseAuthEmailSettingsApi> => {
+    return apiMutator<SupabaseAuthEmailSettingsApi>(getMessagingSupabaseAuthEmailsSettingsPartialUpdateUrl(projectId), {
+        ...options,
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...options?.headers },
+        body: JSON.stringify(patchedSupabaseAuthEmailSettingsUpdateApi),
+    })
+}
+
+export const getMessagingSupabaseAuthEmailsSettingsDestroyUrl = (projectId: string) => {
+    return `/api/projects/${projectId}/messaging_supabase_auth_emails/settings/`
+}
+
+/**
+ * Remove the project URL, hook secret and template mappings. The hook then refuses every call, so turn off the Send Email hook in Supabase first. The templates themselves stay.
+ * @summary Disconnect the Supabase project
+ */
+export const messagingSupabaseAuthEmailsSettingsDestroy = async (
+    projectId: string,
+    options?: RequestInit
+): Promise<SupabaseAuthEmailSettingsApi> => {
+    return apiMutator<SupabaseAuthEmailSettingsApi>(getMessagingSupabaseAuthEmailsSettingsDestroyUrl(projectId), {
+        ...options,
+        method: 'DELETE',
+    })
+}
+
+export const getMessagingSupabaseAuthEmailsStarterTemplatesCreateUrl = (projectId: string) => {
+    return `/api/projects/${projectId}/messaging_supabase_auth_emails/starter_templates/`
+}
+
+/**
+ * Create a transactional template for each core Supabase auth email that has no template yet, and map it. Needs a verified email sender.
+ * @summary Create starter templates for the Supabase auth emails
+ */
+export const messagingSupabaseAuthEmailsStarterTemplatesCreate = async (
+    projectId: string,
+    options?: RequestInit
+): Promise<SupabaseAuthEmailSettingsApi> => {
+    return apiMutator<SupabaseAuthEmailSettingsApi>(
+        getMessagingSupabaseAuthEmailsStarterTemplatesCreateUrl(projectId),
+        {
+            ...options,
+            method: 'POST',
+        }
+    )
 }
 
 export const getMessagingSuppressionsAddSuppressionCreateUrl = (projectId: string) => {
@@ -609,5 +931,49 @@ export const messagingTemplatesDesignPartialUpdate = async (
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', ...options?.headers },
         body: JSON.stringify(patchedDesignPatchApi),
+    })
+}
+
+export const getMessagingTemplatesMakeTransactionalCreateUrl = (projectId: string, id: string) => {
+    return `/api/projects/${projectId}/messaging_templates/${id}/make_transactional/`
+}
+
+/**
+ * Make this template sendable over the transactional email API. This creates the workflow that sends it, with its own metrics, run history and versions. This can't be undone: the template stays transactional. Transactional sends ignore marketing opt-outs. Calling it again on a transactional template changes nothing.
+ * @summary Make a template transactional
+ */
+export const messagingTemplatesMakeTransactionalCreate = async (
+    projectId: string,
+    id: string,
+    makeTransactionalApi?: MakeTransactionalApi,
+    options?: RequestInit
+): Promise<MessageTemplateApi> => {
+    return apiMutator<MessageTemplateApi>(getMessagingTemplatesMakeTransactionalCreateUrl(projectId, id), {
+        ...options,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...options?.headers },
+        body: JSON.stringify(makeTransactionalApi),
+    })
+}
+
+export const getMessagingTemplatesSendCreateUrl = (projectId: string, id: string) => {
+    return `/api/projects/${projectId}/messaging_templates/${id}/send/`
+}
+
+/**
+ * Send one transactional email from this template to one recipient. The template must be made transactional first. `message_data` fills the template's `{{ variables.* }}` placeholders. Transactional emails skip opt-outs and frequency caps. Send an `Idempotency-Key` header to retry safely without sending the email twice.
+ * @summary Send a transactional email
+ */
+export const messagingTemplatesSendCreate = async (
+    projectId: string,
+    id: string,
+    sendTransactionalEmailApi: SendTransactionalEmailApi,
+    options?: RequestInit
+): Promise<SendTransactionalEmailResponseApi> => {
+    return apiMutator<SendTransactionalEmailResponseApi>(getMessagingTemplatesSendCreateUrl(projectId, id), {
+        ...options,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...options?.headers },
+        body: JSON.stringify(sendTransactionalEmailApi),
     })
 }

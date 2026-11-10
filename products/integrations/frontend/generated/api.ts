@@ -9,6 +9,10 @@ import { apiMutator } from '../../../../frontend/src/lib/api-orval-mutator'
  * OpenAPI spec version: 1.0.0
  */
 import type {
+    EmailDomainConnectCheckApi,
+    EmailDomainStatusApi,
+    EmailDomainVerificationApi,
+    GitHubAvailableInstallationsResponseApi,
     GitHubBranchesResponseApi,
     GitHubLinkExistingRequestApi,
     GitHubOAuthAuthorizeRequestApi,
@@ -16,15 +20,26 @@ import type {
     GitHubPrepareCallbackRequestApi,
     GitHubReposRefreshResponseApi,
     GitHubReposResponseApi,
+    GitHubRepositoryAccessResponseApi,
     GitHubTeamsResponseApi,
     IntegrationAccessRequestApi,
     IntegrationAccessRequestResponseApi,
+    IntegrationAssigneesResponseApi,
     IntegrationConfigApi,
+    IntegrationConfigCreateApi,
     IntegrationsChannelsRetrieveParams,
+    IntegrationsDomainConnectCheckRetrieveParams,
+    IntegrationsEmailStatusRetrieveParams,
+    IntegrationsGithubAssigneesRetrieveParams,
     IntegrationsGithubBranchesRetrieveParams,
     IntegrationsGithubReposRetrieveParams,
+    IntegrationsGithubRepositoryAccessRetrieveParams,
     IntegrationsGithubTeamsRetrieveParams,
+    IntegrationsGitlabMembersRetrieveParams,
+    IntegrationsJiraAssignableUsersRetrieveParams,
+    IntegrationsLinearTeamMembersRetrieveParams,
     IntegrationsListParams,
+    IntegrationsUsersRetrieveParams,
     JiraProjectsResponseApi,
     LinearTeamsResponseApi,
     OrganizationIntegrationApi,
@@ -32,11 +47,17 @@ import type {
     PaginatedRoleExternalReferenceListApi,
     PatchedIntegrationConfigApi,
     PatchedOrganizationIntegrationApi,
+    PostHogConnectionForwardApi,
+    PostHogConnectionForwardResponseApi,
+    PostHogConnectionTargetApi,
+    PushTokenImportRequestApi,
+    PushTokenImportResponseApi,
     RoleExternalReferenceApi,
     RoleExternalReferencesListParams,
     RoleExternalReferencesLookupRetrieveParams,
     RoleLookupResponseApi,
     SlackChannelsResponseApi,
+    SlackUsersResponseApi,
 } from './api.schemas'
 
 // https://stackoverflow.com/questions/49579094/typescript-conditional-types-filter-out-readonly-properties-pick-only-requir/49579497#49579497
@@ -209,14 +230,14 @@ export const getIntegrationsCreateUrl = (projectId: string) => {
 
 export const integrationsCreate = async (
     projectId: string,
-    integrationConfigApi: NonReadonly<IntegrationConfigApi>,
+    integrationConfigCreateApi: NonReadonly<IntegrationConfigCreateApi>,
     options?: RequestInit
 ): Promise<IntegrationConfigApi> => {
     return apiMutator<IntegrationConfigApi>(getIntegrationsCreateUrl(projectId), {
         ...options,
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...options?.headers },
-        body: JSON.stringify(integrationConfigApi),
+        body: JSON.stringify(integrationConfigCreateApi),
     })
 }
 
@@ -386,22 +407,94 @@ export const integrationsEmailPartialUpdate = async (
     })
 }
 
+export const getIntegrationsEmailStatusRetrieveUrl = (
+    projectId: string,
+    id: number,
+    params?: IntegrationsEmailStatusRetrieveParams
+) => {
+    const normalizedParams = new URLSearchParams()
+
+    Object.entries(params || {}).forEach(([key, value]) => {
+        if (value !== undefined) {
+            normalizedParams.append(key, value === null ? 'null' : String(value))
+        }
+    })
+
+    const stringifiedParams = normalizedParams.toString()
+
+    return stringifiedParams.length > 0
+        ? `/api/projects/${projectId}/integrations/${id}/email/status/?${stringifiedParams}`
+        : `/api/projects/${projectId}/integrations/${id}/email/status/`
+}
+
+/**
+ * Read the setup progress of an email sender's domain from SES and public DNS without changing either. Poll this until status is verified, then call email/verify once so the sender can send.
+ * @summary Get email sending domain status
+ */
+export const integrationsEmailStatusRetrieve = async (
+    projectId: string,
+    id: number,
+    params?: IntegrationsEmailStatusRetrieveParams,
+    options?: RequestInit
+): Promise<EmailDomainStatusApi> => {
+    return apiMutator<EmailDomainStatusApi>(getIntegrationsEmailStatusRetrieveUrl(projectId, id, params), {
+        ...options,
+        method: 'GET',
+    })
+}
+
 export const getIntegrationsEmailVerifyCreateUrl = (projectId: string, id: number) => {
     return `/api/projects/${projectId}/integrations/${id}/email/verify/`
 }
 
+/**
+ * Ask SES to check the domain's DNS records again. When SES has verified the domain, mark the domain's senders as verified so they can send. Call it once email/status reports status verified.
+ * @summary Verify an email sending domain
+ */
 export const integrationsEmailVerifyCreate = async (
     projectId: string,
     id: number,
-    integrationConfigApi: NonReadonly<IntegrationConfigApi>,
     options?: RequestInit
-): Promise<void> => {
-    return apiMutator<void>(getIntegrationsEmailVerifyCreateUrl(projectId, id), {
+): Promise<EmailDomainVerificationApi> => {
+    return apiMutator<EmailDomainVerificationApi>(getIntegrationsEmailVerifyCreateUrl(projectId, id), {
         ...options,
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...options?.headers },
-        body: JSON.stringify(integrationConfigApi),
     })
+}
+
+export const getIntegrationsGithubAssigneesRetrieveUrl = (
+    projectId: string,
+    id: number,
+    params: IntegrationsGithubAssigneesRetrieveParams
+) => {
+    const normalizedParams = new URLSearchParams()
+
+    Object.entries(params || {}).forEach(([key, value]) => {
+        if (value !== undefined) {
+            normalizedParams.append(key, value === null ? 'null' : String(value))
+        }
+    })
+
+    const stringifiedParams = normalizedParams.toString()
+
+    return stringifiedParams.length > 0
+        ? `/api/projects/${projectId}/integrations/${id}/github_assignees/?${stringifiedParams}`
+        : `/api/projects/${projectId}/integrations/${id}/github_assignees/`
+}
+
+export const integrationsGithubAssigneesRetrieve = async (
+    projectId: string,
+    id: number,
+    params: IntegrationsGithubAssigneesRetrieveParams,
+    options?: RequestInit
+): Promise<IntegrationAssigneesResponseApi> => {
+    return apiMutator<IntegrationAssigneesResponseApi>(
+        getIntegrationsGithubAssigneesRetrieveUrl(projectId, id, params),
+        {
+            ...options,
+            method: 'GET',
+        }
+    )
 }
 
 export const getIntegrationsGithubBranchesRetrieveUrl = (
@@ -483,6 +576,41 @@ export const integrationsGithubReposRefreshCreate = async (
     })
 }
 
+export const getIntegrationsGithubRepositoryAccessRetrieveUrl = (
+    projectId: string,
+    id: number,
+    params?: IntegrationsGithubRepositoryAccessRetrieveParams
+) => {
+    const normalizedParams = new URLSearchParams()
+
+    Object.entries(params || {}).forEach(([key, value]) => {
+        if (value !== undefined) {
+            normalizedParams.append(key, value === null ? 'null' : String(value))
+        }
+    })
+
+    const stringifiedParams = normalizedParams.toString()
+
+    return stringifiedParams.length > 0
+        ? `/api/projects/${projectId}/integrations/${id}/github_repository_access/?${stringifiedParams}`
+        : `/api/projects/${projectId}/integrations/${id}/github_repository_access/`
+}
+
+export const integrationsGithubRepositoryAccessRetrieve = async (
+    projectId: string,
+    id: number,
+    params?: IntegrationsGithubRepositoryAccessRetrieveParams,
+    options?: RequestInit
+): Promise<GitHubRepositoryAccessResponseApi> => {
+    return apiMutator<GitHubRepositoryAccessResponseApi>(
+        getIntegrationsGithubRepositoryAccessRetrieveUrl(projectId, id, params),
+        {
+            ...options,
+            method: 'GET',
+        }
+    )
+}
+
 export const getIntegrationsGithubTeamsRetrieveUrl = (
     projectId: string,
     id: number,
@@ -510,6 +638,38 @@ export const integrationsGithubTeamsRetrieve = async (
     options?: RequestInit
 ): Promise<GitHubTeamsResponseApi> => {
     return apiMutator<GitHubTeamsResponseApi>(getIntegrationsGithubTeamsRetrieveUrl(projectId, id, params), {
+        ...options,
+        method: 'GET',
+    })
+}
+
+export const getIntegrationsGitlabMembersRetrieveUrl = (
+    projectId: string,
+    id: number,
+    params?: IntegrationsGitlabMembersRetrieveParams
+) => {
+    const normalizedParams = new URLSearchParams()
+
+    Object.entries(params || {}).forEach(([key, value]) => {
+        if (value !== undefined) {
+            normalizedParams.append(key, value === null ? 'null' : String(value))
+        }
+    })
+
+    const stringifiedParams = normalizedParams.toString()
+
+    return stringifiedParams.length > 0
+        ? `/api/projects/${projectId}/integrations/${id}/gitlab_members/?${stringifiedParams}`
+        : `/api/projects/${projectId}/integrations/${id}/gitlab_members/`
+}
+
+export const integrationsGitlabMembersRetrieve = async (
+    projectId: string,
+    id: number,
+    params?: IntegrationsGitlabMembersRetrieveParams,
+    options?: RequestInit
+): Promise<IntegrationAssigneesResponseApi> => {
+    return apiMutator<IntegrationAssigneesResponseApi>(getIntegrationsGitlabMembersRetrieveUrl(projectId, id, params), {
         ...options,
         method: 'GET',
     })
@@ -545,6 +705,41 @@ export const integrationsGoogleConversionActionsRetrieve = async (
     })
 }
 
+export const getIntegrationsJiraAssignableUsersRetrieveUrl = (
+    projectId: string,
+    id: number,
+    params: IntegrationsJiraAssignableUsersRetrieveParams
+) => {
+    const normalizedParams = new URLSearchParams()
+
+    Object.entries(params || {}).forEach(([key, value]) => {
+        if (value !== undefined) {
+            normalizedParams.append(key, value === null ? 'null' : String(value))
+        }
+    })
+
+    const stringifiedParams = normalizedParams.toString()
+
+    return stringifiedParams.length > 0
+        ? `/api/projects/${projectId}/integrations/${id}/jira_assignable_users/?${stringifiedParams}`
+        : `/api/projects/${projectId}/integrations/${id}/jira_assignable_users/`
+}
+
+export const integrationsJiraAssignableUsersRetrieve = async (
+    projectId: string,
+    id: number,
+    params: IntegrationsJiraAssignableUsersRetrieveParams,
+    options?: RequestInit
+): Promise<IntegrationAssigneesResponseApi> => {
+    return apiMutator<IntegrationAssigneesResponseApi>(
+        getIntegrationsJiraAssignableUsersRetrieveUrl(projectId, id, params),
+        {
+            ...options,
+            method: 'GET',
+        }
+    )
+}
+
 export const getIntegrationsJiraProjectsRetrieveUrl = (projectId: string, id: number) => {
     return `/api/projects/${projectId}/integrations/${id}/jira_projects/`
 }
@@ -558,6 +753,41 @@ export const integrationsJiraProjectsRetrieve = async (
         ...options,
         method: 'GET',
     })
+}
+
+export const getIntegrationsLinearTeamMembersRetrieveUrl = (
+    projectId: string,
+    id: number,
+    params: IntegrationsLinearTeamMembersRetrieveParams
+) => {
+    const normalizedParams = new URLSearchParams()
+
+    Object.entries(params || {}).forEach(([key, value]) => {
+        if (value !== undefined) {
+            normalizedParams.append(key, value === null ? 'null' : String(value))
+        }
+    })
+
+    const stringifiedParams = normalizedParams.toString()
+
+    return stringifiedParams.length > 0
+        ? `/api/projects/${projectId}/integrations/${id}/linear_team_members/?${stringifiedParams}`
+        : `/api/projects/${projectId}/integrations/${id}/linear_team_members/`
+}
+
+export const integrationsLinearTeamMembersRetrieve = async (
+    projectId: string,
+    id: number,
+    params: IntegrationsLinearTeamMembersRetrieveParams,
+    options?: RequestInit
+): Promise<IntegrationAssigneesResponseApi> => {
+    return apiMutator<IntegrationAssigneesResponseApi>(
+        getIntegrationsLinearTeamMembersRetrieveUrl(projectId, id, params),
+        {
+            ...options,
+            method: 'GET',
+        }
+    )
 }
 
 export const getIntegrationsLinearTeamsRetrieveUrl = (projectId: string, id: number) => {
@@ -605,6 +835,28 @@ export const integrationsLinkedinAdsConversionRulesRetrieve = async (
     })
 }
 
+export const getIntegrationsPushTokensCreateUrl = (projectId: string, id: number) => {
+    return `/api/projects/${projectId}/integrations/${id}/push_tokens/`
+}
+
+/**
+ * Register existing device tokens, for example exported from another provider, on this push channel. Each token is stored encrypted on its person, as the mobile SDK stores it.
+ * @summary Import push device tokens
+ */
+export const integrationsPushTokensCreate = async (
+    projectId: string,
+    id: number,
+    pushTokenImportRequestApi: PushTokenImportRequestApi,
+    options?: RequestInit
+): Promise<PushTokenImportResponseApi> => {
+    return apiMutator<PushTokenImportResponseApi>(getIntegrationsPushTokensCreateUrl(projectId, id), {
+        ...options,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...options?.headers },
+        body: JSON.stringify(pushTokenImportRequestApi),
+    })
+}
+
 export const getIntegrationsTwilioPhoneNumbersRetrieveUrl = (projectId: string, id: number) => {
     return `/api/projects/${projectId}/integrations/${id}/twilio_phone_numbers/`
 }
@@ -615,6 +867,38 @@ export const integrationsTwilioPhoneNumbersRetrieve = async (
     options?: RequestInit
 ): Promise<void> => {
     return apiMutator<void>(getIntegrationsTwilioPhoneNumbersRetrieveUrl(projectId, id), {
+        ...options,
+        method: 'GET',
+    })
+}
+
+export const getIntegrationsUsersRetrieveUrl = (
+    projectId: string,
+    id: number,
+    params?: IntegrationsUsersRetrieveParams
+) => {
+    const normalizedParams = new URLSearchParams()
+
+    Object.entries(params || {}).forEach(([key, value]) => {
+        if (value !== undefined) {
+            normalizedParams.append(key, value === null ? 'null' : String(value))
+        }
+    })
+
+    const stringifiedParams = normalizedParams.toString()
+
+    return stringifiedParams.length > 0
+        ? `/api/projects/${projectId}/integrations/${id}/users/?${stringifiedParams}`
+        : `/api/projects/${projectId}/integrations/${id}/users/`
+}
+
+export const integrationsUsersRetrieve = async (
+    projectId: string,
+    id: number,
+    params?: IntegrationsUsersRetrieveParams,
+    options?: RequestInit
+): Promise<SlackUsersResponseApi> => {
+    return apiMutator<SlackUsersResponseApi>(getIntegrationsUsersRetrieveUrl(projectId, id, params), {
         ...options,
         method: 'GET',
     })
@@ -655,18 +939,61 @@ export const integrationsDomainConnectApplyUrlCreate = async (
     })
 }
 
-export const getIntegrationsDomainConnectCheckRetrieveUrl = (projectId: string) => {
-    return `/api/projects/${projectId}/integrations/domain-connect/check/`
+export const getIntegrationsDomainConnectCheckRetrieveUrl = (
+    projectId: string,
+    params: IntegrationsDomainConnectCheckRetrieveParams
+) => {
+    const normalizedParams = new URLSearchParams()
+
+    Object.entries(params || {}).forEach(([key, value]) => {
+        if (value !== undefined) {
+            normalizedParams.append(key, value === null ? 'null' : String(value))
+        }
+    })
+
+    const stringifiedParams = normalizedParams.toString()
+
+    return stringifiedParams.length > 0
+        ? `/api/projects/${projectId}/integrations/domain-connect/check/?${stringifiedParams}`
+        : `/api/projects/${projectId}/integrations/domain-connect/check/`
 }
 
 export const integrationsDomainConnectCheckRetrieve = async (
     projectId: string,
+    params: IntegrationsDomainConnectCheckRetrieveParams,
     options?: RequestInit
-): Promise<void> => {
-    return apiMutator<void>(getIntegrationsDomainConnectCheckRetrieveUrl(projectId), {
+): Promise<EmailDomainConnectCheckApi> => {
+    return apiMutator<EmailDomainConnectCheckApi>(getIntegrationsDomainConnectCheckRetrieveUrl(projectId, params), {
         ...options,
         method: 'GET',
     })
+}
+
+export const getIntegrationsGithubAvailableInstallationsRetrieveUrl = (projectId: string) => {
+    return `/api/projects/${projectId}/integrations/github/available_installations/`
+}
+
+/**
+ * List GitHub installations this project can link.
+ *
+ * A GitHub App installs once per organization, so a second project links an existing
+ * installation rather than reinstalling. This backs the picker: when more than one option
+ * exists, the client passes the chosen installation_id to github/link_existing. The list also
+ * includes installations the user's personal GitHub link can see but that aren't linked to any
+ * project yet (``source_team_id: null``) — orphan installations approved on GitHub outside
+ * PostHog's callback, which ``github/link_existing`` can adopt.
+ */
+export const integrationsGithubAvailableInstallationsRetrieve = async (
+    projectId: string,
+    options?: RequestInit
+): Promise<GitHubAvailableInstallationsResponseApi> => {
+    return apiMutator<GitHubAvailableInstallationsResponseApi>(
+        getIntegrationsGithubAvailableInstallationsRetrieveUrl(projectId),
+        {
+            ...options,
+            method: 'GET',
+        }
+    )
 }
 
 export const getIntegrationsGithubLinkExistingCreateUrl = (projectId: string) => {
@@ -749,5 +1076,46 @@ export const integrationsRequestAccessCreate = async (
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...options?.headers },
         body: JSON.stringify(integrationAccessRequestApi),
+    })
+}
+
+export const getPosthogConnectionsForwardCreateUrl = (projectId: string, id: string) => {
+    return `/api/projects/${projectId}/posthog_connections/${id}/forward/`
+}
+
+/**
+ * Replay an API request against the connected PostHog project. The server injects the connection's token; the response is passed through.
+ * @summary Forward a request through a PostHog connection
+ */
+export const posthogConnectionsForwardCreate = async (
+    projectId: string,
+    id: string,
+    postHogConnectionForwardApi: PostHogConnectionForwardApi,
+    options?: RequestInit
+): Promise<PostHogConnectionForwardResponseApi> => {
+    return apiMutator<PostHogConnectionForwardResponseApi>(getPosthogConnectionsForwardCreateUrl(projectId, id), {
+        ...options,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...options?.headers },
+        body: JSON.stringify(postHogConnectionForwardApi),
+    })
+}
+
+export const getPosthogConnectionsTargetRetrieveUrl = (projectId: string, id: string) => {
+    return `/api/projects/${projectId}/posthog_connections/${id}/target/`
+}
+
+/**
+ * Resolve which project, organization and region a PostHog connection points at, so callers can build target API paths without reading `api/users/@me/` through the connection first.
+ * @summary Read the connected project's identity
+ */
+export const posthogConnectionsTargetRetrieve = async (
+    projectId: string,
+    id: string,
+    options?: RequestInit
+): Promise<PostHogConnectionTargetApi> => {
+    return apiMutator<PostHogConnectionTargetApi>(getPosthogConnectionsTargetRetrieveUrl(projectId, id), {
+        ...options,
+        method: 'GET',
     })
 }

@@ -1,7 +1,6 @@
 import { Autocomplete } from '@base-ui/react/autocomplete'
 import { useActions, useValues } from 'kea'
 import { capitalizeFirstLetter } from 'kea-forms'
-import { router } from 'kea-router'
 import {
     Fragment,
     type MutableRefObject,
@@ -17,12 +16,13 @@ import {
 } from 'react'
 
 import { IconDay, IconNight, IconSearch, IconSparkles, IconX } from '@posthog/icons'
-import { LemonTag, Link, Spinner } from '@posthog/lemon-ui'
+import { LemonTag, Link, Spinner, Tooltip } from '@posthog/lemon-ui'
 
-import { KeyboardShortcut } from 'lib/components/KeyboardShortcut/KeyboardShortcut'
 import { filterSearchItems } from 'lib/components/Search/utils'
 import { useFeatureFlag } from 'lib/hooks/useFeatureFlag'
+import { KeyboardShortcut } from 'lib/lemon-ui/KeyboardShortcut/KeyboardShortcut'
 import { TreeDataItem } from 'lib/lemon-ui/LemonTree/LemonTree'
+import { ScrollableShadows } from 'lib/lemon-ui/ScrollableShadows/ScrollableShadows'
 import { themeLogic } from 'lib/logic/themeLogic'
 import posthog from 'lib/posthog-typed'
 import { ButtonPrimitive } from 'lib/ui/Button/ButtonPrimitives'
@@ -30,18 +30,19 @@ import { ContextMenu, ContextMenuContent, ContextMenuGroup, ContextMenuTrigger }
 import { Label } from 'lib/ui/Label/Label'
 import { WrappingLoadingSkeleton } from 'lib/ui/WrappingLoadingSkeleton/WrappingLoadingSkeleton'
 import { cn } from 'lib/utils/css-classes'
+import { navigateToHref } from 'lib/utils/navigateToHref'
+import { newInternalTab } from 'lib/utils/newInternalTab'
 import { urls } from 'scenes/urls'
 import { userLogic } from 'scenes/userLogic'
 
-import { ProductIconWrapper, iconForType } from '~/layout/panel-layout/ProjectTree/defaultTree'
 import { MenuItems } from '~/layout/panel-layout/ProjectTree/menus/MenuItems'
-import { fileSystemTypes } from '~/products'
-import { FileSystemIconType } from '~/queries/schema/schema-general'
 import type { UserTheme } from '~/types'
 
-import { ScrollableShadows } from '../ScrollableShadows/ScrollableShadows'
-import { RECENTS_LIMIT, STARRED_LIMIT, SearchItem, SearchLogicProps, searchLogic } from './searchLogic'
-import { formatRelativeTimeShort, getCategoryDisplayName } from './utils'
+import { getIconForItem, getItemTypeDisplayName } from './searchItemDisplay'
+import { SearchItem } from './searchItems'
+import { STARRED_LIMIT } from './searchListItems'
+import { RECENTS_LIMIT, SearchLogicProps, searchLogic } from './searchLogic'
+import { SETTINGS_THEME_ITEM_ID, canOpenInNewTab, formatRelativeTimeShort, getCategoryDisplayName } from './utils'
 
 // ============================================================================
 // Constants
@@ -67,8 +68,6 @@ const PLACEHOLDER_OPTIONS = [
 ]
 
 const PLACEHOLDER_CYCLE_INTERVAL = 3000
-
-const SETTINGS_THEME_ITEM_ID = '__settings_theme__'
 
 const SETTINGS_THEME_ITEM_QUERY = ['dark', 'light', 'theme', 'appearance']
 
@@ -114,88 +113,6 @@ const useRotatingPlaceholder = (isActive: boolean): { text: string; isVisible: b
 // Helpers
 // ============================================================================
 
-const getItemTypeDisplayName = (type: string | null | undefined): string | null => {
-    if (!type) {
-        return null
-    }
-
-    // Check fileSystemTypes manifest first
-    if (type in fileSystemTypes) {
-        return (fileSystemTypes as Record<string, { name?: string }>)[type]?.name ?? null
-    }
-
-    // Handle insight subtypes (e.g., 'insight/funnels' -> 'Funnel')
-    if (type.startsWith('insight/')) {
-        const subtype = type.slice(8) // Remove 'insight/' prefix
-        const insightDisplayNames: Record<string, string> = {
-            funnels: 'Funnel',
-            trends: 'Trend',
-            retention: 'Retention',
-            paths: 'Paths',
-            lifecycle: 'Lifecycle',
-            stickiness: 'Stickiness',
-            hog: 'SQL insight',
-        }
-        return insightDisplayNames[subtype] ?? null
-    }
-
-    // Fallback for types not in the manifest
-    const fallbackDisplayNames: Record<string, string> = {
-        query: 'SQL query',
-        product_analytics: 'Product analytics',
-        web_analytics: 'Web analytics',
-        llm_analytics: 'AI observability',
-        revenue_analytics: 'Revenue analytics',
-        marketing_analytics: 'Marketing analytics',
-        session_replay: 'Session replay',
-        error_tracking: 'Error tracking',
-        data_warehouse: 'Data ops',
-        data_pipeline: 'Data pipeline',
-        annotation: 'Annotation',
-        event_definition: 'Event',
-        property_definition: 'Property',
-        person: 'Person',
-        persons: 'Person',
-        user: 'User',
-        group: 'Group',
-        heatmap: 'Heatmap',
-        sql_editor: 'SQL query',
-        logs: 'Logs',
-        alert: 'Alert',
-        folder: 'Folder',
-        hog_flow: 'Workflow',
-    }
-    return fallbackDisplayNames[type] ?? null
-}
-
-const getIconForItem = (item: SearchItem): ReactNode => {
-    if (item.icon) {
-        return item.icon
-    }
-    let itemType = item.itemType || item.record?.type
-    // Normalize types for icon lookup
-    if (itemType === 'person') {
-        itemType = 'persons'
-    } else if (itemType === 'hog_flow') {
-        itemType = 'workflows'
-    }
-    if (itemType) {
-        // Handle iconColor which may be a single-element array or tuple
-        const rawColor = item.record?.iconColor as string[] | undefined
-        const colorOverride: [string, string] | undefined = rawColor
-            ? rawColor.length === 1
-                ? [rawColor[0], rawColor[0]]
-                : [rawColor[0], rawColor[1]]
-            : undefined
-        return (
-            <ProductIconWrapper type={itemType as string} colorOverride={colorOverride}>
-                {iconForType(itemType as FileSystemIconType, colorOverride)}
-            </ProductIconWrapper>
-        )
-    }
-    return null
-}
-
 const commandItemToTreeDataItem = (item: SearchItem): TreeDataItem => {
     return {
         id: item.id,
@@ -221,7 +138,7 @@ interface SearchContextValue {
     isSearching: boolean
     isActive: boolean
     inputRef: RefObject<HTMLInputElement>
-    handleItemClick: (item: SearchItem) => void
+    handleItemClick: (item: SearchItem, openInNewTab?: boolean) => void
     showAskAiLink: boolean
     onAskAiClick?: () => void
     highlightedItemRef: MutableRefObject<SearchItem | null>
@@ -371,8 +288,8 @@ export interface SearchRootProps {
     logicKey?: SearchLogicProps['logicKey']
     /** Whether the search is active (for placeholder animation) */
     isActive?: boolean
-    /** Callback when an item is selected */
-    onItemSelect?: (item: SearchItem) => void
+    /** Callback when an item is selected. `openInNewTab` is true when activated with Cmd/Ctrl. */
+    onItemSelect?: (item: SearchItem, openInNewTab?: boolean) => void
     /** Whether to show the Ask AI link */
     showAskAiLink?: boolean
     /** Callback when Ask AI is clicked */
@@ -424,8 +341,8 @@ function SearchRoot({
         for (const category of allCategories) {
             items.push(...category.items)
         }
-        return items
-    }, [allCategories])
+        return logicKey === 'command' ? items : items.filter((item) => item.category !== 'shortcuts')
+    }, [allCategories, logicKey])
 
     // Compute filteredItems synchronously to avoid render gap between loading and content
     const filteredItems = useMemo(() => {
@@ -438,8 +355,8 @@ function SearchRoot({
             const filteredClientItems = filterSearchItems(clientItems, searchValue)
             items = [...filteredClientItems, ...serverItems]
         } else {
-            // When not searching, show recents, starred, and tools
-            items = allItems.filter((item) => ['recents', 'starred', 'tools'].includes(item.category))
+            // When not searching, show recents, starred, tools, and shortcuts
+            items = allItems.filter((item) => ['recents', 'starred', 'tools', 'shortcuts'].includes(item.category))
         }
 
         // Add a direct shortcut to the theme setting when searching for dark/light/theme
@@ -501,8 +418,11 @@ function SearchRoot({
     }, [isActive, setSearch])
 
     const handleItemClick = useCallback(
-        (item: SearchItem) => {
+        (item: SearchItem, openInNewTab: boolean = false) => {
             if (item.disabledReason) {
+                return
+            }
+            if (openInNewTab && !canOpenInNewTab(item)) {
                 return
             }
             if (logicKey === 'command') {
@@ -510,7 +430,9 @@ function SearchRoot({
                 posthog.capture('command menu item selected', {
                     category: item.category,
                     item_type: item.itemType ?? null,
+                    matched_search_keyword: item.matchedSearchKeyword ?? null,
                     result_position: position >= 0 ? position : null,
+                    opened_in_new_tab: openInNewTab,
                 })
             }
             if (item.id === SETTINGS_THEME_ITEM_ID) {
@@ -524,14 +446,18 @@ function SearchRoot({
                     return
                 }
                 if (item.href) {
-                    router.actions.push(item.href)
+                    navigateToHref(item.href)
                     return
                 }
             }
             if (onItemSelect) {
-                onItemSelect(item)
+                onItemSelect(item, openInNewTab)
             } else if (item.href) {
-                router.actions.push(item.href)
+                if (openInNewTab) {
+                    newInternalTab(item.href)
+                } else {
+                    navigateToHref(item.href)
+                }
             }
         },
         [onItemSelect, onAskAiClick, updateUser, toggleTheme, logicKey]
@@ -565,14 +491,13 @@ function SearchRoot({
             const isLoading = loadingByCategory.get(category) ?? false
 
             // When searching: hide empty groups (unless still loading)
-            // When not searching: always show recents/tools (with skeleton if loading); starred only when items or loading
+            // When not searching: always show tools; recents and starred only when they have items or are loading
             // "ai" and "create" are only shown when searching
             const shouldShow = hasSearchValue
                 ? items.length > 0 || isLoading
                 : (category === 'suggested' && items.length > 0) ||
-                  category === 'recents' ||
                   category === 'tools' ||
-                  (category === 'starred' && (items.length > 0 || isLoading))
+                  ((category === 'recents' || category === 'starred') && (items.length > 0 || isLoading))
 
             if (shouldShow) {
                 groups.push({ category, items, isLoading })
@@ -663,7 +588,17 @@ export interface SearchInputProps {
 }
 
 function SearchInput({ autoFocus, className }: SearchInputProps): JSX.Element {
-    const { searchValue, setSearchValue, isActive, inputRef, showAskAiLink, onAskAiClick } = useSearchContext()
+    const {
+        searchValue,
+        setSearchValue,
+        isActive,
+        inputRef,
+        showAskAiLink,
+        onAskAiClick,
+        handleItemClick,
+        highlightedItemRef,
+        filteredItems,
+    } = useSearchContext()
 
     const { text: placeholderText, isVisible: placeholderVisible } = useRotatingPlaceholder(isActive && !searchValue)
 
@@ -679,10 +614,25 @@ function SearchInput({ autoFocus, className }: SearchInputProps): JSX.Element {
             if (e.key === 'Tab' && showAskAiLink && searchValue.trim()) {
                 e.preventDefault()
                 onAskAiClick?.()
-                router.actions.push(urls.ai(undefined, searchValue.trim()))
+                navigateToHref(urls.ai(undefined, searchValue.trim()))
+                return
+            }
+            // Cmd/Ctrl+Enter opens the highlighted result in a new tab. Base UI's combobox input
+            // ignores modified Enter (so plain Enter still navigates in place), leaving this to us.
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                const highlighted = highlightedItemRef.current
+                if (
+                    highlighted &&
+                    !highlighted.disabledReason &&
+                    canOpenInNewTab(highlighted) &&
+                    filteredItems.some((item) => item.id === highlighted.id)
+                ) {
+                    e.preventDefault()
+                    handleItemClick(highlighted, true)
+                }
             }
         },
-        [showAskAiLink, searchValue, onAskAiClick]
+        [showAskAiLink, searchValue, onAskAiClick, handleItemClick, highlightedItemRef, filteredItems]
     )
 
     useEffect(() => {
@@ -732,7 +682,7 @@ function SearchInput({ autoFocus, className }: SearchInputProps): JSX.Element {
                         variant="panel"
                         onClick={() => {
                             onAskAiClick?.()
-                            router.actions.push(urls.ai(undefined, searchValue.trim()))
+                            navigateToHref(urls.ai(undefined, searchValue.trim()))
                         }}
                         tooltip="Click or press Tab to ask AI"
                     >
@@ -780,16 +730,17 @@ function SearchStatus(): JSX.Element {
         }
         if (filteredItems.length > 0) {
             if (!searchValue.trim()) {
-                return 'Recents and tools'
+                return null
             }
             return `${filteredItems.length} result${filteredItems.length === 1 ? '' : 's'}`
         }
         return 'Type to search...'
     }, [isSearching, searchValue, filteredItems.length])
 
+    // The live region stays mounted so screen readers announce the first search status.
     return (
-        <Autocomplete.Status className="px-3 pb-2 text-xs text-muted flex items-center">
-            <span>{statusMessage}</span>
+        <Autocomplete.Status className="px-3 pb-2 text-xs text-muted flex items-center empty:p-0">
+            {statusMessage && <span>{statusMessage}</span>}
         </Autocomplete.Status>
     )
 }
@@ -829,7 +780,7 @@ function SearchResults({
             direction="vertical"
             styledScrollbars
             className={cn('flex-1 overflow-y-auto', className)}
-            innerClassName="scroll-pt-12 scroll-pb-8"
+            innerClassName="scroll-pt-12 scroll-pb-8 overscroll-contain"
         >
             {!isAnyLoading && (
                 <Autocomplete.Empty className="px-3 py-8 text-center text-muted empty:p-0">
@@ -886,6 +837,9 @@ function SearchResults({
                                                         <Autocomplete.Item
                                                             value={item}
                                                             onClick={(e) => {
+                                                                // Plain clicks only. LinkPrimitive returns early on
+                                                                // metaKey/ctrlKey, so modifier clicks never get here and
+                                                                // are handled in the capture phase below instead.
                                                                 e.preventDefault()
                                                                 handleItemClick(item)
                                                             }}
@@ -898,7 +852,24 @@ function SearchResults({
                                                                     highlightedItemRef.current = item
                                                                 }
                                                                 return (
-                                                                    <div className="px-2">
+                                                                    <div
+                                                                        className="px-2"
+                                                                        onClickCapture={(e) => {
+                                                                            // LinkPrimitive swallows modifier clicks
+                                                                            // (stopPropagation, then return) before its
+                                                                            // own onClick runs, so the capture phase is
+                                                                            // the only place we still see them. Route
+                                                                            // them through the same call as
+                                                                            // Cmd/Ctrl+Enter so a mouse and a keyboard
+                                                                            // new-tab behave identically: the palette
+                                                                            // closes, the selection is captured, and
+                                                                            // action items stay inert.
+                                                                            if (e.metaKey || e.ctrlKey) {
+                                                                                e.preventDefault()
+                                                                                handleItemClick(item, true)
+                                                                            }
+                                                                        }}
+                                                                    >
                                                                         <Link
                                                                             // No `to` when disabled: Link only applies its
                                                                             // disabled state and reason tooltip without one
@@ -921,6 +892,20 @@ function SearchResults({
                                                                             <span className="truncate">
                                                                                 {String(item.displayName || item.name)}
                                                                             </span>
+                                                                            {item.badges?.map((badge) => (
+                                                                                <Tooltip
+                                                                                    key={badge.label}
+                                                                                    title={badge.tooltip}
+                                                                                >
+                                                                                    <LemonTag
+                                                                                        type={badge.type}
+                                                                                        size="small"
+                                                                                        className="shrink-0"
+                                                                                    >
+                                                                                        {badge.label}
+                                                                                    </LemonTag>
+                                                                                </Tooltip>
+                                                                            ))}
                                                                             {(group.category === 'recents' ||
                                                                                 group.category === 'starred' ||
                                                                                 group.category === 'groups') &&
@@ -933,29 +918,35 @@ function SearchResults({
                                                                                         )}
                                                                                     </span>
                                                                                 )}
+                                                                            {item.parentName && (
+                                                                                <span className="text-xs text-tertiary shrink-0 mt-[2px]">
+                                                                                    {`in ${item.parentName}`}
+                                                                                </span>
+                                                                            )}
                                                                             {item.productCategory && (
                                                                                 <span className="text-xs text-tertiary shrink-0 mt-[2px]">
                                                                                     {item.productCategory}
                                                                                 </span>
                                                                             )}
-                                                                            {item.tags?.map((tag) => (
-                                                                                <LemonTag
-                                                                                    key={tag}
-                                                                                    type={
-                                                                                        tag === 'alpha'
-                                                                                            ? 'completion'
-                                                                                            : tag === 'beta'
-                                                                                              ? 'warning'
-                                                                                              : 'success'
-                                                                                    }
-                                                                                    size="small"
-                                                                                    className="shrink-0"
-                                                                                >
-                                                                                    {tag.toUpperCase()}
-                                                                                </LemonTag>
-                                                                            ))}
+                                                                            {item.keybinding && (
+                                                                                <span className="ml-auto shrink-0">
+                                                                                    {item.keybinding}
+                                                                                </span>
+                                                                            )}
+                                                                            {item.matchedSearchKeyword && (
+                                                                                <span className="ml-auto text-xxs text-tertiary truncate mt-[2px]">
+                                                                                    {`Matches "${item.matchedSearchKeyword}"`}
+                                                                                </span>
+                                                                            )}
                                                                             {item.lastViewedAt && (
-                                                                                <span className="ml-auto text-xs text-tertiary whitespace-nowrap shrink-0 mt-[2px]">
+                                                                                <span
+                                                                                    className={cn(
+                                                                                        'text-xs text-tertiary whitespace-nowrap shrink-0 mt-[2px]',
+                                                                                        item.matchedSearchKeyword
+                                                                                            ? 'ml-2'
+                                                                                            : 'ml-auto'
+                                                                                    )}
+                                                                                >
                                                                                     {formatRelativeTimeShort(
                                                                                         item.lastViewedAt
                                                                                     )}
@@ -1005,7 +996,7 @@ function SearchFooter({ children }: SearchFooterProps): JSX.Element {
     const { searchValue } = useSearchContext()
 
     return (
-        <div className="border-t px-2 py-1 text-xxs text-tertiary font-medium select-none flex items-center gap-1">
+        <div className="border-t px-2 py-1 text-xxs text-tertiary font-medium select-none flex flex-wrap items-center gap-1">
             {children ?? (
                 <>
                     {filteredItems.length > 1 && (
@@ -1016,6 +1007,11 @@ function SearchFooter({ children }: SearchFooterProps): JSX.Element {
                     <span>
                         <KeyboardShortcut enter /> to activate
                     </span>
+                    {filteredItems.some(canOpenInNewTab) && (
+                        <span>
+                            <KeyboardShortcut command enter /> to open in new tab
+                        </span>
+                    )}
                     {searchValue.trim() && (
                         <span>
                             <KeyboardShortcut tab /> to ask AI

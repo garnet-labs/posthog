@@ -40,7 +40,7 @@ export interface editErrorTrackingWidgetModalLogicValues {
     filterTestAccounts: boolean
     limit: number
     onClose: () => void
-    orderBy: 'first_seen' | 'last_seen' | 'occurrences' | 'sessions' | 'users'
+    orderBy: 'first_seen' | 'last_seen' | 'occurrences' | 'sessions' | 'severity' | 'users'
     orderDirection: 'ASC' | 'DESC'
     saveDisabledReason: string | undefined
     saving: boolean
@@ -82,7 +82,7 @@ export interface editErrorTrackingWidgetModalLogicValues {
                       | undefined
                   filterTestAccounts?: boolean | null | undefined
                   limit: number
-                  orderBy: 'first_seen' | 'last_seen' | 'occurrences' | 'sessions' | 'users'
+                  orderBy: 'first_seen' | 'last_seen' | 'occurrences' | 'sessions' | 'severity' | 'users'
                   orderDirection: 'ASC' | 'DESC'
                   status: 'active' | 'all' | 'archived' | 'pending_release' | 'resolved' | 'suppressed'
                   widgetFilters?:
@@ -92,6 +92,7 @@ export interface editErrorTrackingWidgetModalLogicValues {
                                 filterId: string
                                 operator:
                                     | 'between'
+                                    | 'ends_with'
                                     | 'exact'
                                     | 'flag_evaluates_to'
                                     | 'gt'
@@ -100,6 +101,7 @@ export interface editErrorTrackingWidgetModalLogicValues {
                                     | 'icontains_multi'
                                     | 'in'
                                     | 'is_cleaned_path_exact'
+                                    | 'is_cleaned_path_not_exact'
                                     | 'is_date_after'
                                     | 'is_date_before'
                                     | 'is_date_exact'
@@ -111,10 +113,12 @@ export interface editErrorTrackingWidgetModalLogicValues {
                                     | 'max'
                                     | 'min'
                                     | 'not_between'
+                                    | 'not_ends_with'
                                     | 'not_icontains'
                                     | 'not_icontains_multi'
                                     | 'not_in'
                                     | 'not_regex'
+                                    | 'not_starts_with'
                                     | 'regex'
                                     | 'semver_caret'
                                     | 'semver_eq'
@@ -125,6 +129,7 @@ export interface editErrorTrackingWidgetModalLogicValues {
                                     | 'semver_neq'
                                     | 'semver_tilde'
                                     | 'semver_wildcard'
+                                    | 'starts_with'
                                 optionId: string
                                 propertyName: string
                                 value?: string | string[] | null | undefined
@@ -185,7 +190,7 @@ export interface editErrorTrackingWidgetModalLogicMeta {
     __keaTypeGenInternalSelectorTypes: {
         validation: (
             limit: number,
-            orderBy: 'first_seen' | 'last_seen' | 'occurrences' | 'sessions' | 'users',
+            orderBy: 'first_seen' | 'last_seen' | 'occurrences' | 'sessions' | 'severity' | 'users',
             orderDirection: 'ASC' | 'DESC',
             filterTestAccounts: boolean,
             widgetConfig: {
@@ -215,7 +220,7 @@ export interface editErrorTrackingWidgetModalLogicMeta {
                     | undefined
                 filterTestAccounts?: boolean | null | undefined
                 limit: number
-                orderBy: 'first_seen' | 'last_seen' | 'occurrences' | 'sessions' | 'users'
+                orderBy: 'first_seen' | 'last_seen' | 'occurrences' | 'sessions' | 'severity' | 'users'
                 orderDirection: 'ASC' | 'DESC'
                 status: 'active' | 'all' | 'archived' | 'pending_release' | 'resolved' | 'suppressed'
                 widgetFilters?:
@@ -225,6 +230,7 @@ export interface editErrorTrackingWidgetModalLogicMeta {
                               filterId: string
                               operator:
                                   | 'between'
+                                  | 'ends_with'
                                   | 'exact'
                                   | 'flag_evaluates_to'
                                   | 'gt'
@@ -233,6 +239,7 @@ export interface editErrorTrackingWidgetModalLogicMeta {
                                   | 'icontains_multi'
                                   | 'in'
                                   | 'is_cleaned_path_exact'
+                                  | 'is_cleaned_path_not_exact'
                                   | 'is_date_after'
                                   | 'is_date_before'
                                   | 'is_date_exact'
@@ -244,10 +251,12 @@ export interface editErrorTrackingWidgetModalLogicMeta {
                                   | 'max'
                                   | 'min'
                                   | 'not_between'
+                                  | 'not_ends_with'
                                   | 'not_icontains'
                                   | 'not_icontains_multi'
                                   | 'not_in'
                                   | 'not_regex'
+                                  | 'not_starts_with'
                                   | 'regex'
                                   | 'semver_caret'
                                   | 'semver_eq'
@@ -258,6 +267,7 @@ export interface editErrorTrackingWidgetModalLogicMeta {
                                   | 'semver_neq'
                                   | 'semver_tilde'
                                   | 'semver_wildcard'
+                                  | 'starts_with'
                               optionId: string
                               propertyName: string
                               value?: string | string[] | null | undefined
@@ -304,7 +314,7 @@ export interface editErrorTrackingWidgetModalLogicMeta {
                           | undefined
                       filterTestAccounts?: boolean | null | undefined
                       limit: number
-                      orderBy: 'first_seen' | 'last_seen' | 'occurrences' | 'sessions' | 'users'
+                      orderBy: 'first_seen' | 'last_seen' | 'occurrences' | 'sessions' | 'severity' | 'users'
                       orderDirection: 'ASC' | 'DESC'
                       status: 'active' | 'all' | 'archived' | 'pending_release' | 'resolved' | 'suppressed'
                       widgetFilters?:
@@ -314,6 +324,7 @@ export interface editErrorTrackingWidgetModalLogicMeta {
                                     filterId: string
                                     operator:
                                         | 'between'
+                                        | 'ends_with'
                                         | 'exact'
                                         | 'flag_evaluates_to'
                                         | 'gt'
@@ -322,6 +333,7 @@ export interface editErrorTrackingWidgetModalLogicMeta {
                                         | 'icontains_multi'
                                         | 'in'
                                         | 'is_cleaned_path_exact'
+                                        | 'is_cleaned_path_not_exact'
                                         | 'is_date_after'
                                         | 'is_date_before'
                                         | 'is_date_exact'
@@ -333,10 +345,12 @@ export interface editErrorTrackingWidgetModalLogicMeta {
                                         | 'max'
                                         | 'min'
                                         | 'not_between'
+                                        | 'not_ends_with'
                                         | 'not_icontains'
                                         | 'not_icontains_multi'
                                         | 'not_in'
                                         | 'not_regex'
+                                        | 'not_starts_with'
                                         | 'regex'
                                         | 'semver_caret'
                                         | 'semver_eq'
@@ -347,6 +361,7 @@ export interface editErrorTrackingWidgetModalLogicMeta {
                                         | 'semver_neq'
                                         | 'semver_tilde'
                                         | 'semver_wildcard'
+                                        | 'starts_with'
                                     optionId: string
                                     propertyName: string
                                     value?: string | string[] | null | undefined
@@ -387,7 +402,7 @@ export interface editErrorTrackingWidgetModalLogicMeta {
                               | undefined
                           filterTestAccounts?: boolean | null | undefined
                           limit: number
-                          orderBy: 'first_seen' | 'last_seen' | 'occurrences' | 'sessions' | 'users'
+                          orderBy: 'first_seen' | 'last_seen' | 'occurrences' | 'sessions' | 'severity' | 'users'
                           orderDirection: 'ASC' | 'DESC'
                           status: 'active' | 'all' | 'archived' | 'pending_release' | 'resolved' | 'suppressed'
                           widgetFilters?:
@@ -397,6 +412,7 @@ export interface editErrorTrackingWidgetModalLogicMeta {
                                         filterId: string
                                         operator:
                                             | 'between'
+                                            | 'ends_with'
                                             | 'exact'
                                             | 'flag_evaluates_to'
                                             | 'gt'
@@ -405,6 +421,7 @@ export interface editErrorTrackingWidgetModalLogicMeta {
                                             | 'icontains_multi'
                                             | 'in'
                                             | 'is_cleaned_path_exact'
+                                            | 'is_cleaned_path_not_exact'
                                             | 'is_date_after'
                                             | 'is_date_before'
                                             | 'is_date_exact'
@@ -416,10 +433,12 @@ export interface editErrorTrackingWidgetModalLogicMeta {
                                             | 'max'
                                             | 'min'
                                             | 'not_between'
+                                            | 'not_ends_with'
                                             | 'not_icontains'
                                             | 'not_icontains_multi'
                                             | 'not_in'
                                             | 'not_regex'
+                                            | 'not_starts_with'
                                             | 'regex'
                                             | 'semver_caret'
                                             | 'semver_eq'
@@ -430,6 +449,7 @@ export interface editErrorTrackingWidgetModalLogicMeta {
                                             | 'semver_neq'
                                             | 'semver_tilde'
                                             | 'semver_wildcard'
+                                            | 'starts_with'
                                         optionId: string
                                         propertyName: string
                                         value?: string | string[] | null | undefined
@@ -484,7 +504,7 @@ export interface editErrorTrackingWidgetModalLogicMeta {
                               | undefined
                           filterTestAccounts?: boolean | null | undefined
                           limit: number
-                          orderBy: 'first_seen' | 'last_seen' | 'occurrences' | 'sessions' | 'users'
+                          orderBy: 'first_seen' | 'last_seen' | 'occurrences' | 'sessions' | 'severity' | 'users'
                           orderDirection: 'ASC' | 'DESC'
                           status: 'active' | 'all' | 'archived' | 'pending_release' | 'resolved' | 'suppressed'
                           widgetFilters?:
@@ -494,6 +514,7 @@ export interface editErrorTrackingWidgetModalLogicMeta {
                                         filterId: string
                                         operator:
                                             | 'between'
+                                            | 'ends_with'
                                             | 'exact'
                                             | 'flag_evaluates_to'
                                             | 'gt'
@@ -502,6 +523,7 @@ export interface editErrorTrackingWidgetModalLogicMeta {
                                             | 'icontains_multi'
                                             | 'in'
                                             | 'is_cleaned_path_exact'
+                                            | 'is_cleaned_path_not_exact'
                                             | 'is_date_after'
                                             | 'is_date_before'
                                             | 'is_date_exact'
@@ -513,10 +535,12 @@ export interface editErrorTrackingWidgetModalLogicMeta {
                                             | 'max'
                                             | 'min'
                                             | 'not_between'
+                                            | 'not_ends_with'
                                             | 'not_icontains'
                                             | 'not_icontains_multi'
                                             | 'not_in'
                                             | 'not_regex'
+                                            | 'not_starts_with'
                                             | 'regex'
                                             | 'semver_caret'
                                             | 'semver_eq'
@@ -527,6 +551,7 @@ export interface editErrorTrackingWidgetModalLogicMeta {
                                             | 'semver_neq'
                                             | 'semver_tilde'
                                             | 'semver_wildcard'
+                                            | 'starts_with'
                                         optionId: string
                                         propertyName: string
                                         value?: string | string[] | null | undefined
@@ -694,7 +719,7 @@ export const editErrorTrackingWidgetModalLogic = kea<editErrorTrackingWidgetModa
             (s) => [s.limit, s.orderBy, s.orderDirection, s.filterTestAccounts, s.widgetConfig],
             (
                 limit: number,
-                orderBy: 'first_seen' | 'last_seen' | 'occurrences' | 'sessions' | 'users',
+                orderBy: 'first_seen' | 'last_seen' | 'occurrences' | 'sessions' | 'severity' | 'users',
                 orderDirection: 'ASC' | 'DESC',
                 filterTestAccounts: boolean,
                 widgetConfig: ErrorTrackingWidgetConfig
@@ -739,7 +764,7 @@ export const editErrorTrackingWidgetModalLogic = kea<editErrorTrackingWidgetModa
                                   | undefined
                               filterTestAccounts?: boolean | null | undefined
                               limit: number
-                              orderBy: 'first_seen' | 'last_seen' | 'occurrences' | 'sessions' | 'users'
+                              orderBy: 'first_seen' | 'last_seen' | 'occurrences' | 'sessions' | 'severity' | 'users'
                               orderDirection: 'ASC' | 'DESC'
                               status: 'active' | 'all' | 'archived' | 'pending_release' | 'resolved' | 'suppressed'
                               widgetFilters?:
@@ -749,6 +774,7 @@ export const editErrorTrackingWidgetModalLogic = kea<editErrorTrackingWidgetModa
                                             filterId: string
                                             operator:
                                                 | 'between'
+                                                | 'ends_with'
                                                 | 'exact'
                                                 | 'flag_evaluates_to'
                                                 | 'gt'
@@ -757,6 +783,7 @@ export const editErrorTrackingWidgetModalLogic = kea<editErrorTrackingWidgetModa
                                                 | 'icontains_multi'
                                                 | 'in'
                                                 | 'is_cleaned_path_exact'
+                                                | 'is_cleaned_path_not_exact'
                                                 | 'is_date_after'
                                                 | 'is_date_before'
                                                 | 'is_date_exact'
@@ -768,10 +795,12 @@ export const editErrorTrackingWidgetModalLogic = kea<editErrorTrackingWidgetModa
                                                 | 'max'
                                                 | 'min'
                                                 | 'not_between'
+                                                | 'not_ends_with'
                                                 | 'not_icontains'
                                                 | 'not_icontains_multi'
                                                 | 'not_in'
                                                 | 'not_regex'
+                                                | 'not_starts_with'
                                                 | 'regex'
                                                 | 'semver_caret'
                                                 | 'semver_eq'
@@ -782,6 +811,7 @@ export const editErrorTrackingWidgetModalLogic = kea<editErrorTrackingWidgetModa
                                                 | 'semver_neq'
                                                 | 'semver_tilde'
                                                 | 'semver_wildcard'
+                                                | 'starts_with'
                                             optionId: string
                                             propertyName: string
                                             value?: string | string[] | null | undefined
@@ -847,7 +877,7 @@ export const editErrorTrackingWidgetModalLogic = kea<editErrorTrackingWidgetModa
                                   | undefined
                               filterTestAccounts?: boolean | null | undefined
                               limit: number
-                              orderBy: 'first_seen' | 'last_seen' | 'occurrences' | 'sessions' | 'users'
+                              orderBy: 'first_seen' | 'last_seen' | 'occurrences' | 'sessions' | 'severity' | 'users'
                               orderDirection: 'ASC' | 'DESC'
                               status: 'active' | 'all' | 'archived' | 'pending_release' | 'resolved' | 'suppressed'
                               widgetFilters?:
@@ -857,6 +887,7 @@ export const editErrorTrackingWidgetModalLogic = kea<editErrorTrackingWidgetModa
                                             filterId: string
                                             operator:
                                                 | 'between'
+                                                | 'ends_with'
                                                 | 'exact'
                                                 | 'flag_evaluates_to'
                                                 | 'gt'
@@ -865,6 +896,7 @@ export const editErrorTrackingWidgetModalLogic = kea<editErrorTrackingWidgetModa
                                                 | 'icontains_multi'
                                                 | 'in'
                                                 | 'is_cleaned_path_exact'
+                                                | 'is_cleaned_path_not_exact'
                                                 | 'is_date_after'
                                                 | 'is_date_before'
                                                 | 'is_date_exact'
@@ -876,10 +908,12 @@ export const editErrorTrackingWidgetModalLogic = kea<editErrorTrackingWidgetModa
                                                 | 'max'
                                                 | 'min'
                                                 | 'not_between'
+                                                | 'not_ends_with'
                                                 | 'not_icontains'
                                                 | 'not_icontains_multi'
                                                 | 'not_in'
                                                 | 'not_regex'
+                                                | 'not_starts_with'
                                                 | 'regex'
                                                 | 'semver_caret'
                                                 | 'semver_eq'
@@ -890,6 +924,7 @@ export const editErrorTrackingWidgetModalLogic = kea<editErrorTrackingWidgetModa
                                                 | 'semver_neq'
                                                 | 'semver_tilde'
                                                 | 'semver_wildcard'
+                                                | 'starts_with'
                                             optionId: string
                                             propertyName: string
                                             value?: string | string[] | null | undefined

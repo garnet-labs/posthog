@@ -6,15 +6,17 @@ import secrets
 import urllib.parse
 from base64 import b32encode
 from binascii import unhexlify
+from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
-from typing import Any, Optional, cast
+from typing import Any, NoReturn, Optional, cast
 
 from django.conf import settings
 from django.contrib.auth import login, update_session_auth_hash
 from django.contrib.auth.password_validation import validate_password
 from django.core.cache import cache
 from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.db import IntegrityError, transaction
+from django.db.models import Exists, OuterRef
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import redirect
 from django.utils import timezone as django_timezone
@@ -22,6 +24,7 @@ from django.utils.html import escape
 from django.views.decorators.http import require_http_methods
 
 import jwt
+import pydantic
 import requests
 import structlog
 import posthoganalytics
@@ -37,13 +40,18 @@ from prometheus_client import Counter
 from rest_framework import exceptions, mixins, serializers, status, viewsets
 from rest_framework.exceptions import NotFound
 from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from social_django.models import UserSocialAuth
 from two_factor.forms import TOTPDeviceForm
 from two_factor.utils import default_device
 
-from posthog.api.email_verification import EmailVerifier, email_verification_token_generator
+from posthog.schema import UserUIConfiguration
+
+from posthog.after_response import run_after_response
+from posthog.api.email_verification import email_verification_code_verifier
+from posthog.api.notification_settings import validate_notification_settings
 from posthog.api.oauth.toolbar_service import (
     ToolbarOAuthError,
     ToolbarOAuthState,
@@ -57,8 +65,14 @@ from posthog.api.oauth.toolbar_service import (
 )
 from posthog.api.organization import OrganizationSerializer
 from posthog.api.services.flags_service import get_flags_from_service
-from posthog.api.shared import OrganizationBasicSerializer, TeamBasicSerializer
-from posthog.api.utils import ClassicBehaviorBooleanFieldSerializer, action, unparsed_hostname_in_allowed_url_list
+from posthog.api.shared import OrganizationBasicSerializer, OrganizationNotificationLockSerializer, TeamBasicSerializer
+from posthog.api.utils import (
+    ClassicBehaviorBooleanFieldSerializer,
+    action,
+    canonicalize_encoded_url,
+    strip_url_userinfo,
+    unparsed_hostname_in_allowed_url_list,
+)
 from posthog.auth import (
     IDJagAccessTokenAuthentication,
     OAuthAccessTokenAuthentication,
@@ -66,33 +80,54 @@ from posthog.auth import (
     SessionAuthentication,
     session_auth_required,
 )
-from posthog.constants import INVITE_DAYS_VALIDITY, PERMITTED_FORUM_DOMAINS
+from posthog.cloud_utils import is_cloud
+from posthog.constants import INVITE_DAYS_VALIDITY, PERMITTED_FORUM_DOMAINS, AvailableFeature
 from posthog.email import is_email_available
 from posthog.event_usage import (
+    groups,
     report_user_deleted_account,
+    report_user_email_change_requested,
+    report_user_identity_change_refused,
     report_user_logged_in,
     report_user_updated,
     report_user_verified_email,
 )
 from posthog.exceptions_capture import capture_exception
-from posthog.helpers.email_utils import EmailNormalizer, validate_display_name
+from posthog.helpers.email_utils import (
+    EmailLookupHandler,
+    EmailNormalizer,
+    EmailValidationHelper,
+    reject_lookalike_email_characters,
+    reject_plus_addressed_email,
+    validate_display_name,
+)
+from posthog.helpers.impersonation import is_impersonated
 from posthog.helpers.session_cache import SessionCache
-from posthog.helpers.two_factor_session import has_passkeys, set_two_factor_verified_in_session
+from posthog.helpers.two_factor_session import (
+    has_passkeys,
+    normalize_verification_code,
+    set_two_factor_verified_in_session,
+)
+from posthog.helpers.verified_domain_enforcement import VERIFIED_DOMAIN_REQUIRED_ERROR, resolve_login_organization
 from posthog.middleware import (
     IMPERSONATION_REASON_SESSION_KEY,
     get_impersonated_session_expires_at,
     is_read_only_impersonation,
 )
 from posthog.models import OrganizationInvite, Team, User, UserScenePersonalisation
-from posthog.models.oauth import OAuthGrant, find_oauth_refresh_token
+from posthog.models.oauth import OAuthGrant, find_oauth_refresh_token, has_live_third_party_oauth_access
 from posthog.models.onboarding_delegation import cancel_pending_delegation, clear_delegation_state
 from posthog.models.organization import Organization, OrganizationMembership
 from posthog.models.organization_domain import OrganizationDomain
-from posthog.models.personal_api_key import PersonalAPIKey
+from posthog.models.organization_integration import OrganizationIntegration
+from posthog.models.organization_notification_lock import notification_locks_for_users
+from posthog.models.organization_provisioning import OrganizationProvisioning
+from posthog.models.personal_api_key import PersonalAPIKey, max_personal_api_keys_for_user
+from posthog.models.team.team_provisioning_config import TeamProvisioningConfig
 from posthog.models.user import (
-    NOTIFICATION_DEFAULTS,
     ROLE_CHOICES,
     Notifications,
+    OnboardingFlowVariant,
     OnboardingSkippedReason,
     ShortcutPosition,
 )
@@ -103,8 +138,9 @@ from posthog.rate_limit import (
     ToolbarOAuthRefreshThrottle,
     UserAuthenticationThrottle,
     UserEmailVerificationThrottle,
+    UserVerifyEmailThrottle,
+    VerifyEmailIPThrottle,
 )
-from posthog.rbac.user_access_control import UserAccessControl
 from posthog.session.activity import (
     list_user_sessions,
     revoke_other_sessions,
@@ -114,7 +150,12 @@ from posthog.session.activity import (
     sync_current_session_metadata,
 )
 from posthog.session.models import Session
-from posthog.session.reauth import sensitive_action_reference, step_up_required
+from posthog.session.reauth import (
+    fresh_reauth_expires_at,
+    reauth_is_fresh,
+    sensitive_action_reference,
+    step_up_required,
+)
 from posthog.tasks.email import (
     send_email_change_emails,
     send_password_changed_email,
@@ -122,34 +163,24 @@ from posthog.tasks.email import (
     send_two_factor_auth_enabled_email,
 )
 from posthog.user_permissions import UserPermissions
-from posthog.utils import render_template
+from posthog.utils import get_safe_cache, render_template, safe_cache_set
 
+from products.access_control.backend.facade.user_access_control import UserAccessControl
 from products.dashboards.backend.models.dashboard import Dashboard
 from products.notifications.backend.facade.api import NotificationType
-
-_VALID_NOTIFICATION_TYPE_VALUES: frozenset[str] = frozenset(t.value for t in NotificationType)
 
 REDIRECT_TO_SITE_COUNTER = Counter("posthog_redirect_to_site", "Redirect to site")
 REDIRECT_TO_SITE_FAILED_COUNTER = Counter("posthog_redirect_to_site_failed", "Redirect to site failed")
 
 NUM_2FA_BACKUP_CODES = 10
 
-MAX_PIPELINE_NOTIFICATIONS = 1000
-_PIPELINE_ID_PATTERN = re.compile(r"^(?:hog_function|batch_export|plugin_config):[0-9a-zA-Z-]{1,128}$")
+# `product_intro_seen` is exempt from the re-auth gate, so it gets a ceiling of its own. Only a new key
+# is refused at the ceiling, so an intro the user already dismissed still reopens and closes.
+MAX_PRODUCT_INTROS_SEEN = 100
 
-
-def _validate_pipeline_notifications(incoming: dict, merged: dict) -> None:
-    for pipeline_id in incoming:
-        if not isinstance(pipeline_id, str) or not _PIPELINE_ID_PATTERN.match(pipeline_id):
-            raise serializers.ValidationError(
-                f"Invalid pipeline id: {pipeline_id!r}",
-                code="invalid_input",
-            )
-    if len(merged) > MAX_PIPELINE_NOTIFICATIONS:
-        raise serializers.ValidationError(
-            f"pipeline_notifications_disabled cannot have more than {MAX_PIPELINE_NOTIFICATIONS} entries",
-            code="invalid_input",
-        )
+# Building the person properties runs several queries. The user's own edits refresh them through
+# "user updated", so the per-request refresh only catches slower drift such as project counts.
+PERSON_PROPERTIES_REFRESH_INTERVAL_SECONDS = 60 * 60
 
 
 logger = structlog.get_logger(__name__)
@@ -170,6 +201,26 @@ class PendingInviteSerializer(serializers.Serializer):
     organization_id = serializers.CharField()
     organization_name = serializers.CharField()
     created_at = serializers.DateTimeField()
+
+
+class VerifyEmailRequestSerializer(serializers.Serializer):
+    """Request body for POST /api/users/verify_email/."""
+
+    # A string, not a UUIDField: an unknown uuid must answer the same way as a wrong code rather
+    # than as a shape error.
+    uuid = serializers.CharField(help_text="UUID of the user whose email is being verified.")
+    code = serializers.CharField(
+        help_text="The 6-digit verification code from the email. Whitespace, invisible characters, "
+        "and grouping hyphens are removed and compatibility digits are folded to ASCII before checking.",
+    )
+
+    def validate_code(self, value: str) -> str:
+        # Same rule as the login code: exactly 6 digits after normalization, so malformed input is
+        # rejected here and never reaches the attempt budget.
+        cleaned = normalize_verification_code(value)
+        if not re.fullmatch(r"\d{6}", cleaned):
+            raise serializers.ValidationError("Enter the 6-digit code from your email.")
+        return cleaned
 
 
 class OnboardingSkipRequestSerializer(serializers.Serializer):
@@ -195,6 +246,32 @@ class OnboardingSkipRequestSerializer(serializers.Serializer):
         max_length=64,
         help_text="Onboarding step key the user was on when skipping, for analytics only.",
     )
+    flow_variant = serializers.ChoiceField(
+        choices=OnboardingFlowVariant.choices,
+        required=False,
+        help_text="Which onboarding flow the user skipped from, for analytics only.",
+    )
+
+
+def _reserve_person_properties_refresh_if_due(user: User) -> bool:
+    # Store the last refreshed project, not one key per project. A project switch through
+    # AutoProjectMiddleware sends no "user updated", so a switch back to an earlier project
+    # must refresh too.
+    key = f"user_person_properties_refreshed:{user.id}"
+    context = f"{user.current_organization_id}:{user.current_team_id}"
+    if get_safe_cache(key) == context:
+        return False
+    safe_cache_set(key, context, timeout=PERSON_PROPERTIES_REFRESH_INTERVAL_SECONDS)
+    return True
+
+
+@tracer.start_as_current_span("user_serializer.identify")
+def _refresh_person_properties(user: User) -> None:
+    posthoganalytics.capture(
+        distinct_id=user.distinct_id,
+        event="update user properties",
+        properties={"$set": user.get_analytics_metadata()},
+    )
 
 
 class UserSerializer(serializers.ModelSerializer):
@@ -206,6 +283,12 @@ class UserSerializer(serializers.ModelSerializer):
         help_text="The reason the operator gave when the current impersonation session started (or was last up/downgraded). Null when not impersonating."
     )
     sensitive_session_expires_at = serializers.SerializerMethodField()
+    fresh_reauth_expires_at = serializers.SerializerMethodField(
+        help_text=(
+            "When the last re-authentication stops counting as fresh. Changing `email` after this needs a new "
+            "re-authentication. Null when the session has none on record."
+        )
+    )
     is_2fa_enabled = serializers.SerializerMethodField()
     has_social_auth = serializers.SerializerMethodField()
     has_sso_enforcement = serializers.SerializerMethodField()
@@ -234,6 +317,15 @@ class UserSerializer(serializers.ModelSerializer):
         ),
     )
     scene_personalisation = ScenePersonalisationBasicSerializer(many=True, read_only=True)
+    ui_configuration = serializers.JSONField(
+        required=False,
+        allow_null=True,
+        help_text=(
+            "Per-user UI customization, validated against the `UserUIConfiguration` schema. Covers SQL "
+            "editor settings such as Vim mode and the vimrc. Send the complete object: it replaces the "
+            "stored value wholesale. Null means no customization."
+        ),
+    )
     anonymize_data = ClassicBehaviorBooleanFieldSerializer(
         help_text="Whether PostHog should anonymize events captured for this user when identified."
     )
@@ -258,10 +350,26 @@ class UserSerializer(serializers.ModelSerializer):
     )
     requires_credential_review = serializers.SerializerMethodField(
         help_text=(
-            "True if the user has at least one Personal API Key or passkey and has not yet "
-            "acknowledged their existing credentials. Used to gate a one-shot review screen on "
-            "first post-provisioning login. Becomes False once the user POSTs to "
-            "`/api/users/@me/credentials_review_complete/`. Read-only."
+            "True if the user belongs to an organization that a partner provisioned, has not yet "
+            "acknowledged the access on their account, and has at least one Personal API Key or passkey, "
+            "or a third-party OAuth application that can currently act as them. Used to gate a one-shot "
+            "review screen on first post-provisioning login. Becomes False "
+            "once the user POSTs to `/api/users/@me/credentials_review_complete/`. Read-only."
+        ),
+    )
+    notification_locks = serializers.SerializerMethodField(
+        help_text=(
+            "Notification settings an organization admin enforces on this user. The matching "
+            "controls are read-only, and `notification_settings` still holds the user's own "
+            "choice underneath. Read-only."
+        ),
+    )
+    personal_api_keys_limit = serializers.SerializerMethodField(
+        help_text=(
+            "How many personal API keys the user may hold, from the `personal_api_keys` billing "
+            "entitlement of the user's organizations. The highest limit across their organizations "
+            "applies, and 10 when no organization grants a limit. Creating a key beyond it is "
+            "rejected with a validation error. Read-only."
         ),
     )
 
@@ -277,6 +385,7 @@ class UserSerializer(serializers.ModelSerializer):
             "pending_email",
             "is_email_verified",
             "notification_settings",
+            "notification_locks",
             "anonymize_data",
             "allow_impersonation",
             "toolbar_mode",
@@ -288,6 +397,7 @@ class UserSerializer(serializers.ModelSerializer):
             "is_impersonated_read_only",
             "is_impersonated_reason",
             "sensitive_session_expires_at",
+            "fresh_reauth_expires_at",
             "team",
             "organization",
             "organizations",
@@ -308,6 +418,7 @@ class UserSerializer(serializers.ModelSerializer):
             "role_at_organization",
             "passkeys_enabled_for_2fa",
             "hide_mcp_hints",
+            "ui_configuration",
             "onboarding_skipped_at",
             "onboarding_skipped_reason",
             "onboarding_skipped_organization_id",
@@ -318,6 +429,8 @@ class UserSerializer(serializers.ModelSerializer):
             "active_realtime_notification_types",
             "pending_invites",
             "requires_credential_review",
+            "notification_locks",
+            "personal_api_keys_limit",
         ]
 
         read_only_fields = [
@@ -333,6 +446,7 @@ class UserSerializer(serializers.ModelSerializer):
             "is_impersonated_read_only",
             "is_impersonated_reason",
             "sensitive_session_expires_at",
+            "fresh_reauth_expires_at",
             "team",
             "organization",
             "organizations",
@@ -359,6 +473,30 @@ class UserSerializer(serializers.ModelSerializer):
 
     def validate_last_name(self, value: str) -> str:
         return validate_display_name(value)
+
+    def validate_email(self, value: str) -> str:
+        normalized = EmailNormalizer.normalize(value)
+        if self.instance and normalized == EmailNormalizer.normalize(self.instance.email):
+            # Unchanged — don't re-validate a legacy '+' address on an unrelated profile edit. The
+            # stored string is returned as it is, because an edit of the case alone reaches no
+            # verification and so cannot rewrite the address a person signs in with.
+            return self.instance.email
+        reject_plus_addressed_email(value)
+        reject_lookalike_email_characters(value)
+        # Excluding the editor lets a legacy '+' account holder drop their own alias.
+        exclude_user_id = self.instance.pk if self.instance else None
+        if EmailValidationHelper.user_exists_with_stripped_alias(
+            value, exclude_user_id=exclude_user_id
+        ) or EmailValidationHelper.user_exists_with_gmail_canonical(value, exclude_user_id=exclude_user_id):
+            raise serializers.ValidationError("There is already an account with this email address.", code="unique")
+        # The alias check above reads active accounts, so a deactivated holder of the same folded
+        # address passes it. Resolve on the fold every lookup shares, across every account.
+        holders = EmailLookupHandler.users_matching_email(normalized, User.objects.all())
+        if self.instance:
+            holders = holders.exclude(pk=self.instance.pk)
+        if holders.exists():
+            raise serializers.ValidationError("There is already an account with this email address.", code="unique")
+        return normalized
 
     def get_has_password(self, instance: User) -> bool:
         return bool(instance.password) and instance.has_usable_password()
@@ -412,17 +550,60 @@ class UserSerializer(serializers.ModelSerializer):
 
         return session_expiry_time.replace(tzinfo=UTC).isoformat()
 
+    def get_fresh_reauth_expires_at(self, instance: User) -> Optional[str]:
+        if "request" not in self.context:
+            return None
+
+        expires_at = fresh_reauth_expires_at(self.context["request"].session)
+        if expires_at is None:
+            return None
+
+        return datetime.fromtimestamp(expires_at, tz=UTC).isoformat()
+
     @tracer.start_as_current_span("user_serializer.has_social_auth")
     def get_has_social_auth(self, instance: User) -> bool:
         return instance.social_auth.exists()
+
+    @extend_schema_field(serializers.IntegerField())
+    def get_personal_api_keys_limit(self, instance: User) -> int:
+        return max_personal_api_keys_for_user(instance)
 
     @tracer.start_as_current_span("user_serializer.requires_credential_review")
     def get_requires_credential_review(self, instance: User) -> bool:
         if instance.credentials_reviewed_at is not None:
             return False
+        # impersonating users shouldn't bounced into the credential review screen
+        if is_impersonated(self.context.get("request")):
+            return False
+        # A self-signed-up user verifies their email before the first login, so nobody else can add
+        # credentials to the account first. TeamProvisioningConfig and a Vercel installation cover
+        # organizations provisioned before OrganizationProvisioning existed. A "connectable" Vercel
+        # integration links an organization the user already owned, so it does not count.
+        organization_id = OuterRef("organization_id")
+        if (
+            not OrganizationMembership.objects.filter(user=instance)
+            .filter(
+                Exists(OrganizationProvisioning.objects.filter(organization_id=organization_id))
+                | Exists(TeamProvisioningConfig.objects.filter(team__organization_id=organization_id))
+                | Exists(
+                    OrganizationIntegration.objects.filter(
+                        organization_id=organization_id,
+                        kind=OrganizationIntegration.OrganizationIntegrationKind.VERCEL,
+                    ).exclude(config__contains={"type": "connectable"})
+                )
+            )
+            .exists()
+        ):
+            return False
         if PersonalAPIKey.objects.filter(user=instance).exists():
             return True
-        return WebauthnCredential.objects.filter(user=instance).exists()
+        if WebauthnCredential.objects.filter(user=instance).exists():
+            return True
+        # A provisioning partner's OAuth token is the access this screen exists to disclose, and it
+        # is the one form of it that leaves no credential on the user's own record. Without this the
+        # interstitial never fires for a partner that provisioned the account without also issuing a
+        # personal API key, which is the default (see `issues_personal_api_key`).
+        return has_live_third_party_oauth_access(instance)
 
     @tracer.start_as_current_span("user_serializer.is_2fa_enabled")
     def get_is_2fa_enabled(self, instance: User) -> bool:
@@ -475,6 +656,17 @@ class UserSerializer(serializers.ModelSerializer):
     def get_active_realtime_notification_types(self, _: User) -> list[str]:
         return [t.value for t in NotificationType]
 
+    @extend_schema_field(OrganizationNotificationLockSerializer(many=True))
+    def get_notification_locks(self, instance: User) -> list[dict]:
+        """Every rule that reaches this person, across all the organizations they belong to."""
+        if not self._is_self_request(instance):
+            return []
+        locks = notification_locks_for_users([instance.id]).get(instance.id, {})
+        return [
+            {"setting": governed.setting, "scope_id": governed.scope_id, "locked_value": value}
+            for governed, value in sorted(locks.items(), key=lambda item: (item[0].setting, item[0].scope_id))
+        ]
+
     @extend_schema_field(PendingInviteSerializer(many=True))
     @tracer.start_as_current_span("user_serializer.pending_invites")
     def get_pending_invites(self, instance: User) -> list[dict]:
@@ -521,6 +713,12 @@ class UserSerializer(serializers.ModelSerializer):
         try:
             organization = Organization.objects.get(id=value)
             if organization.memberships.filter(user=self.context["request"].user).exists():
+                # A member the org no longer admits can't point their session back at it — this
+                # endpoint is on the enforcement whitelist, so it must refuse on its own.
+                if OrganizationDomain.objects.is_email_blocked_by_domain_enforcement(
+                    self.context["request"].user.email, organization
+                ):
+                    raise serializers.ValidationError(VERIFIED_DOMAIN_REQUIRED_ERROR, code="verified_domain_required")
                 return organization
         except Organization.DoesNotExist:
             pass
@@ -538,95 +736,21 @@ class UserSerializer(serializers.ModelSerializer):
         raise serializers.ValidationError(f"Object with id={value} does not exist.", code="does_not_exist")
 
     def validate_notification_settings(self, notification_settings: Notifications) -> Notifications:
-        instance = cast(User, self.instance)
-        current_settings = {
-            **NOTIFICATION_DEFAULTS,
-            **(instance.partial_notification_settings or {}),
-        }
+        return validate_notification_settings(cast(User, self.instance), notification_settings)
 
-        _dict_notification_keys = (
-            "project_weekly_digest_disabled",
-            "error_tracking_weekly_digest_project_enabled",
-            "web_analytics_weekly_digest_project_enabled",
-            "organization_member_join_email_disabled",
-            "pipeline_notifications_disabled",
-        )
-
-        for key, value in notification_settings.items():
-            if key not in Notifications.__annotations__:
-                raise serializers.ValidationError(
-                    f"Key {key} is not valid as a key for notification settings",
-                    code="invalid_input",
-                )
-
-            expected_type = Notifications.__annotations__[key]
-
-            if key in _dict_notification_keys:
-                if not isinstance(value, dict):
-                    raise serializers.ValidationError(
-                        f"{key} must be a dictionary mapping IDs to boolean values",
-                        code="invalid_input",
-                    )
-                for _, disabled in value.items():
-                    if not isinstance(disabled, bool):
-                        raise serializers.ValidationError(
-                            f"Notification setting values must be boolean, got {type(disabled)} instead",
-                            code="invalid_input",
-                        )
-                merged = {**current_settings.get(key, {}), **value}
-                if key == "pipeline_notifications_disabled":
-                    _validate_pipeline_notifications(value, merged)
-                current_settings[key] = merged
-            elif key == "realtime_notifications_disabled":
-                if not isinstance(value, dict):
-                    raise serializers.ValidationError(
-                        "realtime_notifications_disabled must be a dict",
-                        code="invalid_input",
-                    )
-                for type_key, team_map in value.items():
-                    if type_key not in _VALID_NOTIFICATION_TYPE_VALUES:
-                        raise serializers.ValidationError(
-                            f"Unknown notification type {type_key}",
-                            code="invalid_input",
-                        )
-                    if not isinstance(team_map, dict):
-                        raise serializers.ValidationError(
-                            f"Per-type value for {type_key} must be a dict of team_id to bool",
-                            code="invalid_input",
-                        )
-                    for _team_id, disabled in team_map.items():
-                        if not isinstance(disabled, bool):
-                            raise serializers.ValidationError(
-                                f"Disabled flag for {type_key} must be boolean, got {type(disabled)}",
-                                code="invalid_input",
-                            )
-                existing = current_settings.get("realtime_notifications_disabled", {}) or {}
-                realtime_merged: dict[str, dict[str, bool]] = {**existing}
-                for type_key, team_map in value.items():
-                    realtime_merged[type_key] = {**(existing.get(type_key, {}) or {}), **team_map}
-                current_settings["realtime_notifications_disabled"] = realtime_merged
-            elif key == "data_pipeline_error_threshold":
-                if not isinstance(value, (int, float)):
-                    raise serializers.ValidationError(
-                        f"data_pipeline_error_threshold must be a number, got {type(value)} instead",
-                        code="invalid_input",
-                    )
-                if value < 0.0 or value > 1.0:
-                    raise serializers.ValidationError(
-                        f"data_pipeline_error_threshold must be between 0.0 and 1.0, got {value}",
-                        code="invalid_input",
-                    )
-                current_settings[key] = float(value)
-            else:
-                # For non-dict settings, validate type directly
-                if not isinstance(value, expected_type):
-                    raise serializers.ValidationError(
-                        f"{value} is not a valid type for notification settings, should be {expected_type}",
-                        code="invalid_input",
-                    )
-                current_settings[key] = value
-
-        return cast(Notifications, current_settings)
+    def validate_ui_configuration(self, value: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
+        if value is None:
+            return None
+        try:
+            UserUIConfiguration.model_validate(value)
+        except pydantic.ValidationError as e:
+            errors = "; ".join(
+                f"{'.'.join(str(part) for part in error['loc']) or 'root'}: {error['msg']}" for error in e.errors()
+            )
+            raise serializers.ValidationError(
+                f"Does not match the UserUIConfiguration schema: {errors}", code="invalid_input"
+            )
+        return value
 
     def validate_password_change(
         self, instance: User, current_password: Optional[str], password: Optional[str]
@@ -692,11 +816,13 @@ class UserSerializer(serializers.ModelSerializer):
             validated_data["current_team"] = current_team
             validated_data["current_organization"] = current_team.organization
 
-        if (
-            "email" in validated_data
-            and validated_data["email"].lower() != instance.email.lower()
-            and is_email_available()
-        ):
+        # Fold both sides: `validate_email` hands back the stored address for an edit of the case
+        # alone, and a legacy row can hold that address in any case.
+        changes_email = "email" in validated_data and EmailNormalizer.normalize(
+            validated_data["email"]
+        ) != EmailNormalizer.normalize(instance.email)
+
+        if changes_email and is_email_available():
             new_email = validated_data["email"]
             # Moving between two SSO-enforced domains of the same org is a domain migration, not an SSO bypass.
             # SSO enforcement can only be set on a verified domain, so an enforced domain is always verified.
@@ -725,18 +851,12 @@ class UserSerializer(serializers.ModelSerializer):
                     code="sso_enforced_new_email",
                 )
             validated_data.pop("email", None)  # staged as pending_email below, not written to `email` directly
-            # Serialize concurrent email changes for this user under a row lock so the token is
-            # minted against one consistent pending_email. Without it, interleaved requests can
-            # bind a token to one address but deliver its verification email to another.
-            with transaction.atomic():
-                User.objects.select_for_update().get(pk=instance.pk)
-                instance.pending_email = new_email
-                instance.save(update_fields=["pending_email"])
-                token = email_verification_token_generator.make_token(instance)
-            # Send after the transaction commits (never inside the atomic block), pinning the
-            # recipient to the captured address so a later pending_email change can't redirect
-            # this token's verification email.
-            EmailVerifier.send_verification_email(instance, token, target_email=new_email)
+            instance.pending_email = EmailNormalizer.normalize(new_email)
+            instance.save(update_fields=["pending_email"])
+            # The code is bound to the captured address, so a concurrent email change cannot
+            # redirect this code: once a different address is staged, the code stops verifying.
+            email_verification_code_verifier.send_code(instance, target_email=new_email)
+            report_user_email_change_requested(cast(User, instance), verification_required=True)
 
         if validated_data.get("notification_settings"):
             validated_data["partial_notification_settings"] = validated_data.pop("notification_settings")
@@ -770,6 +890,11 @@ class UserSerializer(serializers.ModelSerializer):
             # Revoke other sessions after update_session_auth_hash so the current (rotated) session is kept.
             revoke_other_sessions_for_request(self.context["request"], instance)
 
+        if changes_email and "email" in validated_data:
+            # Without email configured the new address lands on the account directly, so the change
+            # completes here rather than at verification.
+            report_user_email_change_requested(instance, verification_required=False)
+
         report_user_updated(instance, updated_attrs)
 
         return instance
@@ -783,12 +908,8 @@ class UserSerializer(serializers.ModelSerializer):
         # was the whole reason for moving away from it. Server-side capture also keeps
         # working for clients running ad blockers, which a frontend-side identify would
         # silently miss.
-        with tracer.start_as_current_span("user_serializer.identify"):
-            posthoganalytics.capture(
-                distinct_id=instance.distinct_id,
-                event="update user properties",
-                properties={"$set": instance.get_analytics_metadata()},
-            )
+        if _reserve_person_properties_refresh_if_due(instance):
+            run_after_response(self.context.get("request"), lambda: _refresh_person_properties(instance))
 
         with tracer.start_as_current_span("user_serializer.default_fields"):
             data = super().to_representation(instance)
@@ -838,6 +959,23 @@ class ScenePersonalisationSerializer(serializers.ModelSerializer):
             scene=validated_data["scene"],
             defaults={"dashboard": validated_data["dashboard"]},
         )
+
+
+class ProductIntroSeenSerializer(serializers.Serializer):
+    """Request body for PATCH /api/users/@me/product_intro_seen."""
+
+    product_key = serializers.CharField(
+        max_length=128,
+        help_text=(
+            "Which key in `has_seen_product_intro_for` to set. Any string is accepted: besides the "
+            "product keys, the map holds keys composed per team and keys for surfaces that are not "
+            "products."
+        ),
+    )
+    seen = serializers.BooleanField(
+        default=True,
+        help_text="Whether the intro counts as seen. Send false to show it again.",
+    )
 
 
 class UserAuthSessionSerializer(serializers.ModelSerializer):
@@ -890,6 +1028,40 @@ class UserAuthSessionSerializer(serializers.ModelSerializer):
 
 class RevokeOtherSessionsResponseSerializer(serializers.Serializer):
     revoked_count = serializers.IntegerField(help_text="Number of other login sessions that were revoked.")
+
+
+class TwoFactorStatusSerializer(serializers.Serializer):
+    is_enabled = serializers.BooleanField(help_text="Whether the user has any 2FA method enabled.")
+    backup_codes_remaining = serializers.IntegerField(
+        help_text="Number of unused backup codes. The codes themselves are only returned when they are generated."
+    )
+    method = serializers.CharField(
+        allow_null=True, help_text='The primary 2FA method: "TOTP" or "passkey". Null when 2FA is off.'
+    )
+    has_passkeys = serializers.BooleanField(help_text="Whether the user has at least one verified passkey.")
+    has_totp = serializers.BooleanField(help_text="Whether the user has an authenticator app set up.")
+    passkeys_enabled_for_2fa = serializers.BooleanField(help_text="Whether passkeys count as a 2FA method.")
+
+
+class UserGithubLoginSerializer(serializers.Serializer):
+    github_login = serializers.CharField(
+        allow_null=True,
+        help_text="The user's resolved GitHub login, or null when no GitHub identity is linked.",
+    )
+
+
+def refuse_pending_email_promotion() -> NoReturn:
+    """Refuse the change, because the address is no longer free.
+
+    The staged address stays. Clearing it would leave a verified account with nothing staged, which
+    is the state the replay shortcut in `verify_email` reads as a completed change, so the next
+    request would report success for a change that never happened. Keeping it staged also keeps
+    `cancel_email_change_request` available as the way out.
+    """
+    raise serializers.ValidationError(
+        {"email": ["Another account now uses this email address. Start the change again with a different address."]},
+        code="email_taken",
+    )
 
 
 @extend_schema(extensions={"x-product": "core"})
@@ -945,15 +1117,19 @@ class UserViewSet(
         "has_seen_product_intro_for",
         "events_column_config",
         "role_at_organization",
+        "ui_configuration",
     ]
     time_sensitive_exclude_actions = [
         "hedgehog_config",
         "scene_personalisation",
+        "product_intro_seen",
     ]
-    time_sensitive_allow_actions = ["hedgehog_config"]
+    # These actions only dismiss a screen (the credential review, the onboarding redirect). Requiring a
+    # fresh session for them sends a user with an older session back to that screen on every load.
+    time_sensitive_allow_actions = ["hedgehog_config", "credentials_review_complete", "onboarding_skip"]
     filter_backends = [DjangoFilterBackend]
     filterset_fields = ["is_staff", "email"]
-    queryset = User.objects.filter(is_active=True)
+    queryset = User.objects.filter(is_active=True).order_by("id")
     lookup_field = "uuid"
 
     def dangerously_get_required_scopes(self, request, view) -> list[str] | None:
@@ -993,10 +1169,57 @@ class UserViewSet(
             "user_permissions": UserPermissions(cast(User, self.request.user)),
         }
 
+    def update(self, request: Request, *args: Any, **kwargs: Any) -> Response:
+        self.guard_identity_change(request)
+        return super().update(request, *args, **kwargs)
+
+    def guard_identity_change(self, request: Request) -> None:
+        """Refuse an email or password change that the request cannot prove the account holder wants.
+
+        This runs before serializer validation, because an email validation error would tell the
+        caller which addresses already have an account.
+        """
+        # DRF types `request.data` as a mapping, but a JSON array or string body parses to a list or a
+        # str. Such a body carries neither field, and the serializer rejects it with a 400.
+        data = cast(Any, request.data)
+        if not isinstance(data, Mapping):
+            return
+
+        email = data.get("email")
+        changes_email = "email" in data and not (
+            isinstance(email, str)
+            and EmailNormalizer.normalize(email) == EmailNormalizer.normalize(self.get_object().email)
+        )
+
+        # The login email and the password decide who can sign in, so a leaked personal API key or
+        # OAuth token must not reset either of them.
+        if not isinstance(request.successful_authenticator, SessionAuthentication):
+            if changes_email or "password" in data:
+                report_user_identity_change_refused(
+                    cast(User, request.user),
+                    field="email" if changes_email else "password",
+                    reason="token_auth",
+                )
+                raise exceptions.PermissionDenied(
+                    "You can only change your email or password from the PostHog app, not with an API key or token."
+                )
+            return
+
+        # A session alone is not enough for the email, because the freshness window of
+        # TimeSensitiveActionPermission is hours wide. The account holder re-authenticates first, which
+        # for an account without a password means a passkey or an SSO round trip.
+        if changes_email and not reauth_is_fresh(request.session):
+            report_user_identity_change_refused(cast(User, request.user), field="email", reason="stale_reauth")
+            raise exceptions.PermissionDenied(
+                "Confirm it's you before changing your email.",
+                code="sensitive_action_required_reauth",
+            )
+
     def perform_destroy(self, user: User) -> None:
         report_user_deleted_account(user)
         super().perform_destroy(user)
 
+    @extend_schema(responses=UserGithubLoginSerializer)
     @action(methods=["GET"], detail=True, url_path="github_login")
     def github_login(self, request, **kwargs):
         user = self.get_object()
@@ -1060,37 +1283,76 @@ class UserViewSet(
         revoked_count = revoke_other_sessions(user, request.session.session_key)
         return Response({"revoked_count": revoked_count})
 
-    @action(methods=["POST"], detail=False, permission_classes=[AllowAny])
+    @extend_schema(request=VerifyEmailRequestSerializer)
+    @action(
+        methods=["POST"],
+        detail=False,
+        permission_classes=[AllowAny],
+        throttle_classes=[UserVerifyEmailThrottle, VerifyEmailIPThrottle],
+    )
     def verify_email(self, request, **kwargs):
-        token = request.data["token"] if "token" in request.data else None
-        user_uuid = request.data["uuid"]
-
-        if not token:
-            raise serializers.ValidationError({"token": ["This field is required."]}, code="required")
-
-        # Special handling for E2E tests
-        if settings.E2E_TESTING and user_uuid == "e2e_test_user" and token == "e2e_test_token":
-            return {"success": True, "token": token}
+        body = VerifyEmailRequestSerializer(data=request.data if isinstance(request.data, dict) else {})
+        body.is_valid(raise_exception=True)
+        code = body.validated_data["code"]
+        user_uuid = body.validated_data["uuid"]
 
         try:
             user: Optional[User] = User.objects.filter(is_active=True).get(uuid=user_uuid)
-        except User.DoesNotExist:
+        except (User.DoesNotExist, ValidationError):
             user = None
 
-        if not user or not EmailVerifier.check_token(user, token):
-            raise serializers.ValidationError(
-                {"token": ["This verification token is invalid or has expired."]},
-                code="invalid_token",
-            )
+        # A replay of a spent code (double submit) is not a failure: the address is verified.
+        # Do not create a session - no valid credential was presented.
+        if user and user.is_email_verified is True and not user.pending_email:
+            return Response({"success": True, "requires_login": True})
 
-        if user.pending_email:
+        if not user:
+            raise serializers.ValidationError(
+                {"code": ["This code is invalid or has expired."]},
+                code="invalid_code",
+            )
+        attempts = email_verification_code_verifier.reserve_attempt(user)
+        if email_verification_code_verifier.attempts_exceeded(attempts):
+            # Refuse until the budget expires, but keep the code: anyone with the uuid can
+            # reach this endpoint, and deleting the code here would let them block the user.
+            raise serializers.ValidationError(
+                {"code": ["Too many incorrect attempts. Try again later."]},
+                code="too_many_attempts",
+            )
+        if not email_verification_code_verifier.check_code(user, code):
+            raise serializers.ValidationError(
+                {"code": ["This code is invalid or has expired."]},
+                code="invalid_code",
+            )
+        email_verification_code_verifier.invalidate(user)
+
+        # An unverified user's code proves the account address, not the staged one, so their
+        # staged change stays pending until they verify it with a code sent to the new address.
+        # A legacy account (is_email_verified None) counts as verified, like in the login flow
+        # and in the verifier.
+        if user.pending_email and user.is_email_verified is not False:
             old_email = user.email
-            with transaction.atomic():
-                user.email = user.pending_email
-                user.pending_email = None
-                user.save(update_fields=["email", "pending_email"])
-                # Delete social auth so the old external identity can't keep logging in.
-                UserSocialAuth.objects.filter(user=user).delete()
+            # `pending_email` holds whatever case the change was staged in.
+            new_email = EmailNormalizer.normalize(user.pending_email)
+            # Anyone can claim the address while the change waits for this code.
+            taken = (
+                EmailValidationHelper.user_exists_with_stripped_alias(new_email, exclude_user_id=user.pk)
+                or EmailValidationHelper.user_exists_with_gmail_canonical(new_email, exclude_user_id=user.pk)
+                or EmailLookupHandler.users_matching_email(new_email, User.objects.all()).exclude(pk=user.pk).exists()
+            )
+            if taken:
+                refuse_pending_email_promotion()
+            try:
+                with transaction.atomic():
+                    user.email = EmailNormalizer.normalize(new_email)
+                    user.pending_email = None
+                    user.save(update_fields=["email", "pending_email"])
+                    # Delete social auth so the old external identity can't keep logging in.
+                    UserSocialAuth.objects.filter(user=user).delete()
+            except IntegrityError:
+                # A row that appeared since the check above reaches this write.
+                user.refresh_from_db()
+                refuse_pending_email_promotion()
             send_email_change_emails.delay(datetime.now(UTC).isoformat(), user.first_name, old_email, user.email)
             revoke_other_sessions_for_request(request, user)
 
@@ -1101,17 +1363,21 @@ class UserViewSet(
         user_has_passkeys = has_passkeys(user)
         passkeys_enabled_for_2fa = user_has_passkeys and user.passkeys_enabled_for_2fa
         if default_device(user) or passkeys_enabled_for_2fa:
-            return Response({"success": True, "token": token, "requires_2fa": True})
+            return Response({"success": True, "requires_2fa": True})
 
         # Don't hand a non-SSO session to an account whose domain enforces SSO — verifying an email
         # must not become a password-backend login path around the IdP. The user logs in via SSO.
         if OrganizationDomain.objects.get_sso_enforcement_for_email_address(user.email):
-            return Response({"success": True, "token": token, "requires_sso": True})
+            return Response({"success": True, "requires_sso": True})
+
+        # Domain enforcement: refuse blocked members — blocked admins still get a gated session.
+        if not resolve_login_organization(user):
+            return Response({"success": True, "requires_login": True})
 
         login(self.request, user, backend="django.contrib.auth.backends.ModelBackend")
         set_two_factor_verified_in_session(self.request)
         report_user_logged_in(user)
-        return Response({"success": True, "token": token})
+        return Response({"success": True})
 
     @action(
         methods=["POST"],
@@ -1120,7 +1386,7 @@ class UserViewSet(
         throttle_classes=[UserEmailVerificationThrottle],
     )
     def request_email_verification(self, request, **kwargs):
-        uuid = request.data["uuid"]
+        uuid = request.data.get("uuid") if isinstance(request.data, dict) else None
         if not is_email_available():
             raise serializers.ValidationError(
                 "Cannot verify email address because email is not configured for your instance. Please contact your administrator.",
@@ -1128,7 +1394,7 @@ class UserViewSet(
             )
         try:
             user = User.objects.filter(is_active=True).get(uuid=uuid)
-        except User.DoesNotExist:
+        except (User.DoesNotExist, ValidationError):
             user = None
         if user:
             # Allow re-requests when there's a pending email change that still
@@ -1138,7 +1404,7 @@ class UserViewSet(
                     "Email is already verified.",
                     code="already_verified",
                 )
-            EmailVerifier.create_token_and_send_email_verification(user)
+            email_verification_code_verifier.send_code(user)
 
         return Response({"success": True})
 
@@ -1157,6 +1423,9 @@ class UserViewSet(
 
         instance.pending_email = None
         instance.save()
+        # The target binding already rejects the code once pending_email clears. Delete the
+        # state so no dead code or attempt counter waits out its TTL.
+        email_verification_code_verifier.invalidate(instance)
 
         return Response(self.get_serializer(instance=instance).data)
 
@@ -1186,6 +1455,7 @@ class UserViewSet(
         non_delegated_reasons = {OnboardingSkippedReason.LATER, OnboardingSkippedReason.OTHER}
         reason = validated["reason"]
         step_at_skip = validated.get("step_at_skip") or ""
+        flow_variant = validated.get("flow_variant")
 
         with transaction.atomic():
             locked = User.objects.select_for_update().get(pk=instance.pk)
@@ -1250,6 +1520,7 @@ class UserViewSet(
                 # Fire analytics only after the transaction commits, so a rolled-back
                 # request doesn't produce a skip event the DB doesn't back.
                 distinct_id = str(instance.distinct_id)
+                analytics_groups = groups(instance.organization, instance.team)
 
                 def _fire_skip_analytics() -> None:
                     try:
@@ -1258,7 +1529,12 @@ class UserViewSet(
                         posthoganalytics.capture(
                             distinct_id=distinct_id,
                             event="onboarding skipped",
-                            properties={"step_at_skip": step_at_skip or None, "reason": reason},
+                            properties={
+                                "step_at_skip": step_at_skip or None,
+                                "reason": reason,
+                                "flow_variant": flow_variant,
+                            },
+                            groups=analytics_groups,
                         )
                     except Exception as exc:
                         capture_exception(exc)
@@ -1277,6 +1553,53 @@ class UserViewSet(
         instance.refresh_from_db()
 
         return Response(self.get_serializer(instance=instance).data)
+
+    @extend_schema(
+        request=ProductIntroSeenSerializer,
+        responses={
+            200: OpenApiResponse(
+                response={"type": "object", "additionalProperties": {"type": "boolean"}},
+                description="The user's whole `has_seen_product_intro_for` map, after the merge.",
+            )
+        },
+    )
+    # `required_scopes` is explicit because the viewset resolves scopes from `scope_object` plus the
+    # read/write action lists, and a custom @action is in neither — leaving it unset resolves to no
+    # scopes at all, which `APIScopePermission` refuses outright, even for a wildcard token.
+    @action(methods=["PATCH"], detail=True, required_scopes=["user:write"])
+    def product_intro_seen(self, request, **kwargs) -> Response:
+        """Record that this user has seen one product intro.
+
+        Separate from the `has_seen_product_intro_for` field on the main user PATCH, which requires a
+        recently authenticated session. Dismissing an intro must not depend on that: a re-auth prompt
+        would cover the intro it interrupts, and the dismissal would never persist. Nothing reachable
+        here changes an account, an organization, or a profile.
+
+        Merging server-side also keeps two intros dismissed from separate tabs from dropping each
+        other's key, which a read-modify-write of the whole map cannot avoid.
+        """
+        serializer = ProductIntroSeenSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        product_key = serializer.validated_data["product_key"]
+
+        instance = self.get_object()
+
+        with transaction.atomic():
+            # Lock the user row so concurrent dismissals from separate tabs merge into the map instead of
+            # overwriting it wholesale, and so the size cap counts committed keys rather than a stale read.
+            locked = User.objects.select_for_update().get(pk=instance.pk)
+            seen_for = locked.has_seen_product_intro_for or {}
+
+            if product_key not in seen_for and len(seen_for) >= MAX_PRODUCT_INTROS_SEEN:
+                raise serializers.ValidationError(
+                    f"Cannot track more than {MAX_PRODUCT_INTROS_SEEN} product intros",
+                    code="invalid_input",
+                )
+
+            locked.has_seen_product_intro_for = {**seen_for, product_key: serializer.validated_data["seen"]}
+            locked.save(update_fields=["has_seen_product_intro_for"])
+
+        return Response(locked.has_seen_product_intro_for)
 
     @action(
         methods=["GET", "PATCH"],
@@ -1364,9 +1687,10 @@ class UserViewSet(
 
         return Response({"success": True})
 
+    @extend_schema(responses={200: TwoFactorStatusSerializer})
     @action(methods=["GET"], detail=True)
     def two_factor_status(self, request, **kwargs):
-        """Get current 2FA status including backup codes if enabled"""
+        """Get current 2FA status, including how many backup codes are left."""
         from posthog.helpers.two_factor_session import has_passkeys
 
         user = self.get_object()
@@ -1375,9 +1699,7 @@ class UserViewSet(
         user_has_passkeys = has_passkeys(user)
         passkeys_enabled_for_2fa = user_has_passkeys and user.passkeys_enabled_for_2fa
 
-        backup_codes = []
-        if static_device:
-            backup_codes = [token.token for token in static_device.token_set.all()]
+        backup_codes_remaining = static_device.token_set.count() if static_device else 0
 
         # Determine 2FA method
         method = None
@@ -1389,7 +1711,7 @@ class UserViewSet(
         return Response(
             {
                 "is_enabled": default_device(user) is not None or passkeys_enabled_for_2fa,
-                "backup_codes": backup_codes if totp_device else [],
+                "backup_codes_remaining": backup_codes_remaining if totp_device else 0,
                 "method": method,
                 "has_passkeys": user_has_passkeys,
                 "has_totp": totp_device is not None,
@@ -1722,6 +2044,57 @@ def get_toolbar_preloaded_flags(request):
     return JsonResponse({"featureFlags": feature_flags})
 
 
+TOOLBAR_ENTITLEMENT_FEATURES: list[AvailableFeature] = [
+    AvailableFeature.TOOLBAR_HEATMAPS,
+]
+
+
+def _toolbar_entitlements(organization: Organization) -> dict[str, bool]:
+    """Gated toolbar tools are a Cloud plan entitlement, so every self-hosted deployment keeps them."""
+    if not is_cloud():
+        return {feature.value: True for feature in TOOLBAR_ENTITLEMENT_FEATURES}
+    return {feature.value: organization.is_feature_available(feature) for feature in TOOLBAR_ENTITLEMENT_FEATURES}
+
+
+class ToolbarEntitlementsSerializer(serializers.Serializer):
+    entitlements = serializers.DictField(
+        child=serializers.BooleanField(),
+        help_text="Whether the current organization has each toolbar plan entitlement, keyed by feature name.",
+    )
+
+
+class ToolbarEntitlementsErrorSerializer(serializers.Serializer):
+    error = serializers.CharField(help_text="Why toolbar entitlements could not be retrieved.")
+
+
+class ToolbarEntitlementsView(APIView):
+    authentication_classes = [SessionAuthentication]
+    permission_classes = [IsAuthenticated]
+    include_in_api_docs = True
+
+    @extend_schema(
+        extensions={"x-product": "core"},
+        responses={
+            200: ToolbarEntitlementsSerializer,
+            400: ToolbarEntitlementsErrorSerializer,
+            403: ToolbarEntitlementsErrorSerializer,
+        },
+    )
+    def get(self, request: Request) -> JsonResponse:
+        user = cast(User, request.user)
+        team = user.team
+        if not team:
+            return JsonResponse({"error": "No team found"}, status=400)
+
+        if not _user_can_access_toolbar(user, team):
+            return JsonResponse({"error": "Unauthorized"}, status=403)
+
+        return JsonResponse({"entitlements": _toolbar_entitlements(team.organization)})
+
+
+get_toolbar_entitlements = session_auth_required(ToolbarEntitlementsView.as_view())
+
+
 @session_auth_required
 @require_http_methods(["POST"])
 def prepare_toolbar_preloaded_flags(request):
@@ -1800,8 +2173,12 @@ def redirect_to_site(request):
 
     if not unparsed_hostname_in_allowed_url_list(team.app_urls, app_url):
         REDIRECT_TO_SITE_FAILED_COUNTER.inc()
-        parsed_app_url = urllib.parse.urlparse(app_url)
-        hostname = parsed_app_url.hostname or app_url
+        try:
+            hostname = urllib.parse.urlparse(app_url).hostname or app_url
+        except ValueError:
+            # A URL too malformed to parse is still a rejection, so report it back as typed
+            # rather than failing the request with a 500.
+            hostname = app_url
         logger.error(
             "can_only_redirect_to_permitted_domain",
             permitted_domains=team.app_urls,
@@ -1823,6 +2200,10 @@ def redirect_to_site(request):
             },
             status_code=403,
         )
+
+    # Redirect to the form that was approved, not the caller's raw string.
+    app_url = strip_url_userinfo(canonicalize_encoded_url(app_url))
+
     params = {
         "action": "ph_authorize",
         "token": team.api_token,

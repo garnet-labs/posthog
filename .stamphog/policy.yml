@@ -123,11 +123,19 @@ deny:
                 - '\.stamphog/'
                 - 'AGENT_APPROVALS\.md'
                 - 'tools/pr-approval-agent/'
+                # The workflow that publishes the Dependency proof attestation (see `attestations`).
+                - '\.github/workflows/garnet-ci\.yml'
                 - 'products/stamphog/backend/logic/policy_defaults/'
                 - 'tools/owners/'
                 - 'CODEOWNERS'
                 - 'owners\.yaml'
                 - 'product\.yaml'
+# Bots whose PRs stamphog reviews when CI attests every changed file (the dependency proof).
+bot_authors:
+    - login: 'devin-ai-integration[bot]'
+      id: 158243242
+      branch_prefix: 'chore/'
+      requires: every_file_attested
 allow:
     path_patterns:
         - 'docs/'
@@ -215,3 +223,21 @@ ownership:
     sources:
         - path: .
           format: hogli-resolver
+
+# CI results that lift a deny category for the files they list (engine: tools/pr-approval-agent/
+# attestations.py). The Dependency proof job in .github/workflows/garnet-ci.yml reads the finalized
+# Garnet record of the recorded installs for this head and, only when nothing new was recorded
+# against the last recorded master run, lists the dependency files it judged in one notice
+# annotation titled `stamphog attestation: <base ref>`. A changed or incomplete record, a pending
+# record, or a pull request that edits that workflow publishes nothing, so the deny stands.
+attestations:
+    - name: 'Dependency proof'
+      actions_workflow: '.github/workflows/garnet-ci.yml'
+      job: 'Dependency proof'
+      lifts: ['deps_toolchain']
+      paths:
+          - '^(pnpm-lock\.yaml|pnpm-workspace\.yaml|\.nvmrc|package\.json|pyproject\.toml|uv\.lock)$'
+          - '(?:^|/)package\.json$'
+          - '^products/desktop/(pnpm-lock\.yaml|pnpm-workspace\.yaml|\.node-version)$'
+          - '^services/llm-gateway/(pyproject\.toml|uv\.lock)$'
+          - '^(common/ingestion/acceptance_tests/requirements\.txt|tools/infra-scripts/clitools/(requirements|constraints)\.txt)$'

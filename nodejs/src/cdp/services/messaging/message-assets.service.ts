@@ -1,6 +1,10 @@
 import { Counter, Gauge } from 'prom-client'
 
-import { CyclotronInvocationQueueParametersEmailType } from '~/cdp/schema/cyclotron'
+import {
+    CyclotronInvocationQueueParametersEmailType,
+    CyclotronInvocationQueueParametersSendPushNotificationType,
+    PushNotificationPayloadType,
+} from '~/cdp/schema/cyclotron'
 import { MESSAGE_ASSETS_OUTPUT, MessageAssetsOutput } from '~/common/outputs'
 import { IngestionOutputs } from '~/common/outputs/ingestion-outputs'
 import { safeClickhouseString } from '~/common/utils/db/utils'
@@ -9,6 +13,7 @@ import { captureException } from '~/common/utils/posthog'
 
 import { CyclotronJobInvocationHogFunction, CyclotronJobInvocationResult, MessageAssetRow } from '../../types'
 import { resolveEmailEngagementDistinctId } from './email-tracking.service'
+import { escapeHtml } from './helpers/escape-html'
 
 export type { MessageAssetRow } from '../../types'
 
@@ -44,18 +49,10 @@ const isoMicroseconds = (date: Date): string => {
     return date.toISOString().replace('T', ' ').replace('Z', '000')
 }
 
-const HTML_ESCAPE: Record<string, string> = {
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;',
-}
-
 // Escape user-typed `<`/`>`/`&` so a `<pre>`-wrapped plain-text body can't break
 // surrounding markup or inject scripts.
 const wrapPlainTextAsHtml = (text: string): string => {
-    const escaped = text.replace(/[&<>"']/g, (c) => HTML_ESCAPE[c])
+    const escaped = escapeHtml(text)
     return `<!doctype html><meta charset="utf-8"><pre style="white-space:pre-wrap;font-family:ui-monospace,Menlo,monospace;margin:0;padding:1rem">${escaped}</pre>`
 }
 
@@ -67,9 +64,55 @@ const wrapPlainTextAsHtml = (text: string): string => {
 // the safe budget — the row still lands, the chip works, and the batch is unaffected.
 const MAX_HTML_BYTES = 4 * 1024 * 1024
 
+// A push has no stored body to replay the way an email does, so render the delivered content into the
+// same `html` column. That keeps one asset pipeline and one viewer for both channels: the person view
+// renders this snapshot instead of needing a push-specific renderer.
+// Only the parts the recipient actually saw are rendered. The custom `data` payload is deliberately
+// left out: it is app routing context, not user-visible, and can carry arbitrary customer data we
+// should not be re-displaying in the UI.
+//
+// Two interpolations below carry a `nosemgrep` for `raw-html-format`. That rule fires on customer data
+// reaching a hand-built HTML string at all and can't see a local escaper, but every value here goes
+// through `escapeHtml` (which covers `& < > " '`, enough for both text nodes and the one quoted
+// attribute), and the viewer renders this in an iframe with `sandbox=""`, so scripts can't run even if
+// the escaping were wrong. Keep both properties if you edit this: escape at every interpolation, and
+// don't render anything the recipient didn't see.
+const renderPushPreviewHtml = (payload: PushNotificationPayloadType): string => {
+    const image = payload.image
+        ? `<img src="${escapeHtml(payload.image)}" alt="" style="width:100%;max-height:180px;object-fit:cover;border-radius:8px;margin-top:8px">`
+        : ''
+    // The recipient sees this as a second bold line under the title on iOS, so a snapshot that drops
+    // it doesn't match the notification that was delivered.
+    const subtitle = payload.apns?.subtitle
+        ? `<div style="font-size:15px;font-weight:600;color:#111;margin-bottom:2px">${escapeHtml(payload.apns.subtitle)}</div>`
+        : ''
+    const body = payload.body
+        ? // nosemgrep: javascript.express.security.injection.raw-html-format.raw-html-format
+          `<div style="font-size:14px;line-height:1.4;color:#2d2d2d">${escapeHtml(payload.body)}</div>`
+        : ''
+    // nosemgrep: javascript.express.security.injection.raw-html-format.raw-html-format
+    return `<!doctype html><meta charset="utf-8"><div style="font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;padding:1rem;max-width:420px;margin:1rem auto"><div style="background:#f4f4f5;border-radius:14px;padding:12px 14px"><div style="font-size:15px;font-weight:600;color:#111;margin-bottom:2px">${escapeHtml(payload.title ?? '')}</div>${subtitle}${body}${image}</div></div>`
+}
+
 const oversizedPlaceholderHtml = (bytes: number): string => {
     const mb = (bytes / 1024 / 1024).toFixed(1)
     return `<!doctype html><meta charset="utf-8"><div style="padding:1rem;font-family:ui-sans-serif,system-ui,sans-serif;color:#555;max-width:640px;margin:2rem auto"><h3 style="margin:0 0 0.5rem">Email too large to capture</h3><p style="margin:0">The rendered email was ${mb}&nbsp;MB, which exceeds the ${MAX_HTML_BYTES / 1024 / 1024}&nbsp;MB capture limit. The send itself succeeded — this placeholder is stored so the &ldquo;View email&rdquo; link works, but the original body is not viewable here.</p></div>`
+}
+
+// Stored instead of the body when the template is marked sensitive, so the person view still shows the send.
+const SENSITIVE_PLACEHOLDER_HTML = `<!doctype html><meta charset="utf-8"><div style="padding:1rem;font-family:ui-sans-serif,system-ui,sans-serif;color:#555;max-width:640px;margin:2rem auto"><h3 style="margin:0 0 0.5rem">Email body not stored</h3><p style="margin:0">This email was sent. Its template is marked sensitive, so PostHog doesn't keep a copy of its content.</p></div>`
+
+// Stored instead of the rendered notification when the push step is marked sensitive.
+const SENSITIVE_PUSH_PLACEHOLDER_HTML = `<!doctype html><meta charset="utf-8"><div style="padding:1rem;font-family:ui-sans-serif,system-ui,sans-serif;color:#555;max-width:640px;margin:2rem auto"><h3 style="margin:0 0 0.5rem">Notification content not stored</h3><p style="margin:0">This push notification was sent. Its step is marked sensitive, so PostHog doesn't keep a copy of its content.</p></div>`
+
+const sensitivePushTitle = (invocation: CyclotronJobInvocationHogFunction): string => {
+    const title = invocation.hogFunction.inputs?.title?.value
+    return typeof title === 'string' && title ? title : 'Title not stored'
+}
+
+const sensitiveSubject = (invocation: CyclotronJobInvocationHogFunction): string => {
+    const subject = invocation.hogFunction.inputs?.email?.value?.subject
+    return typeof subject === 'string' ? subject : 'Subject not stored'
 }
 
 /**
@@ -102,8 +145,11 @@ export class MessageAssetsService {
             return null
         }
         const bodyBytes = Buffer.byteLength(body, 'utf8')
+        const sensitive = invocation.hogFunction.metadata?.sensitive === true
         let html = body
-        if (bodyBytes > MAX_HTML_BYTES) {
+        if (sensitive) {
+            html = SENSITIVE_PLACEHOLDER_HTML
+        } else if (bodyBytes > MAX_HTML_BYTES) {
             counterMessageAssetsTruncated.inc()
             html = oversizedPlaceholderHtml(bodyBytes)
         }
@@ -118,7 +164,9 @@ export class MessageAssetsService {
             distinct_id: resolveEmailEngagementDistinctId(invocation) ?? '',
             person_id: invocation.state.globals.person?.id ?? '',
             recipient: params.to.email,
-            subject: params.subject,
+            // A sensitive template's rendered subject can carry a login code, so the row keeps the unrendered
+            // template subject, which still names the email without the values.
+            subject: sensitive ? sensitiveSubject(invocation) : params.subject,
             status: 'sent',
             sent_at: isoMicroseconds(new Date()),
             version: microsecondsSinceEpoch(),
@@ -127,16 +175,75 @@ export class MessageAssetsService {
         }
     }
 
+    // One row per push step, not per channel. A step fans out to several provider integrations, but the
+    // recipient experiences a single notification, so the person view should show one entry rather than
+    // a near-identical row per channel. `platforms` is what actually took delivery, and the caller only
+    // builds a row once at least one channel has, so this is only ever a delivered notification.
+    buildRowForPush(
+        invocation: CyclotronJobInvocationHogFunction,
+        params: CyclotronInvocationQueueParametersSendPushNotificationType,
+        platforms: string[],
+        // The person whose devices took delivery, which the step's Distinct ID input can point away
+        // from the run's own person.
+        recipient: { distinctId: string; personId: string | undefined }
+    ): MessageAssetRow | null {
+        if (!invocation.state.actionId) {
+            return null
+        }
+        const payload = params.payload
+        if (payload?.delivery === 'silent') {
+            return null
+        }
+        // Same rule as the email row: drop only when there is no content to show. A title-less push
+        // still delivered something the recipient saw, so a body alone is worth capturing.
+        if (!payload?.title && !payload?.body) {
+            return null
+        }
+        // Nothing took delivery, so there is no notification a recipient saw to snapshot.
+        if (platforms.length === 0) {
+            return null
+        }
+        const sensitive = invocation.hogFunction.metadata?.sensitive === true
+        return {
+            team_id: invocation.teamId,
+            function_kind: 'hog_flow',
+            function_id: invocation.functionId,
+            parent_run_id: invocation.parentRunId ?? '',
+            invocation_id: invocation.id,
+            action_id: invocation.state.actionId ?? '',
+            kind: 'push',
+            distinct_id: recipient.distinctId,
+            person_id: recipient.personId ?? '',
+            // The person, not the providers that carried it, so the Assets tab's RECIPIENT column means
+            // the same thing for push as it does for email. Per-channel outcomes stay in the run log.
+            recipient: recipient.distinctId,
+            // Like a sensitive email's subject, the unrendered title still names the notification without
+            // the values it carried.
+            subject: sensitive ? sensitivePushTitle(invocation) : (payload.title ?? ''),
+            status: 'sent',
+            sent_at: isoMicroseconds(new Date()),
+            version: microsecondsSinceEpoch(),
+            is_deleted: 0,
+            html: sensitive ? SENSITIVE_PUSH_PLACEHOLDER_HTML : renderPushPreviewHtml(payload),
+        }
+    }
+
     queueInvocationResults(results: CyclotronJobInvocationResult[]): void {
         for (const result of results) {
-            if (!result.emailAssets || result.emailAssets.length === 0) {
+            if (!result.messageAssets || result.messageAssets.length === 0) {
                 continue
             }
-            for (const row of result.emailAssets) {
+            for (const row of result.messageAssets) {
                 this.queuedRows.push(row)
             }
         }
         messageAssetsPendingRows.set(this.queuedRows.length)
+    }
+
+    // Required by ResultSink. This sink holds nothing of its own: it writes through the shared
+    // Kafka outputs, which the server disconnects separately on shutdown.
+    async stop(): Promise<void> {
+        return Promise.resolve()
     }
 
     async flush(): Promise<void> {
@@ -158,7 +265,13 @@ export class MessageAssetsService {
                     })
                 )
             )
-            counterMessageAssetsCaptured.inc({ kind: 'email' }, rows.length)
+            const capturedByKind = new Map<MessageAssetRow['kind'], number>()
+            for (const row of rows) {
+                capturedByKind.set(row.kind, (capturedByKind.get(row.kind) ?? 0) + 1)
+            }
+            for (const [kind, count] of capturedByKind) {
+                counterMessageAssetsCaptured.inc({ kind }, count)
+            }
         } catch (error) {
             counterMessageAssetsFailed.inc(rows.length)
             logger.error('⚠️', `failed to flush message assets — dropping batch: ${error}`, {

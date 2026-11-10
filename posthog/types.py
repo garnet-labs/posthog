@@ -3,6 +3,7 @@ from typing import Union
 from posthog.schema import (
     AccountCustomPropertyFilter,
     ActionsNode,
+    BehavioralPropertyFilter,
     CohortPropertyFilter,
     DataWarehouseNode,
     DataWarehousePersonPropertyFilter,
@@ -16,7 +17,6 @@ from posthog.schema import (
     ExperimentActorsQuery,
     FeaturePropertyFilter,
     FlagPropertyFilter,
-    FunnelCorrelationActorsQuery,
     FunnelExclusionActionsNode,
     FunnelExclusionEventsNode,
     FunnelsActorsQuery,
@@ -32,6 +32,8 @@ from posthog.schema import (
     LogPropertyFilter,
     MetricPropertyFilter,
     PathsQuery,
+    PathsV2ActorsQuery,
+    PathsV2Query,
     PersonMetadataPropertyFilter,
     PersonPropertyFilter,
     RecordingPropertyFilter,
@@ -45,18 +47,16 @@ from posthog.schema import (
     WorkflowVariablePropertyFilter,
 )
 
-from posthog.models.filters.filter import Filter
-from posthog.models.filters.path_filter import PathFilter
-from posthog.models.filters.retention_filter import RetentionFilter
-from posthog.models.filters.stickiness_filter import StickinessFilter
-
-type FilterType = Union[Filter, PathFilter, RetentionFilter, StickinessFilter]
-"""Legacy insight filters."""
-
-type InsightQueryNode = Union[TrendsQuery, FunnelsQuery, RetentionQuery, PathsQuery, StickinessQuery, LifecycleQuery]
+type InsightQueryNode = Union[
+    TrendsQuery, FunnelsQuery, RetentionQuery, PathsQuery, PathsV2Query, StickinessQuery, LifecycleQuery
+]
 
 type InsightActorsQueryNode = Union[
-    InsightActorsQuery, FunnelsActorsQuery, FunnelCorrelationActorsQuery, StickinessActorsQuery, ExperimentActorsQuery
+    InsightActorsQuery,
+    FunnelsActorsQuery,
+    StickinessActorsQuery,
+    ExperimentActorsQuery,
+    PathsV2ActorsQuery,
 ]
 
 type AnyPropertyFilter = Union[
@@ -83,6 +83,7 @@ type AnyPropertyFilter = Union[
     MetricPropertyFilter,
     SpanPropertyFilter,
     WorkflowVariablePropertyFilter,
+    BehavioralPropertyFilter,
 ]
 
 type EntityNode = Union[

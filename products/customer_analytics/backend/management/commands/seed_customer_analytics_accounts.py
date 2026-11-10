@@ -8,9 +8,11 @@ so it has no dependency on ClickHouse->Postgres sync timing. For the given team 
 - ensures a small shared pool of organization-member users and assigns them as each account's
   CSM / account executive / account owner,
 - adds a few notes (internal notebooks) to a handful of accounts,
+- creates production-shaped billing insights with stable short IDs,
+- adds meetings and conversation fixtures to a handful of accounts,
 - points the team's customer-analytics config at group type index 0.
 
-Re-running is safe: existing accounts, pool users, and notes are left alone.
+Re-running is safe: existing accounts, users, notes, insights, meetings, and conversations are reused.
 
 Usage:
     python manage.py seed_customer_analytics_accounts --team-id 1
@@ -28,9 +30,15 @@ from posthog.models import OrganizationMembership, Team, User
 from posthog.models.scoping import team_scope
 from posthog.persons_db import persons_db_connection
 
-from products.customer_analytics.backend.models.account import Account, AccountAssignment, AccountProperties
+from products.customer_analytics.backend.facade.api import create_account
+from products.customer_analytics.backend.facade.enums import AccountRelationshipSource
+from products.customer_analytics.backend.logic import relationships as relationships_logic
+from products.customer_analytics.backend.management.seed_widget_data import WIDGET_ACCOUNT_COUNT, seed_widget_data
+from products.customer_analytics.backend.models.account import Account, AccountProperties
+from products.customer_analytics.backend.models.relationship import AccountRelationshipDefinition
 from products.customer_analytics.backend.models.team_customer_analytics_config import TeamCustomerAnalyticsConfig
 from products.notebooks.backend.facade import api as notebooks
+from products.notebooks.backend.facade.content import build_markdown_notebook_content
 
 ACCOUNT_GROUP_TYPE_INDEX = 0
 
@@ -60,11 +68,21 @@ class Command(BaseCommand):
             "--notes-per-account", type=int, default=2, help="Notes created per selected account (default: 2)."
         )
         parser.add_argument(
+            "--accounts-with-widget-data",
+            type=int,
+            default=WIDGET_ACCOUNT_COUNT,
+            help=f"How many accounts get meetings and conversations (default: {WIDGET_ACCOUNT_COUNT}).",
+        )
+        parser.add_argument(
             "--limit", type=int, default=None, help="Cap how many groups become accounts (default: all)."
         )
         parser.add_argument("--dry-run", action="store_true", help="Report what would be created without writing.")
 
     def handle(self, *args: Any, **options: Any) -> None:
+        account_count = options["accounts_with_widget_data"]
+        if account_count < 0:
+            raise CommandError("--accounts-with-widget-data must be zero or greater.")
+
         team = self._get_team(options["team_id"])
         groups = self._read_account_groups(team, options["limit"])
         if not groups:
@@ -76,12 +94,14 @@ class Command(BaseCommand):
 
         if options["dry_run"]:
             note_account_count = min(options["accounts_with_notes"], len(groups))
-            self.stdout.write(self.style.WARNING("Dry run — no changes will be written."))
+            widget_account_count = min(options["accounts_with_widget_data"], len(groups))
+            self.stdout.write(self.style.WARNING("Dry run - no changes will be written."))
             self.stdout.write(
                 f"Would set account_group_type_index = {ACCOUNT_GROUP_TYPE_INDEX}, "
                 f"create up to {len(groups)} account(s), ensure a pool of {options['users']} user(s), "
-                f"and add up to {note_account_count * options['notes_per_account']} note(s) "
-                f"across {note_account_count} account(s)."
+                f"add up to {note_account_count * options['notes_per_account']} note(s) "
+                f"across {note_account_count} account(s), create three billing insights, "
+                f"and add meetings and conversations to {widget_account_count} account(s)."
             )
             return
 
@@ -89,6 +109,13 @@ class Command(BaseCommand):
         user_pool = self._ensure_user_pool(team, options["users"])
         accounts = self._create_accounts(team, groups, user_pool)
         self._create_notes(team, accounts, user_pool, options["accounts_with_notes"], options["notes_per_account"])
+        seed_widget_data(
+            team=team,
+            accounts=accounts,
+            user_pool=user_pool,
+            output=self.stdout.write,
+            account_count=account_count,
+        )
         self.stdout.write(self.style.SUCCESS("Done."))
 
     def _get_team(self, team_id: int) -> Team:
@@ -152,10 +179,10 @@ class Command(BaseCommand):
     def _create_accounts(
         self, team: Team, groups: list[tuple[str, dict[str, Any]]], user_pool: list[User]
     ) -> list[Account]:
-        assignments = [AccountAssignment(id=user.id, email=user.email) for user in user_pool]
         creator = team.organization.members.first()
         created = 0
         accounts: list[Account] = []
+        definitions = self._ensure_role_definitions(team, creator)
         with team_scope(team.pk):
             existing = {
                 account.external_id: account
@@ -164,27 +191,48 @@ class Command(BaseCommand):
             for index, (group_key, props) in enumerate(groups):
                 account = existing.get(group_key)
                 if account is None:
-                    account = Account.objects.create_account(
+                    account = create_account(
                         team=team,
                         name=props.get("name") or group_key,
                         external_id=group_key,
                         created_by=creator,
-                        properties=self._account_roles(assignments, index, group_key),
+                        properties=AccountProperties(stripe_customer_id=f"cus_{group_key[:14]}"),
                     )
+                    self._assign_roles(team, account, definitions, user_pool, index, creator)
                     created += 1
                 accounts.append(account)
         self.stdout.write(f"Created {created} account(s) ({len(groups) - created} already existed).")
         return accounts
 
     @staticmethod
-    def _account_roles(assignments: list[AccountAssignment], index: int, group_key: str) -> AccountProperties:
-        count = len(assignments)
-        return AccountProperties(
-            csm=assignments[index % count] if count else None,
-            account_executive=assignments[(index + 1) % count] if count else None,
-            account_owner=assignments[(index + 2) % count] if count else None,
-            stripe_customer_id=f"cus_{group_key[:14]}",
-        )
+    def _ensure_role_definitions(team: Team, creator: User | None) -> list[AccountRelationshipDefinition]:
+        return [
+            AccountRelationshipDefinition.objects.for_team(team.pk).get_or_create(
+                team_id=team.pk, name=name, defaults={"created_by": creator}
+            )[0]
+            for name in ("CSM", "Account executive", "Account owner")
+        ]
+
+    @staticmethod
+    def _assign_roles(
+        team: Team,
+        account: Account,
+        definitions: list[AccountRelationshipDefinition],
+        user_pool: list[User],
+        index: int,
+        creator: User | None,
+    ) -> None:
+        if not user_pool:
+            return
+        for offset, definition in enumerate(definitions):
+            relationships_logic.assign(
+                team_id=team.pk,
+                account=account,
+                definition=definition,
+                user=user_pool[(index + offset) % len(user_pool)],
+                actor=relationships_logic.Actor(source=AccountRelationshipSource.MIGRATION, user=creator),
+                emit_event=False,
+            )
 
     @transaction.atomic
     def _create_notes(
@@ -209,14 +257,10 @@ class Command(BaseCommand):
                     team.id,
                     account.id,
                     title=f"{account.name} — {title}",
-                    content=_paragraph_doc(body),
+                    content=build_markdown_notebook_content(body),
                     text_content=body,
                     created_by_id=author.id if author else None,
                     last_modified_by_id=author.id if author else None,
                 )
                 created += 1
         self.stdout.write(f"Created {created} note(s) across up to {len(selected)} account(s).")
-
-
-def _paragraph_doc(text: str) -> dict[str, Any]:
-    return {"type": "doc", "content": [{"type": "paragraph", "content": [{"type": "text", "text": text}]}]}

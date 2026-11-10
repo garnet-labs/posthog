@@ -1,43 +1,30 @@
-"""Read/write helpers for per-(Slack workspace, Slack user) settings backed
-by `models.SlackSettings`. Currently exposes AI-preference resolution; future
-per-user / per-workspace knobs belong here too.
+"""Read helpers for per-(Slack workspace, Slack user) settings backed by
+`models.SlackSettings` (today: the untagged follow-up and question modes, the thread
+join mode, the channel welcome mode and the automatic model choice), plus the shared
+AI-triple value object.
 
-Key names mirror the task-run request serializer
-(`products/tasks/backend/presentation/serializers.py`) so the resolver output
-can be handed to the task layer with zero translation.
-
-Resolution: whole-triple swap, not field-by-field merge. If the user row
-carries the atomic `(runtime_adapter, model)` pair, the user's entire
-preference object takes over (including its absent `reasoning_effort`);
-otherwise we fall back wholesale to the workspace default. A field-by-field
-merge would blend mismatched configurations — for example, surfacing a
-workspace `reasoning_effort` of `low` alongside the user's non-thinking
-model — which is never what the user picked. `reasoning_effort` is still
-dropped if the resolved model doesn't support it, so a stale effort from
-a previous model choice can't silently stick. Unset keys stay `None` so the
-task layer applies its own defaults rather than duplicating them here.
-
-Gated by the `slack-app-home` feature flag: when off the resolver returns
-the empty object, preserving pre-Home-tab behaviour for workspaces that
-haven't opted in.
+Model preferences themselves live in the central tasks config
+(`products.tasks.backend.facade.ai_run_defaults`); `AIPreferences` keeps the
+task-run serializer's field names so resolver output can be handed to the task
+layer with zero translation.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TypeVar
 
-from django.db.models import Q
+from django.db import models
 
-from products.slack_app.backend.feature_flags import is_slack_app_home_enabled
+from products.slack_app.backend.models import ChannelWelcomeMode, ThreadJoinMode, UntaggedFollowupMode
+from products.slack_app.backend.services.workspace_integrations import WorkspaceIntegration
 
-if TYPE_CHECKING:
-    from posthog.models.integration import Integration
+_Mode = TypeVar("_Mode", bound=models.TextChoices)
 
 
 @dataclass(frozen=True)
 class AIPreferences:
-    """Resolved AI preferences for a single (workspace, slack_user_id) lookup.
+    """A resolved AI-preference triple.
 
     Field names match the task-run request serializer so callers can splat this
     straight into the task creation payload.
@@ -47,147 +34,173 @@ class AIPreferences:
     model: str | None = None
     reasoning_effort: str | None = None
 
-    @property
-    def is_empty(self) -> bool:
-        return self.runtime_adapter is None and self.model is None and self.reasoning_effort is None
 
+def resolve_untagged_followup_mode(
+    integration: WorkspaceIntegration, slack_user_id: str | None
+) -> UntaggedFollowupMode:
+    """Resolve how untagged replies in a thread this Slack user started are treated.
 
-_EMPTY = AIPreferences()
-
-
-def resolve_ai_preferences(integration: Integration, slack_user_id: str | None) -> AIPreferences:
-    """Resolve the effective AI preferences for a Slack user in a workspace.
-
-    Whole-triple swap: if the user row carries the atomic `(runtime_adapter,
-    model)` pair, the user's preference object wins outright; otherwise the
-    workspace row wins outright. We never blend the two. `reasoning_effort`
-    is dropped if the resolved model doesn't support it.
+    Read from the thread creator's row, so one person's choice governs every
+    reply in the threads they started. An absent row or empty column resolves
+    to `ASK`, so the replier chooses whether to send the message. An unknown
+    value resolves to `NEVER`.
     """
+    return _resolve_untagged_mode(integration.integration_id, slack_user_id, "untagged_followup_mode")
 
-    if not is_slack_app_home_enabled(integration):
-        return _EMPTY
+
+def resolve_untagged_question_mode(slack_workspace_id: str, slack_user_id: str | None) -> UntaggedFollowupMode:
+    """Resolve what PostHog does with this Slack user's top-level channel questions that do not tag it.
+
+    Read from the author's own row, so one person's choice never changes what happens
+    to anyone else's messages. An absent row or empty column resolves to `ASK`: PostHog
+    offers privately and answers only after the author confirms. An unknown value
+    resolves to `NEVER`.
+    """
+    return _resolve_untagged_mode(slack_workspace_id, slack_user_id, "untagged_question_mode")
+
+
+def _resolve_untagged_mode(slack_workspace_id: str, slack_user_id: str | None, column: str) -> UntaggedFollowupMode:
+    if not slack_user_id:
+        return UntaggedFollowupMode.NEVER
+    return _resolve_personal_mode(
+        slack_workspace_id,
+        slack_user_id,
+        column,
+        UntaggedFollowupMode,
+        unset=UntaggedFollowupMode.ASK,
+        unknown=UntaggedFollowupMode.NEVER,
+    )
+
+
+def _resolve_personal_mode(
+    slack_workspace_id: str, slack_user_id: str, column: str, mode_type: type[_Mode], *, unset: _Mode, unknown: _Mode
+) -> _Mode:
+    """One choice from a Slack user's personal settings row, as `mode_type`."""
+    from products.slack_app.backend.models import SlackSettings
+
+    stored = (
+        SlackSettings.objects.filter(slack_workspace_id=slack_workspace_id, slack_user_id=slack_user_id)
+        .values_list(column, flat=True)
+        .first()
+    )
+    if stored is None:
+        return unset
+    if stored in mode_type.values:
+        return mode_type(stored)
+    return unknown
+
+
+def set_untagged_followup_mode(slack_workspace_id: str, slack_user_id: str, mode: UntaggedFollowupMode) -> None:
+    _set_untagged_mode(slack_workspace_id, slack_user_id, "untagged_followup_mode", mode)
+
+
+def set_untagged_question_mode(slack_workspace_id: str, slack_user_id: str, mode: UntaggedFollowupMode) -> None:
+    _set_untagged_mode(slack_workspace_id, slack_user_id, "untagged_question_mode", mode)
+
+
+def set_thread_join_mode(slack_workspace_id: str, slack_user_id: str, mode: ThreadJoinMode) -> None:
+    _set_untagged_mode(slack_workspace_id, slack_user_id, "thread_join_mode", mode)
+
+
+def _set_untagged_mode(slack_workspace_id: str, slack_user_id: str, column: str, mode: models.TextChoices) -> None:
+    from products.slack_app.backend.models import SlackSettings
+
+    SlackSettings.objects.update_or_create(
+        slack_workspace_id=slack_workspace_id,
+        slack_user_id=slack_user_id,
+        defaults={column: mode.value},
+    )
+
+
+def resolve_thread_join_mode(
+    integration: WorkspaceIntegration, slack_user_id: str | None, *, own_subscription: bool = False
+) -> ThreadJoinMode:
+    """Resolve what happens when someone else tags PostHog in a thread this Slack user started.
+
+    An absent row or empty column resolves to `ALLOW`, so anyone can join until the creator picks
+    a stricter mode. When the thread's run bills to the creator's own plan, it resolves to
+    `ASK_PER_THREAD` instead, so nobody uses that plan before the creator approves.
+    An unknown value resolves to `NEVER`.
+    """
+    if not slack_user_id:
+        return ThreadJoinMode.ALLOW
+    return _resolve_personal_mode(
+        integration.integration_id,
+        slack_user_id,
+        "thread_join_mode",
+        ThreadJoinMode,
+        unset=ThreadJoinMode.ASK_PER_THREAD if own_subscription else ThreadJoinMode.ALLOW,
+        unknown=ThreadJoinMode.NEVER,
+    )
+
+
+def resolve_channel_welcome_mode(slack_workspace_id: str) -> ChannelWelcomeMode:
+    """Resolve where the greeting goes when someone adds the app to a channel.
+
+    Read from the workspace-wide row. An absent row or empty column resolves to
+    `CHANNEL`. An unknown value resolves to `OFF`, so a bad value never posts
+    to a channel.
+    """
 
     from products.slack_app.backend.models import SlackSettings
 
-    slack_workspace_id = integration.integration_id
-    # SQL `IN (..., NULL)` does not match NULL rows, so the workspace-wide row
-    # (slack_user_id IS NULL) needs its own arm in the filter.
-    user_row_filter = Q(slack_user_id=slack_user_id) if slack_user_id else Q(pk__in=[])
-    rows = list(
-        SlackSettings.objects.filter(
-            Q(slack_workspace_id=slack_workspace_id) & (Q(slack_user_id__isnull=True) | user_row_filter)
-        ).values("slack_user_id", "ai_preferences")
+    stored = (
+        SlackSettings.objects.filter(slack_workspace_id=slack_workspace_id, slack_user_id__isnull=True)
+        .values_list("channel_welcome_mode", flat=True)
+        .first()
     )
-    # Pulled into local dicts so mypy can give them a definite type — the
-    # JSONField returns `Any | None` per row, and a `next(...) or {}` expression
-    # ends up as a wider union mypy refuses to narrow.
-    user_prefs: dict[str, Any] = {}
-    workspace_prefs: dict[str, Any] = {}
-    for r in rows:
-        payload = r["ai_preferences"] or {}
-        if r["slack_user_id"] is None:
-            workspace_prefs = payload
-        elif slack_user_id is not None and r["slack_user_id"] == slack_user_id:
-            user_prefs = payload
+    if stored is None:
+        return ChannelWelcomeMode.CHANNEL
+    if stored in ChannelWelcomeMode.values:
+        return ChannelWelcomeMode(stored)
+    return ChannelWelcomeMode.OFF
 
-    # `validate_ai_preferences` enforces that `runtime_adapter` and `model` are
-    # set together, so the presence of either one is a faithful signal that
-    # this row has been explicitly configured. Pick the whole triple from
-    # whichever row sourced the pair.
-    if user_prefs.get("runtime_adapter") and user_prefs.get("model"):
-        chosen = user_prefs
-    elif workspace_prefs.get("runtime_adapter") and workspace_prefs.get("model"):
-        chosen = workspace_prefs
-    else:
-        chosen = {}
 
-    runtime_adapter = chosen.get("runtime_adapter") or None
-    model = chosen.get("model") or None
-    reasoning_effort = chosen.get("reasoning_effort") or None
-    if runtime_adapter and model and reasoning_effort:
-        reasoning_effort = _filter_unsupported_effort(runtime_adapter, model, reasoning_effort)
+def set_channel_welcome_mode(slack_workspace_id: str, mode: ChannelWelcomeMode) -> None:
+    """Store the mode on the workspace-wide row. The caller checks that the actor is a Slack admin."""
 
-    return AIPreferences(
-        runtime_adapter=runtime_adapter,
-        model=model,
-        reasoning_effort=reasoning_effort,
+    from products.slack_app.backend.models import SlackSettings
+
+    SlackSettings.objects.update_or_create(
+        slack_workspace_id=slack_workspace_id,
+        slack_user_id=None,
+        defaults={"channel_welcome_mode": mode.value},
     )
 
 
-def _filter_unsupported_effort(runtime_adapter: str, model: str, effort: str) -> str | None:
-    """Drop a stored effort the resolved model no longer supports (e.g. user
-    saved `high` on a thinking model and then picked a non-thinking one)."""
+def resolve_auto_model_choice(slack_workspace_id: str, slack_user_id: str | None) -> bool:
+    if not slack_user_id:
+        return False
 
-    from products.tasks.backend.facade.run_config import get_supported_reasoning_efforts
+    from products.slack_app.backend.models import SlackSettings
 
-    supported = {e.value for e in get_supported_reasoning_efforts(runtime_adapter, model)}
-    return effort if effort in supported else None
-
-
-def build_ai_preferences_payload(
-    runtime_adapter: str | None,
-    model: str | None,
-    reasoning_effort: str | None,
-) -> dict[str, str]:
-    """Pack the triple into the JSON shape stored on `SlackSettings.ai_preferences`.
-
-    Drops keys whose value is `None` so callers can distinguish "intentionally
-    cleared" (key absent) from "set to falsy value".
-    """
-    payload = {
-        "runtime_adapter": runtime_adapter,
-        "model": model,
-        "reasoning_effort": reasoning_effort,
-    }
-    return {k: v for k, v in payload.items() if v}
-
-
-def validate_ai_preferences(
-    runtime_adapter: str | None,
-    model: str | None,
-    reasoning_effort: str | None,
-) -> None:
-    """Validate the `(runtime_adapter, model, reasoning_effort)` triple.
-
-    Raises `django.core.exceptions.ValidationError` if the triple is internally
-    inconsistent. Call this from the write path so half-set rows never reach
-    the DB.
-    """
-    from django.core.exceptions import ValidationError
-
-    from products.tasks.backend.facade.run_config import (
-        PUBLIC_REASONING_EFFORTS,
-        RuntimeAdapter,
-        get_reasoning_effort_error,
+    return bool(
+        SlackSettings.objects.filter(slack_workspace_id=slack_workspace_id, slack_user_id=slack_user_id)
+        .values_list("auto_model_choice", flat=True)
+        .first()
     )
 
-    if (runtime_adapter is None) != (model is None):
-        raise ValidationError(
-            "runtime_adapter and model must be set together — set both to override the default, or both to null to inherit."
-        )
 
-    if runtime_adapter is not None:
-        valid_adapters = {a.value for a in RuntimeAdapter}
-        if runtime_adapter not in valid_adapters:
-            raise ValidationError(
-                f"Unknown runtime_adapter '{runtime_adapter}'. Valid: {', '.join(sorted(valid_adapters))}."
-            )
+def set_auto_model_choice(slack_workspace_id: str, slack_user_id: str, enabled: bool) -> None:
+    from products.slack_app.backend.models import SlackSettings
 
-    if reasoning_effort is not None:
-        valid_efforts = {e.value for e in PUBLIC_REASONING_EFFORTS}
-        if reasoning_effort not in valid_efforts:
-            raise ValidationError(
-                f"Unknown reasoning_effort '{reasoning_effort}'. Valid: {', '.join(sorted(valid_efforts))}."
-            )
-
-    error = get_reasoning_effort_error(runtime_adapter, model, reasoning_effort)
-    if error:
-        raise ValidationError(error)
+    SlackSettings.objects.update_or_create(
+        slack_workspace_id=slack_workspace_id,
+        slack_user_id=slack_user_id,
+        defaults={"auto_model_choice": enabled},
+    )
 
 
 __all__ = [
     "AIPreferences",
-    "build_ai_preferences_payload",
-    "resolve_ai_preferences",
-    "validate_ai_preferences",
+    "resolve_auto_model_choice",
+    "resolve_channel_welcome_mode",
+    "resolve_untagged_question_mode",
+    "set_auto_model_choice",
+    "set_untagged_followup_mode",
+    "set_untagged_question_mode",
+    "set_channel_welcome_mode",
+    "resolve_thread_join_mode",
+    "set_thread_join_mode",
+    "resolve_untagged_followup_mode",
 ]

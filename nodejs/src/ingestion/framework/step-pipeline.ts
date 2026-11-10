@@ -1,8 +1,10 @@
-import { instrumentFn } from '~/common/tracing/tracing-utils'
+import { instrumentFn, isTracingActive } from '~/common/tracing/tracing-utils'
+import { logger } from '~/common/utils/logger'
 
-import { pipelineStepDurationHistogram } from './metrics'
+import { pipelineStepDurationHistogram, recordBudgetCheckpoint } from './metrics'
 import { OkResultWithContext, Pipeline, PipelineResultWithContext } from './pipeline.interface'
-import { PipelineResult, PipelineResultType, isOkResult } from './results'
+import { PipelineResult, PipelineResultType, isOkResult, timeout } from './results'
+import { eventSpanAttributes } from './span-attributes'
 import { ProcessingStep } from './steps'
 
 export class StepPipeline<TInput, TIntermediate, TOutput, C, RPrev extends string = never, RStep extends string = never>
@@ -36,15 +38,41 @@ export class StepPipeline<TInput, TIntermediate, TOutput, C, RPrev extends strin
             }
         }
 
+        // lastStep keeps the step that spent the time; the reason names the step that never started.
+        const budget = previousResultWithContext.context.budget
+        if (budget?.exhausted) {
+            recordBudgetCheckpoint('step', this.stepName)
+            return {
+                result: timeout(`budget exceeded before ${this.stepName}`),
+                context: previousResultWithContext.context,
+            }
+        }
+
         const end = pipelineStepDurationHistogram.startTimer({ step_name: this.stepName, step_type: 'element' })
+        const traceContext = previousResultWithContext.context.traceContext
         let currentResult: PipelineResult<TOutput, RStep>
         try {
-            currentResult = await instrumentFn({ key: this.stepName, sendException: false, measureTime: false }, () =>
-                this.currentStep(previousResult.value)
+            currentResult = await instrumentFn(
+                {
+                    key: this.stepName,
+                    sendException: false,
+                    measureTime: false,
+                    summary: false,
+                    attributes: isTracingActive(traceContext) ? eventSpanAttributes(previousResult.value) : undefined,
+                    parentContext: traceContext,
+                },
+                () => this.currentStep(previousResult.value)
             )
             end({ result: PipelineResultType[currentResult.type].toLowerCase() })
         } catch (e) {
             end({ result: 'exception' })
+            // The exception propagates and crashes the process; log the input's
+            // origin (set at the pipeline boundary) while it is still in scope.
+            logger.error('🔥', `Step ${this.stepName} threw`, {
+                error: e instanceof Error ? e.message : String(e),
+                stack: e instanceof Error ? e.stack : undefined,
+                debugContext: previousResultWithContext.context.debugContext,
+            })
             throw e
         }
         return {

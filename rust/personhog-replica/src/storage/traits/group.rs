@@ -48,6 +48,10 @@ pub trait GroupStorage: Send + Sync {
 
     // Group writes
 
+    /// Inserts a group, or returns the stored group unchanged when one with the same
+    /// `(team_id, group_type_index, group_key)` already exists.
+    /// Returns `StorageError::FailedPrecondition` when another transaction deletes that row
+    /// before this call reads it back.
     async fn create_group(
         &self,
         team_id: i64,
@@ -126,6 +130,7 @@ pub trait GroupStorage: Send + Sync {
         name_plural: Option<&str>,
         detail_dashboard_id: Option<i64>,
         default_columns: Option<&[String]>,
+        created_at: Option<chrono::DateTime<chrono::Utc>>,
     ) -> StorageResult<Option<GroupTypeMapping>>;
 
     async fn delete_group_type_mapping(

@@ -16,9 +16,11 @@ from pydantic import BaseModel, ValidationError
 from posthog.schema import ApprovalResumePayload, AssistantTool, ClientToolResultPayload
 
 from posthog.models import Team, User
-from posthog.rbac.user_access_control import AccessControlLevel, UserAccessControl
 from posthog.scopes import APIScopeObject
 from posthog.sync import database_sync_to_async
+
+from products.access_control.backend.facade.contracts import ObjectAccessRef
+from products.access_control.backend.facade.user_access_control import AccessControlLevel, UserAccessControl
 
 from ee.hogai.context.context import AssistantContextManager
 from ee.hogai.core.context import get_node_path, set_node_path
@@ -53,6 +55,15 @@ class ApprovalRequest(BaseModel):
     preview: str
     payload: dict[str, Any]
     original_tool_call_id: str | None = None
+
+
+def pending_approval_proposal_id(value: object) -> str | None:
+    if isinstance(value, ApprovalRequest):
+        return value.proposal_id
+    if isinstance(value, dict) and value.get("status") == PENDING_APPROVAL_STATUS:
+        proposal_id = value.get("proposal_id")
+        return proposal_id if isinstance(proposal_id, str) else None
+    return None
 
 
 class ClientToolCallRequest(BaseModel):
@@ -211,14 +222,14 @@ class MaxTool(AssistantContextMixin, AssistantDispatcherMixin, BaseTool):
     def _run_with_context(self, *args, **kwargs):
         """Sets the context for the tool."""
         with set_node_path(self.node_path):
-            if permission_check_result := async_to_sync(self._check_dangerous_operation)(**kwargs):
+            if permission_check_result := async_to_sync(self._check_dangerous_operation)(kwargs):
                 return permission_check_result
             return self._run_impl(*args, **kwargs)
 
     async def _arun_with_context(self, *args, **kwargs):
         """Sets the context for the tool. Checks for approved/dangerous operations before executing."""
         with set_node_path(self.node_path):
-            if permission_check_result := await self._check_dangerous_operation(**kwargs):
+            if permission_check_result := await self._check_dangerous_operation(kwargs):
                 return permission_check_result
             return await self._arun_impl(*args, **kwargs)
 
@@ -335,31 +346,43 @@ class MaxTool(AssistantContextMixin, AssistantDispatcherMixin, BaseTool):
         Raises MaxToolAccessDeniedError if user lacks required access.
 
         Args:
-            obj: The model instance to check access for (Insight, Dashboard, etc.)
+            obj: The model instance to check access for (Insight, Dashboard, etc.), or an ObjectAccessRef for an
+                object that a facade returns as a contract
             required_level: Minimum access level required ("viewer", "editor", etc.)
             resource: Resource name for error message. If None, derived from model._meta.model_name.
             action: Verb for error message ("read", "edit", "delete")
         """
-        has_access = await database_sync_to_async(self.user_access_control.check_access_level_for_object)(
-            obj, required_level
-        )
+        if isinstance(obj, ObjectAccessRef):
+            has_access = await database_sync_to_async(self.user_access_control.check_access_level_for_ref)(
+                obj, required_level
+            )
+        else:
+            has_access = await database_sync_to_async(self.user_access_control.check_access_level_for_object)(
+                obj, required_level
+            )
         if not has_access:
-            resource_name = resource or obj._meta.model_name
+            resource_name = resource or (obj.resource if isinstance(obj, ObjectAccessRef) else obj._meta.model_name)
             raise MaxToolAccessDeniedError(resource_name, required_level, action=action)
 
-    async def _check_dangerous_operation(self, **kwargs) -> tuple[str, Any] | None:
+    async def _check_dangerous_operation(self, kwargs: dict[str, Any]) -> tuple[str, Any] | None:
+        """Takes the caller's kwargs dict by reference, not unpacked.
+
+        An approving user may edit the arguments, and `_handle_dangerous_operation` writes them back
+        into this dict. Unpacking here would hand each level a fresh copy, so the edits would be
+        discarded and the caller would execute the operation the user did not approve.
+        """
         if not await self.is_dangerous_operation(**kwargs):
             return None
 
         # Handle dangerous operation approval flow
         # Pre-compute preview before calling _handle_dangerous_operation
         preview = await self.format_dangerous_operation_preview(**kwargs)
-        dangerous_result = self._handle_dangerous_operation(preview=preview, **kwargs)
+        dangerous_result = self._handle_dangerous_operation(kwargs, preview=preview)
         if dangerous_result is not None:
             return dangerous_result
         return None
 
-    def _handle_dangerous_operation(self, preview: str | None = None, **kwargs) -> tuple[str, Any] | None:
+    def _handle_dangerous_operation(self, kwargs: dict[str, Any], preview: str | None = None) -> tuple[str, Any] | None:
         """
         Handle dangerous operation approval flow using LangGraph's interrupt().
 
@@ -374,7 +397,12 @@ class MaxTool(AssistantContextMixin, AssistantDispatcherMixin, BaseTool):
         if preview is None:
             raise ValueError("preview must be provided for dangerous operations")
 
-        proposal_id = str(uuid.uuid4())
+        # Other parallel approvals can resume while this tool stays interrupted.
+        proposal_id = str(
+            uuid.uuid5(uuid.NAMESPACE_URL, f"{self._get_conversation_id()}:{self._original_tool_call_id}")
+            if self._original_tool_call_id
+            else uuid.uuid4()
+        )
         serialized_payload = self._serialize_kwargs_for_storage(kwargs)
 
         approval_request = ApprovalRequest(

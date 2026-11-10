@@ -1,23 +1,22 @@
+from datetime import timedelta
 from typing import Optional, cast
 
-from django.conf import settings
-
 import gspread
+import structlog
 from google.auth import exceptions as google_auth_exceptions
 
-from posthog.schema import (
+from posthog.cache_utils import cache_for
+
+from products.warehouse_sources.backend.facade.codebase_detection import detect
+from products.warehouse_sources.backend.facade.source_config import (
     DataWarehouseSourceCategory,
-    ExternalDataSourceType as SchemaExternalDataSourceType,
     ReleaseStatus,
     SourceConfig,
     SourceFieldInputConfig,
     SourceFieldInputConfigType,
 )
-
-from products.warehouse_sources.backend.temporal.data_imports.pipelines.pipeline.typings import (
-    SourceInputs,
-    SourceResponse,
-)
+from products.warehouse_sources.backend.models.external_data_schema import SCHEMA_RESOURCE_ID_METADATA_KEY
+from products.warehouse_sources.backend.temporal.data_imports.sources.common import credentials_service
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.base import (
     UNVERSIONED_API_VERSION,
     FieldType,
@@ -25,22 +24,40 @@ from products.warehouse_sources.backend.temporal.data_imports.sources.common.bas
 )
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.registry import SourceRegistry
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.schema import SourceSchema
+from products.warehouse_sources.backend.temporal.data_imports.sources.common.typings import SourceInputs, SourceResponse
 from products.warehouse_sources.backend.temporal.data_imports.sources.generated_configs.googlesheets import (
     GoogleSheetsSourceConfig,
 )
 from products.warehouse_sources.backend.temporal.data_imports.sources.google_sheets.google_sheets import (
     GOOGLE_SHEETS_API_VERSION_V4,
-    get_schema_incremental_fields as get_google_sheets_schema_incremental_fields,
-    get_schemas as get_google_sheets_schemas,
+    GoogleSheetsServiceAccountKeyInvalidError,
+    discover_worksheet_schemas,
     google_sheets_client,
     google_sheets_source,
 )
 from products.warehouse_sources.backend.types import ExternalDataSourceType
 
+logger = structlog.get_logger(__name__)
+
+
+# The source config is built on many web requests, and this address is display text, not a secret.
+@cache_for(timedelta(minutes=5))
+def _service_account_email() -> str:
+    return credentials_service.get_secret("GOOGLE_SHEETS_SERVICE_ACCOUNT_CLIENT_EMAIL")
+
 
 @SourceRegistry.register
 class GoogleSheetsSource(SimpleSource[GoogleSheetsSourceConfig]):
+    codebase_detection = detect(
+        env=("^GOOGLE_SHEETS_",),
+        npm=("google-spreadsheet", "@googleapis/sheets"),
+        pypi=("gspread", "pygsheets"),
+        maven=("com.google.apis:google-api-services-sheets",),
+        rubygems=("google-apis-sheets_v4",),
+    )
+
     api_docs_url = "https://developers.google.com/sheets/api"
+    uses_stable_schema_resource_ids = True
 
     # "v1" is the framework's legacy UNVERSIONED default kept so pre-existing sources stay pinned
     # and unchanged; "v4" names Google's current stable REST API version and is the default for new
@@ -54,7 +71,7 @@ class GoogleSheetsSource(SimpleSource[GoogleSheetsSourceConfig]):
 
     def get_non_retryable_errors(self) -> dict[str, str | None]:
         return {
-            "the header row in the worksheet contains duplicates": "Import failed: There exists duplicate column headers. Please make sure all column headers have values and aren't duplicated.",
+            "the header row in the worksheet contains duplicates": "Import failed: two or more columns in the worksheet share the same header. Give each one a distinct name and resync.",
             # Raised by `_assert_unique_normalized_column_names`: two headers that look distinct
             # collapse to the same normalized column name. Deterministic — retrying can't recover, and
             # the message already names the offending headers, so keep it as-is.
@@ -83,11 +100,27 @@ class GoogleSheetsSource(SimpleSource[GoogleSheetsSourceConfig]):
         # reword. Temporal then retries the whole activity, so the failure is transient and
         # self-recovering.
         return {
+            "APIError: [409]",
             "APIError: [429]",
             "APIError: [500]",
             "APIError: [502]",
             "APIError: [503]",
             "APIError: [504]",
+            # `_retry_on_transient_api_error` also retries a dropped connection or read timeout
+            # (`requests.exceptions.ConnectionError`/`Timeout`/`ChunkedEncodingError`) before
+            # re-raising once that budget is exhausted. urllib3 wraps all of those as "... Max
+            # retries exceeded with url: ..." regardless of the underlying cause (refused
+            # connection, read timeout, dropped socket), so match that stable prefix rather than
+            # the per-request URL or nested error detail.
+            "Max retries exceeded with url",
+            # `_retry_on_transient_api_error` also retries a `RefreshError`/`TransportError` raised
+            # while refreshing our own service-account token, when its message carries Google's
+            # stable "Error 5xx (...)" frontend-outage page (see `_is_transient_refresh_error`),
+            # before re-raising once that budget is exhausted.
+            "Error 500 (",
+            "Error 502 (",
+            "Error 503 (",
+            "Error 504 (",
         }
 
     def get_schemas(
@@ -99,26 +132,20 @@ class GoogleSheetsSource(SimpleSource[GoogleSheetsSourceConfig]):
         force_refresh: bool = False,
         api_version: str | None = None,
     ) -> list[SourceSchema]:
-        # Listing worksheets is version-agnostic (gspread's `worksheets()`), but the per-worksheet
-        # header read goes through `_get_worksheet`, whose memoization key includes the version —
-        # so discovery must resolve the pin rather than let it default.
-        resolved_version = self.resolve_api_version(api_version)
-        sheets = get_google_sheets_schemas(config)
-
-        if names is not None:
-            names_set = set(names)
-            sheets = [(name, row_count) for name, row_count in sheets if name in names_set]
-
         schemas: list[SourceSchema] = []
-        for name, _ in sheets:
-            incremental_fields = get_google_sheets_schema_incremental_fields(config, name, resolved_version)
+        for discovered in discover_worksheet_schemas(config, names=names):
+            worksheet = discovered.worksheet
+            incremental_fields = discovered.incremental_fields
 
             schemas.append(
                 SourceSchema(
-                    name=name,
+                    name=worksheet.name,
+                    label=worksheet.title,
                     supports_incremental=len(incremental_fields) > 0,
                     supports_append=len(incremental_fields) > 0,
                     incremental_fields=incremental_fields,
+                    # The sheet id survives a rename, so it keeps a renamed worksheet on its stored schema.
+                    schema_metadata={SCHEMA_RESOURCE_ID_METADATA_KEY: str(worksheet.worksheet_id)},
                 )
             )
 
@@ -133,6 +160,7 @@ class GoogleSheetsSource(SimpleSource[GoogleSheetsSourceConfig]):
             if inputs.should_use_incremental_field
             else None,
             api_version=self.resolve_api_version(inputs.api_version),
+            worksheet_id=_stored_worksheet_id(inputs),
         )
 
     def validate_credentials(
@@ -142,17 +170,43 @@ class GoogleSheetsSource(SimpleSource[GoogleSheetsSourceConfig]):
         schema_name: Optional[str] = None,
         api_version: str | None = None,
     ) -> tuple[bool, str | None]:
-        client = google_sheets_client()
+        try:
+            client = google_sheets_client()
+        except GoogleSheetsServiceAccountKeyInvalidError:
+            # The user can't fix this instance's service account key, so return a clear message, not a 500.
+            logger.exception("google_sheets_service_account_key_invalid", team_id=team_id)
+            return (
+                False,
+                "The Google Sheets integration isn't configured correctly on this PostHog instance. "
+                "Ask your instance administrator to check the Google Sheets service account key.",
+            )
         try:
             client.open_by_url(config.spreadsheet_url)
             return True, None
+        except gspread.exceptions.NoValidUrlKeyFound:
+            # gspread couldn't find a spreadsheet key in the value — it isn't a Sheets URL. Its
+            # str() is empty, so the generic fallback below would surface a bare "Invalid
+            # credentials" for what's really a URL-format problem. Guide the user instead.
+            return (
+                False,
+                "That doesn't look like a Google Sheets URL. Paste the full URL of your sheet, "
+                "for example https://docs.google.com/spreadsheets/d/<id>/edit.",
+            )
         except gspread.SpreadsheetNotFound:
-            return False, "Spreadsheet not found at URL provided"
+            # The Sheets API answers an unshared sheet with a 404, the same as a deleted one, so
+            # sharing is at least as likely as a wrong URL. Mirror the sync-time message.
+            service_account_email = credentials_service.get_secret("GOOGLE_SHEETS_SERVICE_ACCOUNT_CLIENT_EMAIL")
+            return (
+                False,
+                "PostHog couldn't find a sheet at that URL. Check the URL, and share the sheet with our service "
+                f"account ({service_account_email}) as a Viewer.",
+            )
         except PermissionError:
+            service_account_email = credentials_service.get_secret("GOOGLE_SHEETS_SERVICE_ACCOUNT_CLIENT_EMAIL")
             return (
                 False,
                 "PostHog does not have access to this spreadsheet. Share it with our service account "
-                f"({settings.GOOGLE_SHEETS_SERVICE_ACCOUNT_CLIENT_EMAIL}) as a Viewer, then try again. "
+                f"({service_account_email}) as a Viewer, then try again. "
                 "See https://posthog.com/docs/cdp/sources/google-sheets for more.",
             )
         except gspread.exceptions.APIError as e:
@@ -193,9 +247,11 @@ class GoogleSheetsSource(SimpleSource[GoogleSheetsSourceConfig]):
 
     @property
     def get_source_config(self) -> SourceConfig:
+        service_account_email = _service_account_email()
         return SourceConfig(
-            name=SchemaExternalDataSourceType.GOOGLE_SHEETS,
+            name=ExternalDataSourceType.GOOGLESHEETS,
             category=DataWarehouseSourceCategory.PRODUCTIVITY,
+            keywords=["gsheet", "gsheets", "spreadsheet", "google sheet"],
             label="Google Sheets",
             caption="Ensure you have granted PostHog access to your Google Sheet as instructed in the [documentation](https://posthog.com/docs/cdp/sources/google-sheets). The first row of each sheet must contain unique column headers, since PostHog reads it as the column names when syncing.",
             releaseStatus=ReleaseStatus.GA,
@@ -210,10 +266,18 @@ class GoogleSheetsSource(SimpleSource[GoogleSheetsSourceConfig]):
                         type=SourceFieldInputConfigType.TEXT,
                         required=True,
                         placeholder="",
-                        caption=f'Share the sheet with our service account by entering **{settings.GOOGLE_SHEETS_SERVICE_ACCOUNT_CLIENT_EMAIL}** into the "Add people" field. We only require "Viewer" permissions to sync the sheet.',
+                        caption=f'Share the sheet with our service account by entering **{service_account_email}** into the "Add people" field. We only require "Viewer" permissions to sync the sheet.',
                         secret=False,
                     )
                 ],
             ),
             featured=True,
         )
+
+
+def _stored_worksheet_id(inputs: SourceInputs) -> int | None:
+    resource_id = (inputs.schema_metadata or {}).get(SCHEMA_RESOURCE_ID_METADATA_KEY)
+    try:
+        return int(resource_id) if resource_id is not None else None
+    except (TypeError, ValueError):
+        return None

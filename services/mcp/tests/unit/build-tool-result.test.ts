@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest'
 
-import { EXEC_BUILT_PAYLOAD, markExecPayload, buildToolResultPayload, isToolCallPayload } from '@/lib/build-tool-result'
+import {
+    EXEC_BUILT_PAYLOAD,
+    STRUCTURED_CONTENT_ONLY_TEXT,
+    UI_APP_RENDER_NOTE,
+    estimateResponseTokens,
+    markExecPayload,
+    buildToolResultPayload,
+    isToolCallPayload,
+} from '@/lib/build-tool-result'
+import { estimateTokens } from '@/lib/estimate-tokens'
+import { formatResponse } from '@/lib/response'
 import { POSTHOG_FORMATTED_RESULTS_OVERRIDE_KEY, POSTHOG_META_KEY } from '@/tools/types'
 import { APP_DATA_META_KEY } from '@/ui-apps/types'
 
@@ -49,6 +59,47 @@ const queryTrendsToolMeta = {
 } as const
 
 describe('buildToolResultPayload — query-trends for Claude Code', () => {
+    it.each(['optimized', 'json'] as const)(
+        'keeps native widget data without a UI resource or formatted table in %s mode',
+        (outputFormat) => {
+            const data = { short_id: 'example', query: { kind: 'HogQLQuery', query: "SELECT 'a\\nb'" } }
+            const payload = buildToolResultPayload({
+                handlerResult: data,
+                toolName: 'mock-tool',
+                params: { output_format: outputFormat },
+                includeAppData: true,
+            })
+            expect(payload._meta?.[APP_DATA_META_KEY]).toEqual(data)
+            expect(payload.structuredContent).toBeUndefined()
+            expect(payload.content[0]!.text).not.toBe(STRUCTURED_CONTENT_ONLY_TEXT)
+            if (outputFormat === 'json') {
+                expect(JSON.parse(payload.content[0]!.text)).toEqual(data)
+            }
+        }
+    )
+
+    it.each(['optimized', 'json'] as const)(
+        'carries a UI-resource tool payload once beside native widget data in %s mode',
+        (outputFormat) => {
+            const payload = buildToolResultPayload({
+                handlerResult: queryTrendsHandlerResult(/* withFormatted */ false),
+                toolMeta: queryTrendsToolMeta,
+                toolName: 'query-trends',
+                params: { output_format: outputFormat },
+                includeAppData: true,
+                distinctId: 'd',
+            })
+
+            // The widget reads `_meta`, so structuredContent would repeat what the text
+            // channel already hands the model.
+            expect(payload).not.toHaveProperty('structuredContent')
+            expect(payload._meta?.[APP_DATA_META_KEY]).toMatchObject({ results: expect.any(Array) })
+            if (outputFormat === 'json') {
+                expect(JSON.parse(payload.content[0]!.text)).toMatchObject({ results: expect.any(Array) })
+            }
+        }
+    )
+
     it('returns formatted table as text AND suppresses structuredContent for claude-code', () => {
         const payload = buildToolResultPayload({
             handlerResult: queryTrendsHandlerResult(),
@@ -64,6 +115,10 @@ describe('buildToolResultPayload — query-trends for Claude Code', () => {
         // No structuredContent: Claude Code would otherwise prefer it over text,
         // defeating the purpose of the formatted_results override.
         expect(payload).not.toHaveProperty('structuredContent')
+        // A host that registers the tools directly still mounts the UI app from the
+        // resource URI it read in `tools/list`. Without this the app has no data at all
+        // and renders its failure state instead of the chart.
+        expect(payload._meta?.[APP_DATA_META_KEY]).toMatchObject({ results: expect.any(Array) })
     })
 
     it('keeps structuredContent when suppression is false', () => {
@@ -173,7 +228,215 @@ describe('buildToolResultPayload — query-trends for Claude Code', () => {
     })
 })
 
+// Inline-exec UI-app hosts (PostHog Desktop, Claude Code) go through the exec
+// wrapper, which sets `forceUiDataToMeta` + `includeUiResponseMeta`. The app payload
+// should only move onto `_meta` when a compact formatted table takes structuredContent's
+// place for the model — otherwise it stays in the standard structuredContent field so it
+// isn't duplicated under a non-standard `_meta` key.
+describe('buildToolResultPayload — inline-exec UI host (forceUiDataToMeta)', () => {
+    it('suppresses structuredContent and re-homes the payload onto _meta when a formatted table exists', () => {
+        const payload = buildToolResultPayload({
+            handlerResult: queryTrendsHandlerResult(/* withFormatted */ true),
+            toolMeta: queryTrendsToolMeta,
+            toolName: 'query-trends',
+            params: {},
+            forceUiDataToMeta: true,
+            includeUiResponseMeta: true,
+            includeRenderNote: true,
+            distinctId: 'd',
+        })
+
+        // Model reads the compact table, not the verbose JSON.
+        expect(payload.content[0]!.text).toBe(`${FORMATTED_TABLE}\n\n${UI_APP_RENDER_NOTE}`)
+        expect(payload).not.toHaveProperty('structuredContent')
+        // The UI app hydrates from _meta since structuredContent was dropped.
+        expect(payload._meta?.[APP_DATA_META_KEY]).toMatchObject({ results: expect.any(Array) })
+    })
+
+    it('keeps the payload in structuredContent and never emits _meta app-data when there is no formatted table', () => {
+        // Regression guard for the duplicated-results report: without a compact table the
+        // model reads the data as text anyway, so re-homing it onto `_meta` only duplicates
+        // the full payload under a non-standard key. Keep it in structuredContent instead.
+        const payload = buildToolResultPayload({
+            handlerResult: queryTrendsHandlerResult(/* withFormatted */ false),
+            toolMeta: queryTrendsToolMeta,
+            toolName: 'query-trends',
+            params: {},
+            forceUiDataToMeta: true,
+            includeUiResponseMeta: true,
+            distinctId: 'd',
+        })
+
+        expect(payload.structuredContent).toMatchObject({ results: expect.any(Array) })
+        expect(payload._meta?.[APP_DATA_META_KEY]).toBeUndefined()
+        // The UI resource URI is still exposed for single-exec clients.
+        expect(payload._meta?.ui).toEqual({ resourceUri: 'ui://posthog/query-results.html' })
+    })
+
+    // Regression guard for the relapse report: after the payload moved back into
+    // `structuredContent`, the text channel still carried a full TOON copy of it, so an
+    // inline-exec UI host handed the agent the same rows twice. List and detail shapes
+    // are the two the report flagged (`experiment-list`, `experiment-get`).
+    it.each([
+        [
+            'list',
+            {
+                count: 2,
+                next: null,
+                results: [
+                    { id: 387170, name: 'Onboarding copy', feature_flag_key: 'onboarding-copy' },
+                    { id: 387171, name: 'Pricing page', feature_flag_key: 'pricing-page' },
+                ],
+            },
+        ],
+        [
+            'detail',
+            {
+                id: 387170,
+                name: 'Onboarding copy',
+                feature_flag: { key: 'onboarding-copy', filters: { groups: [{ rollout_percentage: 100 }] } },
+                metrics: [{ kind: 'ExperimentMetric', name: 'Signups' }],
+            },
+        ],
+    ])('serializes a %s payload exactly once when there is no formatted table', (_shape, handlerResult) => {
+        const payload = buildToolResultPayload({
+            handlerResult,
+            toolMeta: { ui: { resourceUri: 'ui://posthog/experiment-list.html' } },
+            toolName: 'experiment-list',
+            params: {},
+            forceUiDataToMeta: true,
+            includeUiResponseMeta: true,
+            includeRenderNote: true,
+            distinctId: 'd',
+        })
+
+        expect(payload.structuredContent).toMatchObject(handlerResult)
+        // The text channel points at structuredContent instead of repeating it.
+        expect(payload.content[0]!.text).toContain(STRUCTURED_CONTENT_ONLY_TEXT)
+        expect(payload.content[0]!.text).toContain(UI_APP_RENDER_NOTE)
+        expect(payload.content[0]!.text).not.toContain('Onboarding copy')
+        expect(payload._meta?.[APP_DATA_META_KEY]).toBeUndefined()
+    })
+
+    it('counts the structured payload for token estimation when the text is only a pointer', () => {
+        // The estimate feeds `$mcp_tool_call.output_tokens`; without this the whole
+        // response would be billed as the one-line pointer.
+        const payload = buildToolResultPayload({
+            handlerResult: queryTrendsHandlerResult(/* withFormatted */ false),
+            toolMeta: queryTrendsToolMeta,
+            toolName: 'query-trends',
+            params: {},
+            forceUiDataToMeta: true,
+            includeUiResponseMeta: true,
+            includeRenderNote: true,
+            distinctId: 'd',
+        })
+
+        expect(estimateResponseTokens(payload)).toBe(
+            estimateTokens(payload.structuredContent) + estimateTokens(UI_APP_RENDER_NOTE)
+        )
+    })
+
+    it('keeps the mirrored text when the caller asked for JSON output', () => {
+        const payload = buildToolResultPayload({
+            handlerResult: queryTrendsHandlerResult(/* withFormatted */ false),
+            toolMeta: queryTrendsToolMeta,
+            toolName: 'query-trends',
+            params: { output_format: 'json' },
+            forceUiDataToMeta: true,
+            includeUiResponseMeta: true,
+            distinctId: 'd',
+        })
+
+        expect(JSON.parse(payload.content[0]!.text)).toMatchObject({ results: expect.any(Array) })
+        expect(payload.structuredContent).toMatchObject({ results: expect.any(Array) })
+    })
+})
+
 describe('buildToolResultPayload — non-query use cases', () => {
+    it.each([
+        { results: [{ id: 1 }], next: null, count: 1, previous: null },
+        { results: [], next: null, count: 0, previous: null },
+    ])('unwraps optimized lists but preserves JSON and widget data: %j', (handlerResult) => {
+        for (const outputFormat of ['optimized', 'json'] as const) {
+            const payload = buildToolResultPayload({
+                handlerResult,
+                toolName: 'mock-tool',
+                params: { output_format: outputFormat },
+                includeAppData: true,
+            })
+
+            expect(payload.content[0]!.text).toBe(
+                outputFormat === 'json' ? JSON.stringify(handlerResult) : formatResponse(handlerResult.results)
+            )
+            expect(payload._meta?.[APP_DATA_META_KEY]).toEqual(handlerResult)
+        }
+    })
+
+    it.each([
+        {
+            handlerResult: {
+                results: [{ id: 1 }],
+                next: 'https://example.com/api/items/?cursor=cD0yMDI2&search=foo',
+                previous: null,
+            },
+            expected:
+                'Showing 1 result. More results exist: call mock-tool again with the same arguments and set cursor=cD0yMDI2 to get the next page.',
+        },
+        {
+            handlerResult: {
+                results: [{ id: 1 }, { id: 2 }],
+                next: 'https://example.com/api/items/?limit=2&offset=2',
+                count: 5,
+                previous: null,
+                _posthogUrl: 'https://example.com/items',
+            },
+            expected:
+                'Showing 2 of 5 results. More results exist: call mock-tool again with the same arguments and set offset=2 and limit=2 to get the next page.',
+        },
+    ])('tells the agent how to read the next page: $handlerResult.next', ({ handlerResult, expected }) => {
+        const payload = buildToolResultPayload({ handlerResult, toolName: 'mock-tool', params: {} })
+
+        expect(payload.content[0]!.text).toBe(`${formatResponse(handlerResult)}\n\n${expected}`)
+    })
+
+    it.each(['optimized', 'json'] as const)(
+        'keeps widget data and JSON text whole when another page exists: %s',
+        (outputFormat) => {
+            const handlerResult = {
+                results: [{ id: 1 }],
+                next: 'https://example.com/api/items/?cursor=next',
+                previous: null,
+            }
+
+            const payload = buildToolResultPayload({
+                handlerResult,
+                toolName: 'mock-tool',
+                params: { output_format: outputFormat },
+                includeAppData: true,
+            })
+
+            if (outputFormat === 'json') {
+                expect(payload.content[0]!.text).toBe(JSON.stringify(handlerResult))
+            }
+            expect(payload._meta?.[APP_DATA_META_KEY]).toEqual(handlerResult)
+        }
+    )
+
+    it.each([
+        { results: [{ id: 1 }], query: { kind: 'HogQLQuery' } },
+        { results: [{ id: 1 }], next: null, previous: null, status: 'ready' },
+        { results: 'not a list', next: null, count: 1, previous: null },
+    ])('preserves non-pagination result objects: %j', (handlerResult) => {
+        const payload = buildToolResultPayload({
+            handlerResult,
+            toolName: 'mock-tool',
+            params: { output_format: 'json' },
+        })
+
+        expect(JSON.parse(payload.content[0]!.text)).toEqual(handlerResult)
+    })
+
     it('preserves array handler results', () => {
         const result = [{ id: 'template-1' }]
         Object.defineProperty(result, POSTHOG_FORMATTED_RESULTS_OVERRIDE_KEY, {

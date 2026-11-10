@@ -1,14 +1,24 @@
 import json
+from datetime import date
 
 import pytest
 from unittest import mock
 
+from posthog.integrations import IntegrationNotFound
+
+from products.warehouse_sources.backend.temporal.data_imports.sources.common.base import VersionDeprecation
 from products.warehouse_sources.backend.temporal.data_imports.sources.generated_configs.linkedinads import (
     LinkedinAdsSourceConfig,
 )
 from products.warehouse_sources.backend.temporal.data_imports.sources.linkedin_ads.client import LinkedinAdsClient
 from products.warehouse_sources.backend.temporal.data_imports.sources.linkedin_ads.source import (
+    _CONNECTION_CHECK_ERROR,
+    _MISSING_INTEGRATION_ERROR,
     LINKEDIN_ADS_VERSION_202606,
+    LINKEDIN_ADS_VERSION_202607,
+    LINKEDIN_ADS_VERSION_202608,
+    LINKEDIN_ADS_VERSION_202609,
+    LINKEDIN_ADS_VERSION_202610,
     LinkedInAdsSource,
 )
 
@@ -26,12 +36,19 @@ class TestLinkedInAdsSource:
         "observed_error",
         [
             'LinkedIn API error (404): {"status":404,"code":"RESOURCE_NOT_FOUND","message":"No virtual resource found"}',
+            # A plain 404 with the generic "NOT_FOUND" code (no "RESOURCE_" prefix) — same
+            # underlying condition (deleted/inaccessible account) under a different LinkedIn
+            # error code.
+            'LinkedIn API error (404): {"code":"NOT_FOUND","message":"Not Found.","status":404}',
             "REVOKED_ACCESS_TOKEN",
             "The token used in the request has expired",
             "Failed to refresh token for LinkedIn Ads integration. Please re-authorize the integration.",
             'LinkedIn API error (401): {"status":401,"serviceErrorCode":65608,"code":"RESTRICTED_MEMBER","message":"Member is restricted"}',
             # Integration.DoesNotExist when the OAuth integration row was deleted/disconnected.
             "Integration matching query does not exist.",
+            # A sunset version header (see `deprecated_versions`) — happens on every call under that
+            # pin regardless of resource, so it must never be left to retry forever.
+            'LinkedIn API error (426): {"status":426,"code":"NONEXISTENT_VERSION","message":"Requested version 20250801 is not active"}',
         ],
     )
     def test_non_retryable_errors_match_upstream_failures(self, observed_error):
@@ -50,9 +67,51 @@ class TestLinkedInAdsSource:
         non_retryable_errors = self.source.get_non_retryable_errors()
         assert not any(key in other_error for key in non_retryable_errors)
 
-    def test_defaults_new_sources_to_202606(self):
-        assert self.source.default_version == LINKEDIN_ADS_VERSION_202606
-        assert set(self.source.supported_versions) == {"v1", LINKEDIN_ADS_VERSION_202606}
+    @pytest.mark.parametrize(
+        "observed_error",
+        [
+            'LinkedIn API error (retryable, 500): {"message":"Internal Server Error","status":500}',
+            'LinkedIn API error (retryable, 429): {"message":"Too many requests"}',
+            'LinkedIn API error (retryable, 503): {"message":"Service Unavailable"}',
+            "LinkedIn API returned a malformed (non-JSON) response: Expecting value: line 1 column 1 (char 0)",
+        ],
+    )
+    def test_retryable_errors_match_exhausted_transient_failures(self, observed_error):
+        retryable_errors = self.source.get_retryable_errors()
+        assert any(pattern in observed_error for pattern in retryable_errors)
+
+    @pytest.mark.parametrize(
+        "other_error",
+        [
+            'LinkedIn API error (404): {"status":404,"code":"RESOURCE_NOT_FOUND"}',
+            'LinkedIn daily rate limit reached (429): {"message":"throttled"}',
+            "Connection reset by peer",
+        ],
+    )
+    def test_retryable_errors_does_not_match_unrelated(self, other_error):
+        retryable_errors = self.source.get_retryable_errors()
+        assert not any(pattern in other_error for pattern in retryable_errors)
+
+    def test_defaults_new_sources_to_202610(self):
+        assert self.source.default_version == LINKEDIN_ADS_VERSION_202610
+        assert set(self.source.supported_versions) == {
+            "v1",
+            LINKEDIN_ADS_VERSION_202606,
+            LINKEDIN_ADS_VERSION_202607,
+            LINKEDIN_ADS_VERSION_202608,
+            LINKEDIN_ADS_VERSION_202609,
+            LINKEDIN_ADS_VERSION_202610,
+        }
+
+    def test_deprecated_versions_carry_sunset_dates(self):
+        # "v1" backs the sunset 202508 header (see client.API_VERSION); 202606 sunsets 2027-06-15.
+        # The in-product deprecation banner depends on this metadata staying declared, and the default
+        # (202610) must never appear here.
+        assert self.source.deprecated_versions == (
+            VersionDeprecation(version="v1", sunset_at=date(2026, 8, 1)),
+            VersionDeprecation(version=LINKEDIN_ADS_VERSION_202606, sunset_at=date(2027, 6, 15)),
+        )
+        assert self.source.default_version not in {d.version for d in self.source.deprecated_versions}
 
     @pytest.mark.parametrize(
         "pinned_version,expected_header",
@@ -61,8 +120,12 @@ class TestLinkedInAdsSource:
             # sent (202508), so their syncs stay byte-for-byte unchanged after the default flip.
             ("v1", "202508"),
             (LINKEDIN_ADS_VERSION_202606, "202606"),
+            (LINKEDIN_ADS_VERSION_202607, "202607"),
+            (LINKEDIN_ADS_VERSION_202608, "202608"),
+            (LINKEDIN_ADS_VERSION_202609, "202609"),
+            (LINKEDIN_ADS_VERSION_202610, "202610"),
             # No pin resolves to the new default.
-            (None, "202606"),
+            (None, "202610"),
             # An undeclared pin is honored verbatim and passed straight through for LinkedIn to validate.
             ("209901", "209901"),
         ],
@@ -91,10 +154,29 @@ class TestLinkedInAdsSource:
 
         self.source.get_oauth_accounts(integration_id=456, team_id=self.team_id)
 
-        assert mock_client_for_integration.call_args.kwargs["api_version"] == "202606"
+        assert mock_client_for_integration.call_args.kwargs["api_version"] == "202610"
+
+    def test_demographic_breakdowns_are_offered_but_not_enabled_by_default(self):
+        # These fan out to one row per day per demographic value on top of the performance tables,
+        # so auto-enabling them would multiply every existing connection's sync cost.
+        schemas = {schema.name: schema for schema in self.source.get_schemas(self.config, self.team_id)}
+
+        demographic_tables = [name for name in schemas if name.startswith("member_")]
+        assert sorted(demographic_tables) == [
+            "member_company_size_stats",
+            "member_company_stats",
+            "member_country_stats",
+            "member_industry_stats",
+            "member_job_title_stats",
+            "member_seniority_stats",
+        ]
+        assert all(not schemas[name].should_sync_default for name in demographic_tables)
+        assert all(schemas[name].supports_incremental for name in demographic_tables)
+
+        for name in ("accounts", "campaigns", "campaign_groups", "creatives", "conversions"):
+            assert schemas[name].should_sync_default
 
     def test_validate_credentials_missing_account_id(self):
-        """Test credential validation with missing account ID."""
         invalid_config = LinkedinAdsSourceConfig(linkedin_ads_integration_id=456, account_id="")
 
         is_valid, error_message = self.source.validate_credentials(invalid_config, self.team_id)
@@ -122,43 +204,32 @@ class TestLinkedInAdsSource:
         assert error_message is not None
         assert "numeric account ID" in error_message
 
-    @mock.patch("products.warehouse_sources.backend.temporal.data_imports.sources.linkedin_ads.source.Integration")
+    @mock.patch(
+        "products.warehouse_sources.backend.temporal.data_imports.sources.linkedin_ads.source.IntegrationManager"
+    )
     def test_validate_credentials_integration_not_found(self, mock_integration_model):
-        """Test credential validation when integration doesn't exist."""
-
-        # Mock DoesNotExist exception
-        class MockDoesNotExist(Exception):
-            pass
-
-        mock_integration_model.DoesNotExist = MockDoesNotExist
-        mock_integration_model.objects.get.side_effect = MockDoesNotExist()
+        mock_integration_model.linkedin_ads.oauth.get.side_effect = IntegrationNotFound()
 
         is_valid, error_message = self.source.validate_credentials(self.config, self.team_id)
 
         assert is_valid is False
-        assert error_message is not None
-        assert "LinkedIn Ads integration not found" in error_message
+        assert error_message == _MISSING_INTEGRATION_ERROR
 
-    @mock.patch("products.warehouse_sources.backend.temporal.data_imports.sources.linkedin_ads.source.Integration")
+    @mock.patch(
+        "products.warehouse_sources.backend.temporal.data_imports.sources.linkedin_ads.source.IntegrationManager"
+    )
     @mock.patch(
         "products.warehouse_sources.backend.temporal.data_imports.sources.linkedin_ads.source.capture_exception"
     )
     def test_validate_credentials_unexpected_error(self, mock_capture_exception, mock_integration_model):
-        """Test credential validation with unexpected error."""
-
-        # Mock DoesNotExist exception
-        class MockDoesNotExist(Exception):
-            pass
-
-        mock_integration_model.DoesNotExist = MockDoesNotExist
-        mock_integration_model.objects.get.side_effect = Exception("Database error")
+        mock_integration_model.linkedin_ads.oauth.get.side_effect = Exception("Database error")
 
         is_valid, error_message = self.source.validate_credentials(self.config, self.team_id)
 
         assert is_valid is False
-        assert error_message is not None
-        assert "Failed to validate LinkedIn Ads credentials" in error_message
-        assert "Database error" in error_message
+        # The raw exception text is a database internal the user can do nothing with; it belongs in
+        # error tracking, not in the wizard.
+        assert error_message == _CONNECTION_CHECK_ERROR
         mock_capture_exception.assert_called_once()
 
     @pytest.mark.parametrize(

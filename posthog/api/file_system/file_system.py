@@ -1,55 +1,63 @@
 import re
-import time
+import json
 import shlex
+import logging
 import builtins
-from typing import Any, cast
-from uuid import UUID, uuid4
+from functools import cached_property
+from typing import Any, Optional, cast
+from uuid import UUID
+from zoneinfo import ZoneInfo
 
-from django.conf import settings
-from django.db import transaction
-from django.db.models import Case, F, IntegerField, Q, QuerySet, Value, When
+from django.apps import apps
+from django.db import connection, transaction
+from django.db.models import (
+    Case,
+    CharField,
+    Exists,
+    F,
+    Func,
+    IntegerField,
+    OuterRef,
+    Q,
+    QuerySet,
+    Subquery,
+    Value,
+    When,
+)
 from django.db.models.functions import Concat, Lower
+from django.utils import timezone
 
 from drf_spectacular.utils import OpenApiResponse, extend_schema
-from rest_framework import filters, pagination, serializers, status, viewsets
+from rest_framework import filters, serializers, status, viewsets
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.request import Request
 from rest_framework.response import Response
 
-from posthog.api.file_system.access_levels import FileSystemAccessLevelSerializerMixin
+from posthog.api.file_system.access_levels import (
+    FileSystemAccessLevelSerializerMixin,
+    _coerce_refs_for_lookup,
+    denied_short_id_refs,
+    entries_missing_access_level,
+)
 from posthog.api.file_system.deletion import (
     HOG_FUNCTION_TYPES,
     delete_file_system_object,
+    get_restorable_object,
     is_file_system_type_registered,
     undo_delete as undo_delete_object,
 )
 from posthog.api.file_system.file_system_logging import log_api_file_system_view
-from posthog.api.file_system.folder_context_generation import (
-    ContextGenerationSerializer,
-    ContextGenerationSetSerializer,
-)
-from posthog.api.file_system.folder_context_generation_service import (
-    get_context_generation_task_id,
-    set_context_generation_task_id,
-)
-from posthog.api.file_system.folder_instructions import (
-    FolderInstructionsPublishSerializer,
-    FolderInstructionsSerializer,
-    FolderInstructionsVersionSerializer,
-)
-from posthog.api.file_system.folder_instructions_service import (
-    FolderInstructionsVersionConflictError,
-    FolderInstructionsVersionLimitError,
-    delete_folder_instructions,
-    ensure_blank_folder_instructions,
-    get_folder_instructions_versions,
-    get_latest_folder_instructions,
-    publish_folder_instructions,
-)
+from posthog.api.file_system.ranked_search import FileRef, FileSystemRankedSearch, search_session
+from posthog.api.file_system.visibility import apply_file_system_visibility_filters
+from posthog.api.mixins import validated_request
+from posthog.api.pagination import FacadeLimitOffsetPagination, facade_page_response
 from posthog.api.routing import TeamAndOrgViewSetMixin
 from posthog.api.shared import UserBasicSerializer
 from posthog.api.utils import action
-from posthog.auth import OAuthAccessTokenAuthentication
 from posthog.decorators import disallow_if_impersonated
+from posthog.exceptions import Conflict
+from posthog.helpers.trigram_search import MAX_SEARCH_LENGTH
+from posthog.models.file_system.constants import RETIRED_FILE_SYSTEM_TYPES
 from posthog.models.file_system.file_system import (
     DEFAULT_SURFACE,
     FileSystem,
@@ -58,25 +66,98 @@ from posthog.models.file_system.file_system import (
     split_path,
     surface_q,
 )
+from posthog.models.file_system.file_system_home_folder import FileSystemHomeFolder
 from posthog.models.file_system.file_system_representation import FileSystemRepresentation
-from posthog.models.file_system.file_system_view_log import get_recent_file_system_items, recent_view_logs
+from posthog.models.file_system.file_system_shortcut import FileSystemShortcut
+from posthog.models.file_system.file_system_view_log import (
+    FileSystemViewLog,
+    get_recent_file_system_items,
+    recent_view_logs,
+)
 from posthog.models.file_system.unfiled_file_saver import save_unfiled_files
+from posthog.models.tagged_item import TaggedItem
+from posthog.models.tagged_item_registry import object_column_for
 from posthog.models.team import Team
 from posthog.models.user import User
-from posthog.temporal.oauth import SANDBOX_OAUTH_APP_CLIENT_IDS
+from posthog.paging import Page, PageRequest
+from posthog.settings import EE_AVAILABLE
 from posthog.utils import str_to_bool
 
-from products.tasks.backend.facade import api as tasks_facade
+logger = logging.getLogger(__name__)
 
 DELETE_PREVIEW_ENTRY_LIMIT = 200
+
+# One message for every reason a restore is refused (missing, already live, or off-limits), so the
+# endpoint can't be used to learn which refs exist.
+# The file system rows whose objects carry tags, with the model field the row's `ref` names.
+TAGGED_FILE_SYSTEM_TYPES: tuple[tuple[str, str, str, str], ...] = (
+    ("dashboard", "dashboards", "Dashboard", "id"),
+    ("insight", "product_analytics", "Insight", "short_id"),
+)
+UNDO_DELETE_REFUSED = "Couldn't restore this. It may already be restored, or you may not have access to it."
+
+# Paths the product itself builds are at most three segments deep ("Unfiled/Insights/<name>"), so
+# these leave ample headroom for hand-made trees while keeping the per-segment folder creation in
+# `_assure_parent_folders` (one existence check plus one insert each) bounded.
+MAX_PATH_LENGTH = 4000
+MAX_PATH_SEGMENTS = 50
+
+# `meta` is a free-form client blob, so it only needs a ceiling that keeps a single row from
+# dominating a page of list results.
+MAX_META_BYTES = 1_000_000
 
 # Search-within-Recents scans this many of the user's most-recent views, then the text filter trims
 # them to a page. Bounds the hydration key set so the query stays cheap on heavy view-log histories.
 RECENTS_SEARCH_SCAN_LIMIT = 200
 
 
+def get_file_system_insight_type(query_kind: str | None, legacy_type: str | None) -> str:
+    insight_type = str(query_kind).removesuffix("Query").lower() if query_kind else str(legacy_type or "TRENDS").lower()
+    return {"hogql": "hog", "pathsv2": "paths", "journeys": "paths"}.get(insight_type, insight_type)
+
+
+def validate_file_system_path(path: Any) -> str:
+    """Bound a caller-supplied path before it reaches the per-segment folder creation loop, which
+    costs one existence check plus one insert per segment and autocommits each one."""
+    if not isinstance(path, str):
+        raise serializers.ValidationError("Path must be a string.")
+    if len(path) > MAX_PATH_LENGTH:
+        raise serializers.ValidationError(f"Path must be {MAX_PATH_LENGTH} characters or fewer.")
+    if len(split_path(path)) > MAX_PATH_SEGMENTS:
+        raise serializers.ValidationError(f"Path can be at most {MAX_PATH_SEGMENTS} levels deep.")
+    return path
+
+
+class FileSystemListQuerySerializer(serializers.Serializer):
+    include_content_type = serializers.BooleanField(
+        default=False,
+        help_text="Include meta.content_type for notebooks and insights on this page, without their contents.",
+    )
+    include_tags = serializers.BooleanField(
+        default=False,
+        help_text="Include meta.tags, the tag names, for dashboards and insights on this page.",
+    )
+
+
+class FileSystemDeleteQuerySerializer(serializers.Serializer):
+    recursive = serializers.BooleanField(
+        default=True,
+        help_text=(
+            "Delete folder contents too (default: true). Set false to delete only empty folders. "
+            "Nonempty folders return HTTP 409 with code directory_not_empty."
+        ),
+    )
+
+
+class FileSystemFrequentQuerySerializer(serializers.Serializer):
+    limit = serializers.IntegerField(
+        default=8, min_value=1, max_value=20, help_text="Maximum number of frequently viewed items to return."
+    )
+
+
 class FileSystemSerializer(FileSystemAccessLevelSerializerMixin, serializers.ModelSerializer):
     last_viewed_at = serializers.DateTimeField(read_only=True, allow_null=True)
+    created_by = UserBasicSerializer(read_only=True, allow_null=True)
 
     class Meta:
         model = FileSystem
@@ -90,6 +171,7 @@ class FileSystemSerializer(FileSystemAccessLevelSerializerMixin, serializers.Mod
             "meta",
             "shortcut",
             "created_at",
+            "created_by",
             "last_viewed_at",
             "user_access_level",
         ]
@@ -101,6 +183,18 @@ class FileSystemSerializer(FileSystemAccessLevelSerializerMixin, serializers.Mod
             "last_viewed_at",
             "user_access_level",
         ]
+
+    def validate_path(self, path: str) -> str:
+        return validate_file_system_path(path)
+
+    def validate_meta(self, meta: Any) -> dict[str, Any]:
+        # Readers treat `meta` as an object, so anything else stored here breaks every listing that
+        # includes the row, not just the writer's own request.
+        if not isinstance(meta, dict):
+            raise serializers.ValidationError("Meta must be an object.")
+        if len(json.dumps(meta, default=str).encode()) > MAX_META_BYTES:
+            raise serializers.ValidationError(f"Meta must be smaller than {MAX_META_BYTES / 1_000_000:g} MB.")
+        return meta
 
     def update(self, instance: FileSystem, validated_data: dict[str, Any]) -> FileSystem:
         if "path" in validated_data:
@@ -144,8 +238,17 @@ class FileSystemSerializer(FileSystemAccessLevelSerializerMixin, serializers.Mod
         return file_system
 
 
-class FileSystemsLimitOffsetPagination(pagination.LimitOffsetPagination):
+class FileSystemsLimitOffsetPagination(FacadeLimitOffsetPagination):
     default_limit = 100
+
+
+class FileSystemHomeFolderSerializer(serializers.Serializer):
+    id = serializers.UUIDField(
+        read_only=True, allow_null=True, help_text="The user's home folder ID, or null if deleted."
+    )
+    path = serializers.CharField(
+        read_only=True, allow_null=True, help_text="The current path of the user's home folder."
+    )
 
 
 class UnfiledFilesQuerySerializer(serializers.Serializer):
@@ -163,10 +266,71 @@ class FileSystemViewLogListQuerySerializer(serializers.Serializer):
     limit = serializers.IntegerField(required=False, min_value=1)
 
 
+SEARCH_FILTER_FIELDS = {"path", "name", "user", "author", "type", "ref"}
+
+
+class FileSystemRankedSearchQuerySerializer(serializers.Serializer):
+    search = serializers.CharField(
+        max_length=MAX_SEARCH_LENGTH,
+        help_text="Search text. Supports the same field filters as the list search (type:, user:, path:, name:, negation with - or !). Free words are ranked by relevance.",
+    )
+    limit = serializers.IntegerField(
+        required=False,
+        default=50,
+        min_value=1,
+        max_value=100,
+        help_text="Maximum number of results to return, best first.",
+    )
+    per_type = serializers.IntegerField(
+        required=False,
+        default=0,
+        min_value=0,
+        max_value=10,
+        help_text="Also include the best matches of every type, up to this many per type, so each type can show a preview.",
+    )
+
+
+class FileSystemRankedSearchItemSerializer(serializers.Serializer):
+    entry = FileSystemSerializer(help_text="The matching file system entry.")
+    rank = serializers.ListField(
+        child=serializers.IntegerField(),
+        help_text="Sort key of the match. Lower sorts first. Compare element by element with other results.",
+    )
+
+
+class FileSystemRankedSearchTypeCountSerializer(serializers.Serializer):
+    type = serializers.CharField(help_text="File system type, for example insight or dashboard.")
+    count = serializers.IntegerField(help_text="Number of matches of this type.")
+
+
+class FileSystemRankedSearchResponseSerializer(serializers.Serializer):
+    results = FileSystemRankedSearchItemSerializer(many=True, help_text="Matches, best first.")
+    matched_all_words = serializers.BooleanField(
+        help_text="True when every result contains every search word. False when no entry matched every word and the results match only some words."
+    )
+    matched_words = serializers.ListField(
+        child=serializers.CharField(),
+        help_text="Search words that the best result matched. Use it to tell the user which words were dropped when matched_all_words is false.",
+    )
+    type_counts = FileSystemRankedSearchTypeCountSerializer(
+        many=True, help_text="Number of matches for each type, largest first."
+    )
+    matched_with_typos = serializers.BooleanField(
+        help_text="True when no entry matched the words as typed, so every result is a close spelling."
+    )
+    counts_capped = serializers.BooleanField(
+        help_text="True when the search stopped at its candidate limit, so type_counts are lower bounds."
+    )
+
+
 class UndoDeleteItemSerializer(serializers.Serializer):
     type = serializers.CharField()
     ref = serializers.CharField()
     path = serializers.CharField(required=False, allow_blank=True)
+
+    def validate_path(self, value: str) -> str:
+        # Restoring re-creates parent folders through the same per-segment loop as create/move/link.
+        return validate_file_system_path(value)
 
 
 class UndoDeleteRequestSerializer(serializers.Serializer):
@@ -203,7 +367,7 @@ class FileSystemViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
     filter_backends = [filters.SearchFilter]
     pagination_class = FileSystemsLimitOffsetPagination
     # Product surface this tree serves. Subclass and override to expose a different surface
-    # (e.g. "desktop") on its own route. The default surface also matches legacy NULL rows.
+    # on its own route. The default surface also matches legacy NULL rows.
     file_system_surface: str = DEFAULT_SURFACE
     # GET /instructions/ and /instructions/versions/ are reads; PUT/PATCH/DELETE on
     # /instructions/ resolve to `publish_instructions` / `delete_instructions` via DRF's
@@ -211,12 +375,11 @@ class FileSystemViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
     scope_object_read_actions = [
         "list",
         "retrieve",
-        "instructions",
-        "instructions_versions",
+        "search",
+        "frequent",
         "unfiled",
         "count",
         "count_by_path",
-        "context_generation",
     ]
     scope_object_write_actions = [
         "create",
@@ -224,15 +387,86 @@ class FileSystemViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
         "partial_update",
         "patch",
         "destroy",
-        "publish_instructions",
-        "delete_instructions",
         "move",
         "link",
         "log_view",
         "undo_delete",
-        "set_context_generation",
-        "publish_canvas",
+        "home_folder",
     ]
+
+    @extend_schema(request=None, responses={200: FileSystemHomeFolderSerializer})
+    @action(detail=False, methods=["POST"])
+    def home_folder(self, request: Request, *args: Any, **kwargs: Any) -> Response:
+        if self.file_system_surface != DEFAULT_SURFACE:
+            raise serializers.ValidationError("Home folders are only available in the project's Files sidebar.")
+        folder = FileSystemHomeFolder.ensure_for_user(team=self.team, user=cast(User, request.user))
+        return Response({"id": str(folder.id) if folder else None, "path": folder.path if folder else None})
+
+    @cached_property
+    def _denied_short_id_refs(self) -> dict[tuple[str, int], builtins.list[str]]:
+        if not self.user_access_control:
+            return {}
+        return denied_short_id_refs(self.user_access_control, self.team.project_id)
+
+    @cached_property
+    def _accessible_team_ids(self) -> Optional[set[int]]:
+        """Environments in this project the user may see, or None when nothing needs filtering.
+
+        The tree deliberately spans every environment in the project, but project-level access is
+        configured per environment and a user can be denied one outright. Resource and object
+        rules don't express that: an environment with no rules of its own falls back to the
+        resource default, so a denied environment's rows would otherwise list and resolve as
+        editable. Mirrors the carve-outs in `filter_and_annotate_file_system_queryset`, which
+        already lets staff and org admins past every other check here.
+        """
+        user_access_control = self.user_access_control
+        if not user_access_control:
+            return None
+        if self.request.user.is_staff or user_access_control.is_organization_admin:
+            return None
+        if not EE_AVAILABLE or not user_access_control.access_controls_supported:
+            return None
+
+        team_ids = Team.objects.filter(project_id=self.team.project_id).values_list("id", flat=True)
+        return {
+            team_id
+            for team_id, team_access in user_access_control.for_team_ids(team_ids).items()
+            if team_access.has_project_access
+        }
+
+    def _filter_by_product_visibility(self, queryset: QuerySet) -> QuerySet:
+        """Drop rows whose product hides the object from this person, beyond project RBAC.
+
+        A canvas follows its channel (personal, private or public), which the file system knows nothing
+        about, so its product registers a filter. Evaluated on every read, so a channel's type or
+        membership changing needs no resync.
+        """
+        return apply_file_system_visibility_filters(queryset, request=self.request, project_id=self.team.project_id)
+
+    def _filter_by_access_control(self, queryset: QuerySet) -> QuerySet:
+        queryset = self._filter_by_product_visibility(queryset)
+        if not self.user_access_control:
+            return queryset
+        accessible_team_ids = self._accessible_team_ids
+        if accessible_team_ids is not None:
+            queryset = queryset.filter(team_id__in=accessible_team_ids)
+        return self.user_access_control.filter_and_annotate_file_system_queryset(
+            queryset, extra_denied_refs=self._denied_short_id_refs
+        )
+
+    def _ensure_can_delete_objects(self, objects: builtins.list[tuple[str, str, int]]) -> None:
+        """Require editor access on every backing object the delete would reach.
+
+        The tree row itself has no access controls, so without this a delete routed through the
+        file system would bypass the level the object's own resource model requires. `objects` is
+        (type, ref, team_id) - team_id is each row's own team, since the tree can list rows from
+        sibling environments and the check has to run against the object's real team.
+        """
+        if not objects or not self.user_access_control:
+            return
+        denied = entries_missing_access_level(objects, self.user_access_control, self.team.project_id, "editor")
+        if denied:
+            raise PermissionDenied("You need editor access to delete this. Ask a project admin to grant it.")
 
     def _basename_regex(self, value: str) -> str:
         return rf"(^|(?<!\\)/)([^/]|\\.)*{re.escape(value)}([^/]|\\.)*$"
@@ -380,6 +614,8 @@ class FileSystemViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
 
     def safely_get_queryset(self, queryset: QuerySet) -> QuerySet:
         queryset = self._scope_by_project_and_environment(queryset)
+        if self.action in ("list", "retrieve"):
+            queryset = queryset.exclude(type__in=RETIRED_FILE_SYSTEM_TYPES)
 
         depth_param = self.request.query_params.get("depth")
         parent_param = self.request.query_params.get("parent")
@@ -417,15 +653,23 @@ class FileSystemViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
         if search_param:
             queryset = self._apply_search_to_queryset(queryset, search_param, basename_only=search_name_only)
 
-        if self.user_access_control:
-            queryset = self.user_access_control.filter_and_annotate_file_system_queryset(queryset)
+        queryset = self._filter_by_access_control(queryset)
+
+        if type_param or type__startswith_param:
+            views = FileSystemViewLog.objects.filter(
+                team_id=OuterRef("team_id"),
+                user_id=cast(User, self.request.user).id,
+                type=OuterRef("type"),
+                ref=OuterRef("ref"),
+            )
+            queryset = queryset.annotate(last_viewed_at=Subquery(views.values("viewed_at")[:1]))
 
         if ref_param:
             queryset = queryset.filter(ref=ref_param)
             queryset = queryset.order_by("shortcut")  # override order
         elif order_by_param:
             if order_by_param in ["path", "-path", "created_at", "-created_at"]:
-                queryset = queryset.order_by(order_by_param)
+                queryset = queryset.order_by(order_by_param, "id")
             else:
                 # `last_viewed_at` ordering (Recents, with or without a search term) is served
                 # view-log-first in `_list_recents`, so it never reaches this queryset path.
@@ -445,25 +689,247 @@ class FileSystemViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
 
         return queryset
 
-    def list(self, request, *args, **kwargs):
+    def _add_object_types(
+        self, results: builtins.list[dict[str, object]], *, include_content_type: bool, include_tags: bool = False
+    ) -> None:
+        entry_types = ("notebook", "insight") if include_content_type else ("insight",)
+        tagged_types = {entry_type for entry_type, *_ in TAGGED_FILE_SYSTEM_TYPES} if include_tags else set()
+        entry_teams = {
+            str(entry_id): team_id
+            for entry_id, team_id in FileSystem.objects.filter(
+                team__project_id=self.team.project_id,
+                id__in=[
+                    item["id"]
+                    for item in results
+                    if item.get("type") in entry_types or item.get("type") in tagged_types
+                ],
+            ).values_list("id", "team_id")
+        }
+        denied: set[tuple[str, str, int]] = set()
+        for team_id in set(entry_teams.values()):
+            entries = [
+                (str(item["type"]), str(item["ref"]), team_id)
+                for item in results
+                if item.get("ref") and entry_teams.get(str(item["id"])) == team_id
+            ]
+            denied.update(
+                (entry_type, ref, team_id)
+                for entry_type, ref in entries_missing_access_level(
+                    entries, self.user_access_control, self.team.project_id, "viewer"
+                )
+            )
+        content_types: dict[tuple[str, int, str], str] = {}
+        insight_types: dict[tuple[int, str], str] = {}
+        for entry_type, app_label, model_name in (
+            ("notebook", "notebooks", "Notebook"),
+            ("insight", "product_analytics", "Insight"),
+        ):
+            if entry_type == "notebook" and not include_content_type:
+                continue
+            refs = {
+                item["ref"]
+                for item in results
+                if item.get("type") == entry_type
+                and item.get("user_access_level") != "none"
+                and isinstance(item.get("ref"), str)
+                and item["ref"]
+            }
+            if not refs:
+                continue
+            model = apps.get_model(app_label, model_name)
+            queryset = model.objects.filter(team__project_id=self.team.project_id, short_id__in=refs, deleted=False)
+            if entry_type == "notebook":
+                queryset = queryset.alias(
+                    _markdown_type=Func(
+                        F("content__content__0__attrs__markdown"), function="jsonb_typeof", output_field=CharField()
+                    )
+                ).filter(
+                    visibility="default",
+                    content__content__0__type="ph-markdown-notebook",
+                    content__content__1__isnull=True,
+                    _markdown_type="string",
+                )
+                content_type = "text/markdown"
+                for team_id, ref in queryset.values_list("team_id", "short_id"):
+                    if (entry_type, ref, team_id) not in denied:
+                        content_types[(entry_type, team_id, ref)] = content_type
+            else:
+                for team_id, ref, kind, source_kind, nested_kind, legacy_type in queryset.values_list(
+                    "team_id",
+                    "short_id",
+                    "query__kind",
+                    "query__source__kind",
+                    "query__source__source__kind",
+                    "filters__insight",
+                ):
+                    if (entry_type, ref, team_id) in denied:
+                        continue
+                    insight_types[(team_id, ref)] = get_file_system_insight_type(
+                        "BI" if kind == "BIVisualizationNode" else nested_kind or source_kind or kind, legacy_type
+                    )
+                    if source_kind == "HogQLQuery":
+                        content_types[(entry_type, team_id, ref)] = "application/sql"
+        tags_by_entry: dict[tuple[str, int, str], builtins.list[str]] = {}
+        if include_tags:
+            for entry_type, app_label, model_name, ref_field in TAGGED_FILE_SYSTEM_TYPES:
+                tag_refs: builtins.list[str] = []
+                for item in results:
+                    ref = item.get("ref")
+                    if (
+                        item.get("type") == entry_type
+                        and item.get("user_access_level") != "none"
+                        and isinstance(ref, str)
+                        and ref
+                    ):
+                        tag_refs.append(ref)
+                model = apps.get_model(app_label, model_name)
+                lookup_refs = _coerce_refs_for_lookup(model, ref_field, tag_refs)
+                if not lookup_refs:
+                    continue
+                rows = model.objects.filter(
+                    team__project_id=self.team.project_id, deleted=False, **{f"{ref_field}__in": lookup_refs}
+                ).values_list("pk", "team_id", ref_field)
+                key_by_pk = {pk: (team_id, str(ref)) for pk, team_id, ref in rows}
+                if not key_by_pk:
+                    continue
+                tagged = TaggedItem.objects.for_objects(model, key_by_pk.keys()).values_list(
+                    object_column_for(model), "tag__name"
+                )
+                for pk, tag_name in tagged:
+                    team_id, ref = key_by_pk[pk]
+                    if (entry_type, ref, team_id) not in denied:
+                        tags_by_entry.setdefault((entry_type, team_id, ref), []).append(tag_name)
+        for item in results:
+            if item.get("type") not in entry_types and item.get("type") not in tagged_types:
+                continue
+            meta = item.get("meta")
+            metadata = {**(meta if isinstance(meta, dict) else {})}
+            team_id = entry_teams.get(str(item["id"]), -1)
+            ref = str(item.get("ref"))
+            if include_tags and item.get("type") in tagged_types:
+                metadata["tags"] = sorted(tags_by_entry.get((str(item["type"]), team_id, ref), []))
+            if item.get("type") == "insight":
+                metadata["insight_type"] = insight_types.get((team_id, ref))
+                if metadata["insight_type"] == "bi":
+                    item["href"] = f"/bi/{ref}"
+            if include_content_type and item.get("type") in entry_types:
+                metadata["content_type"] = content_types.get((str(item["type"]), team_id, ref), "application/json")
+            item["meta"] = metadata
+
+    def _list_typed_by_views(self, request: Request, *, descending: bool) -> Response:
+        queryset = self.filter_queryset(self.get_queryset()).order_by()
+        views = FileSystemViewLog.objects.filter(
+            team_id__in=Team.objects.filter(project_id=self.team.project_id).values("id"),
+            user_id=cast(User, request.user).id,
+        )
+
+        def fetch(page: PageRequest) -> Page[FileSystem]:
+            count = queryset.count()
+            if page.offset >= count:
+                return Page(results=[], count=count)
+            return Page(results=self._typed_page_by_views(queryset, views, page, descending=descending), count=count)
+
+        response = facade_page_response(self, fetch)
+        response.data["users"] = self._created_by_users(response.data["results"])
+        return response
+
+    def _typed_page_by_views(
+        self,
+        queryset: QuerySet[FileSystem],
+        views: QuerySet[FileSystemViewLog],
+        page: PageRequest,
+        *,
+        descending: bool,
+    ) -> builtins.list[FileSystem]:
+        files_sql, files_params = queryset.values("id", "team_id", "type", "ref", "created_at").query.sql_with_params()
+        views_sql, views_params = views.order_by().values("team_id", "type", "ref", "viewed_at").query.sql_with_params()
+        direction = "DESC" if descending else "ASC"
+        # ORM-compiled SQL retains access filters; OFFSET 0 keeps the lateral join view-log-first.
+        page_sql = f"""
+            SELECT files.id
+            FROM ({views_sql}) AS views
+            CROSS JOIN LATERAL (
+                SELECT eligible.id, eligible.created_at
+                FROM ({files_sql}) AS eligible
+                WHERE eligible.team_id = views.team_id AND eligible.type = views.type AND eligible.ref = views.ref
+                ORDER BY eligible.created_at DESC, eligible.id
+                OFFSET 0
+            ) AS files
+            ORDER BY views.viewed_at {direction}, files.created_at DESC, files.id
+            LIMIT %s OFFSET %s
+        """
+        with connection.cursor() as cursor:
+            cursor.execute(page_sql, [*views_params, *files_params, page.limit, page.offset])
+            page_ids = [row[0] for row in cursor.fetchall()]
+        if len(page_ids) < page.limit:
+            own_view = views.filter(team_id=OuterRef("team_id"), type=OuterRef("type"), ref=OuterRef("ref"))
+            unseen_offset = 0
+            if not page_ids and page.offset:
+                viewed_count = queryset.filter(Exists(own_view)).count()
+                unseen_offset = max(0, page.offset - viewed_count)
+            page_ids.extend(
+                queryset.filter(~Exists(own_view))
+                .order_by("-created_at", "id")
+                .values_list("id", flat=True)[unseen_offset : unseen_offset + page.limit - len(page_ids)]
+            )
+        rows = {row.id: row for row in queryset.filter(id__in=page_ids)}
+        return [rows[row_id] for row_id in page_ids if row_id in rows]
+
+    @extend_schema(parameters=[FileSystemListQuerySerializer])
+    def list(self, request: Request, *args: Any, **kwargs: Any) -> Response:
+        query_serializer = FileSystemListQuerySerializer(data=request.query_params)
+        query_serializer.is_valid(raise_exception=True)
         order_by_param = request.query_params.get("order_by")
         # Recents (the high-volume, timeout-prone path) is served view-log-first, with or without a
         # search term — one query function, no join, no COUNT(*).
+        typed_list = request.query_params.get("type") or request.query_params.get("type__startswith")
         if order_by_param in ("-last_viewed_at", "last_viewed_at") and request.user.is_authenticated:
-            return self._list_recents(request, descending=order_by_param == "-last_viewed_at")
-
-        response = super().list(request, *args, **kwargs)
-        response.data["users"] = self._created_by_users(response.data.get("results", []))
+            if typed_list:
+                response = self._list_typed_by_views(request, descending=order_by_param == "-last_viewed_at")
+            else:
+                response = self._list_recents(request, descending=order_by_param == "-last_viewed_at")
+        else:
+            response = super().list(request, *args, **kwargs)
+            response.data["users"] = self._created_by_users(response.data.get("results", []))
+        self._add_object_types(
+            response.data.get("results", []),
+            include_content_type=query_serializer.validated_data["include_content_type"],
+            include_tags=query_serializer.validated_data["include_tags"],
+        )
         return response
+
+    @validated_request(
+        query_serializer=FileSystemFrequentQuerySerializer,
+        responses={200: FileSystemSerializer(many=True)},
+        summary="List frequently viewed files",
+    )
+    @action(methods=["GET"], detail=False, pagination_class=None)
+    def frequent(self, request: Request, **kwargs: object) -> Response:
+        queryset = FileSystem.objects.filter(surface_q(self.file_system_surface), team_id=self.team.id)
+        queryset = self._filter_by_access_control(queryset)
+        items = get_recent_file_system_items(
+            team_id=self.team.id,
+            user_id=cast(User, request.user).id,
+            surface=self.file_system_surface,
+            limit=request.validated_query_data["limit"],
+            exclude_types=[*RETIRED_FILE_SYSTEM_TYPES, "folder", "task"],
+            file_system_queryset=queryset,
+            frequent_on=timezone.now().astimezone(ZoneInfo(self.team.timezone or "UTC")).date(),
+        )
+        return Response(self.get_serializer(items, many=True).data)
 
     def _created_by_users(self, results: builtins.list[dict[str, Any]]) -> builtins.list[dict[str, Any]]:
         # Collect user IDs from the "created_by" meta field so the client can render avatars
-        # without a second round-trip.
-        user_ids = {
-            created_by
-            for item in results
-            if isinstance((created_by := item.get("meta", {}).get("created_by")), int) and created_by
-        }
+        # without a second round-trip. Rows written before `meta` was validated can hold a
+        # non-object value, and one of those must not take down the whole listing.
+        user_ids = set()
+        for item in results:
+            meta = item.get("meta")
+            if not isinstance(meta, dict):
+                continue
+            created_by = meta.get("created_by")
+            if isinstance(created_by, int) and created_by:
+                user_ids.add(created_by)
         if not user_ids:
             return []
         users_qs = User.objects.filter(organization=self.organization, id__in=user_ids).distinct()
@@ -489,12 +955,14 @@ class FileSystemViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
         limit = max(1, min(limit, 1000))
 
         not_type_param = request.query_params.get("not_type")
-        exclude_types = [not_type_param] if not_type_param else None
+        # Drop retired types before the view-log limit, or their views take slots that hydration then empties.
+        exclude_types = [*RETIRED_FILE_SYSTEM_TYPES, *([not_type_param] if not_type_param else [])]
         search_param = request.query_params.get("search")
 
-        base_queryset = FileSystem.objects.filter(surface_q(self.file_system_surface), team_id=self.team.id)
-        if self.user_access_control:
-            base_queryset = self.user_access_control.filter_and_annotate_file_system_queryset(base_queryset)
+        base_queryset = FileSystem.objects.filter(surface_q(self.file_system_surface), team_id=self.team.id).exclude(
+            type__in=RETIRED_FILE_SYSTEM_TYPES
+        )
+        base_queryset = self._filter_by_access_control(base_queryset)
         if search_param:
             base_queryset = self._apply_search_to_queryset(
                 base_queryset, search_param, basename_only=str_to_bool(request.query_params.get("search_name_only"))
@@ -525,17 +993,17 @@ class FileSystemViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
             }
         )
 
-    def _allow_delete_without_ref(self, entry: FileSystem) -> bool:
-        """Whether a registered-type row with no ref may be deleted as a bare row.
+    def _ensure_can_delete(self, entry: FileSystem) -> dict[UUID, bool]:
+        """Decide, and authorize, which of `entry`'s leaf rows carry the delete through to their
+        backing object - and lock that decision so a concurrent request can't change it before
+        `_delete_file_system_entry` acts on it (see the locking note below).
 
-        On the web surface every registered row references a real object, so a
-        ref-less row is a data-integrity error we refuse to delete. Surfaces where
-        registered types can legitimately be ref-less (desktop canvases store their
-        source in `meta`, not a backing Dashboard) override this to allow it.
+        Returns a `{row_id: reaches_backing_object}` map that `destroy()` passes straight into
+        `_delete_file_system_entry`, so the actual delete reuses this locked decision instead of
+        recomputing an unlocked count of its own - two independent unlocked counts would let a
+        second concurrent delete of a sibling row change the answer in between, deleting the
+        backing object without ever having been through the editor check above.
         """
-        return False
-
-    def _ensure_can_delete(self, entry: FileSystem) -> None:
         stack: list[FileSystem] = [entry]
         seen: set[str] = set()
         entries_to_check: list[FileSystem] = []
@@ -553,36 +1021,89 @@ class FileSystemViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
             if current.type == "folder":
                 descendants = FileSystem.objects.filter(path__startswith=f"{current.path}/")
                 descendants = self._scope_by_project_and_environment(descendants)
-                if self.user_access_control:
-                    descendants = self.user_access_control.filter_and_annotate_file_system_queryset(descendants)
+                descendants = self._filter_by_access_control(descendants)
                 stack.extend(descendants)
+                continue
+
+            # A retired row has no backing object to authorize or lock.
+            if current.type in RETIRED_FILE_SYSTEM_TYPES:
                 continue
 
             entries_to_check.append(current)
 
         if not entries_to_check:
-            return None
+            return {}
 
-        ids_to_remove = [entry.id for entry in entries_to_check]
+        ids_to_remove = {entry.id for entry in entries_to_check}
 
+        # Several leaf rows can share one (team, type, ref) - that's the "last reference" case
+        # this whole check exists for - and a folder cascade can span several distinct objects.
+        # Group first so each distinct object is locked and counted exactly once, however many
+        # rows in this batch reference it.
+        # A ref-less row references no object, so it has no siblings to share a count with. It is
+        # keyed by its own id rather than pooled with every other ref-less row of its type, which
+        # would treat unrelated rows as references to one object.
+        entries_by_group: dict[tuple[int, str, Optional[str], str], list[FileSystem]] = {}
         for current in entries_to_check:
-            remaining = (
-                FileSystem.objects.filter(team=current.team, type=current.type, ref=current.ref, shortcut=False)
-                .exclude(id__in=ids_to_remove)
-                .count()
-            )
+            group_key = (current.team_id, current.type, current.ref, "" if current.ref else str(current.id))
+            entries_by_group.setdefault(group_key, []).append(current)
 
-            if not is_file_system_type_registered(current.type):
+        objects_to_delete: builtins.list[tuple[str, str, int]] = []
+        reaches_backing_object: dict[UUID, bool] = {}
+
+        # Sorted so concurrent requests whose cascades overlap on more than one object always
+        # acquire the per-object locks in the same order - locking in traversal order (DFS over
+        # an unordered queryset) could have two such requests lock the same two objects in
+        # opposite order and deadlock, same failure mode `.order_by("id")` below prevents within
+        # one object's sibling set.
+        for (team_id, file_type, ref, _row_key), group in sorted(
+            entries_by_group.items(), key=lambda kv: (kv[0][0], kv[0][1], kv[0][2] or "", kv[0][3])
+        ):
+            if ref is None:
+                # No ref means no shared backing object, so there is no sibling set to count and
+                # nothing for a concurrent delete to race us to. Locking on (team, type, NULL)
+                # would instead row-lock every ref-less row of this type in the team for the rest
+                # of the transaction, serializing unrelated deletes behind this one.
+                remaining = 0
+            else:
+                # Lock every row referencing this object (not just the ones outside ids_to_remove)
+                # so a concurrent request deleting a sibling row locks the same row set in the
+                # same order and blocks on it, rather than each request locking a different subset
+                # and deadlocking against the other.
+                sibling_ids = {
+                    row.id
+                    for row in FileSystem.objects.select_for_update()
+                    .filter(team_id=team_id, type=file_type, ref=ref, shortcut=False)
+                    .order_by("id")
+                }
+                remaining = len(sibling_ids - ids_to_remove)
+            # When several rows in this batch reference the same object, only one of them may
+            # actually carry the deletion through - otherwise every row in the group would call
+            # delete_file_system_object independently, running its hooks and activity logging
+            # once per row instead of once for the object.
+            for current in group:
+                reaches_backing_object[current.id] = False
+            reaches_backing_object[group[0].id] = remaining == 0
+
+            if not is_file_system_type_registered(file_type):
                 continue
 
-            if remaining == 0 and not current.ref and not self._allow_delete_without_ref(current):
-                raise serializers.ValidationError(
-                    {"detail": f"Cannot delete type '{current.type}' without a reference."}
-                )
+            if remaining == 0 and not ref:
+                # A registered-type row with no ref is a data-integrity error we refuse to delete.
+                raise serializers.ValidationError({"detail": f"Cannot delete type '{file_type}' without a reference."})
 
-        return None
+            # Only the last row referencing an object carries the deletion through to the object
+            # itself; removing one of several rows leaves it untouched.
+            if remaining == 0 and ref:
+                objects_to_delete.append((file_type, ref, team_id))
 
-    def _delete_file_system_entry(self, entry: FileSystem) -> builtins.list[dict[str, Any]]:
+        self._ensure_can_delete_objects(objects_to_delete)
+
+        return reaches_backing_object
+
+    def _delete_file_system_entry(
+        self, entry: FileSystem, reaches_backing_object: dict[UUID, bool]
+    ) -> builtins.list[dict[str, Any]]:
         deleted_objects: list[dict[str, Any]] = []
 
         if entry.shortcut:
@@ -592,30 +1113,27 @@ class FileSystemViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
         if entry.type == "folder":
             descendants = FileSystem.objects.filter(path__startswith=f"{entry.path}/")
             descendants = self._scope_by_project_and_environment(descendants)
-            if self.user_access_control:
-                descendants = self.user_access_control.filter_and_annotate_file_system_queryset(descendants)
+            descendants = self._filter_by_access_control(descendants)
             for child in descendants.order_by("depth", "path"):
-                deleted_objects.extend(self._delete_file_system_entry(child))
+                deleted_objects.extend(self._delete_file_system_entry(child, reaches_backing_object))
             entry.delete()
             return deleted_objects
 
-        remaining = (
-            FileSystem.objects.filter(team=entry.team, type=entry.type, ref=entry.ref, shortcut=False)
-            .exclude(id=entry.id)
-            .count()
-        )
+        if entry.type in RETIRED_FILE_SYSTEM_TYPES:
+            entry.delete()
+            return deleted_objects
 
         if not is_file_system_type_registered(entry.type):
             raise serializers.ValidationError({"detail": f"Cannot delete resources with type '{entry.type}'."})
 
-        if remaining > 0:
+        # Reuses the locked decision from _ensure_can_delete rather than recounting - a row this
+        # method discovers on its own (e.g. created after that pass ran) defaults to "leave the
+        # backing object alone", the same safe outcome an unauthorized delete would get.
+        if not reaches_backing_object.get(entry.id, False):
             entry.delete()
             return deleted_objects
 
         if not entry.ref:
-            if self._allow_delete_without_ref(entry):
-                entry.delete()
-                return deleted_objects
             raise serializers.ValidationError({"detail": f"Cannot delete type '{entry.type}' without a reference."})
 
         entry_path = entry.path
@@ -639,18 +1157,42 @@ class FileSystemViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
         )
         return deleted_objects
 
-    def destroy(self, request, *args, **kwargs):
+    @extend_schema(parameters=[FileSystemDeleteQuerySerializer])
+    def destroy(self, request: Request, *args: Any, **kwargs: Any) -> Response:
+        query = FileSystemDeleteQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
         instance = self.get_object()
         original_path = instance.path
         instance_created_by = instance.created_by
         deleted_objects: list[dict[str, Any]]
 
         with transaction.atomic():
-            self._ensure_can_delete(instance)
-            deleted_objects = self._delete_file_system_entry(instance)
+            if instance.type == "folder" and not query.validated_data["recursive"]:
+                descendants = self._scope_by_project_and_environment(
+                    FileSystem.objects.filter(path__startswith=f"{instance.path}/")
+                )
+                hidden_descendants = self._filter_by_access_control(
+                    descendants.filter(type__in=RETIRED_FILE_SYSTEM_TYPES)
+                )
+                empty_folder = FileSystem.objects.filter(
+                    pk=instance.pk, team_id=instance.team_id, path=instance.path, type="folder"
+                ).filter(~Exists(descendants.exclude(type__in=RETIRED_FILE_SYSTEM_TYPES)))
+                # Keep the emptiness predicate in the DELETE statement. Folders have no dependent rows,
+                # and the view-log cleanup signal only applies to files, so no collector is needed.
+                if not empty_folder._raw_delete(empty_folder.db):
+                    raise Conflict("Folder is not empty.", code="directory_not_empty")
+                # The tree hides these rows, so a folder that holds only them looks empty to the user.
+                hidden_descendants.delete()
+                deleted_objects = []
+            else:
+                reaches_backing_object = self._ensure_can_delete(instance)
+                deleted_objects = self._delete_file_system_entry(instance, reaches_backing_object)
 
         if instance.type == "folder":
-            leftovers = self._scope_by_project(FileSystem.objects.filter(path__startswith=f"{original_path}/"))
+            # The tree hides retired rows, so a retired leftover needs no folder to sit in.
+            leftovers = self._scope_by_project(FileSystem.objects.filter(path__startswith=f"{original_path}/")).exclude(
+                type__in=RETIRED_FILE_SYSTEM_TYPES
+            )
             first_leftover = leftovers.first()
             if first_leftover:
                 created_by = first_leftover.created_by or instance_created_by or cast(User, self.request.user)
@@ -666,11 +1208,15 @@ class FileSystemViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
         serializer = UndoDeleteRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        items = serializer.validated_data["items"]
+        # Each restore locks its target row and holds it to the end of the transaction, so two
+        # requests naming the same objects in opposite order would each hold one and block on the
+        # other. Sorting means every request takes those locks in the same order instead.
+        items = sorted(serializer.validated_data["items"], key=lambda item: (item["type"], item["ref"]))
         undo_results: list[dict[str, str]] = []
 
         with transaction.atomic():
             for item in items:
+                self._ensure_can_restore(item["type"], item["ref"])
                 try:
                     restored_instance = undo_delete_object(
                         type_string=item["type"],
@@ -682,16 +1228,25 @@ class FileSystemViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
                         organization=getattr(self, "organization", None),
                     )
                 except ValueError:
-                    import logging
-
-                    logging.exception(
+                    logger.exception(
                         "Exception during undo_delete_object (type=%s, ref=%s)", item.get("type"), item.get("ref")
                     )
-                    raise serializers.ValidationError({"detail": "An internal error occurred during undo delete."})
+                    raise serializers.ValidationError({"detail": UNDO_DELETE_REFUSED})
                 self._restore_file_system_path(restored_instance, item)
                 undo_results.append({"type": item["type"], "ref": item["ref"]})
 
         return Response({"undone": undo_results}, status=status.HTTP_200_OK)
+
+    def _ensure_can_restore(self, type_string: str, ref: str) -> None:
+        """`undo_delete` takes a caller-supplied (type, ref) rather than a tree row, so neither
+        the tree's visibility filter nor `get_object` has run by the time we get here."""
+        instance = get_restorable_object(type_string, ref, team_id=self.team.id)
+        allowed = instance is not None and (
+            not self.user_access_control
+            or self.user_access_control.check_access_level_for_object(instance, required_level="editor")
+        )
+        if not allowed:
+            raise serializers.ValidationError({"detail": UNDO_DELETE_REFUSED})
 
     @action(methods=["GET"], detail=False)
     def unfiled(self, request: Request, *args: Any, **kwargs: Any) -> Response:
@@ -705,7 +1260,7 @@ class FileSystemViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
         if self.user_access_control:
             # nosemgrep: idor-lookup-without-team, idor-taint-user-input-to-model-get (IDs from prior team-scoped query)
             qs = FileSystem.objects.filter(id__in=[f.id for f in files])
-            qs = self.user_access_control.filter_and_annotate_file_system_queryset(qs)
+            qs = self._filter_by_access_control(qs)
             file_count = qs.count()
         else:
             file_count = len(files)
@@ -717,6 +1272,13 @@ class FileSystemViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
             status=status.HTTP_200_OK,
         )
 
+    def _move_folder_shortcuts(self, old_path: str, new_path: str, team_id: int) -> None:
+        shortcuts = self._scope_by_project(
+            FileSystemShortcut.objects.filter(team_id=team_id, type="folder", ref=old_path)
+        )
+        shortcuts.filter(path=join_path([split_path(old_path)[-1]])).update(path=join_path([split_path(new_path)[-1]]))
+        shortcuts.update(ref=new_path)
+
     @action(methods=["POST"], detail=True)
     def move(self, request: Request, *args: Any, **kwargs: Any) -> Response:
         instance = self.get_object()
@@ -724,6 +1286,7 @@ class FileSystemViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
         new_path = request.data.get("new_path")
         if not new_path:
             return Response({"detail": "new_path is required"}, status=status.HTTP_400_BAD_REQUEST)
+        new_path = validate_file_system_path(new_path)
 
         self._assure_parent_folders(new_path, cast(User, request.user))
 
@@ -734,12 +1297,16 @@ class FileSystemViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
             with transaction.atomic():
                 qs = FileSystem.objects.filter(path__startswith=f"{instance.path}/")
                 qs = self._scope_by_project_and_environment(qs)
-                if self.user_access_control:
-                    qs = self.user_access_control.filter_and_annotate_file_system_queryset(qs)
+                qs = self._filter_by_access_control(qs)
                 for file in qs:
+                    old_child_path = file.path
                     file.path = new_path + file.path[len(instance.path) :]
                     file.depth = len(split_path(file.path))
                     file.save()
+                    if file.type == "folder":
+                        self._move_folder_shortcuts(old_child_path, file.path, file.team_id)
+
+                self._move_folder_shortcuts(old_path, new_path, instance.team_id)
 
                 targets = FileSystem.objects.filter(path=new_path).all()
                 targets = self._scope_by_project_and_environment(targets)
@@ -774,6 +1341,7 @@ class FileSystemViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
         new_path = request.data.get("new_path")
         if not new_path:
             return Response({"detail": "new_path is required"}, status=status.HTTP_400_BAD_REQUEST)
+        new_path = validate_file_system_path(new_path)
 
         self._assure_parent_folders(new_path, cast(User, request.user))
 
@@ -784,8 +1352,7 @@ class FileSystemViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
             with transaction.atomic():
                 qs = FileSystem.objects.filter(path__startswith=f"{instance.path}/")
                 qs = self._scope_by_project_and_environment(qs)
-                if self.user_access_control:
-                    qs = self.user_access_control.filter_and_annotate_file_system_queryset(qs)
+                qs = self._filter_by_access_control(qs)
 
                 for file in qs:
                     file.pk = None  # This removes the id
@@ -819,6 +1386,71 @@ class FileSystemViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
             status=status.HTTP_200_OK,
         )
 
+    @validated_request(
+        query_serializer=FileSystemRankedSearchQuerySerializer,
+        responses={200: OpenApiResponse(response=FileSystemRankedSearchResponseSerializer)},
+        summary="Search files by relevance",
+        description="Ranks entries by words matched, typos, word proximity, name before folder, exact words, word position, exactness, the user's recent views, and recency.",
+    )
+    @action(methods=["GET"], detail=False, pagination_class=None)
+    def search(self, request: Request, *args: Any, **kwargs: Any) -> Response:
+        params = request.validated_query_data
+        filter_tokens: list[str] = []
+        free_tokens: list[str] = []
+        for token in tokenize_search(params["search"]):
+            bare = token.lstrip("-!")
+            field, has_colon, _ = bare.partition(":")
+            is_filter = bare != token or (has_colon and field.lower() in SEARCH_FILTER_FIELDS)
+            (filter_tokens if is_filter else free_tokens).append(token)
+        project_team_ids = list(Team.objects.filter(project_id=self.team.project_id).values_list("id", flat=True))
+        queryset = self._scope_by_project_and_environment(FileSystem.objects.select_related("created_by"))
+        queryset = queryset.filter(team_id__in=project_team_ids).exclude(
+            type__in=[*RETIRED_FILE_SYSTEM_TYPES, "folder"]
+        )
+        if filter_tokens:
+            queryset = self._apply_search_to_queryset(queryset, " ".join(shlex.quote(t) for t in filter_tokens))
+        queryset = self._filter_by_access_control(queryset)
+        ranker = FileSystemRankedSearch(
+            " ".join(free_tokens),
+            user_id=cast(User, request.user).id,
+            team_id=self.team.id,
+            today=timezone.now().date(),
+        )
+        with search_session(queryset.db):
+            if ranker.tokens:
+                result = ranker.search(queryset)
+                entries = result.top(params["limit"], per_type=params["per_type"])
+                matched_all_words = result.matched_all_words
+                matched_words = list(entries[0].matched_tokens) if entries else []
+                type_counts = sorted(result.type_counts.items(), key=lambda item: -item[1])
+                counts_capped = result.counts_capped
+                matched_with_typos = result.matched_with_typos
+                full_entries = queryset.in_bulk([ranked_entry.entry.id for ranked_entry in entries])
+                items = []
+                for ranked_entry in entries:
+                    entry = full_entries.get(ranked_entry.entry.id)
+                    if entry is None:
+                        continue
+                    entry.last_viewed_at = ranker.last_viewed.get(FileRef(type=entry.type, ref=entry.ref or ""))
+                    items.append((entry, list(ranked_entry.rank)))
+            else:
+                items = [(entry, []) for entry in queryset.order_by("-created_at")[: params["limit"]]]
+                matched_all_words, matched_words = True, []
+                type_counts = []
+                counts_capped = False
+                matched_with_typos = False
+        serialized = self.get_serializer([entry for entry, _ in items], many=True).data
+        return Response(
+            {
+                "results": [{"entry": data, "rank": rank} for data, (_, rank) in zip(serialized, items)],
+                "matched_all_words": matched_all_words,
+                "matched_words": matched_words,
+                "type_counts": [{"type": t, "count": c} for t, c in type_counts],
+                "counts_capped": counts_capped,
+                "matched_with_typos": matched_with_typos,
+            }
+        )
+
     @action(methods=["POST"], detail=True)
     def count(self, request: Request, *args: Any, **kwargs: Any) -> Response:
         """Get count of all files in a folder."""
@@ -826,23 +1458,7 @@ class FileSystemViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
         if instance.type != "folder":
             return Response({"detail": "Count can only be called on folders"}, status=status.HTTP_400_BAD_REQUEST)
 
-        qs = FileSystem.objects.filter(path__startswith=f"{instance.path}/").order_by("depth", "path")
-        qs = self._scope_by_project_and_environment(qs)
-        if self.user_access_control:
-            qs = self.user_access_control.filter_and_annotate_file_system_queryset(qs)
-
-        total_count = qs.count()
-        preview_entries = list(qs[:DELETE_PREVIEW_ENTRY_LIMIT])
-        serializer = self.get_serializer(preview_entries, many=True)
-
-        return Response(
-            {
-                "count": total_count,
-                "entries": serializer.data,
-                "has_more": total_count > len(preview_entries),
-            },
-            status=status.HTTP_200_OK,
-        )
+        return self._folder_count_response(instance.path)
 
     @action(methods=["GET", "POST"], detail=False, url_path="log_view")
     @disallow_if_impersonated(message="Impersonated sessions cannot log file system views.", allowed_methods=["GET"])
@@ -887,6 +1503,7 @@ class FileSystemViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
             user_id=request.user.id,
             surface=self.file_system_surface,
             type=validated.get("type") or None,
+            exclude_types=RETIRED_FILE_SYSTEM_TYPES,
             limit=validated.get("limit"),
         )
 
@@ -899,10 +1516,16 @@ class FileSystemViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
         if not path_param:
             return Response({"detail": "path parameter is required"}, status=status.HTTP_400_BAD_REQUEST)
 
-        qs = FileSystem.objects.filter(path__startswith=f"{path_param}/").order_by("depth", "path")
-        qs = self._scope_by_project_and_environment(qs)
-        if self.user_access_control:
-            qs = self.user_access_control.filter_and_annotate_file_system_queryset(qs)
+        return self._folder_count_response(path_param)
+
+    def _folder_count_response(self, folder_path: str) -> Response:
+        qs = (
+            FileSystem.objects.filter(path__startswith=f"{folder_path}/")
+            .select_related("created_by")
+            .order_by("depth", "path")
+        )
+        qs = self._scope_by_project_and_environment(qs).exclude(type__in=RETIRED_FILE_SYSTEM_TYPES)
+        qs = self._filter_by_access_control(qs)
 
         total_count = qs.count()
         preview_entries = list(qs[:DELETE_PREVIEW_ENTRY_LIMIT])
@@ -1027,380 +1650,3 @@ class FileSystemViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
         if items_to_update:
             for item in items_to_update:
                 item.save()
-
-
-class CanvasPublishSerializer(serializers.Serializer):
-    """Payload for publishing a freeform canvas's React source via the agent."""
-
-    code = serializers.CharField(
-        allow_blank=True,
-        trim_whitespace=False,
-        help_text="The complete single-file React source for the canvas.",
-    )
-    prompt = serializers.CharField(
-        required=False,
-        allow_blank=True,
-        trim_whitespace=False,
-        help_text="Short description of the change, stored on the appended version history entry.",
-    )
-    name = serializers.CharField(
-        required=False,
-        allow_blank=False,
-        trim_whitespace=True,
-        help_text="Optional new display name for the canvas (rewrites the leaf segment of its path).",
-    )
-    expected_current_version_id = serializers.CharField(
-        required=False,
-        allow_null=True,
-        allow_blank=False,
-        help_text=(
-            "Optimistic-concurrency guard: the currentVersionId the publisher based its edits on "
-            "(null when it read a canvas with no versions yet). When provided and the canvas has since "
-            "moved past it (a concurrent publish, or a user's undo) the publish is rejected with a 409 "
-            "version_conflict instead of overwriting the newer head. Omit to publish unguarded."
-        ),
-    )
-
-
-class CanvasPublishConflictSerializer(serializers.Serializer):
-    """409 body for a guarded canvas publish based on a stale version."""
-
-    detail = serializers.CharField(help_text="Human-readable description of the conflict and how to recover.")
-    code = serializers.CharField(help_text='Always "version_conflict".')
-    current_version_id = serializers.CharField(
-        allow_null=True,
-        help_text="The canvas's live currentVersionId at rejection time (null when the canvas has no versions).",
-    )
-
-
-@extend_schema(extensions={"x-product": "core"})
-class DesktopFileSystemViewSet(FileSystemViewSet):
-    """
-    The file tree for the desktop product surface. Reuses all FileSystemViewSet behaviour but is
-    scoped to the "desktop" surface, so its tree is fully isolated from the default "web" tree.
-
-    Adds per-folder, versioned markdown instructions describing the contents of a folder.
-    """
-
-    file_system_surface = "desktop"
-
-    def _allow_delete_without_ref(self, entry: FileSystem) -> bool:
-        # Desktop canvases are `dashboard`-typed rows whose source lives in `meta`,
-        # not a backing Dashboard, so they legitimately have no ref. Delete the bare
-        # row (nothing to cascade to) rather than refusing. Scope this to `dashboard`
-        # only — any other registered type with no ref is still a data-integrity
-        # error we refuse to delete, even on the desktop surface.
-        return entry.type == "dashboard"
-
-    def perform_create(self, serializer: serializers.BaseSerializer) -> None:
-        super().perform_create(serializer)
-        instance = cast(FileSystem, serializer.instance)
-        self._ensure_blank_instructions_for_created_path(instance)
-
-    def _ensure_blank_instructions_for_created_path(self, instance: FileSystem) -> None:
-        """Give every desktop folder along the created path a blank instruction set.
-
-        Covers the created folder itself plus any parent folders auto-created by the serializer,
-        so a "channel" always has instructions from the moment it exists.
-        """
-        segments = split_path(instance.path)
-        candidate_paths = [join_path(segments[:depth_index]) for depth_index in range(1, len(segments))]
-        if instance.type == "folder":
-            candidate_paths.append(instance.path)
-        if not candidate_paths:
-            return
-
-        folders = self._scope_by_project(FileSystem.objects.filter(path__in=candidate_paths, type="folder"))
-        user = self.request.user if isinstance(self.request.user, User) else None
-        for folder in folders:
-            ensure_blank_folder_instructions(folder, user=user)
-
-    def _get_folder_or_400(self) -> FileSystem | Response:
-        instance = self.get_object()
-        if instance.type != "folder":
-            return Response(
-                {"detail": "Instructions can only be attached to folders."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        return instance
-
-    def _get_dashboard_or_400(self) -> FileSystem | Response:
-        instance = self.get_object()
-        if instance.type != "dashboard":
-            return Response(
-                {"detail": "Canvas code can only be published to dashboards."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-        return instance
-
-    @extend_schema(
-        operation_id="desktop_file_system_canvas_partial_update",
-        request=CanvasPublishSerializer,
-        responses={
-            200: FileSystemSerializer,
-            409: OpenApiResponse(
-                response=CanvasPublishConflictSerializer,
-                description="The canvas moved past expected_current_version_id (a concurrent publish or an undo).",
-            ),
-        },
-    )
-    @action(methods=["PATCH"], detail=True, url_path="canvas")
-    def publish_canvas(self, request: Request, *args: Any, **kwargs: Any) -> Response:
-        """Publish a new version of a freeform canvas's React source.
-
-        Merges into the dashboard row's `meta` (never replaces it), so existing
-        keys like `channelId`/`templateId` survive. Appends a full-file version
-        snapshot and points `currentVersionId` at it — the server-side mirror of
-        the app's dashboardsService.saveFreeform, including the linear-discard of
-        any redo tail left behind by an undo. When the publisher passes
-        `expected_current_version_id`, a publish based on a stale version is
-        rejected with 409 `version_conflict` instead of overwriting the newer head.
-        """
-        dashboard = self._get_dashboard_or_400()
-        if isinstance(dashboard, Response):
-            return dashboard
-
-        payload = CanvasPublishSerializer(data=request.data)
-        payload.is_valid(raise_exception=True)
-        code = payload.validated_data["code"]
-        prompt = payload.validated_data.get("prompt")
-        name = payload.validated_data.get("name")
-        has_expected_version = "expected_current_version_id" in payload.validated_data
-        expected_version_id = payload.validated_data.get("expected_current_version_id")
-
-        now_ms = int(time.time() * 1000)
-        version: dict[str, Any] = {"id": str(uuid4()), "code": code, "createdAt": now_ms}
-        if prompt:
-            version["prompt"] = prompt
-
-        # Lock the row for the read-modify-write so concurrent publishes can't clobber
-        # each other's appended version (each would otherwise build `versions` from the
-        # same stale snapshot and the second write would drop the first).
-        with transaction.atomic():
-            dashboard = FileSystem.objects.select_for_update().get(pk=dashboard.pk)
-            meta = dict(dashboard.meta or {})
-            current_version_id = meta.get("currentVersionId")
-
-            if has_expected_version and current_version_id != expected_version_id:
-                return Response(
-                    {
-                        "detail": "The canvas changed since it was read (a concurrent publish or an undo). "
-                        "Re-fetch the canvas, re-apply the edits to the fresh source, and publish again.",
-                        "code": "version_conflict",
-                        "current_version_id": current_version_id,
-                    },
-                    status=status.HTTP_409_CONFLICT,
-                )
-
-            # Snapshot the live author context onto the version (reverting restores it).
-            existing_context = meta.get("context")
-            if isinstance(existing_context, str):
-                version["context"] = existing_context
-            versions = list(meta.get("versions") or [])
-            first_publish = not versions and not meta.get("code")
-            # Linear-discard: a publish always becomes the new head, so a redo tail past
-            # the live pointer (left by an undo) is dropped rather than kept as
-            # unreachable history — mirroring the client's undo/redo semantics.
-            if current_version_id:
-                pointer = next(
-                    (
-                        index
-                        for index, existing in enumerate(versions)
-                        if isinstance(existing, dict) and existing.get("id") == current_version_id
-                    ),
-                    None,
-                )
-                if pointer is not None:
-                    versions = versions[: pointer + 1]
-            versions.append(version)
-
-            meta.update(
-                {
-                    "kind": "freeform",
-                    "code": code,
-                    "versions": versions,
-                    "currentVersionId": version["id"],
-                    "updatedAt": now_ms,
-                }
-            )
-            dashboard.meta = meta
-
-            update_fields = ["meta"]
-            if name:
-                # The canvas's display name is the leaf segment of its path; rename in place.
-                segments = split_path(dashboard.path)
-                segments[-1] = name
-                dashboard.path = join_path(segments)
-                dashboard.depth = len(segments)
-                update_fields += ["path", "depth"]
-
-            dashboard.save(update_fields=update_fields)
-
-        if first_publish:
-            self._announce_canvas_created(request, dashboard)
-
-        return Response(self.get_serializer(dashboard).data)
-
-    def _announce_canvas_created(self, request: Request, dashboard: FileSystem) -> None:
-        """Announce a canvas's first publish in the generating task's thread.
-
-        The task sandbox stamps every MCP call with an X-PostHog-Task-Id header, so
-        a publish is attributable to the task that made it. The header alone is
-        forgeable, so two checks bind the announcement to a real sandbox run: the
-        request must carry an OAuth token minted under a sandbox app (those tokens
-        are only created server-side), and the facade only accepts a task created
-        by the requesting user (the sandbox authenticates with the task creator's
-        credentials). No header (a human or app save) means no announcement.
-        """
-        raw_task_id = (request.headers.get("X-PostHog-Task-Id") or "").strip()
-        try:
-            task_id = UUID(raw_task_id)
-        except ValueError:
-            return
-        if not self._is_sandbox_authenticated(request):
-            return
-        user = request.user if isinstance(request.user, User) else None
-        segments = split_path(dashboard.path)
-        tasks_facade.post_canvas_created_thread_update(
-            task_id,
-            self.team_id,
-            acting_user_id=user.id if user else None,
-            canvas_name=segments[-1] if segments else "Canvas",
-            canvas_url=self._canvas_share_url(dashboard),
-        )
-
-    @staticmethod
-    def _is_sandbox_authenticated(request: Request) -> bool:
-        """True when the request bears an OAuth token minted under a sandbox app —
-        the credential a task sandbox (via the MCP server) calls this API with."""
-        authenticator = request.successful_authenticator
-        if not isinstance(authenticator, OAuthAccessTokenAuthentication):
-            return False
-        application = authenticator.access_token.application
-        return application is not None and application.client_id in SANDBOX_OAUTH_APP_CLIENT_IDS
-
-    def _canvas_share_url(self, dashboard: FileSystem) -> str | None:
-        """The web interstitial link that deep-links into the desktop app's canvas view:
-        `/code/canvas/<channel folder id>/<dashboard id>`. The channel id is stamped on
-        the row's meta by the desktop app at create time; fall back to the parent folder
-        row for rows that predate the stamp.
-        """
-        channel_id = (dashboard.meta or {}).get("channelId")
-        if not channel_id:
-            parent_path = join_path(split_path(dashboard.path)[:-1])
-            folder = (
-                FileSystem.objects.filter(
-                    surface_q(self.file_system_surface),
-                    team_id=dashboard.team_id,
-                    type="folder",
-                    path=parent_path,
-                ).first()
-                if parent_path
-                else None
-            )
-            channel_id = str(folder.id) if folder else None
-        if not channel_id:
-            return None
-        return f"{settings.SITE_URL}/code/canvas/{channel_id}/{dashboard.id}"
-
-    @extend_schema(responses={200: FolderInstructionsSerializer})
-    @action(methods=["GET"], detail=True)
-    def instructions(self, request: Request, *args: Any, **kwargs: Any) -> Response:
-        """Return the latest non-deleted instructions for this folder."""
-        folder = self._get_folder_or_400()
-        if isinstance(folder, Response):
-            return folder
-
-        latest = get_latest_folder_instructions(folder)
-        if latest is None:
-            return Response({"detail": "This folder has no instructions."}, status=status.HTTP_404_NOT_FOUND)
-
-        return Response(FolderInstructionsSerializer(latest).data)
-
-    @extend_schema(request=FolderInstructionsPublishSerializer, responses={200: FolderInstructionsSerializer})
-    @instructions.mapping.put
-    @instructions.mapping.patch
-    def publish_instructions(self, request: Request, *args: Any, **kwargs: Any) -> Response:
-        """Publish a new version of the folder's instructions."""
-        folder = self._get_folder_or_400()
-        if isinstance(folder, Response):
-            return folder
-
-        payload = FolderInstructionsPublishSerializer(data=request.data)
-        payload.is_valid(raise_exception=True)
-
-        try:
-            published = publish_folder_instructions(
-                folder,
-                content=payload.validated_data["content"],
-                user=cast(User, request.user),
-                base_version=payload.validated_data.get("base_version"),
-            )
-        except FolderInstructionsVersionConflictError as err:
-            return Response(
-                {
-                    "detail": "The instructions changed since you opened them. Reload the latest version and try again.",
-                    "current_version": err.current_version,
-                },
-                status=status.HTTP_409_CONFLICT,
-            )
-        except FolderInstructionsVersionLimitError as err:
-            return Response(
-                {"detail": f"This folder has reached the maximum of {err.max_version} instruction versions."},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        return Response(FolderInstructionsSerializer(published).data)
-
-    @extend_schema(request=None, responses={204: None})
-    @instructions.mapping.delete
-    def delete_instructions(self, request: Request, *args: Any, **kwargs: Any) -> Response:
-        """Soft-delete every version of this folder's instructions."""
-        folder = self._get_folder_or_400()
-        if isinstance(folder, Response):
-            return folder
-
-        deleted_count = delete_folder_instructions(folder)
-        if deleted_count == 0:
-            return Response({"detail": "This folder has no instructions."}, status=status.HTTP_404_NOT_FOUND)
-
-        return Response(status=status.HTTP_204_NO_CONTENT)
-
-    @extend_schema(responses={200: FolderInstructionsVersionSerializer(many=True)})
-    @action(methods=["GET"], detail=True, url_path="instructions/versions")
-    def instructions_versions(self, request: Request, *args: Any, **kwargs: Any) -> Response:
-        """List the version history for this folder's instructions, newest first."""
-        folder = self._get_folder_or_400()
-        if isinstance(folder, Response):
-            return folder
-
-        versions = get_folder_instructions_versions(folder)
-        page = self.paginate_queryset(versions)
-        if page is not None:
-            return self.get_paginated_response(FolderInstructionsVersionSerializer(page, many=True).data)
-        return Response(FolderInstructionsVersionSerializer(versions, many=True).data)
-
-    @extend_schema(responses={200: ContextGenerationSerializer})
-    @action(methods=["GET"], detail=True, url_path="context_generation")
-    def context_generation(self, request: Request, *args: Any, **kwargs: Any) -> Response:
-        """Return the Task currently generating this folder's CONTEXT.md, or null if none."""
-        folder = self._get_folder_or_400()
-        if isinstance(folder, Response):
-            return folder
-
-        return Response(ContextGenerationSerializer({"task_id": get_context_generation_task_id(folder)}).data)
-
-    @extend_schema(request=ContextGenerationSetSerializer, responses={200: ContextGenerationSerializer})
-    @context_generation.mapping.put
-    def set_context_generation(self, request: Request, *args: Any, **kwargs: Any) -> Response:
-        """Set or clear the Task associated with this folder's CONTEXT.md generation."""
-        folder = self._get_folder_or_400()
-        if isinstance(folder, Response):
-            return folder
-
-        payload = ContextGenerationSetSerializer(data=request.data, context={"folder_team": folder.team})
-        payload.is_valid(raise_exception=True)
-        task_id = payload.validated_data["task_id"]
-        set_context_generation_task_id(folder, task_id=task_id)
-
-        return Response(ContextGenerationSerializer({"task_id": task_id}).data)

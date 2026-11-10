@@ -5,12 +5,17 @@ from parameterized import parameterized
 from posthog.models.oauth import OAuthAccessToken, OAuthApplication
 from posthog.models.personal_api_key import PersonalAPIKey
 from posthog.models.team.team import Team
+from posthog.models.user import User
+from posthog.test.authentication_checks import covers_authentication
 
-from ee.api.agentic_provisioning.test.base import ProvisioningTestBase
-from ee.api.agentic_provisioning.views import _maybe_create_provisioned_pat
+from ee.api.agentic_provisioning.authentication import ProvisioningBearerAuthentication
+from ee.api.agentic_provisioning.credentials import maybe_create_provisioned_pat
+from ee.api.agentic_provisioning.ratelimits import RATE_LIMITED_MESSAGE
+from ee.api.agentic_provisioning.test.base import ProvisioningTestBase, provisioning_config
 
 
 class TestProvisioningResources(ProvisioningTestBase):
+    @covers_authentication(ProvisioningBearerAuthentication)
     def test_create_resource_returns_complete(self):
         token = self._get_bearer_token()
         res = self._post_with_bearer(
@@ -24,7 +29,24 @@ class TestProvisioningResources(ProvisioningTestBase):
         assert "api_key" in data["complete"]["access_configuration"]
         assert "host" in data["complete"]["access_configuration"]
 
-    @patch("ee.api.agentic_provisioning.views._capture_provisioning_event")
+    def test_create_resource_rate_limited_uses_status_envelope(self):
+        self.partner.update_provisioning_rate_limits(resource_creates=1)
+        token = self._get_bearer_token()
+
+        assert self._post_with_bearer("/api/agentic/provisioning/resources", token=token).status_code == 200
+
+        res = self._post_with_bearer("/api/agentic/provisioning/resources", token=token)
+        assert res.status_code == 429
+        assert res["Retry-After"]
+
+        # Resource endpoints speak the "status" envelope, not the typed one.
+        assert res.json() == {
+            "status": "error",
+            "id": "",
+            "error": {"code": "rate_limited", "message": RATE_LIMITED_MESSAGE},
+        }
+
+    @patch("ee.api.agentic_provisioning.views.resources.capture_provisioning_event")
     def test_create_resource_capture_attributes_client(self, mock_capture_event):
         token = self._get_bearer_token()
         res = self._post_with_bearer(
@@ -58,6 +80,29 @@ class TestProvisioningResources(ProvisioningTestBase):
             "/api/agentic/provisioning/resources/99999",
             token=token,
         )
+        assert res.status_code == 403
+
+    @parameterized.expand(
+        [
+            ("read_access_control_revoked", "read", "access_control"),
+            ("read_org_membership_removed", "read", "membership"),
+            ("create_access_control_revoked", "create", "access_control"),
+            ("create_org_membership_removed", "create", "membership"),
+        ]
+    )
+    def test_resource_endpoints_rejected_after_team_access_lost(self, _name: str, endpoint: str, revocation: str):
+        token = self._get_bearer_token()
+
+        if revocation == "access_control":
+            self._restrict_team_access(self.team)
+        else:
+            self.organization_membership.delete()
+
+        if endpoint == "read":
+            res = self._get_with_bearer(f"/api/agentic/provisioning/resources/{self.team.id}", token=token)
+        else:
+            res = self._post_with_bearer("/api/agentic/provisioning/resources", {}, token=token)
+
         assert res.status_code == 403
 
     def test_get_resource_invalid_id_returns_400(self):
@@ -146,8 +191,7 @@ class TestProvisioningResources(ProvisioningTestBase):
     def test_create_resource_omits_pat_when_app_gate_off(self):
         token = self._get_bearer_token()
         app = self.partner
-        app.provisioning_issues_personal_api_key = False
-        app.save(update_fields=["provisioning_issues_personal_api_key"])
+        app.update_provisioning(issues_personal_api_key=False)
         before = PersonalAPIKey.objects.filter(user=self.user).count()
         res = self._post_with_bearer(
             "/api/agentic/provisioning/resources",
@@ -168,9 +212,9 @@ class TestProvisioningResources(ProvisioningTestBase):
             redirect_uris="https://localhost",
             algorithm="RS256",
             scopes=["insight:read"],
-            provisioning_issues_personal_api_key=gate_on,
+            _provisioning_config=provisioning_config(issues_personal_api_key=gate_on),
         )
-        result = _maybe_create_provisioned_pat(self.user, self.team, app, "insight:read")
+        result = maybe_create_provisioned_pat(self.user, self.team, app, "insight:read")
         if gate_on:
             assert result is not None
             pat = PersonalAPIKey.objects.filter(user=self.user).order_by("-created_at").first()
@@ -426,7 +470,7 @@ class TestProvisioningResources(ProvisioningTestBase):
         from posthog.models.organization import OrganizationMembership
         from posthog.models.team.team_provisioning_config import TeamProvisioningConfig
 
-        from ee.models.rbac.access_control import AccessControl
+        from products.access_control.backend.models.access_control import AccessControl
 
         self.organization.available_product_features = [
             {"key": AvailableFeature.ACCESS_CONTROL, "name": AvailableFeature.ACCESS_CONTROL},
@@ -480,7 +524,6 @@ class TestProvisioningResources(ProvisioningTestBase):
             authorization_grant_type=OAuthApplication.GRANT_AUTHORIZATION_CODE,
             redirect_uris="https://localhost",
             algorithm="RS256",
-            provisioning_partner_type="other_partner",
         )
         other_partner_team = Team.objects.create_with_data(
             initiating_user=self.user,
@@ -518,7 +561,7 @@ class TestProvisioningResources(ProvisioningTestBase):
         from posthog.models.organization import OrganizationMembership
         from posthog.models.team.team_provisioning_config import TeamProvisioningConfig
 
-        from ee.models.rbac.access_control import AccessControl
+        from products.access_control.backend.models.access_control import AccessControl
 
         self.organization.available_product_features = [
             {"key": AvailableFeature.ACCESS_CONTROL, "name": AvailableFeature.ACCESS_CONTROL},
@@ -612,11 +655,12 @@ class TestProvisioningResources(ProvisioningTestBase):
 
 
 class TestProvisioningResourceRemove(ProvisioningTestBase):
-    def test_remove_strips_team_from_sibling_tokens(self):
+    @parameterized.expand([("same_user", False), ("other_org_member", True)])
+    def test_remove_strips_team_from_sibling_tokens(self, _name: str, sibling_is_other_member: bool) -> None:
         # Removing a resource has to revoke the team from every live token
-        # the partner installation holds for that user. Otherwise a sibling
-        # bearer that still has the team in scope can short-circuit past the
-        # auto-add guard and keep operating on the removed team.
+        # the partner holds, for any user. Otherwise a sibling bearer that still
+        # has the team in scope can short-circuit past the auto-add guard and keep
+        # operating on the removed team.
         from posthog.models.oauth import OAuthAccessToken, OAuthRefreshToken
         from posthog.models.team.team_provisioning_config import TeamProvisioningConfig
 
@@ -627,10 +671,16 @@ class TestProvisioningResourceRemove(ProvisioningTestBase):
             defaults={"stripe_project_id": "proj_remove_me", "application": access_token.application},
         )
 
-        # Sibling token for the same user+application also has the team in scope.
+        sibling_user = (
+            User.objects.create_and_join(
+                organization=self.organization, email="teammate@example.com", password="testpass", first_name="Mate"
+            )
+            if sibling_is_other_member
+            else access_token.user
+        )
         sibling_at = OAuthAccessToken.objects.create(
             application=access_token.application,
-            user=access_token.user,
+            user=sibling_user,
             token="sibling_access_token_value",
             expires=access_token.expires,
             scope=access_token.scope,
@@ -638,7 +688,7 @@ class TestProvisioningResourceRemove(ProvisioningTestBase):
         )
         sibling_rt = OAuthRefreshToken.objects.create(
             application=access_token.application,
-            user=access_token.user,
+            user=sibling_user,
             token="sibling_refresh_token_value",
             access_token=sibling_at,
             scoped_teams=[self.team.id, 99999],
@@ -671,7 +721,6 @@ class TestProvisioningResourceRemove(ProvisioningTestBase):
             authorization_grant_type=OAuthApplication.GRANT_AUTHORIZATION_CODE,
             redirect_uris="https://localhost",
             algorithm="RS256",
-            provisioning_partner_type="other_partner",
         )
         TeamProvisioningConfig.objects.update_or_create(
             team=self.team, defaults={"application": other_partner, "stripe_project_id": "proj_other_owner"}
@@ -706,7 +755,7 @@ class TestCreateProvisionedPat(ProvisioningTestBase):
         ]
     )
     def test_label_prefix_resolution(self, _name, label_prefix, expected_label_template):
-        api_key = _maybe_create_provisioned_pat(
+        api_key = maybe_create_provisioned_pat(
             self.user, self.team, self._minting_app(), "query:read", label_prefix=label_prefix
         )
         assert api_key is not None
@@ -717,7 +766,7 @@ class TestCreateProvisionedPat(ProvisioningTestBase):
     def test_label_is_truncated_to_40_chars(self):
         self.team.name = "A" * 60
         self.team.save()
-        _maybe_create_provisioned_pat(
+        maybe_create_provisioned_pat(
             self.user, self.team, self._minting_app(), "query:read", label_prefix="LongPartnerName"
         )
         pat = PersonalAPIKey.objects.filter(user=self.user).order_by("-created_at").first()
@@ -732,5 +781,5 @@ class TestCreateProvisionedPat(ProvisioningTestBase):
         app.scopes = []
         app.save(update_fields=["scopes"])
         initial_count = PersonalAPIKey.objects.filter(user=self.user).count()
-        assert _maybe_create_provisioned_pat(self.user, self.team, app, "query:read") is None
+        assert maybe_create_provisioned_pat(self.user, self.team, app, "query:read") is None
         assert PersonalAPIKey.objects.filter(user=self.user).count() == initial_count

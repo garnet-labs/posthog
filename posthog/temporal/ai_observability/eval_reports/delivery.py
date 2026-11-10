@@ -6,17 +6,25 @@ email HTML body and Slack Block Kit payloads from that shape.
 """
 
 import re
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from urllib.parse import quote, urlencode
 
 import structlog
 from markdown_it import MarkdownIt
 from markdown_to_mrkdwn import SlackMarkdownConverter
+from slack_sdk.errors import SlackApiError
 
+from posthog.dataclasses import frozen
+from posthog.models.team import Team
+from posthog.slack.formatting import channel_id_from_target
+from posthog.temporal.ai_observability.eval_reports.auto_disable import disable_undeliverable_report
 from posthog.temporal.ai_observability.eval_reports.report_agent.schema import (
+    METRICS_UNAVAILABLE_MESSAGE,
     Citation,
     EvalReportContent,
     EvalReportMetrics,
+    citation_wrappers,
 )
 
 logger = structlog.get_logger(__name__)
@@ -32,6 +40,24 @@ _LEADING_HEADING_RE = re.compile(r"^\s*#{1,6}\s+(.+?)\s*(?:\r?\n|$)")
 _md = MarkdownIt("commonmark", {"html": False}).enable("table")
 _slack_converter = SlackMarkdownConverter()
 
+_INVITE_UTM_TAGS = "utm_source=posthog&utm_campaign=eval_report&utm_medium=slack"
+
+_SLACK_RECONNECT_HINT = "The Slack connection no longer works. Reconnect Slack in your project settings."
+# Slack errors that no retry can fix, each with the step the user must take.
+_SLACK_CONFIG_ERROR_HINTS = {
+    "not_in_channel": "The PostHog app is not in this channel. Invite it with /invite @PostHog.",
+    "is_archived": "This channel is archived. Pick a different channel for this report.",
+    # Slack also returns channel_not_found for a private channel that the app is not a member of.
+    "channel_not_found": (
+        "Slack can't find this channel. If the channel is private, invite the PostHog app with /invite @PostHog. "
+        "Otherwise, pick a different channel for this report."
+    ),
+    **dict.fromkeys(
+        ("account_inactive", "invalid_auth", "token_revoked", "missing_scope", "not_allowed_token_type"),
+        _SLACK_RECONNECT_HINT,
+    ),
+}
+
 # Inline styles for email-safe HTML (many clients strip <style> blocks)
 _EMAIL_TABLE_STYLE = 'style="border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 14px;"'
 _EMAIL_TH_STYLE = (
@@ -41,11 +67,22 @@ _EMAIL_TD_STYLE = 'style="border: 1px solid #ddd; padding: 8px 12px;"'
 
 _OUTCOME_LABELS = {
     "boolean": (("pass", "Pass"), ("fail", "Fail"), ("na", "N/A")),
+    "numeric": (("pass", "Pass"), ("fail", "Fail"), ("na", "N/A")),
+    "categorical": (("pass", "Pass"), ("fail", "Fail"), ("na", "N/A")),
     "sentiment": (("positive", "Positive"), ("neutral", "Neutral"), ("negative", "Negative")),
 }
 
-type CitationMap = dict[str, tuple[str, str | None]]
+type CitationMap = dict[str, CitationLink]
 _SAFE_CITATION_LABEL_RE = re.compile(r"^[A-Za-z0-9._~-]{1,8}$")
+
+
+@dataclass(frozen=True, kw_only=True)
+class CitationLink:
+    """Where a cited ID should take the reader, and what to call it if the ID doesn't render."""
+
+    trace_id: str
+    generation_id: str | None
+    session_id: str | None
 
 
 def _inline_email_styles(html: str) -> str:
@@ -70,34 +107,48 @@ def _format_period_for_display(iso_str: str) -> str:
 
 
 def _build_citation_map(citations: list[Citation]) -> CitationMap:
-    """Map each cited ID to its trace and optional focused generation."""
+    """Map each cited ID to the unit the reader should land on."""
     citation_map: CitationMap = {}
     for citation in citations:
-        if citation.generation_id and citation.trace_id:
-            citation_map[citation.generation_id] = (citation.trace_id, citation.generation_id)
+        if citation.session_id:
+            citation_map[citation.session_id] = CitationLink(
+                trace_id=citation.trace_id, generation_id=None, session_id=citation.session_id
+            )
+        elif citation.generation_id and citation.trace_id:
+            citation_map[citation.generation_id] = CitationLink(
+                trace_id=citation.trace_id, generation_id=citation.generation_id, session_id=None
+            )
         elif citation.trace_id:
-            citation_map[citation.trace_id] = (citation.trace_id, None)
+            citation_map[citation.trace_id] = CitationLink(
+                trace_id=citation.trace_id, generation_id=None, session_id=None
+            )
     return citation_map
 
 
-def _make_trace_link(project_id: int, trace_id: str, generation_id: str | None) -> str:
-    """Build a trace URL, optionally focused on a cited generation."""
+def _make_citation_link(project_id: int, link: CitationLink) -> str:
+    """Build the URL for a cited unit: its session, or its trace optionally focused on a generation."""
     from posthog.utils import absolute_uri
 
-    # kea-router decodes the pathname once before matching, so preserve an encoded layer for the scene.
-    encoded_trace_id = quote(quote(trace_id, safe=""), safe="")
+    # One encoded layer each, matching what the app's own URL builders emit: the session scene
+    # reads the ID straight off the decoded pathname, while the trace scene decodes once more.
+    if link.session_id:
+        return absolute_uri(f"/project/{project_id}/ai-observability/sessions/{quote(link.session_id, safe='')}")
+
+    encoded_trace_id = quote(quote(link.trace_id, safe=""), safe="")
     path = f"/project/{project_id}/ai-observability/traces/{encoded_trace_id}"
-    if generation_id:
-        path = f"{path}?{urlencode({'event': generation_id})}"
+    if link.generation_id:
+        path = f"{path}?{urlencode({'event': link.generation_id})}"
     return absolute_uri(path)
 
 
-def _citation_link_label(cited_id: str, generation_id: str | None) -> str:
+def _citation_link_label(cited_id: str, link: CitationLink) -> str:
     """Keep arbitrary IDs from breaking the generated Markdown link label."""
     preview = cited_id[:8]
     if _SAFE_CITATION_LABEL_RE.fullmatch(preview):
         return f"{preview}..."
-    return "generation" if generation_id else "trace"
+    if link.session_id:
+        return "session"
+    return "generation" if link.generation_id else "trace"
 
 
 def _linkify_citations(text: str, project_id: int, citation_map: CitationMap) -> str:
@@ -119,19 +170,18 @@ def _linkify_citations(text: str, project_id: int, citation_map: CitationMap) ->
     for i, cited_id in enumerate(citation_map):
         placeholder = f"\x00CITE{i}\x00"
         placeholders[placeholder] = cited_id
-        _, generation_id = citation_map[cited_id]
 
-        for wrapper in [f"`` `{cited_id}` ``", f"`{cited_id}`", f"<{cited_id}>"]:
+        for wrapper in citation_wrappers(cited_id):
             text = text.replace(wrapper, placeholder)
-        if generation_id:
+        if citation_map[cited_id].generation_id:
             text = text.replace(cited_id, placeholder)
 
     # Phase 2: replace placeholders with markdown links.
     for placeholder, cited_id in placeholders.items():
-        trace_id, generation_id = citation_map[cited_id]
-        link = _make_trace_link(project_id, trace_id, generation_id)
-        label = _citation_link_label(cited_id, generation_id)
-        text = text.replace(placeholder, f"[{label}]({link})")
+        link = citation_map[cited_id]
+        url = _make_citation_link(project_id, link)
+        label = _citation_link_label(cited_id, link)
+        text = text.replace(placeholder, f"[{label}]({url})")
 
     return text
 
@@ -160,7 +210,7 @@ def _format_pass_rate(rate: float | None) -> str:
 
 def _format_outcome_value(metrics: EvalReportMetrics, outcome: str) -> str:
     count = metrics.result_counts[outcome]
-    if metrics.output_type == "boolean":
+    if metrics.output_type in ("boolean", "numeric", "categorical"):
         return str(count)
 
     rate = metrics.result_rates.get(outcome)
@@ -177,7 +227,7 @@ def _format_outcome_value(metrics: EvalReportMetrics, outcome: str) -> str:
 
 def _format_boolean_pass_rate_value(metrics: EvalReportMetrics) -> str:
     value = _format_pass_rate(metrics.pass_rate)
-    if metrics.previous_pass_rate is None:
+    if metrics.pass_rate is None or metrics.previous_pass_rate is None:
         return value
 
     diff = metrics.pass_rate - metrics.previous_pass_rate
@@ -185,17 +235,26 @@ def _format_boolean_pass_rate_value(metrics: EvalReportMetrics) -> str:
     return f"{value} ({arrow} {abs(diff):.2f}pp vs previous)"
 
 
-def _render_metrics_block_html(metrics: EvalReportMetrics) -> str:
+def _render_metrics_block_html(
+    metrics: EvalReportMetrics | None,
+    *,
+    period_start: str = "",
+    period_end: str = "",
+) -> str:
     """Render trusted outcome counts and rates as an HTML table.
 
     Lives at the top of the email body so the reader sees the trusted numbers
     before reading the agent's analysis.
     """
+    if metrics is None:
+        period = f"{_format_period_for_display(period_start)} → {_format_period_for_display(period_end)}"
+        notice = _inline_email_styles(f"<p><strong>{METRICS_UNAVAILABLE_MESSAGE}</strong></p>")
+        return f'<p class="muted"><strong>Period</strong>: {period}</p>\n{notice}\n'
     period = f"{_format_period_for_display(metrics.period_start)} → {_format_period_for_display(metrics.period_end)}"
     outcome_labels = _OUTCOME_LABELS[metrics.output_type]
     headers = "".join(f"<th>{label}</th>" for _, label in outcome_labels)
     values = "".join(f"<td>{_format_outcome_value(metrics, outcome)}</td>" for outcome, _ in outcome_labels)
-    if metrics.output_type == "boolean":
+    if metrics.output_type in ("boolean", "numeric", "categorical"):
         headers += "<th>Pass rate</th>"
         values += f"<td><strong>{_format_boolean_pass_rate_value(metrics)}</strong></td>"
     table = f"<table><tr><th>Total runs</th>{headers}</tr><tr><td>{metrics.total_runs}</td>{values}</tr></table>"
@@ -203,12 +262,14 @@ def _render_metrics_block_html(metrics: EvalReportMetrics) -> str:
     return f'<p class="muted"><strong>Period</strong>: {period}</p>\n{table}\n'
 
 
-def _render_metrics_slack_blocks(metrics: EvalReportMetrics) -> list[dict]:
+def _render_metrics_slack_blocks(metrics: EvalReportMetrics | None) -> list[dict]:
     """Render the metrics block as a compact, output-type-neutral Slack dashboard."""
+    if metrics is None:
+        return [{"type": "section", "text": {"type": "mrkdwn", "text": METRICS_UNAVAILABLE_MESSAGE}}]
     outcome_lines = [
         f"{label}: {_format_outcome_value(metrics, outcome)}" for outcome, label in _OUTCOME_LABELS[metrics.output_type]
     ]
-    if metrics.output_type == "boolean":
+    if metrics.output_type in ("boolean", "numeric", "categorical"):
         outcome_lines.append(f"Pass rate: {_format_boolean_pass_rate_value(metrics)}")
     code_block = "\n".join([f"Total runs: {metrics.total_runs}", *outcome_lines])
 
@@ -256,7 +317,7 @@ def deliver_email_report(
     errors: list[str] = []
 
     # Metrics block first, then each section
-    body_parts = [_render_metrics_block_html(content.metrics)]
+    body_parts = [_render_metrics_block_html(content.metrics, period_start=period_start, period_end=period_end)]
     for section in content.sections:
         body_parts.append(_render_section_html(section.title, section.content, project_id, citation_map))
     body_html = "\n".join(body_parts)
@@ -297,6 +358,30 @@ def deliver_email_report(
     return errors
 
 
+@frozen
+class SlackDeliveryFailure:
+    message: str
+    retryable: bool
+
+
+def _slack_channel_label(target_channel: str) -> str:
+    return target_channel.partition("|")[2] or target_channel
+
+
+def _slack_config_failure(target_channel: str, hint: str) -> SlackDeliveryFailure:
+    error_msg = f"Failed to send Slack message to {_slack_channel_label(target_channel)}: {hint}"
+    logger.warning(error_msg)
+    return SlackDeliveryFailure(message=error_msg, retryable=False)
+
+
+def _slack_delivery_failure(target_channel: str, error: Exception) -> SlackDeliveryFailure:
+    if isinstance(error, SlackApiError) and (hint := _SLACK_CONFIG_ERROR_HINTS.get(error.response.get("error"))):
+        return _slack_config_failure(target_channel, hint)
+    error_msg = f"Failed to send Slack message to {_slack_channel_label(target_channel)}: {error}"
+    logger.exception(error_msg)
+    return SlackDeliveryFailure(message=error_msg, retryable=True)
+
+
 def deliver_slack_report(
     report_run,
     targets: list[dict],
@@ -305,17 +390,20 @@ def deliver_slack_report(
     project_id: int,
     period_start: str,
     period_end: str,
-) -> list[str]:
-    """Send report via Slack. Returns list of errors (empty if all succeeded).
+) -> list[SlackDeliveryFailure]:
+    """Send report via Slack. Returns one failure per failed target (empty if all succeeded).
 
     Main message = agent title (Block Kit header) + metrics context + first section.
     Thread replies = sections[1:]. If there's only one section, no thread replies.
     """
-    from posthog.models.integration import Integration, SlackIntegration
+    from posthog.integrations import IntegrationManager, IntegrationNotFound
+    from posthog.models.integration import SlackIntegration
+
+    from products.slack_app.backend.facade.api import slack_followup_invite
 
     content = EvalReportContent.from_dict(report_run.content)
     citation_map = _build_citation_map(content.citations)
-    errors: list[str] = []
+    failures: list[SlackDeliveryFailure] = []
 
     header_text = f"{evaluation_name}: {content.title}" if content.title else f"Evaluation report: {evaluation_name}"
     # Slack header blocks are limited to 150 chars, enforce that here.
@@ -326,6 +414,10 @@ def deliver_slack_report(
         f"*{evaluation_name}*  ·  {_format_period_for_display(period_start)} → {_format_period_for_display(period_end)}"
     )
 
+    team = Team.objects.select_related("organization").get(id=team_id)
+    # Read rather than assumed: nothing on this path enforces consent before generation.
+    ai_enabled = bool(team.organization.is_ai_data_processing_approved)
+
     for target in targets:
         if target.get("type") != "slack":
             continue
@@ -335,20 +427,16 @@ def deliver_slack_report(
         if not integration_id or not channel:
             continue
 
-        # The Slack channel picker stores the target as "<channel_id>|#<channel_name>"
-        # (e.g. "C0B5CHB0JQH|#tech-devops-cron"). chat.postMessage only accepts the channel
-        # ID, so strip the "|#name" suffix before sending. Mirrors the subscriptions path in
-        # ee/tasks/subscriptions/slack_subscriptions.py, which splits the same composite value.
-        channel_id = channel.split("|")[0]
+        channel_id = channel_id_from_target(channel)
         if not channel_id:
             error_msg = f"Failed to send Slack message to {channel}: no channel ID in target value"
             logger.warning(error_msg)
-            errors.append(error_msg)
+            failures.append(SlackDeliveryFailure(message=error_msg, retryable=False))
             continue
 
         try:
-            integration = Integration.objects.get(id=integration_id, team_id=team_id, kind="slack")
-            client = SlackIntegration(integration).client
+            integration = IntegrationManager.slack.oauth.get(team_id, integration_id)
+            client = SlackIntegration(integration, source="eval_reports").client
 
             # Main message: header + context + metrics grid + first section (if any)
             blocks: list[dict] = [
@@ -375,6 +463,9 @@ def deliver_slack_report(
                     }
                 )
 
+            if invite := slack_followup_invite(integration, utm_tags=_INVITE_UTM_TAGS, ai_enabled=ai_enabled):
+                blocks.append(invite)
+
             result = client.chat_postMessage(
                 channel=channel_id,
                 blocks=blocks,
@@ -392,12 +483,13 @@ def deliver_slack_report(
                         text=mrkdwn_text[:3000],
                     )
 
+        except IntegrationNotFound:
+            # delivery_targets is a JSON field, so a deleted Slack integration leaves its id behind.
+            failures.append(_slack_config_failure(channel, _SLACK_RECONNECT_HINT))
         except Exception as e:
-            error_msg = f"Failed to send Slack message to {channel}: {e}"
-            logger.exception(error_msg)
-            errors.append(error_msg)
+            failures.append(_slack_delivery_failure(channel, e))
 
-    return errors
+    return failures
 
 
 def deliver_report(report_id: str, report_run_id: str) -> None:
@@ -406,6 +498,8 @@ def deliver_report(report_id: str, report_run_id: str) -> None:
     Raises RuntimeError after persisting FAILED status if ALL delivery targets
     fail, so the Temporal activity surfaces the failure and the retry policy
     kicks in. Partial failures return normally (with delivery_status=partial_failure).
+    If every failure is a Slack configuration error, a retry cannot fix it, so the
+    report is disabled and its creator notified instead.
     """
     from products.ai_observability.backend.models.evaluation_reports import EvaluationReport, EvaluationReportRun
 
@@ -431,12 +525,12 @@ def deliver_report(report_id: str, report_run_id: str) -> None:
         all_errors.extend(email_errors)
 
     slack_targets = [t for t in targets if t.get("type") == "slack"]
-    slack_errors: list[str] = []
+    slack_failures: list[SlackDeliveryFailure] = []
     if slack_targets:
-        slack_errors = deliver_slack_report(
+        slack_failures = deliver_slack_report(
             report_run, slack_targets, evaluation_name, team_id, project_id, period_start, period_end
         )
-        all_errors.extend(slack_errors)
+        all_errors.extend(failure.message for failure in slack_failures)
 
     had_any_target = bool(email_targets or slack_targets)
     # Each email target may contain multiple comma-separated addresses, and deliver_email_report
@@ -454,9 +548,9 @@ def deliver_report(report_id: str, report_run_id: str) -> None:
         increment_delivery("email", "delivered")
     for _ in range(len(email_errors)):
         increment_delivery("email", "failed")
-    for _ in range(slack_attempts - len(slack_errors)):
+    for _ in range(slack_attempts - len(slack_failures)):
         increment_delivery("slack", "delivered")
-    for _ in range(len(slack_errors)):
+    for _ in range(len(slack_failures)):
         increment_delivery("slack", "failed")
 
     if not had_any_target:
@@ -482,6 +576,12 @@ def deliver_report(report_id: str, report_run_id: str) -> None:
         error_count=len(all_errors),
     )
 
-    if all_failed:
+    if not all_failed:
+        return
+
+    retryable = bool(email_errors) or any(failure.retryable for failure in slack_failures)
+    if retryable:
         # Raise so the Temporal activity fails and retries fire per DELIVER_RETRY_POLICY.
         raise RuntimeError(f"All delivery targets failed for report run {report_run_id}: {'; '.join(all_errors)}")
+
+    disable_undeliverable_report(report, report_run)

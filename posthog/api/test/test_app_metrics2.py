@@ -1,24 +1,41 @@
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from zoneinfo import ZoneInfo
 
 from posthog.test.base import BaseTest, ClickhouseTestMixin
 
 from parameterized import parameterized
 
-from posthog.api.app_metrics2 import fetch_app_metric_totals
+from posthog.api.app_metrics2 import fetch_app_metric_totals, fetch_app_metrics_trends
 from posthog.test.fixtures import create_app_metric2
 
 
 class TestAppMetrics2Timezone(ClickhouseTestMixin, BaseTest):
-    def _seed(self, when_utc: datetime):
+    def _seed(self, when_utc: datetime, app_source_id: str = "fn-1") -> None:
         create_app_metric2(
             team_id=self.team.pk,
             app_source="hog_function",
-            app_source_id="fn-1",
+            app_source_id=app_source_id,
             metric_kind="success",
             metric_name="succeeded",
             timestamp=when_utc,
         )
+
+    @parameterized.expand(
+        [
+            ("instance_id", {"instance_id": "54321"}),  # the fixture's default instance
+            ("name", {"name": ["succeeded"]}),
+            ("kind", {"kind": ["success"]}),
+        ]
+    )
+    def test_totals_optional_filters_are_bound(self, _name: str, filters: dict[str, Any]) -> None:
+        self._seed(datetime(2026, 6, 8, 12, 0, 0, tzinfo=UTC), app_source_id="fn-filters")
+
+        result = fetch_app_metric_totals(
+            team_id=self.team.pk, app_source="hog_function", app_source_id="fn-filters", **filters
+        )
+
+        assert result.totals == {"success": 1}
 
     @parameterized.expand(
         [
@@ -48,3 +65,37 @@ class TestAppMetrics2Timezone(ClickhouseTestMixin, BaseTest):
         # for negative offsets it pulls in the earlier row, for positive ones it drops both.
         # `fetch_app_metrics_trends` shares the identical conversion, so this guards it too.
         assert result.totals == {"success": 1}, tz_name
+
+    @parameterized.expand(
+        [
+            ("day", datetime(2026, 6, 8, 12, 0, tzinfo=UTC), datetime(2026, 6, 8, 13, 0, 0, 500000, tzinfo=UTC), [2]),
+            (
+                "hour",
+                datetime(2026, 6, 8, 9, 30, tzinfo=UTC),
+                datetime(2026, 6, 8, 11, 30, 0, 500000, tzinfo=UTC),
+                [1, 0, 1],
+            ),
+        ]
+    )
+    def test_trends_and_totals_count_rows_at_the_range_edges(
+        self, interval: str, after: datetime, before: datetime, expected: list[int]
+    ) -> None:
+        # The rows sit in different clock hours because the table can merge rows of one hour into one row.
+        self._seed(after - timedelta(hours=1))  # before `after`: excluded
+        self._seed(after + timedelta(minutes=15))  # in range, in a bucket that starts before `after`: included
+        self._seed(before - timedelta(microseconds=250000))  # in the same second as `before`, but earlier: included
+
+        trends = fetch_app_metrics_trends(
+            team_id=self.team.pk,
+            app_source="hog_function",
+            app_source_id="fn-1",
+            after=after,
+            before=before,
+            interval=interval,
+        )
+        totals = fetch_app_metric_totals(
+            team_id=self.team.pk, app_source="hog_function", app_source_id="fn-1", after=after, before=before
+        )
+
+        assert [(series.name, series.values) for series in trends.series] == [("success", expected)]
+        assert totals.totals == {"success": sum(expected)}

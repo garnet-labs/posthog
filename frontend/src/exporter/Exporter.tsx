@@ -5,9 +5,10 @@ import clsx from 'clsx'
 import { BindLogic, useValues } from 'kea'
 import { Suspense, useEffect, useSyncExternalStore } from 'react'
 
+import { DashboardLoadingState } from '@posthog/products-dashboards/frontend/components/DashboardLoadingState/DashboardLoadingState'
+
 import { Logo } from 'lib/brand'
 import { useResizeObserver } from 'lib/hooks/useResizeObserver'
-import { useThemedHtml } from 'lib/hooks/useThemedHtml'
 import { LemonMarkdown } from 'lib/lemon-ui/LemonMarkdown'
 import { Link } from 'lib/lemon-ui/Link'
 import { WrappingLoadingSkeleton } from 'lib/ui/WrappingLoadingSkeleton/WrappingLoadingSkeleton'
@@ -18,8 +19,8 @@ import { teamLogic } from 'scenes/teamLogic'
 
 import { ExporterLogin } from '~/exporter/ExporterLogin'
 import { ExportType, ExportedData } from '~/exporter/types'
-import { isInsightVizNode, isTrendsQuery } from '~/queries/utils'
-import { ChartDisplayType } from '~/types'
+import { useThemedHtml } from '~/layout/useThemedHtml'
+import { isMetricInsightQuery } from '~/queries/utils'
 
 import { exporterViewLogic } from './exporterViewLogic'
 
@@ -28,7 +29,7 @@ const LazyHeatmapScene = lazyWithRetry(() => import('./scenes/ExporterHeatmapSce
 const LazyInsightScene = lazyWithRetry(() => import('./scenes/ExporterInsightScene'))
 const LazyNotebookScene = lazyWithRetry(() => import('./scenes/ExporterNotebookScene'))
 const LazyRecordingScene = lazyWithRetry(() => import('./scenes/ExporterRecordingScene'))
-const LazyInterviewScene = lazyWithRetry(() => import('./scenes/ExporterInterviewScene'))
+const LazyQueryScene = lazyWithRetry(() => import('./scenes/ExporterQueryScene'))
 
 function ExportedSceneSkeleton(): JSX.Element {
     return (
@@ -80,24 +81,23 @@ export function Exporter(props: ExportedData): JSX.Element {
         notebook,
         insights,
         inline_query_results: inlineQueryResults,
+        query,
+        query_results: queryResults,
+        query_title: queryTitle,
         themes,
         accessToken,
         exportToken,
-        interview,
         ...exportOptions
     } = props
     const { whitelabel, showInspector = false } = exportOptions
     const forcedTheme = useResolvedForcedTheme(exportOptions.theme)
 
-    // A metric insight sizes to a square card rather than filling the viewport, so drop the 100vh floor
+    // A metric insight sizes to a compact card rather than filling the viewport, so drop the 100vh floor
     // that would otherwise leave empty space below it (see Exporter.scss and ExportedInsight.scss).
-    const metric =
-        insight &&
-        isInsightVizNode(insight.query) &&
-        isTrendsQuery(insight.query.source) &&
-        insight.query.source.trendsFilter?.display === ChartDisplayType.Metric
-            ? insight
-            : undefined
+    // Applies to both saved insights and ad-hoc query exports — the image exporter narrows
+    // the screenshot viewport for both.
+    const metricQuery = insight?.query ?? query
+    const metric = isMetricInsightQuery(metricQuery)
 
     const { currentTeam } = useValues(teamLogic)
     const { ref: elementRef, height, width } = useResizeObserver()
@@ -127,14 +127,6 @@ export function Exporter(props: ExportedData): JSX.Element {
 
     if (type === ExportType.Unlock) {
         return <ExporterLogin whitelabel={whitelabel} />
-    }
-
-    if (type === ExportType.Interview && interview) {
-        return (
-            <Suspense fallback={<ExportedSceneSkeleton />}>
-                <LazyInterviewScene interview={interview} accessToken={accessToken} />
-            </Suspense>
-        )
     }
 
     return (
@@ -215,8 +207,22 @@ export function Exporter(props: ExportedData): JSX.Element {
                     <Suspense fallback={<ExportedSceneSkeleton />}>
                         <LazyInsightScene insight={insight} themes={themes!} exportOptions={exportOptions} />
                     </Suspense>
-                ) : dashboard ? (
+                ) : query ? (
                     <Suspense fallback={<ExportedSceneSkeleton />}>
+                        <LazyQueryScene
+                            query={query}
+                            queryResults={queryResults}
+                            title={queryTitle}
+                            themes={themes!}
+                            exportOptions={exportOptions}
+                        />
+                    </Suspense>
+                ) : dashboard ? (
+                    <Suspense
+                        fallback={
+                            <DashboardLoadingState showControls={false} tileCount={dashboard.tiles?.length ?? 0} />
+                        }
+                    >
                         <LazyDashboardScene dashboard={dashboard} type={type} themes={themes} />
                     </Suspense>
                 ) : recording ? (

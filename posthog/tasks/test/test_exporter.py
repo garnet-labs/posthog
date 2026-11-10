@@ -11,10 +11,13 @@ from parameterized import parameterized
 from posthog.hogql.errors import QueryError
 
 from posthog.exceptions import ClickHouseAtCapacity
+from posthog.models.personal_api_key import PersonalAPIKey
+from posthog.models.utils import generate_random_token_personal, hash_key_value
 from posthog.tasks import exporter
 
 from products.dashboards.backend.models.dashboard import Dashboard
-from products.exports.backend.models.exported_asset import ExportedAsset
+from products.exports.backend.facade import exporters as export_handlers
+from products.exports.backend.models.exported_asset import DATASET_EXPORT_KIND, ExportedAsset
 from products.exports.backend.tasks.failure_handler import (
     FAILURE_TYPE_SYSTEM,
     FAILURE_TYPE_USER,
@@ -82,6 +85,33 @@ class TestExporterTask(APIBaseTest):
         assert self.exported_asset.content_location is not None
 
     @patch("products.exports.backend.tasks.image_exporter.export_image")
+    def test_exporter_rechecks_typed_export_scopes(self, mock_export: MagicMock, mock_uuid: MagicMock) -> None:
+        personal_api_key = PersonalAPIKey.objects.create(
+            user=self.user,
+            label="typed export key",
+            secure_value=hash_key_value(generate_random_token_personal()),
+            scopes=["export:write"],
+            scoped_teams=[self.team.id],
+        )
+        asset = ExportedAsset.objects.create(
+            team=self.team,
+            dashboard=self.exported_asset.dashboard,
+            export_format=ExportedAsset.ExportFormat.PNG,
+            created_by=self.user,
+            source_authentication=ExportedAsset.SourceAuthentication.PERSONAL_API_KEY,
+            source_credential_id=personal_api_key.id,
+        )
+
+        exporter.export_asset(asset.id)
+
+        mock_export.assert_not_called()
+        asset.refresh_from_db()
+        assert (
+            asset.exception
+            == "This export could not verify its original authorization. Create a new export and try again."
+        )
+
+    @patch("products.exports.backend.tasks.image_exporter.export_image")
     def test_export_stores_exception_type_on_failure(self, mock_export: MagicMock, mock_uuid: MagicMock) -> None:
         mock_export.side_effect = QueryError("Unknown table 'foo'")
 
@@ -93,8 +123,62 @@ class TestExporterTask(APIBaseTest):
         assert asset.exception_type == "QueryError"
         assert asset.failure_type == FAILURE_TYPE_USER
 
+    @patch("products.exports.backend.tasks.image_exporter.export_image")
+    def test_routes_a_registered_format_and_kind_to_its_handler(
+        self, mock_export_image: MagicMock, mock_uuid: MagicMock
+    ) -> None:
+        handler = MagicMock()
+        with patch.dict(export_handlers._export_format_handlers):
+            export_handlers.register_export_format_handler(
+                export_format="application/json",
+                kind="test_kind",
+                handler=handler,
+                content_path=lambda *, team_id, asset_id, export_context: None,
+            )
+            asset = ExportedAsset.objects.create(
+                team=self.team,
+                export_format=ExportedAsset.ExportFormat.JSON,
+                export_context={"kind": "test_kind"},
+            )
+
+            exporter.export_asset(asset.id)
+
+        handler.assert_called_once_with(asset)
+        mock_export_image.assert_not_called()
+        asset.refresh_from_db()
+        assert asset.exception is None
+
 
 class TestExportAssetFailureRecording(APIBaseTest):
+    @parameterized.expand(
+        [
+            (
+                "missing_dataset_kind",
+                {"dataset_id": "caller-metadata"},
+                "This export can't be generated. Contact support if this keeps happening.",
+            ),
+            (
+                "invalid_dataset_context",
+                {"kind": DATASET_EXPORT_KIND},
+                "The dataset export configuration is invalid.",
+            ),
+        ]
+    )
+    def test_invalid_jsonl_context_is_a_user_error(
+        self, _name: str, export_context: dict[str, str], expected_exception: str
+    ) -> None:
+        asset = ExportedAsset.objects.create(
+            team=self.team,
+            export_format=ExportedAsset.ExportFormat.JSONL,
+            export_context=export_context,
+        )
+
+        exporter.export_asset(asset.id)
+
+        asset.refresh_from_db()
+        assert asset.exception == expected_exception
+        assert asset.failure_type == FAILURE_TYPE_USER
+
     @patch("products.exports.backend.tasks.image_exporter.export_image")
     def test_non_retriable_error_records_failure_and_does_not_raise(self, mock_export_direct: MagicMock) -> None:
         mock_export_direct.side_effect = QueryError("Invalid query syntax")

@@ -1,29 +1,59 @@
 import type { LLMProviderKey } from '../settings/llmProviderKeysLogic'
 import type { EvaluationConfig, EvaluationOutputType, EvaluationType, LLMJudgeEvaluation } from './types'
 
-const REPORTABLE_OUTPUT_TYPES: ReadonlySet<EvaluationOutputType> = new Set(['boolean', 'sentiment'])
+// Mirrors REPORTABLE_OUTPUT_TYPES_BY_TARGET in evaluation_configs.py — keep the two in step.
+const REPORTABLE_OUTPUT_TYPES_BY_TARGET: Record<string, ReadonlySet<EvaluationOutputType>> = {
+    generation: new Set(['boolean', 'sentiment', 'numeric', 'categorical']),
+    trace: new Set(['boolean', 'numeric', 'categorical']),
+    session: new Set(['boolean', 'numeric', 'categorical']),
+}
 
 export function isBooleanEvaluationOutput(outputType: EvaluationOutputType | null | undefined): boolean {
     return outputType === 'boolean'
 }
 
-export function evaluationSupportsReports(
+export function evaluationSupportsReportHistory(
     evaluation: Pick<EvaluationConfig, 'output_type' | 'target'> | null | undefined
 ): boolean {
-    if (evaluation?.output_type == null || !REPORTABLE_OUTPUT_TYPES.has(evaluation.output_type)) {
-        return false
-    }
-    return evaluation.target === 'generation' || (evaluation.target === 'trace' && evaluation.output_type === 'boolean')
+    return !!evaluation && (REPORTABLE_OUTPUT_TYPES_BY_TARGET[evaluation.target]?.has(evaluation.output_type) ?? false)
 }
 
-export function evaluationSupportsRunSummary(
-    evaluation: Pick<EvaluationConfig, 'output_type' | 'target'> | null | undefined
+export function evaluationSupportsReports(
+    evaluation:
+        | (Pick<EvaluationConfig, 'output_type' | 'target'> & Partial<Pick<EvaluationConfig, 'output_config'>>)
+        | null
+        | undefined
 ): boolean {
-    return evaluation?.target === 'generation' && isBooleanEvaluationOutput(evaluation.output_type)
+    return (
+        evaluationSupportsReportHistory(evaluation) &&
+        (!['numeric', 'categorical'].includes(evaluation?.output_type ?? '') ||
+            !!evaluation?.output_config?.passing_rule)
+    )
+}
+
+export function evaluationSupportsRunOutcomes(
+    evaluation:
+        | (Pick<EvaluationConfig, 'output_type' | 'target'> & Partial<Pick<EvaluationConfig, 'output_config'>>)
+        | null
+        | undefined
+): boolean {
+    return evaluation?.output_type === 'numeric' || evaluation?.output_type === 'categorical'
+        ? !!evaluation.output_config?.passing_rule
+        : isBooleanEvaluationOutput(evaluation?.output_type)
 }
 
 export function evaluationTypeUsesModelConfiguration(evaluationType: EvaluationType | null | undefined): boolean {
     return evaluationType === 'llm_judge'
+}
+
+// Sessions are creatable through the API and MCP regardless of the UI flag, so an evaluation that
+// already targets one must keep the option listed even for a flag-off user. Without it the picker
+// falls back to rendering the raw 'session' value, and saving would silently drop the target.
+export function evaluationOffersSessionTarget(
+    evaluation: Pick<EvaluationConfig, 'target'> | null | undefined,
+    settlingStrategyEnabled: boolean
+): boolean {
+    return settlingStrategyEnabled || evaluation?.target === 'session'
 }
 
 export function isLLMJudgeEvaluation(
@@ -62,8 +92,4 @@ export function evaluationCanResolveModel(
 
 export function evaluationTypeDefaultsToBooleanOutput(evaluationType: EvaluationType | null | undefined): boolean {
     return evaluationType === 'llm_judge' || evaluationType === 'hog'
-}
-
-export function evaluationTypeHasEditableCriteria(evaluationType: EvaluationType | null | undefined): boolean {
-    return evaluationTypeDefaultsToBooleanOutput(evaluationType)
 }

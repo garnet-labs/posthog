@@ -5,22 +5,41 @@ from typing import Literal, Optional, cast
 import orjson as json
 import structlog
 
-from posthog.schema import ActorsQuery, InsightActorsQuery, TrendsQuery
+from posthog.schema import ActorsQuery, HogQLQueryModifiers, InsightActorsQuery, TrendsQuery
 
 from posthog.hogql import ast
 from posthog.hogql.parser import parse_expr, parse_select
 from posthog.hogql.property import property_to_expr
 from posthog.hogql.query import execute_hogql_query
 
-from posthog.hogql_queries.insights.paginators import HogQLHasMorePaginator
+from posthog.hogql_queries.paginators import HogQLHasMorePaginator
 from posthog.hogql_queries.utils.recordings_helper import RecordingsHelper
-from posthog.models import Team
+from posthog.models import PropertyDefinition, Team
 from posthog.models.person.util import _batched_get_distinct_ids_for_persons, _batched_get_persons_by_uuids
 from posthog.models.user import User
 from posthog.personhog_client.caller_tag import personhog_caller_tag
 from posthog.utils import is_anonymous_id
 
+from products.event_definitions.backend.models.property_definition import effective_project_id_expr
+
 logger = structlog.get_logger(__name__)
+
+PERSON_EMAIL_PROPERTY_KEY = "email"
+PERSON_TITLE_CASED_EMAIL_PROPERTY_KEY = "Email"
+PERSON_EMAIL_PROPERTY_KEYS = (PERSON_EMAIL_PROPERTY_KEY, PERSON_TITLE_CASED_EMAIL_PROPERTY_KEY)
+
+
+def person_email_property_keys(team: Team) -> tuple[str, ...]:
+    has_title_cased_email = (
+        PropertyDefinition.objects.alias(effective_project_id=effective_project_id_expr())
+        .filter(
+            effective_project_id=team.project_id,
+            type=PropertyDefinition.Type.PERSON,
+            name=PERSON_TITLE_CASED_EMAIL_PROPERTY_KEY,
+        )
+        .exists()
+    )
+    return PERSON_EMAIL_PROPERTY_KEYS if has_title_cased_email else (PERSON_EMAIL_PROPERTY_KEY,)
 
 
 class ActorStrategy:
@@ -34,11 +53,13 @@ class ActorStrategy:
         query: ActorsQuery,
         paginator: HogQLHasMorePaginator,
         user: User | None = None,
+        modifiers: HogQLQueryModifiers | None = None,
     ):
         self.team = team
         self.paginator = paginator
         self.query = query
         self.user = user
+        self.modifiers = modifiers
 
     def get_actors(self, actor_ids) -> dict[str, dict]:
         raise NotImplementedError()
@@ -54,6 +75,11 @@ class ActorStrategy:
 
     def order_by(self) -> Optional[list[ast.OrderExpr]]:
         return None
+
+
+# Test account filters authored against events (event/element/hogql/session types) have no
+# meaning in a person-level query, so only these types are applied on the persons list.
+PERSON_SCOPE_TEST_ACCOUNT_FILTER_TYPES = ("person", "cohort")
 
 
 class PersonStrategy(ActorStrategy):
@@ -128,20 +154,28 @@ class PersonStrategy(ActorStrategy):
         if self.query.fixedProperties:
             where_exprs.append(property_to_expr(self.query.fixedProperties, self.team, scope="person"))
 
+        if self.query.filterTestAccounts:
+            applicable_test_filters = [
+                prop
+                for prop in (self.team.test_account_filters or [])
+                if isinstance(prop, dict) and prop.get("type") in PERSON_SCOPE_TEST_ACCOUNT_FILTER_TYPES
+            ]
+            if applicable_test_filters:
+                where_exprs.append(property_to_expr(applicable_test_filters, self.team, scope="person"))
+
         search = self.query.search.strip() if self.query.search else None
         if search:
+            searched_properties = [*person_email_property_keys(self.team), "name"]
             where_exprs.append(
                 ast.Or(
                     exprs=[
-                        ast.CompareOperation(
-                            op=ast.CompareOperationOp.ILike,
-                            left=ast.Call(name="toString", args=[ast.Field(chain=["properties", "email"])]),
-                            right=ast.Constant(value=f"%{search}%"),
-                        ),
-                        ast.CompareOperation(
-                            op=ast.CompareOperationOp.ILike,
-                            left=ast.Call(name="toString", args=[ast.Field(chain=["properties", "name"])]),
-                            right=ast.Constant(value=f"%{search}%"),
+                        *(
+                            ast.CompareOperation(
+                                op=ast.CompareOperationOp.ILike,
+                                left=ast.Call(name="toString", args=[ast.Field(chain=["properties", name])]),
+                                right=ast.Constant(value=f"%{search}%"),
+                            )
+                            for name in searched_properties
                         ),
                         ast.CompareOperation(
                             op=ast.CompareOperationOp.ILike,
@@ -291,6 +325,7 @@ class SessionStrategy(ActorStrategy):
             query=query,
             team=self.team,
             user=self.user,
+            modifiers=self.modifiers,
         )
 
         columns = response.columns or []

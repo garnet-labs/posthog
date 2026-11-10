@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 from typing import Any, Optional, Union
 
 import pytest
-from posthog.test.base import APIBaseTest, ClickhouseTestMixin, _create_event
+from posthog.test.base import APIBaseTest, ClickhouseTestMixin, NewEventsSchemaSnapshotExtension, _create_event
 
 from django.conf import settings
 
@@ -54,9 +54,13 @@ class TestSessionWhereClauseExtractorV2(ClickhouseTestMixin, APIBaseTest):
 
     @property
     def inliner(self):
+        return self._inliner()
+
+    def _inliner(self, session_timestamp_buffer_minutes: Optional[int] = None):
         team = self.team
         modifiers = create_default_modifiers_for_team(team)
         modifiers.sessionTableVersion = SessionTableVersion.V2
+        modifiers.sessionTimestampBufferMinutes = session_timestamp_buffer_minutes
         context = HogQLContext(
             team_id=team.pk,
             team=team,
@@ -124,10 +128,22 @@ class TestSessionWhereClauseExtractorV2(ClickhouseTestMixin, APIBaseTest):
         actual = self.inliner.get_inner_where(parse("SELECT event, count() FROM sessions GROUP BY event LIMIT 10"))
         assert actual is None
 
-    def test_handles_select_with_eq(self):
-        actual = f(self.inliner.get_inner_where(parse("SELECT * FROM sessions WHERE $start_timestamp = '2021-01-01'")))
+    @parameterized.expand(
+        [
+            ("default_buffer", None, "toIntervalDay(3)"),
+            ("modifier_buffer", 60, "toIntervalMinute(60)"),
+            ("modifier_cannot_widen", 10_000_000, "toIntervalDay(3)"),
+            ("negative_modifier_clamped", -60, "toIntervalMinute(0)"),
+        ]
+    )
+    def test_handles_select_with_eq(self, _name, buffer_minutes, interval):
+        actual = f(
+            self._inliner(buffer_minutes).get_inner_where(
+                parse("SELECT * FROM sessions WHERE $start_timestamp = '2021-01-01'")
+            )
+        )
         expected = f(
-            "fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) >= ('2021-01-01' - toIntervalDay(3)) AND fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) <= ('2021-01-01' + toIntervalDay(3))"
+            f"fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) >= ('2021-01-01' - {interval}) AND fromUnixTimestamp(intDiv(_toUInt64(bitShiftRight(raw_sessions.session_id_v7, 80)), 1000)) <= ('2021-01-01' + {interval})"
         )
         assert expected == actual
 
@@ -462,7 +478,9 @@ class TestSessionsV2QueriesHogQLToClickhouse(ClickhouseTestMixin, APIBaseTest):
         generalized_sql = self.generalize_sql(actual)
         self.snapshot.session.pytest_session.config.option.warn_unused_snapshots = True
         if settings.CLICKHOUSE_HOGQL_USE_NEW_EVENTS_SCHEMA and "events_json" in generalized_sql:
-            assert generalized_sql == self.snapshot(name="new_events_schema")
+            assert generalized_sql == self.snapshot(
+                name="new_events_schema", extension_class=NewEventsSchemaSnapshotExtension
+            )
             return
         assert generalized_sql == self.snapshot
 
@@ -616,7 +634,9 @@ class TestSessionIdPushdownV2(ClickhouseTestMixin, APIBaseTest):
         generalized_sql = self.generalize_sql(actual)
         self.snapshot.session.pytest_session.config.option.warn_unused_snapshots = True
         if settings.CLICKHOUSE_HOGQL_USE_NEW_EVENTS_SCHEMA and "events_json" in generalized_sql:
-            assert generalized_sql == self.snapshot(name="new_events_schema")
+            assert generalized_sql == self.snapshot(
+                name="new_events_schema", extension_class=NewEventsSchemaSnapshotExtension
+            )
             return
         assert generalized_sql == self.snapshot
 

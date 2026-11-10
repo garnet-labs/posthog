@@ -11,7 +11,7 @@ than a private parser — one semantics, many consumers.
 import re
 import sys
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from fnmatch import fnmatch
 from pathlib import Path
@@ -30,6 +30,9 @@ if TYPE_CHECKING:
 # disable their stamphog copy before any gate runs — the package is only
 # required once a policy actually declares a hogli-resolver ownership source.
 _OWNERS_PKG = Path(__file__).resolve().parents[1] / "owners"
+# The owners resolver moved from tools/owners (module posthog_owners) to packages/owners-yaml
+# (module owners_yaml); it depends only on the standard library and PyYAML.
+_OWNERS_YAML_PKG = Path(__file__).resolve().parents[2] / "packages" / "owners-yaml"
 
 # ── Dependency ecosystems ────────────────────────────────────────
 #
@@ -199,18 +202,20 @@ class _HogliResolver:
 
 
 def _build_hogli_resolver(repo_root: Path, source: OwnershipSource) -> _HogliResolver:
-    if str(_OWNERS_PKG) not in sys.path:
-        sys.path.insert(0, str(_OWNERS_PKG))
+    for pkg in (_OWNERS_YAML_PKG, _OWNERS_PKG):
+        if str(pkg) not in sys.path:
+            sys.path.insert(0, str(pkg))
     try:
-        from posthog_owners.resolver import (
-            OwnersResolver,  # noqa: PLC0415 — absent in vendored copies; needed only for this format
-        )
-    except ImportError as exc:
-        raise RuntimeError(
-            "ownership format 'hogli-resolver' requires the posthog-owners package: "
-            "vendor tools/owners alongside tools/pr-approval-agent, or drop the "
-            "hogli-resolver source from .stamphog/policy.yml"
-        ) from exc
+        from owners_yaml.resolver import OwnersResolver  # noqa: PLC0415 — needed only for this format
+    except ImportError:
+        try:
+            from posthog_owners.resolver import OwnersResolver  # noqa: PLC0415
+        except ImportError as exc:
+            raise RuntimeError(
+                "ownership format 'hogli-resolver' requires the owners resolver package: "
+                "packages/owners-yaml (owners_yaml) or tools/owners (posthog_owners), "
+                "or drop the hogli-resolver source from .stamphog/policy.yml"
+            ) from exc
     assert source.path is not None  # validated by the loader (hogli-resolver uses `path`)
     return _HogliResolver(OwnersResolver(repo_root=repo_root / source.path))
 
@@ -522,13 +527,22 @@ def category_fully_exempt(category: str, files: list[str]) -> bool:
     return bool(files) and all(_is_exempt_path(category, f) for f in files)
 
 
-def detect_deny_categories(files: list[str], ignored_files: set[str] | None = None) -> list[str]:
-    """Categories hard-denied by the changed file paths. Titles never deny."""
+def detect_deny_categories(
+    files: list[str], ignored_files: set[str] | None = None, lifted: Mapping[str, Iterable[str]] | None = None
+) -> list[str]:
+    """Categories hard-denied by the changed file paths. Titles never deny.
+
+    ``lifted`` maps a category to the files an attestation lifted it for: those files no longer
+    deny that category, and still deny every other one.
+    """
     hits: set[str] = set()
     ignored_files_lower = {f.lower() for f in ignored_files or set()}
-    paths_lower = [fl for f in files if (fl := f.lower()) not in ignored_files_lower]
+    all_paths_lower = [fl for f in files if (fl := f.lower()) not in ignored_files_lower]
+    lifted = lifted or {}
 
     for category, scopes in DENY_PATTERNS.items():
+        lifted_lower = {f.lower() for f in lifted.get(category, ())}
+        paths_lower = [p for p in all_paths_lower if p not in lifted_lower]
         category_paths = [p for p in paths_lower if not _is_exempt_path(category, p)]
         path_regexes = scopes.get("paths", []) + [path_rx for path_rx, _title_rx in scopes.get("any", [])]
         if any(rx.search(p) for rx in path_regexes for p in category_paths):

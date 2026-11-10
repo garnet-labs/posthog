@@ -14,10 +14,20 @@ import type { BreakPointFunction } from 'kea'
 
 import { TaxonomicFilterGroupType } from 'lib/components/TaxonomicFilter/types'
 
-import { type AttachedContextItem, attachedContextItemKey } from '../types/contextTypes'
-import { attachedContextLogic } from './attachedContextLogic'
+import { type AttachedContextItem, attachedContextItemKey } from '~/layout/ai/attachedContext'
+import { attachedContextLogic } from '~/layout/ai/attachedContextLogic'
 
 export const PICKER_PROVIDER_ID = 'user-picker'
+
+/** The group types the composer's @-picker offers. Keep in sync with `taxonomicItemToAttachedContext`. */
+export const CONTEXT_PICKER_GROUP_TYPES: TaxonomicFilterGroupType[] = [
+    TaxonomicFilterGroupType.Events,
+    TaxonomicFilterGroupType.Actions,
+    TaxonomicFilterGroupType.Insights,
+    TaxonomicFilterGroupType.Dashboards,
+    TaxonomicFilterGroupType.Notebooks,
+    TaxonomicFilterGroupType.ErrorTrackingIssues,
+]
 
 /** Structural subset of the taxonomic item shapes the picker consumes — no scene-tree type imports. */
 export interface PickableTaxonomicItem {
@@ -75,7 +85,11 @@ export interface contextPickerLogicActions {
         items: AttachedContextItem[]
         providerId: string
     } // attachedContextLogic
-    undismissContext: (key: string) => {
+    undismissContext: (
+        key: string,
+        dismissGroup?: string | undefined
+    ) => {
+        dismissGroup: string | undefined
         key: string
     } // attachedContextLogic
     handleTaxonomicFilterChange: (

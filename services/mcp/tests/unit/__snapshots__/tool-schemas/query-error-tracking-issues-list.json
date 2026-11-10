@@ -12,9 +12,6 @@
                                 },
                                 {
                                     "type": "number"
-                                },
-                                {
-                                    "type": "null"
                                 }
                             ],
                             "description": "User ID or role UUID to filter by."
@@ -71,12 +68,16 @@
                     "operator": {
                         "anyOf": [
                             {
-                                "description": "* `exact` - exact\n* `is_not` - is_not\n* `icontains` - icontains\n* `not_icontains` - not_icontains\n* `regex` - regex\n* `not_regex` - not_regex\n* `gt` - gt\n* `lt` - lt\n* `gte` - gte\n* `lte` - lte\n* `is_set` - is_set\n* `is_not_set` - is_not_set\n* `is_date_exact` - is_date_exact\n* `is_date_after` - is_date_after\n* `is_date_before` - is_date_before\n* `in` - in\n* `not_in` - not_in",
+                                "description": "* `exact` - exact\n* `is_not` - is_not\n* `icontains` - icontains\n* `not_icontains` - not_icontains\n* `starts_with` - starts_with\n* `not_starts_with` - not_starts_with\n* `ends_with` - ends_with\n* `not_ends_with` - not_ends_with\n* `regex` - regex\n* `not_regex` - not_regex\n* `gt` - gt\n* `lt` - lt\n* `gte` - gte\n* `lte` - lte\n* `is_set` - is_set\n* `is_not_set` - is_not_set\n* `is_date_exact` - is_date_exact\n* `is_date_after` - is_date_after\n* `is_date_before` - is_date_before\n* `in` - in\n* `not_in` - not_in",
                                 "enum": [
                                     "exact",
                                     "is_not",
                                     "icontains",
                                     "not_icontains",
+                                    "starts_with",
+                                    "not_starts_with",
+                                    "ends_with",
+                                    "not_ends_with",
                                     "regex",
                                     "not_regex",
                                     "gt",
@@ -201,6 +202,10 @@
             ],
             "description": "Filter by exact exception fingerprint hash, not fuzzy search."
         },
+        "firstSeenAfter": {
+            "description": "Only include issues first seen strictly after this ISO timestamp or relative date, such as -24h or -7d. Independent of dateRange, which filters occurrences.",
+            "type": "string"
+        },
         "library": {
             "anyOf": [
                 {
@@ -217,8 +222,8 @@
             "description": "Filter by SDK/library value from event $lib, for example posthog-js."
         },
         "limit": {
-            "default": 25,
-            "description": "Page size.",
+            "default": 10,
+            "description": "Page size. Defaults to 10. Use nextOffset to fetch more rows instead of a large page.",
             "maximum": 100,
             "minimum": 1,
             "type": "number"
@@ -231,8 +236,8 @@
         },
         "orderBy": {
             "default": "occurrences",
-            "description": "Field used to sort issues. Defaults to occurrences.\n\n* `last_seen` - last_seen\n* `first_seen` - first_seen\n* `occurrences` - occurrences\n* `users` - users\n* `sessions` - sessions",
-            "enum": ["last_seen", "first_seen", "occurrences", "users", "sessions"],
+            "description": "Field used to sort issues. Defaults to occurrences.\n\n* `last_seen` - last_seen\n* `first_seen` - first_seen\n* `occurrences` - occurrences\n* `users` - users\n* `sessions` - sessions\n* `severity` - severity",
+            "enum": ["last_seen", "first_seen", "occurrences", "users", "sessions", "severity"],
             "type": "string"
         },
         "orderDirection": {
@@ -246,7 +251,7 @@
             "type": "string"
         },
         "release": {
-            "description": "Filter by exact release ID, version, or git commit ID captured in $exception_releases.",
+            "description": "Filter by exact release ID, version, or git commit ID captured in $exception_release.",
             "maxLength": 500,
             "type": "string"
         },
@@ -273,7 +278,7 @@
         },
         "volumeResolution": {
             "default": 0,
-            "description": "Number of volume buckets. Defaults to 0 for compact aggregate counts.",
+            "description": "Integer count of equal-width time buckets across dateRange, from 0 to 200. Not a time unit: 'hour', 'day', and 'week' are invalid. Example: 7 with a 7-day dateRange gives daily buckets. Defaults to 0, which returns only aggregate counts without volume buckets.",
             "maximum": 200,
             "minimum": 0,
             "type": "number"

@@ -1,23 +1,25 @@
 import clsx from 'clsx'
 import { useCallback } from 'react'
 
-import { DefaultTooltip, TimeSeriesLineChart, type PointClickData, type TooltipContext } from '@posthog/quill-charts'
+import { TimeSeriesLineChart, type PointClickData, type TooltipContext } from '@posthog/quill-charts'
 
-import { makeChartErrorHandler } from 'products/product_analytics/frontend/insights/trends/shared/chartErrorHandler'
+import { makeChartErrorHandler } from 'lib/charts/chartErrorHandler'
+import { AnnotationsLayer } from 'lib/components/AnnotationsOverlay/AnnotationsLayer'
 
-import { LineGraphProps } from './LineGraph'
-import { SqlLineSeriesMeta, buildLineChartConfig, formatSqlSeriesValue } from './sqlLineGraphAdapter'
+import { type SqlChartProps } from './SqlChart'
+import { SqlChartTooltip } from './SqlChartTooltip'
+import { SqlLineSeriesMeta, buildLineChartConfig } from './sqlLineGraphAdapter'
 import { useSqlChartModel } from './useSqlChartModel'
 
 const handleChartError = makeChartErrorHandler('sql-line-chart')
 
 /**
- * SQL line/area graph rendered via @posthog/quill-charts, gated behind the
- * `product-analytics-quill-sql-charts` flag (see {@link LineGraph}). Handles line, area, goal
- * lines, and trend lines; everything else falls back to the legacy chart.js path. Tooltip content
- * (per-column formatting, total row) is configured in {@link buildLineChartConfig}.
+ * SQL line/area graph rendered via @posthog/quill-charts. The default SQL chart renderer (see
+ * {@link sqlChartComponentFor}); bar-only and mixed series route to their own components. Handles
+ * line, area, goal lines, and trend lines. Tooltip content (per-column formatting, total row) is
+ * configured in {@link buildLineChartConfig}.
  */
-export const SqlLineGraph = (props: LineGraphProps): JSX.Element => {
+export const SqlLineGraph = (props: SqlChartProps): JSX.Element => {
     const { onPointClick: onPointClickProp } = props
     const model = useSqlChartModel(props, buildLineChartConfig)
 
@@ -33,27 +35,19 @@ export const SqlLineGraph = (props: LineGraphProps): JSX.Element => {
     // avoid duplicating the per-column formatting logic.
     const renderTooltip = useCallback(
         (ctx: TooltipContext<SqlLineSeriesMeta>) => {
-            if (!model) {
+            if (!model || !onPointClickProp) {
                 return null
             }
-            const { valueFormatter, labelFormatter, showTotal, totalFormatter } = model.config.tooltip ?? {}
             return (
-                <DefaultTooltip
-                    {...ctx}
-                    valueFormatter={
-                        valueFormatter ??
-                        ((value, entry) =>
-                            formatSqlSeriesValue(value, (entry.series.meta as SqlLineSeriesMeta | undefined)?.settings))
-                    }
-                    labelFormatter={labelFormatter}
-                    showTotal={showTotal}
-                    totalFormatter={totalFormatter}
-                    sortedByValue
-                    footer="Click to inspect persons"
+                <SqlChartTooltip
+                    context={ctx}
+                    config={model.config.tooltip}
+                    onPointClick={onPointClickProp}
+                    hint={props.pointClickHint ?? 'Click to inspect persons'}
                 />
             )
         },
-        [model]
+        [model, onPointClickProp, props.pointClickHint]
     )
 
     return (
@@ -73,7 +67,12 @@ export const SqlLineGraph = (props: LineGraphProps): JSX.Element => {
                     tooltip={onPointClickProp ? renderTooltip : undefined}
                     onPointClick={onPointClickProp ? onPointClick : undefined}
                     onError={handleChartError}
-                />
+                >
+                    {props.children}
+                    {props.showAnnotations && props.insightNumericId && (
+                        <AnnotationsLayer insightNumericId={props.insightNumericId} dates={model.labels} />
+                    )}
+                </TimeSeriesLineChart>
             )}
         </div>
     )

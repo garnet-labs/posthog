@@ -1,12 +1,13 @@
 import { MakeLogicType, actions, connect, kea, listeners, path, reducers, selectors } from 'kea'
 import { loaders } from 'kea-loaders'
+import posthog from 'posthog-js'
 
 import api, { ApiError } from 'lib/api'
 import { dayjs } from 'lib/dayjs'
+import { HogQLQueryString, escapePropertyAsHogQLIdentifier, hogql } from 'lib/utils/hogql'
 import { sessionRecordingEventUsageLogic } from 'scenes/session-recordings/sessionRecordingEventUsageLogic'
 
 import { QueryLogTags } from '~/queries/schema/schema-general'
-import { HogQLQueryString, escapePropertyAsHogQLIdentifier, hogql } from '~/queries/utils'
 import { CORE_FILTER_DEFINITIONS_BY_GROUP } from '~/taxonomy/taxonomy'
 import { SessionRecordingPropertiesType, SessionRecordingType } from '~/types'
 
@@ -25,6 +26,7 @@ const BASE_QUERY_PROPERTIES: [string, string][] = [
     ['properties', '$geoip_subdivision_1_name'],
     ['properties', '$geoip_city_name'],
     ['session', '$entry_current_url'],
+    ['properties', '$ip'],
 ]
 const BASE_PROPERTIES = BASE_QUERY_PROPERTIES.map(([, property]) => property)
 
@@ -166,12 +168,20 @@ export const sessionRecordingsListPropertiesLogic = kea<sessionRecordingsListPro
                         )
                     } catch (e) {
                         if (!extraSessionProperties.length) {
-                            throw e
+                            // These are supplementary columns on the recordings list. A backend blip shouldn't
+                            // toast, it should just leave this batch's rows without properties.
+                            posthog.captureException(e)
+                            return values.recordingProperties
                         }
-                        response = await api.queryHogQL(
-                            buildPropertiesQuery(sessionIds, oldestTimestamp, newestTimestamp, []),
-                            QUERY_TAGS
-                        )
+                        try {
+                            response = await api.queryHogQL(
+                                buildPropertiesQuery(sessionIds, oldestTimestamp, newestTimestamp, []),
+                                QUERY_TAGS
+                            )
+                        } catch (fallbackError) {
+                            posthog.captureException(fallbackError)
+                            return values.recordingProperties
+                        }
                         // only a 400 (a pin missing from this project's session table) blacklists the pin set — transient errors retry next batch
                         if (e instanceof ApiError && e.status === 400) {
                             actions.markExtraPropertiesUnqueryable(extraSessionProperties)

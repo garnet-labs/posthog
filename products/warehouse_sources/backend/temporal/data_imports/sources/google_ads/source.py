@@ -1,39 +1,42 @@
 import re
+import datetime
 from typing import Optional, cast
 
 from django.core.cache import cache
 
+import requests
 from rest_framework.exceptions import ValidationError
 
-from posthog.schema import (
+from posthog.integrations import IntegrationNotFound
+from posthog.models.integration import (
+    ERROR_TOKEN_REFRESH_FAILED,
+    GoogleAdsIntegration,
+    GoogleAdsQuotaExhaustedError,
+    GoogleAdsScopeInsufficientError,
+    OauthIntegration,
+    google_ads_hierarchy_level,
+)
+
+from products.warehouse_sources.backend.facade.codebase_detection import detect
+from products.warehouse_sources.backend.facade.source_config import (
     DataWarehouseSourceCategory,
-    ExternalDataSourceType as SchemaExternalDataSourceType,
     ReleaseStatus,
     SourceConfig,
     SourceFieldInputConfig,
     SourceFieldInputConfigType,
     SourceFieldOauthAccountSelectConfig,
     SourceFieldOauthConfig,
+    SourceFieldSelectConfig,
+    SourceFieldSelectConfigConverter,
+    SourceFieldSelectConfigOption,
     SourceFieldSwitchGroupConfig,
     SuggestedTable,
-)
-
-from posthog.models.integration import (
-    ERROR_TOKEN_REFRESH_FAILED,
-    GoogleAdsIntegration,
-    Integration,
-    OauthIntegration,
-    google_ads_hierarchy_level,
-)
-
-from products.warehouse_sources.backend.temporal.data_imports.pipelines.pipeline.typings import (
-    SourceInputs,
-    SourceResponse,
 )
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.base import (
     MARKETING_ANALYTICS_SUGGESTED_TABLE_TOOLTIP,
     FieldType,
     ResumableSource,
+    VersionDeprecation,
 )
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.canonical_descriptions import (
     CanonicalDescriptions,
@@ -47,28 +50,38 @@ from products.warehouse_sources.backend.temporal.data_imports.sources.common.mix
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.registry import SourceRegistry
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.resumable import ResumableSourceManager
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.schema import SourceSchema
+from products.warehouse_sources.backend.temporal.data_imports.sources.common.typings import SourceInputs, SourceResponse
 from products.warehouse_sources.backend.temporal.data_imports.sources.generated_configs.googleads import (
     GoogleAdsSourceConfig,
 )
+from products.warehouse_sources.backend.temporal.data_imports.sources.google_ads.change_events import (
+    CHANGE_EVENT_LOOKBACK_SECONDS,
+)
 from products.warehouse_sources.backend.temporal.data_imports.sources.google_ads.configs import (
+    GOOGLE_ADS_INITIAL_BACKFILL_DAYS,
     GoogleAdsResumeConfig,
     GoogleAdsServiceAccountSourceConfig,
     clean_customer_id,
     format_customer_id,
+    parse_start_date,
 )
 from products.warehouse_sources.backend.types import ExternalDataSourceType
 
-# Default incremental overlap re-read window for Google Ads stats tables (the 12 schemas
-# carrying a `segments.date` filter). Google reports recent-day cost/conversion data as
-# provisional and keeps revising it for days after the fact (see "About data freshness":
-# https://support.google.com/google-ads/answer/2544985), so an incremental sync that only
-# re-fetches the newest day freezes each day at its first-imported, not-yet-final value.
-# Re-reading a 30-day trailing window each run lets those days catch up as Google finalizes
-# them; merge-by-primary-key makes the overlap idempotent. 30 days also covers the App-
-# campaign conversion attribution window for the conversion metrics in these tables. These
-# tables are small, so the extra re-read is negligible. Tunable; stays under the 60-day cap
-# enforced at the creation/update endpoints.
-GOOGLE_ADS_STATS_INCREMENTAL_LOOKBACK_SECONDS = 30 * 24 * 60 * 60
+# Default incremental overlap re-read window for Google Ads stats tables (those carrying a
+# `segments.date` filter). Google reports recent-day cost/conversion data as provisional and keeps
+# revising it for days after the fact (see "About data freshness":
+# https://support.google.com/google-ads/answer/2544985), so an incremental sync that only re-fetches
+# the newest day freezes each day at its first-imported, not-yet-final value. Re-reading a trailing
+# window each run lets those days catch up; merge-by-primary-key makes the overlap idempotent.
+#
+# The window is a direct multiplier on the rows an incremental run reports: on the largest stats
+# tables (`search_term_stats`, `keyword_stats`, which grow with query volume rather than account
+# size) an N-day window costs roughly N times the rows of a newest-day-only sync. Two weeks buys
+# most of Google's restatement window at half that cost. Only schemas created from here on pick this
+# up — existing schemas keep whatever lookback they already carry. It sits above the length at which
+# SyncMethodForm warns a window is expensive, so accounts that would rather sync less lower it per
+# schema, up to the 60-day cap the creation/update endpoints enforce.
+GOOGLE_ADS_STATS_INCREMENTAL_LOOKBACK_SECONDS = 15 * 24 * 60 * 60
 
 _OAUTH_ACCOUNTS_CACHE_TTL_SECONDS = 60
 
@@ -78,13 +91,54 @@ def _oauth_accounts_cache_key(team_id: int, integration_id: int) -> str:
     return f"@dwh/google_ads/{team_id}/{integration_id}/oauth_accounts"
 
 
+# The connected Google login granted PostHog an OAuth token without the adwords scope, so
+# nothing it asks for will be authorized. The wizard and the sync both surface this, and
+# reconnecting is the only fix, so both paths read from one string.
+_SCOPE_INSUFFICIENT_ERROR = (
+    "Your Google Ads connection is missing the access PostHog needs. Reconnect your Google Ads "
+    "account and allow access to your Google Ads data."
+)
+
+
 @SourceRegistry.register
 class GoogleAdsSource(
     ResumableSource[GoogleAdsSourceConfig | GoogleAdsServiceAccountSourceConfig, GoogleAdsResumeConfig], OAuthMixin
 ):
-    supported_versions = ("v23", "v24")
-    default_version = "v24"
+    codebase_detection = detect(
+        env=("^GOOGLE_ADS_", "^GAARF_"),
+        script_hosts=("www.googleadservices.com", "googleads.g.doubleclick.net"),
+        npm=("google-ads-api", "google-ads-node", "google-ads-api-report-fetcher", "@types/google-ads-scripts"),
+        pypi=("google-ads", "google-ads-mcp", "google-ads-api-report-fetcher", "google-ads-stubs"),
+        cargo=("googleads-rs",),
+        cocoapods=("GoogleAdsOnDeviceConversion",),
+        composer=("googleads/google-ads-php",),
+        go=("github.com/shenzhencenter/google-ads-pb",),
+        maven=(
+            "com.google.api-ads:google-ads",
+            "com.google.api-ads:google-ads-bom",
+            "com.google.api-ads:google-ads-shadowjar",
+            "com.google.api-ads:google-ads-stubs-lib",
+            "com.google.api-ads:adwords-axis",
+            "com.google.api-ads:adwords-lib",
+        ),
+        rubygems=("google-ads-googleads", "google-adwords-api"),
+        swiftpm=("github.com/googleads/google-ads-on-device-conversion-ios-sdk",),
+    )
+
+    supported_versions = ("v23", "v24", "v25")
+    default_version = "v25"
     api_docs_url = "https://developers.google.com/google-ads/api/docs/release-notes"
+    # Google sunsets each major ~12 months after release. v23 (released 2026-01-28) is scheduled to
+    # sunset in February 2027; Google has announced the month but not the exact day, so pin the
+    # conservative first-of-month — the deprecation banner and the v23→v25 repin migration key off it.
+    # v24 (released 2026-04-22) is projected for ~May 2027 with no firm date on the sunset page yet,
+    # so its `sunset_at` stays None until Google publishes one and existing v24 pins stay on v24.
+    deprecated_versions = (
+        VersionDeprecation(version="v23", sunset_at=datetime.date(2027, 2, 1)),
+        VersionDeprecation(version="v24", sunset_at=None),
+    )
+
+    history_lookback = datetime.timedelta(days=GOOGLE_ADS_INITIAL_BACKFILL_DAYS)
 
     @property
     def source_type(self) -> ExternalDataSourceType:
@@ -98,13 +152,29 @@ class GoogleAdsSource(
         return CANONICAL_DESCRIPTIONS
 
     def get_non_retryable_errors(self) -> dict[str, str | None]:
+        # Order matters: the finalization activity shows the message of the *first* pattern that
+        # matches, and Google returns several of the specific codes below under the generic
+        # `PERMISSION_DENIED` / `UNAUTHENTICATED` gRPC statuses. Specific codes therefore come first,
+        # so a scope or deleted-account failure doesn't get the generic access message.
         return {
-            "PERMISSION_DENIED": None,
-            "UNAUTHENTICATED": None,
-            "ACCESS_TOKEN_SCOPE_INSUFFICIENT": None,
-            "Account has been deleted": None,
-            "INVALID_CUSTOMER_ID": None,
+            "ACCESS_TOKEN_SCOPE_INSUFFICIENT": _SCOPE_INSUFFICIENT_ERROR,
+            "Account has been deleted": "The Google Ads account this source syncs from has been deleted, so there's nothing left to import. Point the source at an active customer ID, or delete the source.",
+            "INVALID_CUSTOMER_ID": "The customer ID on this source isn't a valid Google Ads account. Update it to the 10-digit customer ID shown in your Google Ads account, then re-enable the sync.",
             "REQUESTED_METRICS_FOR_MANAGER": "Metrics cannot be requested for a Google Ads manager (MCC) account. Reconfigure this source with a client account customer ID, or enable the MCC option and provide both the manager and client customer IDs.",
+            # A gRPC PERMISSION_DENIED (and its ads-level USER_PERMISSION_DENIED counterpart) means the
+            # connected Google login can't reach this customer ID. The sync already retries as the
+            # manager account that can reach it (see `GoogleAdsSearchService`), so anything landing here
+            # is access the login genuinely doesn't have. Its str() is a raw gRPC status and protobuf
+            # dump (with a per-request peer IP) the user can't act on, so replace it.
+            "PERMISSION_DENIED": (
+                "The connected Google login can't access this Google Ads account. Check the customer ID "
+                "is correct and still shared with that login, and if it's a client account under a "
+                'manager (MCC) account, enable "Using MCC account?" and enter your manager\'s customer '
+                "ID. Then reconnect your Google Ads account and re-enable the sync."
+            ),
+            # A gRPC UNAUTHENTICATED means Google rejected the credentials outright. Same story: the raw
+            # status dump is unusable and only reconnecting recovers.
+            "UNAUTHENTICATED": "Your Google Ads connection could not be authenticated. Please reconnect your Google Ads account.",
             # google.auth.exceptions.RefreshError raised when the stored OAuth refresh token
             # has been revoked, expired, or is otherwise rejected by Google's token endpoint.
             # Retrying cannot recover — the user must reconnect their Google Ads account.
@@ -118,6 +188,8 @@ class GoogleAdsSource(
             # recover — the user must reconnect their Google Ads account. Model-specific so we don't
             # swallow unrelated `DoesNotExist` errors from other models, which may be real bugs.
             "Integration matching query does not exist": "Your Google Ads connection is no longer available — it may have been disconnected. Please reconnect your Google Ads account.",
+            # `_get_integration` raises `IntegrationNotFound("Integration not found: <id>")` for the same case.
+            "Integration not found": "Your Google Ads connection is no longer available — it may have been disconnected. Please reconnect your Google Ads account.",
             # gapic wraps a transport-level UNAUTHENTICATED into google.api_core.exceptions.Unauthenticated,
             # whose str() is "401 Request is missing required authentication credential. ..." — it never
             # contains the bare "UNAUTHENTICATED" token, so the gRPC-status keys above don't catch it.
@@ -127,6 +199,24 @@ class GoogleAdsSource(
             # credentials. ..." — raised when the OAuth access token itself is rejected. Same story: no bare
             # "UNAUTHENTICATED" token, retrying cannot recover, the user must reconnect their Google Ads account.
             "Request had invalid authentication credentials": "Your Google Ads connection could not be authenticated. Please reconnect your Google Ads account.",
+        }
+
+    def get_retryable_errors(self) -> set[str]:
+        # A quota/rate-limit RESOURCE_EXHAUSTED ("Resource has been exhausted (e.g. check
+        # quota).") is already ridden out in-process by `_call_with_transient_retry` (see
+        # `_is_transient_grpc_error` in google_ads.py). A search that still fails after that
+        # budget has hit a longer-lived quota window than a few seconds of backoff can clear,
+        # but Temporal's activity retry recovers once it does — self-recovering, not a bug, so
+        # keep it out of error tracking as noise.
+        #
+        # `GoogleAdsCallDeadlineExceeded` (see google_ads.py) is raised deliberately when a single
+        # call runs past the generous per-call timeout — normal for a full page of a wide resource
+        # or a very large account. It is retryable by design: Temporal's activity retry builds a
+        # fresh channel and resumes from the saved page token. Matched without the timeout value,
+        # which is a tunable constant rather than a stable identifier.
+        return {
+            "Resource has been exhausted (e.g. check quota)",
+            "Google Ads call did not finish within",
         }
 
     # TODO: clean up google ads source to not have two auth config options
@@ -165,7 +255,7 @@ class GoogleAdsSource(
             SourceSchema(
                 name=endpoint,
                 supports_incremental=ads_incremental_fields.get(endpoint, None) is not None,
-                supports_append=ads_incremental_fields.get(endpoint, None) is not None,
+                supports_append=endpoint != "change_event" and ads_incremental_fields.get(endpoint, None) is not None,
                 incremental_fields=[
                     {"label": column_name, "type": column_type, "field": column_name, "field_type": column_type}
                     for column_name, column_type in ads_incremental_fields.get(endpoint, [])
@@ -175,7 +265,9 @@ class GoogleAdsSource(
                 # Only the incremental stats tables (those with a segments.date filter) need the
                 # lookback; the full-refresh dimension tables re-read everything each run anyway.
                 default_incremental_lookback_seconds=(
-                    GOOGLE_ADS_STATS_INCREMENTAL_LOOKBACK_SECONDS
+                    CHANGE_EVENT_LOOKBACK_SECONDS
+                    if endpoint == "change_event"
+                    else GOOGLE_ADS_STATS_INCREMENTAL_LOOKBACK_SECONDS
                     if ads_incremental_fields.get(endpoint, None) is not None
                     else None
                 ),
@@ -214,12 +306,16 @@ class GoogleAdsSource(
             db_incremental_field_last_value=inputs.db_incremental_field_last_value
             if inputs.should_use_incremental_field
             else None,
+            db_incremental_field_last_value_before_lookback=inputs.db_incremental_field_last_value_before_lookback,
+            history_start=inputs.history_start,
+            requested_start=config.start_date if isinstance(config, GoogleAdsSourceConfig) else None,
+            skip_removed=isinstance(config, GoogleAdsSourceConfig) and config.skip_removed_keywords,
         )
 
     @property
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
-            name=SchemaExternalDataSourceType.GOOGLE_ADS,
+            name=ExternalDataSourceType.GOOGLEADS,
             category=DataWarehouseSourceCategory.ADVERTISING,
             featured=True,
             keywords=["adwords"],
@@ -246,8 +342,42 @@ class GoogleAdsSource(
                         required=True,
                         placeholder="123-456-7890",
                     ),
+                    SourceFieldInputConfig(
+                        name="start_date",
+                        sync_setting=True,
+                        label="Start date",
+                        caption=(
+                            "Earliest date to import, as YYYY-MM-DD. On a source that has already "
+                            "synced, changing this takes effect on the next full re-import — Sync "
+                            "keeps going from where it left off. Leave empty for the last two years; "
+                            "an earlier date imports more rows, which count towards your billed row usage."
+                        ),
+                        type=SourceFieldInputConfigType.TEXT,
+                        required=False,
+                        placeholder="2020-01-01",
+                        secret=False,
+                    ),
+                    SourceFieldSelectConfig(
+                        name="skip_removed_keywords",
+                        sync_setting=True,
+                        label="Skip removed keywords?",
+                        caption=(
+                            "Leave out keywords that are removed, or that sit in a removed ad group or "
+                            "campaign, from the keyword and ad group criterion tables. Every sync reads "
+                            "these tables in full, so removed keywords count towards your billed row "
+                            "usage on each sync."
+                        ),
+                        required=True,
+                        defaultValue="false",
+                        converter=SourceFieldSelectConfigConverter.STR_TO_BOOL,
+                        options=[
+                            SourceFieldSelectConfigOption(label="Yes", value="true"),
+                            SourceFieldSelectConfigOption(label="No", value="false"),
+                        ],
+                    ),
                     SourceFieldSwitchGroupConfig(
                         name="is_mcc_account",
+                        account_selector=True,
                         label="Using MCC account?",
                         caption="Whether your account is a Google Ads MCC account and you're accessing a clients account?",
                         default=False,
@@ -308,12 +438,28 @@ class GoogleAdsSource(
 
         try:
             accounts = GoogleAdsIntegration(integration).list_google_ads_accessible_accounts()
+        except GoogleAdsScopeInsufficientError as e:
+            # Reconnecting alone repeats the same consent screen, so name the permission to allow.
+            raise IntegrationAccountListingError(_SCOPE_INSUFFICIENT_ERROR) from e
         except ValidationError as e:
             # Raised only for a 401/403 from Google: revoked credentials, or the connected account
             # lost access.
             raise IntegrationAccountListingError(
                 "Google rejected the credentials for this integration. Please reconnect your Google Ads "
                 "integration and make sure the connected account can access your Google Ads accounts."
+            ) from e
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+            # The walk retries a transient blip internally; this means every attempt on some request
+            # timed out or failed to connect. Actionable and retryable from the user's side, so surface
+            # a clean message instead of the raw connection error.
+            raise IntegrationAccountListingError(
+                "Google Ads did not respond in time while listing your accounts. Please try again."
+            ) from e
+        except GoogleAdsQuotaExhaustedError as e:
+            # Unlike the sync path, no Temporal activity retries this interactive call, so a 429
+            # otherwise surfaces as an unhandled 500 instead of something the user can act on.
+            raise IntegrationAccountListingError(
+                "Google Ads rate-limited this request. Please wait a moment and try again."
             ) from e
 
         names_by_id = {account["id"]: account["name"] for account in accounts}
@@ -390,7 +536,9 @@ class GoogleAdsSource(
             if "CUSTOMER_NOT_FOUND" in error_message or "USER_PERMISSION_DENIED" in error_message:
                 return (
                     False,
-                    f"Customer ID {config.customer_id} is not accessible. Please verify your customer ID and manager account settings.",
+                    f"Customer ID {config.customer_id} isn't accessible through the connected manager "
+                    "(MCC) account. Check that the customer ID is correct, that the manager customer ID "
+                    "you entered is right, and that this account is linked under that manager, then try again.",
                 )
             raise
 
@@ -405,6 +553,14 @@ class GoogleAdsSource(
             _is_transient_grpc_error,
             google_ads_client,
         )
+
+        # Caught here rather than at sync time: an unreadable value is treated as unset there, so
+        # the source would import a range nobody asked for with nothing to say why.
+        if isinstance(config, GoogleAdsSourceConfig) and config.start_date:
+            try:
+                parse_start_date(config.start_date)
+            except ValueError:
+                return False, "Start date must be a date in YYYY-MM-DD format, for example 2020-01-01."
 
         # The SDK's client default is the newest bundled version, so leaving these probes unpinned
         # would validate against a version the source may not sync with.
@@ -433,7 +589,7 @@ class GoogleAdsSource(
                     'enable "Using MCC account?" and enter your manager\'s customer ID, then try again.',
                 )
             return True, None
-        except Integration.DoesNotExist:
+        except IntegrationNotFound:
             return (
                 False,
                 "The Google Ads connection for this source no longer exists. Please reconnect your Google Ads account.",
@@ -441,10 +597,7 @@ class GoogleAdsSource(
         except Exception as e:
             error_message = str(e)
             if "ACCESS_TOKEN_SCOPE_INSUFFICIENT" in error_message:
-                return (
-                    False,
-                    "Insufficient permissions. Please reconnect your Google Ads account with the required scopes.",
-                )
+                return False, _SCOPE_INSUFFICIENT_ERROR
             if "NOT_ADS_USER" in error_message:
                 return (
                     False,
@@ -476,5 +629,16 @@ class GoogleAdsSource(
                     False,
                     "Google Ads returned a temporary error while validating your credentials. This is "
                     "usually a transient issue on Google's side — please try again in a moment.",
+                )
+            # A gRPC INVALID_ARGUMENT ("Request contains an invalid argument") means Google rejected the
+            # request as malformed — most often a customer ID (or MCC manager ID) that isn't a valid
+            # account. Its str() is the same raw protobuf dump (with a per-request peer IP) the user
+            # can't act on, so surface an actionable prompt instead of leaking it.
+            if "INVALID_ARGUMENT" in error_message:
+                return (
+                    False,
+                    "Google Ads rejected the request as invalid while validating your credentials. Check "
+                    "that your customer ID (and your manager account ID, if using an MCC) is correct, then "
+                    "try again.",
                 )
             return False, f"Error validating credentials: {error_message}"

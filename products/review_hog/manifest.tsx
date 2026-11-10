@@ -5,7 +5,7 @@ import { FileSystemIconType, ProductItemCategory, ProductKey } from '~/queries/s
 import { ProductManifest } from '~/types'
 
 export const manifest: ProductManifest = {
-    name: 'ReviewHog',
+    name: 'PostHog Review',
     scenes: {
         CodeReview: {
             name: 'Code review',
@@ -16,10 +16,10 @@ export const manifest: ProductManifest = {
         },
     },
     routes: {
-        '/code_review': ['CodeReview', 'codeReview'],
+        '/code-review': ['CodeReview', 'codeReview'],
     },
     urls: {
-        codeReview: (): string => '/code_review',
+        codeReview: (): string => '/code-review',
     },
     treeItemsProducts: [
         {
@@ -27,7 +27,9 @@ export const manifest: ProductManifest = {
             intents: [ProductKey.REVIEW_HOG],
             category: ProductItemCategory.UNRELEASED,
             iconType: 'code_review' as FileSystemIconType,
+            iconColor: ['var(--color-product-code-review-light)', 'var(--color-product-code-review-dark)'],
             href: urls.codeReview(),
+            searchKeywords: ['pr review', 'review agent', 'reviewhog'],
             flag: FEATURE_FLAGS.REVIEW_HOG,
             tags: ['alpha'],
             sceneKey: 'CodeReview',

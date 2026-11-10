@@ -2,17 +2,20 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from posthog.test.base import APIBaseTest
+from unittest.mock import MagicMock, patch
 
-from products.customer_analytics.backend.logic.person_property_runs import (
-    MAX_CONSECUTIVE_SYNC_FAILURES,
-    record_sync_run,
-)
+from parameterized import parameterized
+
+from products.customer_analytics.backend.logic.custom_property_source_health import MAX_CONSECUTIVE_SYNC_FAILURES
+from products.customer_analytics.backend.logic.person_property_runs import record_sync_run
 from products.customer_analytics.backend.models import CustomPropertySource, CustomPropertySyncRun, TargetType
 from products.customer_analytics.backend.models.team_scoped_test_base import TeamScopedTestMixin
 from products.customer_analytics.backend.test.factories import create_custom_property_definition
 from products.warehouse_sources.backend.facade.hooks import PersonPropertySyncRunRecord
 from products.warehouse_sources.backend.models.external_data_schema import ExternalDataSchema
 from products.warehouse_sources.backend.models.external_data_source import ExternalDataSource
+
+HEALTH_SERVICE = "products.customer_analytics.backend.logic.custom_property_source_health"
 
 
 class TestRecordSyncRun(TeamScopedTestMixin, APIBaseTest):
@@ -38,7 +41,8 @@ class TestRecordSyncRun(TeamScopedTestMixin, APIBaseTest):
     def _record(self, **overrides) -> PersonPropertySyncRunRecord:
         kwargs: dict = {
             "team_id": self.team.id,
-            "schema_id": self.schema_id,
+            "binding_kind": "schema",
+            "binding_id": self.schema_id,
             "source_id": str(self.source.id),
             "job_id": "job-1",
             "trigger": "scheduled",
@@ -83,15 +87,22 @@ class TestRecordSyncRun(TeamScopedTestMixin, APIBaseTest):
         assert self.source.last_sync_error == "boom"
         assert self.source.is_enabled is True
 
-    def test_auto_disables_at_failure_cap(self):
-        # Regression: a source failing forever should stop syncing, matching the account path's cap.
+    @parameterized.expand([(True,), (False,)])
+    @patch(f"{HEALTH_SERVICE}.notify_source_auto_disabled")
+    def test_auto_disables_at_failure_cap(self, count_failure: bool, mock_notify: MagicMock) -> None:
         self.source.consecutive_failures = MAX_CONSECUTIVE_SYNC_FAILURES - 1
         self.source.save()
 
-        record_sync_run(self._record(status="failed", error="boom"))
+        with self.captureOnCommitCallbacks(execute=True):
+            record_sync_run(self._record(status="failed", error="boom", count_failure=count_failure))
 
         self.source.refresh_from_db()
-        assert self.source.is_enabled is False
+        assert self.source.is_enabled is (not count_failure)
+        assert self.source.consecutive_failures == MAX_CONSECUTIVE_SYNC_FAILURES - 1 + int(count_failure)
+        assert self.source.last_sync_error == "boom"
+        run = CustomPropertySyncRun.objects.for_team(self.team.id).get(source_id=self.source.id)
+        assert run.status == "failed" and run.error == "boom"
+        assert mock_notify.call_count == int(count_failure)
 
     def test_unknown_source_is_a_noop(self):
         # A run for a since-deleted source must not crash or orphan a row.
@@ -112,16 +123,50 @@ class TestRecordSyncRun(TeamScopedTestMixin, APIBaseTest):
         assert run.id == placeholder.id
         assert run.status == "completed" and run.produced == 5
 
-    def test_scheduled_run_leaves_a_running_placeholder_untouched(self):
-        # A scheduled sync must not hijack a backfill's running placeholder; it always inserts its own.
+    @parameterized.expand([("running",), ("completed",)])
+    def test_scheduled_run_leaves_a_running_placeholder_untouched(self, status):
+        # A scheduled sync must not hijack a backfill's running placeholder — not when it opens its own
+        # run either; it always inserts its own row.
         placeholder = CustomPropertySyncRun.objects.create(
             team_id=self.team.id, source=self.source, schema_id=self.schema_id, trigger="backfill", status="running"
         )
-        record_sync_run(self._record(trigger="scheduled", status="completed"))
+        record_sync_run(self._record(trigger="scheduled", status=status))
 
         assert CustomPropertySyncRun.objects.unscoped().filter(source=self.source).count() == 2
         placeholder.refresh_from_db()
         assert placeholder.status == "running"
+
+    def test_running_record_opens_a_row_without_folding_onto_the_source(self):
+        # A sync that has only started says nothing about the source's health: stamping last_synced_at
+        # or clearing the error would show the UI a green "Synced" for a run still in flight.
+        self.source.consecutive_failures = 2
+        self.source.last_sync_error = "boom"
+        self.source.save()
+
+        record_sync_run(self._record(status="running", finished_at="", rows_read=0, changed=0, existing=0, produced=0))
+
+        run = CustomPropertySyncRun.objects.unscoped().get(source_id=self.source.id)
+        assert run.status == "running" and run.finished_at is None
+        self.source.refresh_from_db()
+        assert self.source.consecutive_failures == 2
+        assert self.source.last_sync_error == "boom"
+        assert self.source.last_synced_at is None
+
+    def test_scheduled_record_reconciles_a_sync_now_row_and_keeps_its_trigger(self):
+        # "Sync now" opens the row, then rides the ordinary import pipeline, which reports itself as
+        # 'scheduled'. The terminal record must land on that row rather than adding a second one, and
+        # must not relabel a run the user asked for as scheduled.
+        opened = CustomPropertySyncRun.objects.create(
+            team_id=self.team.id, source=self.source, schema_id=self.schema_id, trigger="sync", status="running"
+        )
+        record_sync_run(self._record(trigger="scheduled", status="completed", produced=3))
+
+        runs = CustomPropertySyncRun.objects.unscoped().filter(source=self.source)
+        assert runs.count() == 1
+        run = runs.get()
+        assert run.id == opened.id
+        assert run.status == "completed" and run.produced == 3
+        assert run.trigger == "sync"
 
     def test_scheduled_retry_dedups_on_job_id_and_counts_failure_once(self):
         # The scheduled sync activity retries up to 3 times, calling the recorder on each failed
@@ -149,3 +194,25 @@ class TestRecordSyncRun(TeamScopedTestMixin, APIBaseTest):
         assert self.source.consecutive_failures == 0
         assert self.source.last_synced_at is not None
         assert self.source.last_sync_error is None
+
+    def test_view_binding_lands_in_the_saved_query_column(self):
+        # The two binding columns are how a run stays attributable after its schema or view is deleted.
+        # Writing a view's id into schema_id would attribute the run to a schema that never ran it.
+        record_sync_run(self._record(binding_kind="saved_query", binding_id="7bd1a4de-0000-4000-8000-000000000001"))
+
+        run = CustomPropertySyncRun.objects.unscoped().get(source_id=self.source.id)
+        assert str(run.saved_query_id) == "7bd1a4de-0000-4000-8000-000000000001"
+        assert run.schema_id is None
+
+    @patch(f"{HEALTH_SERVICE}.notify_source_auto_disabled")
+    def test_the_disabling_failure_tells_the_owner_once_across_retries(self, mock_notify):
+        self.source.consecutive_failures = MAX_CONSECUTIVE_SYNC_FAILURES - 1
+        self.source.save()
+
+        with self.captureOnCommitCallbacks(execute=True):
+            record_sync_run(self._record(status="failed", error="boom"))
+            record_sync_run(self._record(status="failed", error="boom"))
+
+        self.source.refresh_from_db()
+        assert self.source.is_enabled is False
+        mock_notify.assert_called_once_with(team_id=self.team.id, source_id=self.source.id, disable_event_id="job-1")

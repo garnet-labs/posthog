@@ -3,7 +3,7 @@ import { Client, Connection, WorkflowExecutionAlreadyStartedError } from '@tempo
 import { EncryptionCodec } from '~/common/temporal/codec'
 import { RawKafkaEvent } from '~/types'
 
-import { TemporalService, resolveSettleConfig, workflowSafeTraceId } from './temporal.service'
+import { EVENT_REFERENCE_START_DELAY, TemporalService, resolveSettleConfig, workflowSafeId } from './temporal.service'
 import type { EvaluationWorkflowRuntime, TemporalServiceConfig } from './temporal.service'
 
 jest.mock('@temporalio/client')
@@ -63,6 +63,8 @@ describe('TemporalService', () => {
     })
 
     afterEach(() => {
+        jest.useRealTimers()
+        jest.restoreAllMocks()
         jest.clearAllMocks()
     })
 
@@ -236,6 +238,50 @@ describe('TemporalService', () => {
             })
         })
 
+        it.each([
+            [
+                'run-evaluation',
+                (event: RawKafkaEvent) => service.startEvaluationRunWorkflow('eval-123', event, 'llm_judge'),
+            ],
+            ['run-tagger', (event: RawKafkaEvent) => service.startTaggerRunWorkflow('tagger-123', event)],
+        ])(
+            'starts %s with a delayed reference when the worker would encode the event over the payload limit',
+            async (workflow, start) => {
+                const oversizedOutput = 'é'.repeat(300_000)
+                const events = [
+                    createMockEvent({
+                        properties: JSON.stringify({ $ai_trace_id: 'trace-1', $ai_output: oversizedOutput }),
+                    }),
+                    createMockEvent({
+                        properties: JSON.stringify({ $ai_trace_id: 12345, $ai_output: oversizedOutput }),
+                    }),
+                    createMockEvent({ properties: JSON.stringify({ $ai_trace_id: 'é'.repeat(300_000) }) }),
+                ]
+                const sameLengthAscii = createMockEvent({
+                    properties: JSON.stringify({ $ai_trace_id: 'trace-1', $ai_output: 'e'.repeat(300_000) }),
+                })
+
+                for (const event of [...events, sameLengthAscii]) {
+                    await start(event)
+                }
+
+                const calls = (mockClient.workflow.start as jest.Mock).mock.calls
+                const reference = {
+                    uuid: 'event-456',
+                    team_id: 1,
+                    timestamp: '2024-01-01T00:00:00Z',
+                    awaiting_ingestion: true,
+                }
+                ;['trace-1', '12345', null].forEach((traceId, i) => {
+                    expect(calls[i][0]).toBe(workflow)
+                    expect(calls[i][1]).toEqual(expect.objectContaining({ startDelay: EVENT_REFERENCE_START_DELAY }))
+                    expect(calls[i][1].args[0].event_data).toEqual({ ...reference, trace_id: traceId })
+                })
+                expect(calls[3][1].args[0].event_data).toBe(sameLengthAscii)
+                expect(calls[3][1]).not.toHaveProperty('startDelay')
+            }
+        )
+
         it('generates deterministic tagger workflow IDs', async () => {
             const mockEvent = createMockEvent()
 
@@ -280,10 +326,14 @@ describe('TemporalService', () => {
         it('starts the aggregate workflow with the resolved settle config', async () => {
             const mockEvent = createMockEvent()
 
-            await service.startAggregateEvaluationWorkflow('eval-123', mockEvent, 'trace-abc', 'session-1', {
-                strategy: 'inactivity',
-                quiet_period_seconds: 120,
-                max_age_seconds: 600,
+            await service.startAggregateEvaluationWorkflow({
+                evaluationId: 'eval-123',
+                event: mockEvent,
+                target: 'trace',
+                traceId: 'trace-abc',
+                sessionId: 'session-1',
+                aiSessionId: null,
+                settle: { strategy: 'inactivity', quiet_period_seconds: 120, max_age_seconds: 600 },
             })
 
             expect(mockClient.workflow.start).toHaveBeenCalledWith('run-aggregate-evaluation', {
@@ -294,6 +344,8 @@ describe('TemporalService', () => {
                         trace_id: 'trace-abc',
                         distinct_id: mockEvent.distinct_id,
                         session_id: 'session-1',
+                        ai_session_id: null,
+                        target: 'trace',
                         settle: { strategy: 'inactivity', quiet_period_seconds: 120, max_age_seconds: 600 },
                     },
                 ],
@@ -305,90 +357,202 @@ describe('TemporalService', () => {
             })
         })
 
+        it('keys the session workflow on the ai session id, not the product-analytics session id', async () => {
+            const mockEvent = createMockEvent()
+
+            await service.startAggregateEvaluationWorkflow({
+                evaluationId: 'eval-123',
+                event: mockEvent,
+                target: 'session',
+                traceId: 'trace-abc',
+                sessionId: 'ph-session-1',
+                aiSessionId: 'ai-session-9',
+                settle: { strategy: 'inactivity', quiet_period_seconds: 3600, max_age_seconds: 86400 },
+            })
+
+            expect(mockClient.workflow.start).toHaveBeenCalledWith('run-aggregate-evaluation', {
+                args: [
+                    {
+                        evaluation_id: 'eval-123',
+                        team_id: mockEvent.team_id,
+                        trace_id: 'trace-abc',
+                        distinct_id: mockEvent.distinct_id,
+                        session_id: 'ph-session-1',
+                        ai_session_id: 'ai-session-9',
+                        target: 'session',
+                        settle: { strategy: 'inactivity', quiet_period_seconds: 3600, max_age_seconds: 86400 },
+                    },
+                ],
+                taskQueue: 'llm-analytics-evals-task-queue',
+                workflowId: 'llma-session-eval-eval-123-ai-session-9',
+                workflowIdConflictPolicy: 'USE_EXISTING',
+                workflowIdReusePolicy: 'ALLOW_DUPLICATE_FAILED_ONLY',
+                workflowTaskTimeout: '2 minutes',
+            })
+        })
+
         it('returns null when the trace was already evaluated', async () => {
             ;(mockClient.workflow.start as jest.Mock).mockRejectedValueOnce(
                 new WorkflowExecutionAlreadyStartedError('done', 'llma-trace-eval-x', 'run-aggregate-evaluation')
             )
 
-            const result = await service.startAggregateEvaluationWorkflow(
-                'eval-123',
-                createMockEvent(),
-                'trace-abc',
-                null,
-                { strategy: 'fixed_window', window_seconds: 1800 }
-            )
+            const result = await service.startAggregateEvaluationWorkflow({
+                evaluationId: 'eval-123',
+                event: createMockEvent(),
+                target: 'trace',
+                traceId: 'trace-abc',
+                sessionId: null,
+                aiSessionId: null,
+                settle: { strategy: 'fixed_window', window_seconds: 1800 },
+            })
 
             expect(result).toBeNull()
         })
 
-        it('produces the same workflow id for every event of the same trace', async () => {
-            await service.startAggregateEvaluationWorkflow(
-                'eval-123',
-                createMockEvent({ uuid: 'event-1' }),
-                'trace-789',
-                null,
-                { strategy: 'fixed_window', window_seconds: 1800 }
-            )
-            await service.startAggregateEvaluationWorkflow(
-                'eval-123',
-                createMockEvent({ uuid: 'event-2' }),
-                'trace-789',
-                null,
-                { strategy: 'fixed_window', window_seconds: 1800 }
-            )
+        it.each([
+            {
+                name: 'every event of one trace',
+                target: 'trace' as const,
+                units: [
+                    { uuid: 'event-1', traceId: 'trace-789', aiSessionId: null },
+                    { uuid: 'event-2', traceId: 'trace-789', aiSessionId: null },
+                ],
+                workflowId: 'llma-trace-eval-eval-123-trace-789',
+            },
+            {
+                name: 'every trace of one session',
+                target: 'session' as const,
+                units: [
+                    { uuid: 'event-1', traceId: 'trace-1', aiSessionId: 'ai-session-9' },
+                    { uuid: 'event-2', traceId: 'trace-2', aiSessionId: 'ai-session-9' },
+                ],
+                workflowId: 'llma-session-eval-eval-123-ai-session-9',
+            },
+        ])('starts one workflow for $name until the dedup window ends', async ({ target, units, workflowId }) => {
+            // lru-cache reads the clock through the performance object it captured at import. Fake
+            // timers replace that global object, so only a spy on the method moves the cache clock.
+            // The fake timers still have to run, because lru-cache holds each clock reading until a
+            // timer clears it.
+            let now = performance.now()
+            jest.spyOn(performance, 'now').mockImplementation(() => now)
+            jest.useFakeTimers({ doNotFake: ['performance'] })
+            const advanceClock = (ms: number): void => {
+                now += ms
+                jest.advanceTimersByTime(ms)
+            }
+            const starts = () =>
+                units.map(
+                    ({ uuid, traceId, aiSessionId }) =>
+                        () =>
+                            service.startAggregateEvaluationWorkflow({
+                                evaluationId: 'eval-123',
+                                event: createMockEvent({ uuid }),
+                                target,
+                                traceId,
+                                sessionId: null,
+                                aiSessionId,
+                                settle: { strategy: 'fixed_window', window_seconds: 1800 },
+                            })
+                )
+
+            await Promise.all(starts().map((start) => start()))
+            for (const start of starts()) {
+                await start()
+            }
 
             const calls = (mockClient.workflow.start as jest.Mock).mock.calls
-            expect(calls[0][1].workflowId).toEqual(calls[1][1].workflowId)
-            expect(calls[0][1].workflowId).not.toContain('event-1')
+            expect(calls).toHaveLength(1)
+            expect(calls[0][1].workflowId).toEqual(workflowId)
+
+            const [repeatStart] = starts()
+            advanceClock(40_000)
+            await repeatStart()
+            expect(calls).toHaveLength(1)
+
+            advanceClock(40_000)
+            await repeatStart()
+            expect(calls).toHaveLength(2)
+            expect(calls[1][1].workflowId).toEqual(workflowId)
         })
 
-        it('rethrows non-dedup start failures', async () => {
+        it('rethrows non-dedup start failures and lets the next start retry', async () => {
             ;(mockClient.workflow.start as jest.Mock).mockRejectedValue(new Error('Temporal unavailable'))
 
             await expect(
-                service.startAggregateEvaluationWorkflow('eval-123', createMockEvent(), 'trace-789', null, {
-                    strategy: 'fixed_window',
-                    window_seconds: 1800,
+                service.startAggregateEvaluationWorkflow({
+                    evaluationId: 'eval-123',
+                    event: createMockEvent(),
+                    target: 'trace',
+                    traceId: 'trace-789',
+                    sessionId: null,
+                    aiSessionId: null,
+                    settle: { strategy: 'fixed_window', window_seconds: 1800 },
                 })
             ).rejects.toThrow('Temporal unavailable')
+            ;(mockClient.workflow.start as jest.Mock).mockResolvedValue(mockWorkflowHandle)
+            await expect(
+                service.startAggregateEvaluationWorkflow({
+                    evaluationId: 'eval-123',
+                    event: createMockEvent(),
+                    target: 'trace',
+                    traceId: 'trace-789',
+                    sessionId: null,
+                    aiSessionId: null,
+                    settle: { strategy: 'fixed_window', window_seconds: 1800 },
+                })
+            ).resolves.toBe(mockWorkflowHandle)
+            expect(mockClient.workflow.start).toHaveBeenCalledTimes(2)
         })
     })
 
     describe('resolveSettleConfig', () => {
         it.each([
-            [undefined, { strategy: 'fixed_window', window_seconds: 1800 }],
-            [{}, { strategy: 'fixed_window', window_seconds: 1800 }],
-            [{ window_seconds: 60 }, { strategy: 'fixed_window', window_seconds: 60 }],
+            // Trace keeps its fixed_window fallback: rows saved before strategies existed mean that.
+            ['trace' as const, undefined, { strategy: 'fixed_window', window_seconds: 1800 }],
+            ['trace' as const, {}, { strategy: 'fixed_window', window_seconds: 1800 }],
             [
-                { strategy: 'fixed_window' as const, window_seconds: 900 },
-                { strategy: 'fixed_window', window_seconds: 900 },
-            ],
-            [
+                'trace' as const,
                 { strategy: 'inactivity' as const },
                 { strategy: 'inactivity', quiet_period_seconds: 300, max_age_seconds: 7200 },
             ],
+            // Sessions have no legacy rows, so a session config is always complete server-side and
+            // must never pick up the trace fallbacks.
             [
-                { strategy: 'inactivity' as const, quiet_period_seconds: 60, max_age_seconds: 600 },
-                { strategy: 'inactivity', quiet_period_seconds: 60, max_age_seconds: 600 },
+                'session' as const,
+                { strategy: 'inactivity' as const, quiet_period_seconds: 86400, max_age_seconds: 604800 },
+                { strategy: 'inactivity', quiet_period_seconds: 86400, max_age_seconds: 604800 },
             ],
-        ])('resolves %j', (input, expected) => {
-            expect(resolveSettleConfig(input)).toEqual(expected)
+            [
+                'session' as const,
+                { strategy: 'fixed_window' as const, window_seconds: 604800 },
+                { strategy: 'fixed_window', window_seconds: 604800 },
+            ],
+        ])('resolves %s %j', (target, input, expected) => {
+            expect(resolveSettleConfig(input, target)).toEqual(expected)
+        })
+
+        it('does not apply trace fallbacks to an incomplete session config', () => {
+            expect(resolveSettleConfig({ strategy: 'inactivity' }, 'session')).toEqual({
+                strategy: 'inactivity',
+                quiet_period_seconds: 3600,
+                max_age_seconds: 86400,
+            })
         })
     })
 
-    describe('workflowSafeTraceId', () => {
-        it('keeps short trace ids as-is', () => {
-            expect(workflowSafeTraceId('trace-789')).toBe('trace-789')
+    describe('workflowSafeId', () => {
+        it('keeps short ids as-is', () => {
+            expect(workflowSafeId('trace-789')).toBe('trace-789')
         })
 
-        it('hashes oversized trace ids deterministically', () => {
-            const longTraceId = 'x'.repeat(500)
+        it('hashes oversized ids deterministically', () => {
+            const longId = 'x'.repeat(500)
 
-            const safeId = workflowSafeTraceId(longTraceId)
+            const safeId = workflowSafeId(longId)
 
             expect(safeId).toHaveLength(32)
-            expect(safeId).toBe(workflowSafeTraceId(longTraceId))
-            expect(safeId).not.toBe(workflowSafeTraceId(`${longTraceId}y`))
+            expect(safeId).toBe(workflowSafeId(longId))
+            expect(safeId).not.toBe(workflowSafeId(`${longId}y`))
         })
     })
 })

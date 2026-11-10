@@ -12,8 +12,10 @@ import {
     HogFunctionType,
 } from '../types'
 import { convertToHogFunctionInvocationGlobals } from '../utils'
-import { createInvocation } from '../utils/invocation-utils'
-import { HogExecutorService } from './hog-executor.service'
+import { dualWrite } from '../utils/dual-store'
+import { HogConfigurationError } from '../utils/hog-error-classification'
+import { createInputsFailureResult, createInvocation } from '../utils/invocation-utils'
+import { HogExecutorAsyncService } from './hog-executor-async.service'
 import { InvocationResultsService } from './invocation-results.service'
 import { GroupsManagerService } from './managers/groups-manager.service'
 import { HogFunctionManagerService } from './managers/hog-function-manager.service'
@@ -44,9 +46,10 @@ export class BatchExportHogFunctionService {
         private teamManager: TeamManager,
         private groupsManager: GroupsManagerService,
         private hogFunctionManager: HogFunctionManagerService,
-        private hogExecutor: HogExecutorService,
+        private hogExecutorAsync: HogExecutorAsyncService,
         private hogWatcher: HogWatcherService,
-        private invocationResultsService: InvocationResultsService
+        private invocationResultsService: InvocationResultsService,
+        private hogWatcherMirror: HogWatcherService
     ) {
         this.promiseScheduler = new PromiseScheduler()
     }
@@ -84,11 +87,23 @@ export class BatchExportHogFunctionService {
         const globals = this.buildRequestGlobals(clickhouse_event as RawClickHouseEvent, hogFunction, team)
         await this.groupsManager.addGroupsToGlobals(globals)
 
-        const globalsWithInputs = await this.hogExecutor.buildInputsWithGlobals(hogFunction, globals)
-        const invocation = createInvocation(globalsWithInputs, hogFunction)
-        invocation.id = invocationId.toString()
+        let result: CyclotronJobInvocationResult<CyclotronJobInvocationHogFunction>
+        try {
+            const globalsWithInputs = await this.hogExecutorAsync.hogExecutor.buildInputsWithGlobals(
+                hogFunction,
+                globals
+            )
+            const invocation = createInvocation(globalsWithInputs, hogFunction)
+            invocation.id = invocationId.toString()
 
-        const result = await this.hogExecutor.executeWithAsyncFunctions(invocation, { maxFetchRetries: 0 }) // Retries are handled by the batch export service
+            result = await this.hogExecutorAsync.executeWithAsyncFunctions(invocation, { maxFetchRetries: 0 }) // Retries are handled by the batch export service
+        } catch (error) {
+            // A 500 makes the batch export retry forever, so it never reaches its error threshold.
+            if (!(error instanceof HogConfigurationError)) {
+                throw error
+            }
+            result = createInputsFailureResult(hogFunction, globals, error, invocationId.toString())
+        }
 
         // TODO: Follow up - we might want to more accuratelt link an execution to the fact it came from a batch export
         // We have the parent_id but that overrides the function id which is not always what we want
@@ -97,7 +112,11 @@ export class BatchExportHogFunctionService {
         void this.promiseScheduler.schedule(
             Promise.all([
                 this.invocationResultsService.queueInvocationResultsAndFlush([result]),
-                this.hogWatcher.observeResultsBuffered(result),
+                dualWrite(
+                    'hog-watcher.observeResultsBuffered',
+                    () => this.hogWatcher.observeResultsBuffered(result),
+                    () => this.hogWatcherMirror.observeResultsBuffered(result)
+                ),
             ])
         )
 
@@ -115,6 +134,7 @@ export class BatchExportHogFunctionService {
         return {
             ...globals,
             source: {
+                id: hogFunction.id,
                 name: hogFunction.name ?? `Hog function: ${hogFunction.id}`,
                 url: `${projectUrl}/functions/${hogFunction.id}`,
             },

@@ -1,12 +1,12 @@
 """Dataclasses for evaluation report content, metrics, and citations.
 
 The v2 schema splits the report into:
-- `evaluation_target`: the evaluated unit (`generation` or `trace`)
+- `evaluation_target`: the evaluated unit (`generation`, `trace`, or `session`)
 - `metrics`: structured numeric data computed mechanically from ClickHouse,
   the agent cannot fabricate these
 - `title`: the agent's punchline headline (required, one line)
 - `sections`: 1-6 agent-chosen titled markdown sections
-- `citations`: structured target references (generation_id + trace_id + reason)
+- `citations`: structured target references (generation_id + trace_id + session_id + reason)
 
 This separation lets downstream consumers (signals, inbox, coding agents) query
 `metrics` and `citations` without parsing prose, and lets the agent focus on
@@ -14,16 +14,29 @@ analysis rather than number formatting.
 """
 
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Literal, overload
 
-from posthog.temporal.ai_observability.eval_reports.output_types import get_outcome_definition
 from posthog.temporal.ai_observability.eval_reports.targets import GENERATION_TARGET, resolve_evaluation_target
+
+from products.ai_observability.backend.models.evaluation_outcomes import get_outcome_definition
 
 # Hard cap on the number of agent-chosen sections. Prevents section sprawl and
 # keeps reports scannable. The agent is also instructed to lean lean — quality
 # over quantity, merge related findings rather than fragmenting.
 MAX_REPORT_SECTIONS = 6
 MIN_REPORT_SECTIONS = 1
+
+
+class EvalReportGenerationStatus(StrEnum):
+    COMPLETED = "completed"
+    METRICS_UNAVAILABLE = "metrics_unavailable"
+
+
+METRICS_UNAVAILABLE_MESSAGE = (
+    "Metrics could not be calculated for this period because evaluation data was temporarily unavailable. "
+    "This does not mean that no evaluations ran."
+)
 
 
 def normalize_result_counts(output_type: str, counts: dict[str, int] | None) -> dict[str, int]:
@@ -46,18 +59,18 @@ def calculate_result_rates(
 
 
 @overload
-def calculate_boolean_pass_rate(counts: dict[str, int], *, empty_as_none: Literal[False] = False) -> float: ...
+def calculate_pass_rate(counts: dict[str, int], *, empty_as_none: Literal[False] = False) -> float: ...
 
 
 @overload
-def calculate_boolean_pass_rate(counts: dict[str, int], *, empty_as_none: Literal[True]) -> float | None: ...
+def calculate_pass_rate(counts: dict[str, int], *, empty_as_none: Literal[True]) -> float | None: ...
 
 
 @overload
-def calculate_boolean_pass_rate(counts: dict[str, int], *, empty_as_none: bool) -> float | None: ...
+def calculate_pass_rate(counts: dict[str, int], *, empty_as_none: bool) -> float | None: ...
 
 
-def calculate_boolean_pass_rate(counts: dict[str, int], *, empty_as_none: bool = False) -> float | None:
+def calculate_pass_rate(counts: dict[str, int], *, empty_as_none: bool = False) -> float | None:
     pass_count = counts.get("pass", 0)
     applicable_count = pass_count + counts.get("fail", 0)
     if applicable_count == 0:
@@ -69,21 +82,33 @@ def calculate_boolean_pass_rate(counts: dict[str, int], *, empty_as_none: bool =
 class Citation:
     """An inspected example cited by the agent to ground a specific finding.
 
-    Generation reports store both IDs so viewers can link to the generation
-    without a runtime lookup. Trace reports leave `generation_id` empty and use
-    `trace_id` as the reference. `reason` is a short free-form category for why
-    the example is interesting.
+    Every citation carries the ID of the unit that was evaluated, plus whatever
+    narrower IDs the agent verified along the way, so a viewer can link straight
+    to it without a runtime lookup. Generation reports fill `generation_id` and
+    `trace_id`; trace reports fill `trace_id`; session reports fill `session_id`
+    and optionally the `trace_id` the agent read inside it. `reason` is a short
+    free-form category for why the example is interesting.
     """
 
-    generation_id: str
-    trace_id: str
-    reason: str
+    generation_id: str = ""
+    trace_id: str = ""
+    reason: str = ""
+    session_id: str = ""
+
+    def cited_id(self) -> str:
+        """The ID of the evaluated unit — what the report text refers to and links to.
+
+        Only a session citation carries `session_id` and only a generation citation carries
+        `generation_id`, so this resolves to the right ID without knowing the target.
+        """
+        return self.session_id or self.generation_id or self.trace_id
 
     def to_dict(self) -> dict:
         return {
             "generation_id": self.generation_id,
             "trace_id": self.trace_id,
             "reason": self.reason,
+            "session_id": self.session_id,
         }
 
     @staticmethod
@@ -92,7 +117,17 @@ class Citation:
             generation_id=data.get("generation_id", ""),
             trace_id=data.get("trace_id", ""),
             reason=data.get("reason", ""),
+            session_id=data.get("session_id", ""),
         )
+
+
+def citation_wrappers(cited_id: str) -> tuple[str, ...]:
+    """Every inline wrapper the delivery renderer turns into a citation link.
+
+    The renderer and the dead-identifier guard must agree on this list. A guard that
+    accepts fewer wrappers rejects prose the renderer would have linked correctly.
+    """
+    return (f"`` `{cited_id}` ``", f"`{cited_id}`", f"<{cited_id}>")
 
 
 @dataclass
@@ -113,7 +148,7 @@ class ReportSection:
         )
 
 
-@dataclass
+@dataclass(frozen=False)
 class EvalReportMetrics:
     """Structured metrics computed mechanically from ClickHouse.
 
@@ -123,6 +158,7 @@ class EvalReportMetrics:
     """
 
     output_type: str = "boolean"
+    output_config: dict = field(default_factory=dict)
     total_runs: int = 0
     result_counts: dict[str, int] = field(default_factory=dict)
     result_rates: dict[str, float] = field(default_factory=dict)
@@ -131,7 +167,7 @@ class EvalReportMetrics:
     previous_total_runs: int | None = None
     previous_result_counts: dict[str, int] | None = None
     previous_result_rates: dict[str, float] | None = None
-    pass_rate: float = field(init=False, default=0.0)
+    pass_rate: float | None = field(init=False, default=0.0)
     previous_pass_rate: float | None = None
 
     def __post_init__(self) -> None:
@@ -167,10 +203,12 @@ class EvalReportMetrics:
                 if outcome in definition.outcomes
             }
 
-        if self.output_type == "boolean":
-            self.pass_rate = calculate_boolean_pass_rate(self.result_counts)
+        if self.output_type in ("boolean", "numeric", "categorical"):
+            self.pass_rate = calculate_pass_rate(
+                self.result_counts, empty_as_none=self.output_type in ("numeric", "categorical")
+            )
             if self.previous_result_counts is not None:
-                self.previous_pass_rate = calculate_boolean_pass_rate(self.previous_result_counts, empty_as_none=True)
+                self.previous_pass_rate = calculate_pass_rate(self.previous_result_counts, empty_as_none=True)
         else:
             self.previous_pass_rate = None
 
@@ -186,13 +224,15 @@ class EvalReportMetrics:
             "previous_result_counts": self.previous_result_counts,
             "previous_result_rates": self.previous_result_rates,
         }
-        if self.output_type == "boolean":
+        if self.output_type in ("boolean", "numeric", "categorical"):
             metrics.update(
                 {
                     "pass_rate": self.pass_rate,
                     "previous_pass_rate": self.previous_pass_rate,
                 }
             )
+        if self.output_type in ("numeric", "categorical"):
+            metrics["output_config"] = self.output_config
         return metrics
 
     @staticmethod
@@ -208,6 +248,7 @@ class EvalReportMetrics:
 
         metrics = EvalReportMetrics(
             output_type=output_type,
+            output_config=dict(data.get("output_config") or {}),
             total_runs=data.get("total_runs", 0),
             result_counts=result_counts,
             result_rates=dict(data.get("result_rates") or {}),
@@ -222,9 +263,9 @@ class EvalReportMetrics:
             ),
             previous_pass_rate=data.get("previous_pass_rate"),
         )
-        if metrics.output_type == "boolean" and data.get("pass_rate") is not None:
+        if metrics.output_type in ("boolean", "numeric", "categorical") and data.get("pass_rate") is not None:
             metrics.pass_rate = float(data["pass_rate"])
-        if metrics.output_type == "boolean" and data.get("previous_pass_rate") is not None:
+        if metrics.output_type in ("boolean", "numeric", "categorical") and data.get("previous_pass_rate") is not None:
             metrics.previous_pass_rate = float(data["previous_pass_rate"])
         return metrics
 
@@ -233,6 +274,7 @@ _LEGACY_BOOLEAN_COUNT_FIELDS = frozenset({"pass_count", "fail_count", "na_count"
 
 
 _KNOWN_METRIC_FIELDS = {
+    "output_config",
     "output_type",
     "total_runs",
     "result_counts",
@@ -278,7 +320,14 @@ def normalize_report_content_payload(data: dict) -> dict:
     """Upgrade a stored report at the read/write boundary without mutating it."""
     normalized = dict(data)
     metrics = data.get("metrics")
-    if isinstance(metrics, dict):
+    try:
+        status = EvalReportGenerationStatus(data.get("generation_status", ""))
+    except ValueError:
+        status = EvalReportGenerationStatus.COMPLETED
+    normalized["generation_status"] = status.value
+    if status == EvalReportGenerationStatus.METRICS_UNAVAILABLE:
+        normalized["metrics"] = None
+    elif isinstance(metrics, dict):
         normalized["metrics"] = normalize_metrics_payload(metrics)
     return normalized
 
@@ -291,10 +340,13 @@ class EvalReportContent:
     title: str = ""
     sections: list[ReportSection] = field(default_factory=list)
     citations: list[Citation] = field(default_factory=list)
-    metrics: EvalReportMetrics = field(default_factory=EvalReportMetrics)
+    metrics: EvalReportMetrics | None = field(default_factory=EvalReportMetrics)
+    generation_status: EvalReportGenerationStatus = EvalReportGenerationStatus.COMPLETED
 
     def __post_init__(self) -> None:
         self.evaluation_target = resolve_evaluation_target(self.evaluation_target)
+        if self.generation_status == EvalReportGenerationStatus.METRICS_UNAVAILABLE:
+            self.metrics = None
 
     def to_dict(self) -> dict:
         return {
@@ -302,15 +354,24 @@ class EvalReportContent:
             "title": self.title,
             "sections": [s.to_dict() for s in self.sections],
             "citations": [c.to_dict() for c in self.citations],
-            "metrics": self.metrics.to_dict(),
+            "metrics": self.metrics.to_dict() if self.metrics is not None else None,
+            "generation_status": self.generation_status.value,
         }
 
     @staticmethod
     def from_dict(data: dict) -> "EvalReportContent":
+        normalized = normalize_report_content_payload(data)
+        generation_status = EvalReportGenerationStatus(normalized["generation_status"])
+        metrics = normalized.get("metrics")
         return EvalReportContent(
-            evaluation_target=data.get("evaluation_target", GENERATION_TARGET),
-            title=data.get("title", ""),
-            sections=[ReportSection.from_dict(s) for s in data.get("sections", [])],
-            citations=[Citation.from_dict(c) for c in data.get("citations", [])],
-            metrics=EvalReportMetrics.from_dict(data.get("metrics", {})),
+            evaluation_target=normalized.get("evaluation_target", GENERATION_TARGET),
+            title=normalized.get("title", ""),
+            sections=[ReportSection.from_dict(s) for s in normalized.get("sections", [])],
+            citations=[Citation.from_dict(c) for c in normalized.get("citations", [])],
+            metrics=(
+                None
+                if generation_status == EvalReportGenerationStatus.METRICS_UNAVAILABLE
+                else EvalReportMetrics.from_dict(metrics if isinstance(metrics, dict) else {})
+            ),
+            generation_status=generation_status,
         )

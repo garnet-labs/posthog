@@ -1,17 +1,33 @@
 import uuid
 from datetime import timedelta
+from urllib.parse import urlencode
+
+from unittest.mock import patch
 
 from django.core.cache import cache
 from django.utils import timezone
 
 from parameterized import parameterized
 
-from posthog.models.oauth import OAuthAccessToken, OAuthApplication
+from posthog.api.id_jag import JWT_BEARER_GRANT_TYPE
+from posthog.api.oauth.client_assertion import PRIVATE_KEY_REQUIRED_MESSAGE
+from posthog.constants import AvailableFeature
+from posthog.models.oauth import OAuthAccessToken, OAuthApplication, OAuthRefreshToken
+from posthog.models.organization import OrganizationMembership
+from posthog.models.team.team import Team
 
-from ee.api.agentic_provisioning import AUTH_CODE_CACHE_PREFIX
-from ee.api.agentic_provisioning.test.base import TEST_PARTNER_SCOPES, ProvisioningTestBase
+from products.access_control.backend.models.access_control import AccessControl
+
+from ee.api.agentic_provisioning.constants import AUTH_CODE_CACHE_PREFIX
+from ee.api.agentic_provisioning.test.base import (
+    TEST_PARTNER_CLIENT_SECRET,
+    TEST_PARTNER_SCOPES,
+    ProvisioningTestBase,
+    provisioning_config,
+)
 
 TOKEN_URL = "/api/agentic/oauth/token"
+OAUTH_TOKEN_URL = "/oauth/token/"
 
 
 class TestOAuthTokenExchange(ProvisioningTestBase):
@@ -30,14 +46,53 @@ class TestOAuthTokenExchange(ProvisioningTestBase):
         cache.set(key, data, timeout=300)
         return code, verifier
 
-    def _exchange_code(self, code: str, verifier: str):
-        return self._post_api(TOKEN_URL, {"grant_type": "authorization_code", "code": code, "code_verifier": verifier})
+    def _exchange_code(self, code: str, verifier: str, partner: OAuthApplication | None = None):
+        return self._post_api(
+            TOKEN_URL,
+            {
+                "grant_type": "authorization_code",
+                "code": code,
+                "code_verifier": verifier,
+                **self._client_auth(partner),
+            },
+        )
 
-    def _refresh(self, refresh_token: str):
-        return self._post_api(TOKEN_URL, {"grant_type": "refresh_token", "refresh_token": refresh_token})
+    def _refresh(self, refresh_token: str, partner: OAuthApplication | None = None):
+        return self._post_api(
+            TOKEN_URL,
+            {"grant_type": "refresh_token", "refresh_token": refresh_token, **self._client_auth(partner)},
+        )
 
     def _stamp_session_revoke(self, when=None) -> None:
         OAuthApplication.objects.filter(id=self.partner.id).update(sessions_revoked_at=when or timezone.now())
+
+    def _public_partner(self, **provisioning: bool) -> OAuthApplication:
+        return OAuthApplication.objects.create(
+            client_id="pkce-token-partner",
+            name="PKCE Token Partner",
+            client_secret="",
+            client_type=OAuthApplication.CLIENT_PUBLIC,
+            authorization_grant_type=OAuthApplication.GRANT_AUTHORIZATION_CODE,
+            redirect_uris="https://partner.example.com/callback",
+            algorithm="RS256",
+            scopes=TEST_PARTNER_SCOPES,
+            is_provisioning_partner=True,
+            _provisioning_config=provisioning_config(active=True, **provisioning),
+        )
+
+    def _client_secret_partner(self, **provisioning: bool) -> OAuthApplication:
+        return OAuthApplication.objects.create(
+            client_id="client-secret-token-partner",
+            name="Client Secret Token Partner",
+            client_secret=TEST_PARTNER_CLIENT_SECRET,
+            client_type=OAuthApplication.CLIENT_CONFIDENTIAL,
+            authorization_grant_type=OAuthApplication.GRANT_AUTHORIZATION_CODE,
+            redirect_uris="https://partner.example.com/callback",
+            algorithm="RS256",
+            scopes=TEST_PARTNER_SCOPES,
+            is_provisioning_partner=True,
+            _provisioning_config=provisioning_config(active=True, **provisioning),
+        )
 
     def test_valid_code_exchange_returns_tokens(self):
         res = self._request_bearer_token()
@@ -54,6 +109,31 @@ class TestOAuthTokenExchange(ProvisioningTestBase):
         assert "id" in team_entry
         assert "name" in team_entry
         assert "organization_id" in team_entry
+
+    def test_available_teams_exclude_acl_restricted_teams(self):
+        self.organization.available_product_features = [
+            {"key": AvailableFeature.ACCESS_CONTROL, "name": AvailableFeature.ACCESS_CONTROL},
+        ]
+        self.organization.save()
+        self.organization_membership.level = OrganizationMembership.Level.MEMBER
+        self.organization_membership.save()
+
+        restricted_team = Team.objects.create_with_data(
+            initiating_user=self.user, organization=self.organization, name="Restricted team"
+        )
+        AccessControl.objects.create(
+            team=restricted_team,
+            access_level="none",
+            resource="project",
+            resource_id=str(restricted_team.id),
+        )
+
+        data = self._request_bearer_token().json()
+        listed = data["account"]["available_teams"]
+
+        assert self.team.id in [team["id"] for team in listed]
+        assert restricted_team.id not in [team["id"] for team in listed]
+        assert restricted_team.name not in [team["name"] for team in listed]
 
     def test_code_is_single_use(self):
         code, verifier = self._mint_auth_code()
@@ -91,6 +171,149 @@ class TestOAuthTokenExchange(ProvisioningTestBase):
         assert res.status_code == 401
         assert res.json()["error_description"] == "code_verifier is required for PKCE"
 
+    @parameterized.expand(
+        [
+            ("missing_credentials", None),
+            ("wrong_secret", "not-the-real-secret"),
+        ]
+    )
+    def test_confidential_partner_without_valid_secret_cannot_exchange_code(self, _name, secret):
+        partner = self._client_secret_partner(can_create_accounts=False)
+        code, verifier = self._mint_auth_code(partner=partner)
+        body = {"grant_type": "authorization_code", "code": code, "code_verifier": verifier}
+        if secret is not None:
+            body.update(self._client_auth(partner, secret=secret))
+
+        res = self._post_api(TOKEN_URL, body)
+
+        assert res.status_code == 401
+        assert res.json()["error"] == "invalid_client"
+        # Client authentication runs before the code is consumed, so a rejected attempt must
+        # leave the caller able to retry with the right secret.
+        assert self._exchange_code(code, verifier, partner).status_code == 200
+
+    def test_confidential_partner_without_valid_secret_cannot_refresh(self):
+        partner = self._client_secret_partner(can_create_accounts=False)
+        refresh_token = self._request_bearer_token(partner=partner).json()["refresh_token"]
+
+        res = self._post_api(
+            TOKEN_URL,
+            {
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+                **self._client_auth(partner, secret="not-the-real-secret"),
+            },
+        )
+
+        assert res.status_code == 401
+        assert res.json()["error"] == "invalid_client"
+        # The rejected refresh must not have revoked the caller's only token.
+        assert self._refresh(refresh_token, partner).status_code == 200
+
+    def test_pkce_partner_exchanges_code_without_a_secret(self):
+        # PKCE partners are public clients: code_verifier is their only client authentication,
+        # so requiring a secret from confidential partners must not reach them.
+        code, verifier = self._mint_auth_code(partner=self._public_partner(can_create_accounts=False))
+
+        res = self._post_api(TOKEN_URL, {"grant_type": "authorization_code", "code": code, "code_verifier": verifier})
+
+        assert res.status_code == 200
+        assert res.json()["access_token"].startswith("pha_")
+
+    @parameterized.expand(
+        [
+            ("public_code_exchange", True, {}, "authorization_code", TOKEN_URL, 401),
+            ("public_refresh", True, {}, "refresh_token", TOKEN_URL, 401),
+            ("client_secret_refresh", False, {}, "refresh_token", TOKEN_URL, 401),
+            (
+                "paying_public_refresh",
+                True,
+                {"can_create_accounts": False, "pays_for_customers": True},
+                "refresh_token",
+                TOKEN_URL,
+                401,
+            ),
+            ("public_refresh_at_oauth_token", True, {}, "refresh_token", OAUTH_TOKEN_URL, 401),
+            ("client_secret_refresh_at_oauth_token", False, {}, "refresh_token", OAUTH_TOKEN_URL, 401),
+            ("exempt_public_refresh", True, {"can_create_accounts": False}, "refresh_token", TOKEN_URL, 200),
+            (
+                "exempt_public_refresh_at_oauth_token",
+                True,
+                {"can_create_accounts": False},
+                "refresh_token",
+                OAUTH_TOKEN_URL,
+                200,
+            ),
+            # The Wizard's production shape: a client secret, and no account creation.
+            ("exempt_client_secret_refresh", False, {"can_create_accounts": False}, "refresh_token", TOKEN_URL, 200),
+            (
+                "exempt_client_secret_refresh_at_oauth_token",
+                False,
+                {"can_create_accounts": False},
+                "refresh_token",
+                OAUTH_TOKEN_URL,
+                200,
+            ),
+        ]
+    )
+    def test_unsigned_token_request(
+        self,
+        _name: str,
+        public: bool,
+        capabilities: dict[str, bool],
+        grant_type: str,
+        url: str,
+        expected_status: int,
+    ) -> None:
+        # Starts exempt so it can hold a refresh token, as a partner granted a capability later would.
+        exempt = {"can_create_accounts": False}
+        partner = self._public_partner(**exempt) if public else self._client_secret_partner(**exempt)
+        credentials = self._client_auth(partner) if not public else {"client_id": partner.client_id}
+        if grant_type == "authorization_code":
+            code, verifier = self._mint_auth_code(partner=partner)
+            body = {"grant_type": grant_type, "code": code, "code_verifier": verifier, **credentials}
+        else:
+            refresh_token = self._request_bearer_token(partner=partner).json()["refresh_token"]
+            body = {"grant_type": grant_type, "refresh_token": refresh_token, **credentials}
+        partner.update_provisioning(**{"can_create_accounts": True, **capabilities})
+
+        with patch("posthoganalytics.capture") as capture:
+            res = self._post_api(url, body)
+
+        assert res.status_code == expected_status, res.json()
+        tags = {call.kwargs.get("properties", {}).get("provisioning_signing") for call in capture.call_args_list}
+        assert ("refused" if expected_status == 401 else "unsigned_exempt") in tags
+        if expected_status == 401:
+            assert res.json()["error"] == "invalid_client"
+            assert res.json()["error_description"] == PRIVATE_KEY_REQUIRED_MESSAGE
+
+    @parameterized.expand([("public", True), ("client_secret", False)])
+    def test_refused_partner_can_still_revoke_its_tokens(self, _name: str, public: bool) -> None:
+        exempt = {"can_create_accounts": False}
+        partner = self._public_partner(**exempt) if public else self._client_secret_partner(**exempt)
+        credentials = {"client_id": partner.client_id} if public else self._client_auth(partner)
+        refresh_token = self._request_bearer_token(partner=partner).json()["refresh_token"]
+        partner.update_provisioning(can_create_accounts=True)
+
+        res = self._post_api(
+            "/oauth/revoke/",
+            urlencode({"token": refresh_token, "token_type_hint": "refresh_token", **credentials}).encode(),
+            content_type="application/x-www-form-urlencoded",
+        )
+
+        assert res.status_code == 200, res.content
+        assert not OAuthRefreshToken.objects.filter(token=refresh_token, revoked__isnull=True).exists()
+
+    def test_refused_partner_gets_a_401_from_the_jwt_bearer_grant(self):
+        partner = self._client_secret_partner()
+        res = self._post_api(
+            OAUTH_TOKEN_URL,
+            {"grant_type": JWT_BEARER_GRANT_TYPE, "assertion": "not-an-id-jag", **self._client_auth(partner)},
+        )
+
+        assert res.status_code == 401
+        assert res.json()["error"] == "invalid_client"
+
     def test_pkce_mismatch_returns_400_without_consuming_code(self):
         code, verifier = self._mint_auth_code()
         res = self._exchange_code(code, "wrong_verifier_" + "a" * 32)
@@ -116,9 +339,8 @@ class TestOAuthTokenExchange(ProvisioningTestBase):
         assert res.json()["error"] == "invalid_scope"
 
     def test_omitted_request_scopes_resolve_to_app_ceiling(self):
-        partner_token = self._get_bearer_token()
         verifier, challenge = self._pkce_pair()
-        res = self._post_with_bearer(
+        res = self._post_as_partner(
             "/api/agentic/provisioning/account_requests",
             data={
                 "id": "req_scopeless",
@@ -126,7 +348,6 @@ class TestOAuthTokenExchange(ProvisioningTestBase):
                 "code_challenge": challenge,
                 "code_challenge_method": "S256",
             },
-            token=partner_token,
         )
         assert res.status_code == 200
         code = res.json()["oauth"]["code"]
@@ -196,6 +417,16 @@ class TestOAuthTokenExchange(ProvisioningTestBase):
         assert body["error"] == "invalid_grant"
         assert "revoked" in body["error_description"]
         assert OAuthAccessToken.objects.count() == tokens_before
+
+    def test_refresh_rejected_when_user_deactivated(self):
+        first = self._request_bearer_token().json()
+
+        self.user.is_active = False
+        self.user.save()
+
+        res = self._refresh(first["refresh_token"])
+        assert res.status_code == 400
+        assert res.json()["error"] == "invalid_grant"
 
     def test_refresh_allowed_when_token_postdates_session_revoke(self):
         self._stamp_session_revoke(timezone.now() - timedelta(hours=1))

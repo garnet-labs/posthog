@@ -1,7 +1,7 @@
 import { act, fireEvent } from '@testing-library/react'
 
 import { clientForIndex } from './jsdom'
-import { waitForHogChartTooltip } from './tooltip'
+import { waitForChartTooltip } from './tooltip'
 
 /** Fire a mouseMove on a chart wrapper element at the pixel position
  *  corresponding to the given label index. */
@@ -23,13 +23,18 @@ export async function hoverUntilTooltip(
     totalLabels: number,
     timeout = 3000
 ): Promise<HTMLElement> {
-    return waitForHogChartTooltip(timeout, () => hoverAtIndex(wrapper, index, totalLabels))
+    return waitForChartTooltip(timeout, () => hoverAtIndex(wrapper, index, totalLabels))
 }
 
-export async function clickAtIndex(wrapper: HTMLElement, index: number, totalLabels: number): Promise<void> {
+export async function clickAtIndex(
+    wrapper: HTMLElement,
+    index: number,
+    totalLabels: number,
+    timeout?: number
+): Promise<void> {
     // Re-hover until the tooltip flushes — onClick reads tooltipCtx synchronously to decide
     // between pinning and onPointClick, and a stale null takes the wrong branch.
-    await hoverUntilTooltip(wrapper, index, totalLabels)
+    await hoverUntilTooltip(wrapper, index, totalLabels, timeout)
     fireEvent.click(wrapper)
 }
 

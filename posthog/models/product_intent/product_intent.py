@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any, Optional
 
 from django.core.cache import cache
@@ -22,12 +22,10 @@ from posthog.utils import get_instance_realm, get_safe_cache, safe_cache_delete,
 
 from products.dashboards.backend.models.dashboard import Dashboard
 from products.event_definitions.backend.models.event_definition import EventDefinition
-from products.experiments.backend.models.experiment import Experiment
 from products.feature_flags.backend.models.feature_flag import FeatureFlag
-from products.product_analytics.backend.models.insight import Insight
+from products.product_analytics.backend.facade.models import Insight
 from products.product_tours.backend.models import ProductTour
 from products.surveys.backend.models import Survey
-from products.workflows.backend.models.hog_flow.hog_flow import HogFlow
 
 logger = structlog.get_logger(__name__)
 
@@ -57,48 +55,6 @@ Note: single-event activation metrics that can also happen at the same time the 
 is created won't have tracking events sent for them. Unless you want to solve this,
 make activation metrics require multiple things to happen.
 """
-
-# Activation threshold for the managed warehouse: a warehouse that is provisioned but never
-# queried still emits small idle compute heartbeats, so we require meaningful compute before
-# counting the team as activated. Provisional value drawn from PostHog's own dogfood warehouse
-# (the only one with data today); retune once real customer warehouses report usage.
-MANAGED_WAREHOUSE_ACTIVATION_CPU_SECONDS = 100_000
-MANAGED_WAREHOUSE_ACTIVATION_WINDOW_DAYS = 30
-# Throttle the (ClickHouse-backed) managed warehouse activation check to at most once per hour
-# per team, since register() runs it synchronously on every intent PATCH. Activation is sticky
-# and also re-evaluated by the daily calculate_product_activation task, so an hour of latency
-# on first activation is harmless.
-MANAGED_WAREHOUSE_ACTIVATION_CHECK_TTL_SECONDS = 60 * 60
-
-
-def get_managed_warehouse_compute_usage(team_id: int, start: datetime, end: datetime) -> float:
-    # Sums cpu_seconds from the `managed warehouse compute usage` heartbeat (emitted by the
-    # external duckgres service into the owning project) over the [start, end) window.
-    #
-    # Trust note: this is a public capture event and carries no non-public provenance signal
-    # today (its `token` property is the public project token), so a customer could forge it to
-    # inflate their own activation metric. Blast radius is limited to that team's activation
-    # state — no cross-tenant, billing, or security impact. Hardening path: have duckgres attach
-    # an internal shared secret and validate it here, mirroring the DECIDE_BILLING_ANALYTICS_TOKEN
-    # check in posthog/tasks/usage_report.py (a duckgres-side change, out of scope for this PR).
-    #
-    # Local import: this module loads during django.setup() (via posthog.models), so keep the
-    # ClickHouse client off that path.
-    from posthog.clickhouse.client import sync_execute  # noqa: PLC0415
-
-    rows = sync_execute(
-        """
-        SELECT sum(JSONExtractFloat(properties, 'cpu_seconds'))
-        FROM events
-        WHERE team_id = %(team_id)s
-          AND event = 'managed warehouse compute usage'
-          AND timestamp >= %(start)s
-          AND timestamp < %(end)s
-        """,
-        {"team_id": team_id, "start": start, "end": end},
-        team_id=team_id,
-    )
-    return (rows and rows[0][0]) or 0.0
 
 
 class ProductIntentSerializer(serializers.Serializer):
@@ -155,10 +111,11 @@ class ProductIntent(UUIDTModel, RootTeamMixin):
         return False
 
     def has_activated_experiments(self) -> bool:
-        # the team has any launched experiments
-        return Experiment.objects.filter(
-            team=self.team, status__in=[Experiment.Status.RUNNING, Experiment.Status.STOPPED]
-        ).exists()
+        # Local import: this module loads during django.setup() (via posthog.models), and the
+        # experiments facade API imports posthog.schema, which must stay off the startup path.
+        from products.experiments.backend.facade import api as experiments  # noqa: PLC0415
+
+        return experiments.team_has_launched_experiments(self.team_id)
 
     def has_activated_error_tracking(self) -> bool:
         # the team has resolved any issues
@@ -172,8 +129,11 @@ class ProductIntent(UUIDTModel, RootTeamMixin):
         return Survey.objects.filter(team__project_id=self.team.project_id, start_date__isnull=False).exists()
 
     def has_activated_feature_flags(self) -> bool:
+        # Local import: see has_activated_experiments.
+        from products.experiments.backend.facade import api as experiments  # noqa: PLC0415
+
         # Get feature flags that have at least one filter group, excluding ones used by experiments, surveys, and product tours
-        experiment_flags = Experiment.objects.filter(team=self.team).values_list("feature_flag_id", flat=True)
+        experiment_flags = experiments.experiment_flag_ids([self.team_id], include_deleted=True)
         survey_flags = Survey.objects.filter(team=self.team).values_list("targeting_flag_id", flat=True)
         product_tour_flags = ProductTour.all_objects.filter(team=self.team).values_list(
             "internal_targeting_flag_id", flat=True
@@ -270,41 +230,50 @@ class ProductIntent(UUIDTModel, RootTeamMixin):
         contexts = intent.contexts or {}
         return contexts.get("mcp_analytics_viewed", 0) >= 1
 
-    def has_activated_workflows(self) -> bool:
-        # At least one workflow needs to be active (not just drafted)
-        return HogFlow.objects.filter(team=self.team, status=HogFlow.State.ACTIVE).exists()
+    def has_activated_metrics(self) -> bool:
+        # Two independent paths activate metrics:
+        #
+        # 1. Engagement: the user has charted or queried metrics. Charting/querying is only
+        #    possible once metrics have reached the team (a metric name has to exist to pick),
+        #    so an engagement signal is itself proof of ingestion.
+        #
+        # 2. Ingestion: the team has metric data flowing. Sending data does not require the
+        #    viewer, so a team can reach the product outcome without ever firing a UI event.
+        #
+        # We deliberately do NOT gate on `metrics_first_ingested`: that context fires only
+        # when the frontend observes a no-metrics -> has-metrics flip in-session, so a team
+        # that already had metrics before its first check never records it and could never
+        # activate on later query intents.
+        intent = ProductIntent.objects.filter(
+            team=self.team,
+            product_type="metrics",
+        ).first()
 
-    def has_activated_managed_warehouse(self) -> bool:
-        # Provisioning is the intent; genuine usage is compute crossing the threshold within
-        # 30 days of the intent (mirrors has_activated_data_warehouse's window).
-        window_end = self.created_at + timedelta(days=MANAGED_WAREHOUSE_ACTIVATION_WINDOW_DAYS)
-
-        # Unlike the other (Postgres-backed) checks, this one reads ClickHouse. Gate the query
-        # behind cheap Postgres checks so it only fires when it could change the answer:
-        #   1. once the 30-day window has closed, activation is permanently impossible, and
-        #   2. a team that never emitted the compute-usage heartbeat cannot have any usage.
-        if datetime.now(tz=UTC) > window_end:
+        if not intent:
             return False
-        if not EventDefinition.objects.filter(team=self.team, name="managed warehouse compute usage").exists():
-            return False
 
-        # register() calls check_and_update_activation() synchronously on every intent PATCH, so
-        # without this an authenticated member could drive an unbounded ClickHouse query rate by
-        # re-hitting add_product_intent. Debounce the query per team via a short cache TTL; on a
-        # miss we skip and report not-activated for now — the daily calculate_product_activation
-        # task (and the next call after the TTL) will run the real check. Fail open on cache errors.
-        debounce_key = f"managed_warehouse_activation_checked:{self.team_id}"
+        contexts = intent.contexts or {}
+        if contexts.get("metrics_viewer_query_run", 0) >= 1 or contexts.get("metrics_sql_query_run", 0) >= 1:
+            return True
+
+        # Local import: this module loads during django.setup() (via posthog.models), and the
+        # metrics facade pulls in HogQL execution (circular).
+        from products.metrics.backend.facade.api import team_has_metrics  # noqa: PLC0415
+
+        # Activation checks run on the request path (intent registration), so a ClickHouse
+        # failure must not fail the caller — treat it as "no data yet" and let the periodic
+        # recheck pick the team up later.
         try:
-            should_query = cache.add(debounce_key, "1", timeout=MANAGED_WAREHOUSE_ACTIVATION_CHECK_TTL_SECONDS)
-        except Exception as e:
-            logger.warning("managed_warehouse_activation_debounce_cache_failure", team_id=self.team_id, exc_info=True)
-            capture_exception(e)
-            should_query = True
-        if not should_query:
+            return team_has_metrics(self.team)
+        except Exception:
+            logger.exception("has_activated_metrics: data lookup failed", team_id=self.team_id)
             return False
 
-        usage = get_managed_warehouse_compute_usage(self.team_id, self.created_at, window_end)
-        return usage >= MANAGED_WAREHOUSE_ACTIVATION_CPU_SECONDS
+    def has_activated_workflows(self) -> bool:
+        from products.workflows.backend.facade.api import has_active_workflows  # noqa: PLC0415
+
+        # At least one workflow needs to be active (not just drafted)
+        return has_active_workflows(team_id=self.team_id)
 
     def check_and_update_activation(self, skip_reporting: bool = False) -> bool:
         # If the intent is already activated, we don't need to check again
@@ -349,7 +318,7 @@ class ProductIntent(UUIDTModel, RootTeamMixin):
         is_onboarding: bool = False,
     ) -> "ProductIntent":
         from posthog.event_usage import report_user_action
-        from posthog.models.file_system.user_product_list import UserProductList
+        from posthog.models.file_system.starred_products import star_products_from_intent
 
         product_intent, created = ProductIntent.objects.get_or_create(team=team, product_type=product_type)
 
@@ -392,7 +361,8 @@ class ProductIntent(UUIDTModel, RootTeamMixin):
             )
 
             try:
-                UserProductList.create_from_product_intent(product_intent, user)
+                if created:
+                    star_products_from_intent(product_intent, user)
             except Exception as e:
                 capture_exception(
                     e, additional_properties={"product_type": product_type, "context": context, "user_id": user.id}
@@ -414,8 +384,8 @@ ACTIVATION_CHECKS: dict[str, Callable[[ProductIntent], bool]] = {
     "surveys": ProductIntent.has_activated_surveys,
     "llm_analytics": ProductIntent.has_activated_llm_analytics,
     "mcp_analytics": ProductIntent.has_activated_mcp_analytics,
+    "metrics": ProductIntent.has_activated_metrics,
     "workflows": ProductIntent.has_activated_workflows,
-    "managed_warehouse": ProductIntent.has_activated_managed_warehouse,
 }
 
 ACTIVATION_CHECK_PRODUCT_KEYS: frozenset[str] = frozenset(ACTIVATION_CHECKS)

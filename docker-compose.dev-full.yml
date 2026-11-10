@@ -18,6 +18,7 @@ services:
         depends_on:
             - replay-capture
             - capture
+            - capture-ai
             - feature-flags
             - hypercache-server
             - web
@@ -36,6 +37,11 @@ services:
             service: redis7
         ports:
             - '6379:6379'
+
+    valkey:
+        extends:
+            file: docker-compose.base.yml
+            service: valkey
 
     clickhouse:
         extends:
@@ -79,8 +85,8 @@ services:
         ports:
             - '19000:19000'
             - '19001:19001'
-        # Fresh named volume so the swap starts clean; data on the previous volume
-        # stays salvageable via `hogli deploy:upgrade-objectstorage`.
+        # Named volume from the SeaweedFS swap; the old MinIO volume is left in place
+        # because SeaweedFS cannot read its on-disk format.
         volumes:
             - objectstorage-data:/data
 
@@ -122,7 +128,7 @@ services:
         ports:
             - 8000:8000
         build: .
-        command: ./bin/docker-server-unit
+        command: ./bin/docker-server
         volumes:
             - .:/app/posthog
         environment:
@@ -151,6 +157,16 @@ services:
             - redis7
             - kafka
 
+    capture-ai:
+        extends:
+            file: docker-compose.base.yml
+            service: capture-ai
+        environment:
+            - DEBUG=1
+        depends_on:
+            - redis7
+            - kafka
+
     replay-capture:
         extends:
             file: docker-compose.base.yml
@@ -163,6 +179,16 @@ services:
         extends:
             file: docker-compose.base.yml
             service: property-defs-rs
+        depends_on:
+            - kafka
+
+    property-defs-ai:
+        extends:
+            file: docker-compose.base.yml
+            service: property-defs-rs
+        environment:
+            KAFKA_CONSUMER_TOPIC: clickhouse_ai_events_json
+            KAFKA_CONSUMER_GROUP: property-defs-ai
         depends_on:
             - kafka
 
@@ -192,9 +218,13 @@ services:
             - .:/app/posthog
         environment:
             - DOCKER=1
+            # Every CDP process dual-writes to Valkey and refuses to start without a host.
+            - CDP_VALKEY_HOST=valkey
+            - CDP_VALKEY_PORT=6379
         depends_on:
             - db
             - redis7
+            - valkey
             - clickhouse
             - kafka
             - objectstorage
@@ -258,20 +288,6 @@ services:
             - objectstorage
             - temporal
 
-    cyclotron-janitor:
-        extends:
-            file: docker-compose.base.yml
-            service: cyclotron-janitor
-        environment:
-            DATABASE_URL: 'postgres://posthog:posthog@db:5432/cyclotron'
-            KAFKA_HOSTS: 'kafka:9092'
-            DEBUG: 1 # Add debug mode like other services
-        depends_on:
-            db:
-                condition: service_healthy
-            kafka:
-                condition: service_started
-
     otel-collector:
         extends:
             file: docker-compose.base.yml
@@ -284,10 +300,10 @@ services:
             file: docker-compose.base.yml
             service: jaeger
 
-    localstack:
+    dynamodb:
         extends:
             file: docker-compose.base.yml
-            service: localstack
+            service: dynamodb
 
 networks:
     otel_network:

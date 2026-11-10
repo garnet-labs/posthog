@@ -1,6 +1,7 @@
 import { useActions, useValues } from 'kea'
 
 import { FullScreen } from 'lib/components/FullScreen'
+import { useFeatureFlag } from 'lib/hooks/useFeatureFlag'
 import { DashboardEventSource } from 'lib/utils/eventUsageLogic'
 import { sceneConfigurations } from 'scenes/scenes'
 import { Scene } from 'scenes/sceneTypes'
@@ -10,22 +11,64 @@ import { SceneTitleSection } from '~/layout/scenes/components/SceneTitleSection'
 import { dashboardsModel } from '~/models/dashboardsModel'
 import { DashboardMode } from '~/types'
 
+import { useMcpToolApplyBack } from 'products/posthog_ai/frontend/api/logics'
+
 import { EditModeActions, FullscreenModeActions, ViewModeActions } from './DashboardHeaderActions'
 import { DashboardLoadAction, dashboardLogic } from './dashboardLogic'
 import { DashboardModals } from './DashboardModals'
 import { DashboardSceneMenuBar } from './DashboardSceneMenuBar'
 import { DashboardScenePanel } from './DashboardScenePanel'
+import { QuillDashboardHeaderActions } from './QuillDashboardHeaderActions'
 
 export const DASHBOARD_CANNOT_EDIT_MESSAGE =
     "You don't have edit permissions for this dashboard. Ask a dashboard collaborator with edit access to add you."
 
-export function DashboardHeader(): JSX.Element | null {
-    const { dashboard, dashboardLoading, dashboardMode, canEditDashboard } = useValues(dashboardLogic)
+export function insightIsAddedToDashboard(input: Record<string, unknown> | null, dashboardId: number): boolean {
+    return Array.isArray(input?.dashboards) && input.dashboards.some((id) => Number(id) === dashboardId)
+}
+
+export function DashboardHeader({
+    loading = false,
+    extraActions,
+    reloadOnAIChanges = true,
+}: {
+    loading?: boolean
+    extraActions?: JSX.Element
+    reloadOnAIChanges?: boolean
+}): JSX.Element | null {
+    const { dashboard, dashboardLoading, dashboardMode, dashboardEditing, canEditDashboard } = useValues(dashboardLogic)
     const { setDashboardMode, loadDashboard } = useActions(dashboardLogic)
     const { updateDashboard } = useActions(dashboardsModel)
+    const todayRailNav = useFeatureFlag('TODAY_RAIL_NAV')
 
-    if (!dashboard && !dashboardLoading) {
+    const isLoading = !dashboard && (loading || dashboardLoading)
+
+    // Sandbox PostHog AI adds insights through insight-create/insight-update, rather than the legacy
+    // upsert_dashboard tool. Reload only when that tool explicitly targets the dashboard being viewed.
+    useMcpToolApplyBack({
+        tools: ['insight-create', 'insight-update'],
+        targetKey: `dashboard:${dashboard?.id ?? 'unloaded'}`,
+        active: reloadOnAIChanges && !!dashboard && canEditDashboard,
+        onApply: (_event, { innerInput }) => {
+            if (dashboard && insightIsAddedToDashboard(innerInput, dashboard.id)) {
+                loadDashboard({ action: DashboardLoadAction.Update })
+            }
+        },
+    })
+
+    if (!dashboard && !isLoading) {
         return null
+    }
+
+    let actions: JSX.Element | undefined
+    if (dashboard) {
+        if (dashboardEditing) {
+            actions = <EditModeActions />
+        } else if (dashboardMode === DashboardMode.Fullscreen) {
+            actions = <FullscreenModeActions />
+        } else {
+            actions = <ViewModeActions />
+        }
     }
 
     return (
@@ -53,7 +96,7 @@ export function DashboardHeader(): JSX.Element | null {
                 }}
                 markdown
                 canEdit={canEditDashboard}
-                isLoading={dashboardLoading}
+                isLoading={isLoading}
                 saveOnBlur
                 renameDebounceMs={0}
                 maxButtonLabel="PostHog AI"
@@ -73,18 +116,19 @@ export function DashboardHeader(): JSX.Element | null {
                                   text: dashboard.name,
                                   icon: iconForType('dashboard'),
                               },
-                              callback: () => loadDashboard({ action: DashboardLoadAction.Update }),
+                              callback: (toolOutput: { dashboard_id?: string | number }) => {
+                                  if (Number(toolOutput?.dashboard_id) === dashboard.id) {
+                                      loadDashboard({ action: DashboardLoadAction.Update })
+                                  }
+                              },
                           }
                         : undefined
                 }
                 actions={
-                    dashboardMode === DashboardMode.Edit ? (
-                        <EditModeActions />
-                    ) : dashboardMode === DashboardMode.Fullscreen ? (
-                        <FullscreenModeActions />
-                    ) : (
-                        <ViewModeActions />
-                    )
+                    <>
+                        {todayRailNav && dashboard ? <QuillDashboardHeaderActions /> : actions}
+                        {extraActions}
+                    </>
                 }
             />
         </>

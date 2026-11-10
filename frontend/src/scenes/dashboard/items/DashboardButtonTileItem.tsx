@@ -3,19 +3,22 @@ import React from 'react'
 
 import { ButtonTileCard } from 'lib/components/Cards/ButtonTileCard/ButtonTileCard'
 import { dashboardWidgetMenusLogic } from 'lib/components/Cards/InsightCard/dashboardWidgetMenusLogic'
-import { DashboardWidgetPlacementMenus } from 'lib/components/Cards/InsightCard/DashboardWidgetPlacementMenus'
+import {
+    DashboardWidgetPlacementMenus,
+    type DashboardWidgetPlacementMenusProps,
+} from 'lib/components/Cards/InsightCard/DashboardWidgetPlacementMenus'
 import { LemonButton } from 'lib/lemon-ui/LemonButton'
 import { LemonDivider } from 'lib/lemon-ui/LemonDivider'
 
-import type { DashboardPlacement, DashboardTile, DashboardType, QueryBasedInsightModel } from '~/types'
+import type { DashboardPlacement, DashboardTile, DashboardType } from '~/types'
 
 type BaseButtonTileCardProps = React.ComponentProps<typeof ButtonTileCard>
 
-interface DashboardButtonTileItemProps extends Omit<
-    BaseButtonTileCardProps,
-    'buttonTile' | 'placement' | 'moreButtonOverlay'
-> {
-    tile: DashboardTile<QueryBasedInsightModel>
+interface DashboardButtonTileItemProps
+    extends
+        Omit<BaseButtonTileCardProps, 'buttonTile' | 'placement' | 'moreButtonOverlay'>,
+        Pick<DashboardWidgetPlacementMenusProps, 'tileGroupMoveOptions' | 'onMoveToTileGroup'> {
+    tile: DashboardTile
     placement: DashboardPlacement
     dashboardId?: number | null
     onEdit: () => void
@@ -31,6 +34,8 @@ function DashboardButtonTileItemInternal(
         dashboardId,
         onEdit,
         onMoveToDashboard,
+        tileGroupMoveOptions,
+        onMoveToTileGroup,
         onDuplicate,
         onRemove,
         ...buttonTileCardProps
@@ -38,14 +43,12 @@ function DashboardButtonTileItemInternal(
     ref: React.ForwardedRef<HTMLDivElement>
 ): JSX.Element {
     const buttonId = tile.button_tile?.id
-    const { copyToDestinations } = useValues(
-        dashboardWidgetMenusLogic({
-            instanceKey: buttonId != null ? `button-${buttonId}` : `button-tile-${tile.id}`,
-            dashboardId,
-            dashboards: undefined,
-            dashboard_tiles: tile.button_tile?.dashboard_tiles,
-        })
-    )
+    const dashboardWidgetMenusLogicProps = {
+        instanceKey: buttonId != null ? `button-${buttonId}` : `button-tile-${tile.id}`,
+        dashboardId,
+        dashboard_tiles: tile.button_tile?.dashboard_tiles,
+    }
+    const { copyToDestinations } = useValues(dashboardWidgetMenusLogic(dashboardWidgetMenusLogicProps))
 
     return (
         <ButtonTileCard
@@ -61,6 +64,8 @@ function DashboardButtonTileItemInternal(
                     <DashboardWidgetPlacementMenus
                         placementDestinations={copyToDestinations}
                         onMoveToDashboard={onMoveToDashboard}
+                        tileGroupMoveOptions={tileGroupMoveOptions}
+                        onMoveToTileGroup={onMoveToTileGroup}
                     />
 
                     <LemonButton onClick={onDuplicate} fullWidth data-attr="duplicate-button-tile-from-dashboard">

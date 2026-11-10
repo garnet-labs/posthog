@@ -3,7 +3,7 @@ import { logger } from '~/common/utils/logger'
 import { ChunkPipeline, ChunkPipelineResultWithContext, OkResultWithContext } from './chunk-pipeline.interface'
 import { InterleavingChunkPipeline, PullOutcome } from './interleaving-chunk-pipeline'
 import { PipelineContext, PipelineResultWithContext } from './pipeline.interface'
-import { PipelineResultType, dlq, isDlqResult, isDropResult, isOkResult, ok } from './results'
+import { PipelineResultType, dlq, isDlqResult, isDropResult, isOkResult, isTimeoutResult, ok, timeout } from './results'
 
 /**
  * Splits one element into its sub-elements. Must be synchronous and cheap —
@@ -41,7 +41,8 @@ export class FanOutParentRef {
 
 /**
  * The context type sub-elements carry: nothing but the correlation tag (plus
- * the base `PipelineContext` fields, with fresh per-sub arrays). Sub-pipelines
+ * the base `PipelineContext` fields, with fresh per-sub arrays and the
+ * parent's `debugContext` copied by reference for crash logs). Sub-pipelines
  * are context-agnostic — decoupled from the parent pipeline's context type, so
  * context-gated builder surface (`teamAware`, `messageAware`,
  * `handleIngestionWarnings`, `handleResults`) is uncallable inside them. Not
@@ -62,6 +63,8 @@ interface PendingParent<TElement, TSubOut, C> {
     dlqFailures: { reason: string; error: unknown }[]
     /** lastStep of the most recent DLQ sub-result, for error attribution on the parent. */
     dlqLastStep: string | undefined
+    /** First timed-out sub-result seen; when set the parent times out instead of fanning in. */
+    timedOut: { reason: string; lastStep: string | undefined } | null
 }
 
 /**
@@ -84,6 +87,7 @@ interface PendingParent<TElement, TSubOut, C> {
  *      error via AggregateError) once all of its siblings have drained.
  *      Fanning in anyway could emit an element built for work that never
  *      happened — e.g. a pointer to a blob that was never stored.
+ *    - TIMEOUT times the parent out, because its message is redelivered whole.
  *    - REDIRECT contributes nothing but logs a warning: it is almost
  *      certainly misuse, since sub-elements are not Kafka messages — route
  *      the parent before fanning out instead.
@@ -175,7 +179,19 @@ export class FanOutFanInChunkPipeline<
                 continue
             }
 
-            const subs = this.fanOutFn(element.result.value)
+            let subs: TSub[]
+            try {
+                subs = this.fanOutFn(element.result.value)
+            } catch (e) {
+                // The exception propagates and crashes the process; log the
+                // parent's origin while its context is still in scope.
+                logger.error('🔥', `Fan-out ${this.fanOutName} threw`, {
+                    error: e instanceof Error ? e.message : String(e),
+                    stack: e instanceof Error ? e.stack : undefined,
+                    debugContext: element.context.debugContext,
+                })
+                throw e
+            }
             if (subs.length === 0) {
                 settled.push(this.completeParent(element.result.value, element.context, []))
                 continue
@@ -195,11 +211,17 @@ export class FanOutFanInChunkPipeline<
                 collected: [],
                 dlqFailures: [],
                 dlqLastStep: undefined,
+                timedOut: null,
             }
             const ref = new FanOutParentRef()
             this.pendingParents.set(ref, parent)
             for (const sub of subs) {
                 const subContext: PipelineContext<FanOutSubContext> = {
+                    // The parent's origin, by reference, so sub crash logs
+                    // identify the message the sub-element came from.
+                    debugContext: element.context.debugContext,
+                    traceContext: element.context.traceContext,
+                    budget: element.context.budget,
                     sideEffects: [],
                     warnings: [],
                     [FAN_OUT_PARENT]: ref,
@@ -273,6 +295,11 @@ export class FanOutFanInChunkPipeline<
 
         if (isOkResult(subResult.result)) {
             parent.collected.push(subResult.result.value)
+        } else if (isTimeoutResult(subResult.result)) {
+            parent.timedOut ??= {
+                reason: subResult.result.reason,
+                lastStep: subResult.context.lastStep,
+            }
         } else if (isDlqResult(subResult.result)) {
             // A sub-element that must be dead-lettered fails its whole parent:
             // fanning in regardless could emit an element built for work that
@@ -298,10 +325,23 @@ export class FanOutFanInChunkPipeline<
         }
 
         this.pendingParents.delete(ref)
-        if (parent.dlqFailures.length > 0) {
+        if (parent.timedOut) {
+            this.readyResults.push(this.timeOutParent(parent, parent.timedOut))
+        } else if (parent.dlqFailures.length > 0) {
             this.readyResults.push(this.failParent(parent))
         } else {
             this.readyResults.push(this.completeParent(parent.original, parent.context, parent.collected))
+        }
+    }
+
+    private timeOutParent(
+        parent: PendingParent<TElement, TSubOut, COutput>,
+        timedOut: NonNullable<PendingParent<TElement, TSubOut, COutput>['timedOut']>
+    ): PipelineResultWithContext<TMerged, COutput, RPrev> {
+        parent.context.lastStep = timedOut.lastStep
+        return {
+            result: timeout<TMerged>(`fan-out sub-element timed out: ${timedOut.reason}`),
+            context: parent.context,
         }
     }
 
@@ -336,6 +376,19 @@ export class FanOutFanInChunkPipeline<
         // Same ownership invariant as in pullAndFanOut: the context is
         // uniquely held by this stage, so set lastStep in place.
         context.lastStep = this.fanInName
-        return { result: ok(this.fanInFn(original, collected)), context }
+        let merged: TMerged
+        try {
+            merged = this.fanInFn(original, collected)
+        } catch (e) {
+            // The exception propagates and crashes the process; log the
+            // parent's origin while its context is still in scope.
+            logger.error('🔥', `Fan-in ${this.fanInName} threw`, {
+                error: e instanceof Error ? e.message : String(e),
+                stack: e instanceof Error ? e.stack : undefined,
+                debugContext: context.debugContext,
+            })
+            throw e
+        }
+        return { result: ok(merged), context }
     }
 }

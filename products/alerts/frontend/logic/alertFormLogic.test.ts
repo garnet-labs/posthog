@@ -22,11 +22,13 @@ import {
 import { initKeaTests } from '~/test/init'
 import { InsightLogicProps, InsightShortId } from '~/types'
 
+import * as generatedApi from '../generated/api'
 import { supportsOngoingInterval } from '../types'
 import type { AlertType } from '../types'
 import {
     alertFormLogic,
     canCheckOngoingInterval,
+    evaluationDelayField,
     ongoingIntervalField,
     thresholdAlertHasBounds,
     type AlertFormType,
@@ -151,7 +153,6 @@ describe('alertFormLogic', () => {
             onEditSuccess,
             insightVizDataLogicProps: insightLogicProps,
             insightInterval: 'day',
-            uiVersion: 'redesigned',
         })
         logic.mount()
         logic.actions.setAlertFormValues({ ...makeFormDefaults(), checks: undefined })
@@ -160,6 +161,13 @@ describe('alertFormLogic', () => {
 
     it.each([
         ['ordinary', { insightInterval: 'day' as const }, '', AlertCalculationInterval.DAILY, null],
+        [
+            'ordinary with an insight name',
+            { insightInterval: 'day' as const, insightName: 'Weekly signups' },
+            'Weekly signups alert',
+            AlertCalculationInterval.DAILY,
+            null,
+        ],
         [
             'anomaly',
             {
@@ -195,21 +203,60 @@ describe('alertFormLogic', () => {
     )
 
     it.each([
-        ['legacy', 'legacy' as const, '', {}],
-        ['redesigned', 'redesigned' as const, 'Weekly signups alert', {}],
-    ])('keeps %s creation defaults scoped to its UI', (_name, uiVersion, expectedName, expectedBounds) => {
-        const logic = alertFormLogic({
-            alert: null,
-            insightId: 42,
-            onEditSuccess: jest.fn(),
-            insightVizDataLogicProps: insightLogicProps,
-            insightName: 'Weekly signups',
-            uiVersion,
-        })
-        logic.mount()
+        [
+            'delayed',
+            (logic: ReturnType<typeof mountForm>) => logic.actions.setAlertFormValue('evaluation_delay_intervals', 2),
+        ],
+        ['cleared', (logic: ReturnType<typeof mountForm>) => logic.actions.clearSimulation()],
+        ['run over another range', (logic: ReturnType<typeof mountForm>) => logic.actions.setSimulationDateFrom('-7d')],
+        [
+            'run against another series',
+            (logic: ReturnType<typeof mountForm>) =>
+                logic.actions.setAlertFormValue('config', { type: 'TrendsAlertConfig', series_index: 1 }),
+        ],
+    ])('drops a preview that resolves after the settings it was run with were %s', async (_label, invalidate) => {
+        // Neither action cancels the request the model is still judging, so its verdict must not
+        // repopulate the chart against settings the model never saw.
+        let resolveSimulation: (result: any) => void = () => {}
+        jest.spyOn(generatedApi, 'alertsSimulateCreate').mockImplementation(
+            () => new Promise((resolve) => (resolveSimulation = resolve))
+        )
+        const logic = mountForm()
+        logic.actions.setAlertFormValue('detector_config', { type: 'zscore', threshold: 0.95, window: 30 })
 
-        expect(logic.values.alertForm.name).toBe(expectedName)
-        expect(logic.values.alertForm.threshold.configuration.bounds).toEqual(expectedBounds)
+        logic.actions.simulateAlert()
+        invalidate(logic)
+        resolveSimulation({ data: [1], dates: ['2026-01-01'], scores: [0.1], triggered_indices: [], total_points: 1 })
+
+        await expectLogic(logic).toFinishAllListeners()
+        expect(logic.values.simulationResult).toBeNull()
+    })
+
+    it('leaves the loader to the newest preview when an older one settles first', async () => {
+        const pending: ((result: any) => void)[] = []
+        const failing: ((error: Error) => void)[] = []
+        jest.spyOn(generatedApi, 'alertsSimulateCreate').mockImplementation(
+            () => new Promise((resolve, reject) => (pending.push(resolve), failing.push(reject)))
+        )
+        const logic = mountForm()
+        logic.actions.setAlertFormValue('detector_config', { type: 'zscore', threshold: 0.95, window: 30 })
+
+        logic.actions.simulateAlert()
+        logic.actions.simulateAlert()
+        failing[0](new Error('model timed out'))
+        await expectLogic(logic).delay(0)
+
+        expect(logic.values.simulationResultLoading).toBe(true)
+        expect(errorToastSpy).not.toHaveBeenCalled()
+
+        const newest = { data: [2], dates: ['2026-01-02'], scores: [0.2], triggered_indices: [], total_points: 1 }
+        pending[1](newest)
+        await expectLogic(logic).toFinishAllListeners()
+
+        expect(logic.values.simulationResultLoading).toBe(false)
+        expect(logic.values.simulationResult).toEqual(newest)
+        const simulationRuns = captureSpy.mock.calls.filter(([event]) => event === 'alert simulation run')
+        expect(simulationRuns).toEqual([['alert simulation run', expect.objectContaining({ success: true })]])
     })
 
     it('shows success toast and no error toast when create succeeds', async () => {
@@ -229,6 +276,10 @@ describe('alertFormLogic', () => {
         })
         expect(captureSpy).toHaveBeenCalledWith('alert creation completed', {
             ui_version: 'redesigned',
+        })
+        expect(captureSpy).toHaveBeenCalledWith('alert wizard completed', {
+            action: 'created',
+            alert_type: 'insight',
         })
 
         const toastOptions = successToastSpy.mock.calls[0][1] as { button: { action: () => void } }
@@ -332,6 +383,10 @@ describe('alertFormLogic', () => {
         expect(updateSpy).toHaveBeenCalledTimes(1)
         expect(errorToastSpy).not.toHaveBeenCalled()
         expect(successToastSpy).toHaveBeenCalledWith('Alert saved.')
+        expect(captureSpy).toHaveBeenCalledWith('alert wizard completed', {
+            action: 'updated',
+            alert_type: 'insight',
+        })
     })
 
     it('blocks save when threshold alert has no lower or upper bound', async () => {
@@ -362,7 +417,35 @@ describe('alertFormLogic', () => {
 
         expect(createSpy).not.toHaveBeenCalled()
         expect(successToastSpy).not.toHaveBeenCalled()
+        expect(errorToastSpy).toHaveBeenCalledWith(
+            "Couldn't save alert: Enter at least one threshold (less than or more than)"
+        )
         expect(logic.values.thresholdBoundsFormError).toBe('Enter at least one threshold (less than or more than)')
+    })
+
+    it('shows multiple validation errors without duplicate punctuation', async () => {
+        const logic = mountForm()
+        logic.actions.setAlertFormValues({
+            ...makeFormDefaults({
+                name: '',
+                threshold: {
+                    configuration: {
+                        type: InsightThresholdType.ABSOLUTE,
+                        bounds: {},
+                    },
+                },
+                schedule_restriction: { blocked_windows: [{ start: '09:00', end: '09:00' }] },
+            }),
+            checks: undefined,
+        })
+
+        await expectLogic(logic, () => {
+            logic.actions.submitAlertForm()
+        }).toFinishAllListeners()
+
+        expect(errorToastSpy).toHaveBeenCalledWith(
+            "Couldn't save alert: You need to give your alert a name. Start and end must differ. Enter at least one threshold (less than or more than)"
+        )
     })
 
     it('treats cleared threshold inputs as missing bounds', () => {
@@ -1030,6 +1113,17 @@ describe('alertFormLogic', () => {
                 )
             ).toEqual(expected)
         })
+    })
+
+    it.each([
+        ['time-series trends', 'trends', false, 0, true, false],
+        ['non-time-series trends with no saved delay', 'trends', true, 0, false, true],
+        ['non-time-series trends with a saved delay', 'trends', true, 2, true, true],
+        ['funnels with a saved delay', 'funnels', false, 2, true, true],
+    ] as const)('evaluationDelayField: %s', (_name, kind, isNonTimeSeriesDisplay, savedDelay, show, unsupported) => {
+        const field = evaluationDelayField(kind, isNonTimeSeriesDisplay, savedDelay)
+        expect(field.show).toBe(show)
+        expect(field.unsupportedReason !== undefined).toBe(unsupported)
     })
 
     describe('ongoing-interval gating', () => {

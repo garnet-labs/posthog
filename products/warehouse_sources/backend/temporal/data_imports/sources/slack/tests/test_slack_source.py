@@ -7,7 +7,7 @@ from products.warehouse_sources.backend.temporal.data_imports.sources.common.bas
 from products.warehouse_sources.backend.temporal.data_imports.sources.slack.slack import (
     validate_credentials as validate_slack_credentials,
 )
-from products.warehouse_sources.backend.temporal.data_imports.sources.slack.source import SlackSource
+from products.warehouse_sources.backend.temporal.data_imports.sources.slack.source import SlackAccess, SlackSource
 
 SOURCE_VALIDATE_PATCH = (
     "products.warehouse_sources.backend.temporal.data_imports.sources.slack.source.validate_slack_credentials"
@@ -42,7 +42,11 @@ class TestSlackSourceValidateCredentials:
         source = SlackSource()
         with (
             mock.patch(SOURCE_VALIDATE_PATCH, return_value=mock_result) as mock_validate,
-            mock.patch.object(source, "_resolve_access_token", return_value=("token", None, "cache")),
+            mock.patch.object(
+                source,
+                "_resolve_access_token",
+                return_value=SlackAccess(access_token="token", authed_user_id=None, cache_id="cache"),
+            ),
         ):
             result = source.validate_credentials(MagicMock(), team_id=1)
         mock_validate.assert_called_once_with("token")
@@ -50,10 +54,13 @@ class TestSlackSourceValidateCredentials:
 
     @parameterized.expand(
         [
-            # A valid token that only lacks scopes must guide a re-auth, not read as "invalid".
-            ("missing_scope", "missing_scope", "missing required scopes"),
+            # A valid token that only lacks scopes must point at the app's scopes, not read as "invalid".
+            ("missing_scope", "missing_scope", "Add the bot scopes from the setup manifest"),
             ("invalid_auth", "invalid_auth", "token is invalid"),
             ("token_revoked", "token_revoked", "revoked"),
+            # Wrong token type (e.g. a user or app-level token pasted into the bot token field)
+            # can never succeed on retry — the customer must paste the correct token.
+            ("not_allowed_token_type", "not_allowed_token_type", "Bot User OAuth Token"),
             # An unmapped Slack error still surfaces the specific code rather than a generic string.
             ("unknown_code", "some_new_error", "some_new_error"),
         ]

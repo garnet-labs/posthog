@@ -1,5 +1,5 @@
 import { isHogDate, isHogDateTime } from './objects'
-import { toHogDate, toHogDateTime } from './stl/date'
+import { dateStringToSeconds, toHogDate, toHogDateTime } from './stl/date'
 
 /** Epoch seconds for a Hog datetime/date value, else null. A bare HogDate is UTC midnight. */
 function temporalSeconds(value: any): number | null {
@@ -12,10 +12,22 @@ function temporalSeconds(value: any): number | null {
     return null
 }
 
+/**
+ * What a failure says about the program, so a caller can decide what to do with it without reading
+ * the message. `contract`: the bytecode asks for something this runtime does not have (a global, a
+ * function, an arity, an opcode), so the same program fails on every input until one of them changes.
+ * `data`: the program fits the runtime and a value did not fit the program, so another input may
+ * pass. `limit`: a resource ceiling was hit.
+ */
+export type HogVMErrorKind = 'contract' | 'data' | 'limit'
+
 export class HogVMException extends Error {
-    constructor(message: string) {
-        super(message)
+    kind: HogVMErrorKind
+
+    constructor(message: string, kind: HogVMErrorKind = 'data', options?: { cause?: unknown }) {
+        super(message, options)
         this.name = 'HogVMException'
+        this.kind = kind
     }
 }
 
@@ -24,7 +36,7 @@ export class UncaughtHogVMException extends HogVMException {
     payload: any
 
     constructor(type: string, message: string, payload: any = null) {
-        super(message)
+        super(message, 'data')
         this.name = 'UncaughtHogVMException'
         this.type = type
         this.payload = payload
@@ -37,7 +49,7 @@ export class UncaughtHogVMException extends HogVMException {
 }
 
 /** Fixed cost per object in memory */
-const COST_PER_UNIT = 8
+export const COST_PER_UNIT = 8
 
 export function like(
     string: string,
@@ -223,6 +235,22 @@ export function unifyComparisonTypes(left: any, right: any): [any, any] {
     const rightSeconds = temporalSeconds(right)
     if (leftSeconds !== null && rightSeconds !== null) {
         return [leftSeconds, rightSeconds]
+    }
+    // A bare-field SQL comparison like `timestamp > toDateTime(...)` puts a plain date-like string
+    // (e.g. the filter globals' ISO `timestamp`) against a HogDateTime/HogDate object. Parse the
+    // string the same way `toDateTime` would rather than falling through to the generic branches
+    // below, where `object > string` stays unordered and silently evaluates to false.
+    if (leftSeconds !== null && typeof right === 'string') {
+        const rightSecondsFromString = dateStringToSeconds(right)
+        if (rightSecondsFromString !== null) {
+            return [leftSeconds, rightSecondsFromString]
+        }
+    }
+    if (rightSeconds !== null && typeof left === 'string') {
+        const leftSecondsFromString = dateStringToSeconds(left)
+        if (leftSecondsFromString !== null) {
+            return [leftSecondsFromString, rightSeconds]
+        }
     }
     if (typeof left === 'number' && typeof right === 'string') {
         return [left, Number(right)]

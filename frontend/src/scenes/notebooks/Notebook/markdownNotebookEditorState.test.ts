@@ -73,6 +73,41 @@ describe('notebookLogic markdown editor state', () => {
         jest.restoreAllMocks()
     })
 
+    it('drops a retained notebook once the server denies access', async () => {
+        const retainedShortId = 'test-retained-notebook'
+        let denied = false
+        useMocks({
+            get: {
+                [`/api/projects/:team_id/notebooks/${retainedShortId}/`]: () =>
+                    denied
+                        ? [403, { type: 'authentication_error', code: 'permission_denied', detail: 'No access' }]
+                        : [200, { ...cachedNotebook, short_id: retainedShortId }],
+            },
+        })
+        const mountRetained = (): ReturnType<typeof notebookLogic.build> => {
+            const retained = notebookLogic({ shortId: retainedShortId, mode: 'notebook' })
+            retained.mount()
+            return retained
+        }
+        let retained = mountRetained()
+        await expectLogic(retained, () => retained.actions.loadNotebook())
+            .toDispatchActions(['loadNotebookSuccess'])
+            .toFinishAllListeners()
+        retained.unmount()
+
+        denied = true
+        retained = mountRetained()
+        expect(retained.values.notebook?.short_id).toBe(retainedShortId)
+        await expectLogic(retained)
+            .toDispatchActions(['loadNotebookFailure'])
+            .toMatchValues({ notebook: null, accessDeniedToNotebook: true })
+        retained.unmount()
+
+        retained = mountRetained()
+        expect(retained.values.notebook).toBeNull()
+        retained.unmount()
+    })
+
     it('applies editor changes to local content when no interaction is active', () => {
         const nextMarkdown = `${BASE_MARKDOWN} edited`
 
@@ -276,7 +311,7 @@ Thinking...`)
             logic.actions.pasteAfterLastNode('Dropped text')
         }).toDispatchActions(['setLocalContent'])
 
-        expect(getMarkdownNotebookMarkdown(logic.values.localContent)).toEqual(`${BASE_MARKDOWN}\n\nDropped text`)
+        expect(getMarkdownNotebookMarkdown(logic.values.localContent)).toEqual(`${BASE_MARKDOWN}\n\n\nDropped text`)
     })
 
     it.each([

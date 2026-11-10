@@ -10,8 +10,14 @@ from posthog.event_usage import EventSource, groups
 from posthog.settings import HOGQL_INCREASED_MAX_EXECUTION_TIME
 from posthog.tasks.utils import CeleryQueue
 
+from products.exports.backend.facade.exporters import get_export_format_handler
 from products.exports.backend.models.exported_asset import ExportedAsset
-from products.exports.backend.tasks.failure_handler import USER_QUERY_ERRORS, classify_failure_type
+from products.exports.backend.source_authentication import assert_export_authorization
+from products.exports.backend.tasks.failure_handler import (
+    USER_QUERY_ERRORS,
+    InvalidExportContext,
+    classify_failure_type,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -115,8 +121,18 @@ def export_asset_direct(
     export_source = source or EventSource.EXPORT
 
     try:
-        if exported_asset.export_format in (ExportedAsset.ExportFormat.CSV, ExportedAsset.ExportFormat.XLSX):
+        assert_export_authorization(exported_asset)
+        export_handler = get_export_format_handler(
+            export_format=exported_asset.export_format, kind=exported_asset.export_kind
+        )
+        if export_handler is not None:
+            export_handler(exported_asset)
+        elif exported_asset.export_format in (ExportedAsset.ExportFormat.CSV, ExportedAsset.ExportFormat.XLSX):
             csv_exporter.export_tabular(exported_asset, limit=limit, source=export_source)
+        elif exported_asset.export_format == ExportedAsset.ExportFormat.JSONL:
+            raise InvalidExportContext(
+                "This export can't be generated. Contact support if this keeps happening.", reportable=True
+            )
         else:
             image_exporter.export_image(exported_asset, max_height_pixels=max_height_pixels, source=export_source)
 

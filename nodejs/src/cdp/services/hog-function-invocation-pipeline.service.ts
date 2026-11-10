@@ -9,18 +9,22 @@ import { CdpValkeyShadowPools } from '../cdp-services'
 import { counterHogFunctionStateOnEvent, counterRateLimited } from '../consumers/metrics'
 import { shouldBlockInvocationDueToQuota } from '../consumers/quota-limiting-helper'
 import {
+    CyclotronJobInvocation,
     CyclotronJobInvocationHogFunction,
     HogFunctionInvocationGlobals,
     HogFunctionType,
     HogFunctionTypeType,
     MinimalAppMetric,
 } from '../types'
-import { mirrorCall } from '../utils/mirror-call'
-import { HogExecutorService } from './hog-executor.service'
+import { dualRead } from '../utils/dual-store'
+import { buildHogFunctionInvocations } from '../utils/invocation-utils'
+import { InvocationFailureSink } from './dead-letter/cdp-dead-letter.service'
+import { HogInputsService } from './hog-inputs.service'
 import { HogFunctionManagerService } from './managers/hog-function-manager.service'
 import { HogFunctionMonitoringService } from './monitoring/hog-function-monitoring.service'
 import { HogMaskerService } from './monitoring/hog-masker.service'
-import { HogWatcherService, HogWatcherState } from './monitoring/hog-watcher.service'
+import { HogWatcherService, HogWatcherState, sameWatcherStates } from './monitoring/hog-watcher.service'
+import { CdpUsageReporterService } from './usage/cdp-usage-reporter.service'
 
 export interface HogFunctionInvocationPipelineConfig {
     CDP_RATE_LIMITER_BUCKET_SIZE: number
@@ -31,19 +35,23 @@ export interface HogFunctionInvocationPipelineConfig {
 
 export interface HogFunctionInvocationPipelineDeps {
     hogFunctionManager: HogFunctionManagerService
-    hogExecutor: HogExecutorService
+    hogInputsService: HogInputsService
     hogWatcher: HogWatcherService
-    hogWatcherMirror: HogWatcherService | null
+    hogWatcherMirror: HogWatcherService
     hogMasker: HogMaskerService
     hogFunctionMonitoringService: HogFunctionMonitoringService
+    cdpUsageReporter?: CdpUsageReporterService
     quotaLimiting: QuotaLimiting
     redis: RedisV2
-    valkeyShadow: CdpValkeyShadowPools | null
+    valkeyShadow: CdpValkeyShadowPools
+    /** Absent for consumers that have no dead-letter topic; their build failures stay metrics-only. */
+    deadLetterService?: InvocationFailureSink
 }
 
 export interface BuildHogFunctionInvocationsOptions {
     hogTypes: HogFunctionTypeType[]
     filterFn: (fn: HogFunctionType) => boolean
+    invocationFilterFn?: (fn: HogFunctionType, globals: HogFunctionInvocationGlobals) => boolean
 }
 
 /**
@@ -54,7 +62,7 @@ export interface BuildHogFunctionInvocationsOptions {
  */
 export class HogFunctionInvocationPipeline {
     private hogRateLimiter: KeyedRateLimiterService
-    private hogRateLimiterMirror: KeyedRateLimiterService | null
+    private hogRateLimiterMirror: KeyedRateLimiterService
 
     constructor(
         private config: HogFunctionInvocationPipelineConfig,
@@ -67,16 +75,28 @@ export class HogFunctionInvocationPipeline {
             ttlSeconds: config.CDP_RATE_LIMITER_TTL,
         }
         this.hogRateLimiter = new KeyedRateLimiterService(rateLimiterConfig, deps.redis)
-        this.hogRateLimiterMirror = deps.valkeyShadow
-            ? new KeyedRateLimiterService(rateLimiterConfig, deps.valkeyShadow.writer)
-            : null
+        this.hogRateLimiterMirror = new KeyedRateLimiterService(rateLimiterConfig, deps.valkeyShadow.writer)
     }
 
-    @instrumented('cdpConsumer.handleEachBatch.queueMatchingFunctions')
     public async buildInvocations(
         invocationGlobals: HogFunctionInvocationGlobals[],
         opts: BuildHogFunctionInvocationsOptions
     ): Promise<CyclotronJobInvocationHogFunction[]> {
+        return (await this.buildInvocationsWithRelease(invocationGlobals, opts)).invocations
+    }
+
+    /**
+     * Also returns the masker's `release`. Masking claims are written before the caller queues the invocations,
+     * so a caller that retries after a failed queue must release them, or the retry masks every invocation.
+     */
+    @instrumented('cdpConsumer.handleEachBatch.queueMatchingFunctions')
+    public async buildInvocationsWithRelease(
+        invocationGlobals: HogFunctionInvocationGlobals[],
+        opts: BuildHogFunctionInvocationsOptions
+    ): Promise<{
+        invocations: CyclotronJobInvocationHogFunction[]
+        release: (persisted?: CyclotronJobInvocation[]) => Promise<void>
+    }> {
         const teamsToLoad = [...new Set(invocationGlobals.map((x) => x.project.id))]
         const hogFunctionsByTeam = await this.deps.hogFunctionManager.getHogFunctionsForTeams(
             teamsToLoad,
@@ -87,43 +107,68 @@ export class HogFunctionInvocationPipeline {
         const possibleInvocations = (
             await Promise.all(
                 invocationGlobals.map(async (globals) => {
-                    const teamHogFunctions = hogFunctionsByTeam[globals.project.id]
+                    const teamHogFunctions = opts.invocationFilterFn
+                        ? hogFunctionsByTeam[globals.project.id].filter((fn) => opts.invocationFilterFn!(fn, globals))
+                        : hogFunctionsByTeam[globals.project.id]
 
-                    const { invocations, metrics, logs } = await this.deps.hogExecutor.buildHogFunctionInvocations(
-                        teamHogFunctions,
-                        globals
-                    )
+                    try {
+                        const { invocations, metrics, logs, buildFailures } = await buildHogFunctionInvocations(
+                            this.deps.hogInputsService,
+                            teamHogFunctions,
+                            globals
+                        )
 
-                    this.deps.hogFunctionMonitoringService.queueAppMetrics(metrics, 'hog_function')
-                    this.deps.hogFunctionMonitoringService.queueLogs(logs, 'hog_function')
+                        this.deps.hogFunctionMonitoringService.queueAppMetrics(metrics, 'hog_function')
+                        this.deps.hogFunctionMonitoringService.queueLogs(logs, 'hog_function')
+                        this.deps.deadLetterService?.recordBuildFailures(globals, buildFailures)
 
-                    return invocations
+                        return invocations
+                    } catch (error) {
+                        // Anything the per-function handling did not expect: a filter global that
+                        // cannot be built, a bug in the builder itself. Without this the whole batch
+                        // fails and the partition stalls on one event, forever, until someone
+                        // deploys a fix. Retriable errors still fail the batch, because a dependency
+                        // being down is not the event's fault.
+                        if (error?.isRetriable === true) {
+                            throw error
+                        }
+                        // Swallowing the event is only safe once it is parked. A consumer with no
+                        // dead-letter service, or one running with the flag off, fails the batch
+                        // instead, which is what kept the event before any of this existed.
+                        if (!this.deps.deadLetterService?.recordProcessFailure(globals, error, 'hog_function')) {
+                            throw error
+                        }
+                        return []
+                    }
                 })
             )
         ).flat()
 
         const hogFunctionIds = possibleInvocations.map((x) => x.hogFunction.id)
-        const [states] = await Promise.all([
-            instrumentFn('cdpConsumer.handleEachBatch.hogWatcher.getEffectiveStates', async () => {
-                return await this.deps.hogWatcher.getEffectiveStates(hogFunctionIds)
-            }),
-            mirrorCall('hog-watcher.getEffectiveStates', () =>
-                this.deps.hogWatcherMirror?.getEffectiveStates(hogFunctionIds)
-            ),
-        ])
+        const states = await dualRead(
+            'hog-watcher.getEffectiveStates',
+            () =>
+                instrumentFn('cdpConsumer.handleEachBatch.hogWatcher.getEffectiveStates', async () => {
+                    return await this.deps.hogWatcher.getEffectiveStates(hogFunctionIds)
+                }),
+            () => this.deps.hogWatcherMirror.getEffectiveStates(hogFunctionIds),
+            sameWatcherStates
+        )
 
         const rateLimitInputs: KeyedRateLimitRequest[] = possibleInvocations.map((x) => ({
             id: x.hogFunction.id,
             cost: 1,
         }))
-        const [rateLimits] = await Promise.all([
-            instrumentFn('cdpConsumer.handleEachBatch.hogRateLimiter.rateLimitGrouped', async () => {
-                return await this.hogRateLimiter.rateLimitGrouped(rateLimitInputs)
-            }),
-            mirrorCall('hog-rate-limiter.rateLimitGrouped', () =>
-                this.hogRateLimiterMirror?.rateLimitGrouped(rateLimitInputs)
-            ),
-        ])
+        const rateLimits = await dualRead(
+            'hog-function-rate-limiter.rateLimitGrouped',
+            () =>
+                instrumentFn('cdpConsumer.handleEachBatch.hogRateLimiter.rateLimitGrouped', async () => {
+                    return await this.hogRateLimiter.rateLimitGrouped(rateLimitInputs)
+                }),
+            () => this.hogRateLimiterMirror.rateLimitGrouped(rateLimitInputs),
+            (primary, secondary) =>
+                primary.every(([, result], index) => result.isRateLimited === secondary[index]?.[1].isRateLimited)
+        )
 
         const validInvocations: CyclotronJobInvocationHogFunction[] = []
 
@@ -183,7 +228,11 @@ export class HogFunctionInvocationPipeline {
             })
         )
 
-        const { masked, notMasked: notMaskedInvocations } = await this.deps.hogMasker.filterByMasking(validInvocations)
+        const {
+            masked,
+            notMasked: notMaskedInvocations,
+            release,
+        } = await this.deps.hogMasker.filterByMasking(validInvocations)
 
         this.deps.hogFunctionMonitoringService.queueAppMetrics(
             masked.map((item) => ({
@@ -223,12 +272,17 @@ export class HogFunctionInvocationPipeline {
                         metric_name: 'billable_invocation',
                         count: 1,
                     })
+                    this.deps.cdpUsageReporter?.reportBillableInvocation({
+                        teamId: item.teamId,
+                        usageKey: 'cdp_billable_invocations',
+                        recordId: `event:${eventUuid}`,
+                    })
                 }
             }
         })
 
         this.deps.hogFunctionMonitoringService.queueAppMetrics(triggeredInvocationsMetrics, 'hog_function')
 
-        return notMaskedInvocations
+        return { invocations: notMaskedInvocations, release }
     }
 }

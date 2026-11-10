@@ -6,9 +6,8 @@ deterministic — the first implementation `TaskRun` with a `pr_url` set — so 
 billed exactly once, in the period that PR first appeared, regardless of any later status
 changes, re-judgements, or additional runs.
 
-The PR↔report link lives on the `SignalReportTask` bridge (relationship="implementation"); the
-PR URL itself is written to `TaskRun.output['pr_url']`. There is no artefact that records the
-implementation task or its PR, so the query is rooted on that bridge, not on artefacts.
+Billing eligibility uses the `SignalReportTask` implementation bridge and the first task-run
+PR URL. PR-link artefacts also include external work, so their presence cannot authorize a charge.
 
 Because this is a billing source it fails closed: a run only bills when its PR URL is a GitHub
 URL and the run, task, bridge, and report teams all agree, so malformed bridge rows never
@@ -38,29 +37,28 @@ would otherwise be repeatable free work.
 
 import uuid
 from collections import defaultdict
+from collections.abc import Collection, Sequence
 from datetime import datetime
 from typing import TYPE_CHECKING, NamedTuple
 
-from django.db.models import F, OuterRef, QuerySet, Subquery, Sum
+from django.db.models import F, Min, OuterRef, QuerySet, Subquery, Sum
 from django.utils import timezone
 
 from dateutil.relativedelta import relativedelta
 
+from posthog.models.organization import BillingPeriod
+
 from products.signals.backend.artefact_schemas import TASK_RUN_TYPE_IMPLEMENTATION
 from products.signals.backend.enums import SignalSourceProduct
 from products.signals.backend.models import SignalReport, SignalReportRefund, SignalReportTask, SignalScoutRun
-from products.signals.backend.scout_harness.lazy_seed import scout_skill_row_origin
+from products.signals.backend.scout_harness.lazy_seed import scout_skill_row_is_proven_canonical
 from products.skills.backend.models.skills import LLMSkill
+from products.tasks.backend.facade.api import GITHUB_PR_URL_PREFIX
 
 if TYPE_CHECKING:
     from posthog.models.organization import Organization
 
 _IMPLEMENTATION = TASK_RUN_TYPE_IMPLEMENTATION
-
-# Only PRs hosted on GitHub are billable. The PR URL is GitHub's `html_url`
-# (https://github.com/owner/repo/pull/N), so validate the host prefix to avoid charging
-# for malformed or non-GitHub values written into `output.pr_url`.
-_GITHUB_PR_URL_PREFIX = "https://github.com/"
 
 SIGNALS_CREDITS_PER_DOLLAR = 100  # 1 credit = $0.01, matching ai_credits
 
@@ -68,24 +66,29 @@ SIGNALS_CREDITS_PER_DOLLAR = 100  # 1 credit = $0.01, matching ai_credits
 SIGNALS_CREDITS_PER_REPORT_WITH_PR = 15 * SIGNALS_CREDITS_PER_DOLLAR  # 1500
 
 
-def _bridges_with_pr_run(**run_created_at: datetime) -> QuerySet[SignalReportTask]:
+def _bridges_with_pr_run(*, include_manual: bool = False, **run_created_at: datetime) -> QuerySet[SignalReportTask]:
     """Implementation bridges whose task shipped a billable PR run matching `run_created_at`.
 
     Rooted on the signals-owned `SignalReportTask` bridge and traversing to runs via the
     `task__runs` relation, so the query never imports the tasks product's internals — it stays
     behind the tasks public interface. Postgres is free to drive the join from the run
     `created_at` index regardless, so the period scan stays bounded by PRs shipped, not by the
-    number of bridges.
+    number of bridges. `task_run_github_pr_run_idx` keeps that scan off the runs' `output` JSONB,
+    but only while the prefix test here stays spelled as the `GITHUB_PR_URL_PREFIX` its predicate
+    was built from.
 
     Fail closed: a bridge only counts when one of its runs carries a GitHub PR URL within the
     given `created_at` bound and the four teams in the chain — run, task, bridge, and report —
-    all agree. A malformed bridge whose teams disagree is excluded rather than charged to
-    whichever team_id happened to be on it. The run-level conditions sit in one `filter()` so
-    they all resolve against the same `TaskRun` row.
+    all agree. Only GitHub is billable, because the URL is GitHub's `html_url`, so the host
+    prefix test keeps malformed values written into `output.pr_url` from raising a charge. A
+    malformed bridge whose teams disagree is excluded rather than charged to whichever team_id
+    happened to be on it. The run-level conditions sit in one `filter()` so they all resolve
+    against the same `TaskRun` row.
     """
     return SignalReportTask.objects.filter(
+        **({} if include_manual else {"task__runs__state__billing_product__isnull": True}),
         relationship=_IMPLEMENTATION,
-        task__runs__output__pr_url__startswith=_GITHUB_PR_URL_PREFIX,
+        task__runs__output__pr_url__startswith=GITHUB_PR_URL_PREFIX,
         # Fail closed on team disagreement across run / task / bridge / report.
         task__team_id=F("team_id"),
         report__team_id=F("team_id"),
@@ -119,16 +122,17 @@ BILLING_EXEMPT_SOURCE_PRODUCTS: dict[str, str] = {
 }
 
 
-def _scout_skill_is_canonical(team_id: int, skill_name: str) -> bool:
+def _scout_skill_is_canonical(team_id: int, skill_name: str, *, version: int | None = None) -> bool:
     """Whether the team's row for `skill_name` is still the PostHog-shipped scout, byte for byte.
 
     `skill_name` alone doesn't attest PostHog-system origin: a team can edit a seeded scout in
     place and the diverged row keeps its canonical name, which would let a repurposed fork mint
-    permanent exemptions. `scout_skill_row_origin` settles it by content hash against the
-    fingerprint stamped at seed time. Fails closed — no row, no proof → billable.
+    permanent exemptions. `scout_skill_row_is_proven_canonical` settles it by content hash against
+    the fingerprint stamped at seed time. Fails closed — no row, no hash, no match → billable.
     """
-    skill = LLMSkill.objects.filter(team_id=team_id, name=skill_name, deleted=False, is_latest=True).first()
-    return skill is not None and scout_skill_row_origin(skill) == "canonical"
+    skills = LLMSkill.objects.filter(team_id=team_id, name=skill_name, deleted=False)
+    skill = (skills.filter(is_latest=True) if version is None else skills.filter(version=version)).first()
+    return skill is not None and scout_skill_row_is_proven_canonical(skill)
 
 
 def system_billing_exempt_reason(team_id: int, report_id: str | uuid.UUID) -> str | None:
@@ -165,7 +169,7 @@ def mark_report_billing_exempt(report: SignalReport, reason: str) -> bool:
         raise ValueError(f"Unknown billing exemption reason: {reason!r}")
     if report.billing_exempt_reason:
         return False
-    if first_billable_pr_run_at(report.id) is not None:
+    if first_billable_pr_run_at(report.id, team_id=report.team_id) is not None:
         raise BillingExemptionError(
             f"Report {report.id} already has a billable PR run; use a refund instead of a billing exemption."
         )
@@ -174,12 +178,16 @@ def mark_report_billing_exempt(report: SignalReport, reason: str) -> bool:
     return True
 
 
+def report_has_implementation_pr(report_id: str | uuid.UUID, *, team_id: int) -> bool:
+    return _bridges_with_pr_run(include_manual=True).filter(report_id=report_id, team_id=team_id).exists()
+
+
 class FirstBillablePrRun(NamedTuple):
     created_at: datetime
     pr_url: str
 
 
-def first_billable_pr_run(report_id: str | uuid.UUID) -> FirstBillablePrRun | None:
+def first_billable_pr_run(report_id: str | uuid.UUID, *, team_id: int) -> FirstBillablePrRun | None:
     """The report's billable moment: its first implementation run with a GitHub PR URL (with that
     run's `created_at` and `pr_url`), or None if it has never shipped one.
 
@@ -190,7 +198,7 @@ def first_billable_pr_run(report_id: str | uuid.UUID) -> FirstBillablePrRun | No
     """
     row = (
         _bridges_with_pr_run()
-        .filter(report_id=report_id)
+        .filter(report_id=report_id, team_id=team_id)
         # Both columns resolve against the TaskRun join the filter established, so the earliest
         # billable run's timestamp and URL come from the same row.
         .order_by("task__runs__created_at")
@@ -202,27 +210,19 @@ def first_billable_pr_run(report_id: str | uuid.UUID) -> FirstBillablePrRun | No
     return FirstBillablePrRun(created_at=row[0], pr_url=row[1])
 
 
-def first_billable_pr_run_at(report_id: str | uuid.UUID) -> datetime | None:
+def first_billable_pr_run_at(report_id: str | uuid.UUID, *, team_id: int) -> datetime | None:
     """`first_billable_pr_run`, timestamp only."""
-    run = first_billable_pr_run(report_id)
+    run = first_billable_pr_run(report_id, team_id=team_id)
     return run.created_at if run else None
 
 
-def report_pr_is_merged(report_id: str | uuid.UUID, pr_url: str) -> bool:
-    """Whether *this* PR of the report merged, per the tasks GitHub webhook.
+def report_pr_is_merged(report_id: str | uuid.UUID, pr_url: str, *, team_id: int) -> bool:
+    from products.signals.backend.implementation_pr import fetch_implementation_prs_for_reports
 
-    Reads `output.pr_merged`, the flag the webhook persists when a PR merges — the factual record of
-    a merge, independent of report status. A report can now reach RESOLVED without a merged PR (a
-    user or agent can resolve it directly), so status alone no longer attests a merge.
+    for pr in fetch_implementation_prs_for_reports([str(report_id)], team_id=team_id).get(str(report_id), []):
+        if pr.url == pr_url and pr.attached_at is not None:
+            return pr.merged
 
-    Scoped to one `pr_url` rather than the whole report, because the caller is deciding about a
-    specific PR: the refund reverses the charge for the billable run's PR, and it's that PR which
-    must be closed if it never merged. A report-level check would let an unrelated later PR that did
-    merge vouch for the refunded one, leaving the refunded PR open.
-
-    Fail closed like `_bridges_with_pr_run`: the PR URL, the merge flag, and the four team checks all
-    sit in one `filter()` so they resolve against the same `TaskRun` row.
-    """
     return SignalReportTask.objects.filter(
         relationship=_IMPLEMENTATION,
         report_id=report_id,
@@ -248,6 +248,22 @@ def annotate_first_billable_pr_run_at(queryset: QuerySet[SignalReport]) -> Query
     return queryset.annotate(first_billable_pr_run_at=Subquery(earliest))
 
 
+def first_billable_pr_run_at_by_report(report_ids: Sequence[str | uuid.UUID], *, team_id: int) -> dict[str, datetime]:
+    """`annotate_first_billable_pr_run_at` for a known set of reports, in one grouped query.
+
+    The annotation is a correlated subquery, so it costs one bridge-and-run walk per row the
+    query returns. A list that already knows its page asks for the whole page at once instead.
+    Reports with no billable PR run are absent from the map, matching the annotation's NULL.
+    """
+    rows = (
+        _bridges_with_pr_run()
+        .filter(report_id__in=report_ids, team_id=team_id)
+        .values("report_id")
+        .annotate(first_run_at=Min("task__runs__created_at"))
+    )
+    return {str(row["report_id"]): row["first_run_at"] for row in rows}
+
+
 # Why a report can't be refunded right now (`refund_ineligibility_reason`); None = refundable.
 REFUND_INELIGIBLE_ALREADY_REFUNDED = "already_refunded"
 REFUND_INELIGIBLE_BILLING_EXEMPT = "billing_exempt"
@@ -267,7 +283,7 @@ def refund_ineligibility_reason(
     has_refund: bool,
     billing_exempt: bool,
     billable_run_at: datetime | None,
-    period: tuple[datetime, datetime],
+    period: BillingPeriod,
 ) -> str | None:
     """Why a report can't be refunded right now, or None when a refund would be accepted.
 
@@ -281,8 +297,7 @@ def refund_ineligibility_reason(
         return REFUND_INELIGIBLE_BILLING_EXEMPT
     if billable_run_at is None:
         return REFUND_INELIGIBLE_NO_BILLABLE_PR
-    period_start, period_end = period
-    if not (period_start <= billable_run_at < period_end):
+    if not (period.start <= billable_run_at < period.end):
         return REFUND_INELIGIBLE_OUT_OF_PERIOD
     return None
 
@@ -305,7 +320,7 @@ def credited_refund_credits_for_org(organization_id: str | uuid.UUID, begin: dat
     )
 
 
-def current_billing_period_bounds(organization: "Organization") -> tuple[datetime, datetime]:
+def current_billing_period_bounds(organization: "Organization") -> BillingPeriod:
     """The org's current billing period `[start, end)`, falling back to the current UTC calendar
     month when billing hasn't populated `organization.usage["period"]` (e.g. self-hosted or a
     just-created org). Refund eligibility and the org-wide refund summary both key off this."""
@@ -314,11 +329,14 @@ def current_billing_period_bounds(organization: "Organization") -> tuple[datetim
         return period
     now = timezone.now()
     start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    return (start, start + relativedelta(months=1))
+    return BillingPeriod(start=start, end=start + relativedelta(months=1))
 
 
 def get_signals_billing_credits_by_team(
-    begin: datetime, end: datetime, organization_id: str | uuid.UUID | None = None
+    begin: datetime,
+    end: datetime,
+    organization_id: str | uuid.UUID | None = None,
+    organization_ids: Collection[str | uuid.UUID] | None = None,
 ) -> list[tuple[int, int]]:
     """Signals credits used per team in `[begin, end)`.
 
@@ -327,7 +345,8 @@ def get_signals_billing_credits_by_team(
     such run exists before `begin`. Each billable report is charged a flat
     `SIGNALS_CREDITS_PER_REPORT_WITH_PR`. Returns `[(team_id, credits), ...]` for teams with
     non-zero usage only. `organization_id` narrows the scan to one org (the widget's live-count
-    path); usage reporting passes nothing and stays fleet-wide.
+    path), and `organization_ids` to a set of orgs (the quota run's recount). Usage reporting passes
+    neither and stays fleet-wide.
 
     The entry scan is bounded by PRs shipped in the period (via the `created_at` +
     `output__pr_url` indexes), not by the total number of reports, task runs, or teams.
@@ -341,6 +360,8 @@ def get_signals_billing_credits_by_team(
     )
     if organization_id is not None:
         bridges = bridges.filter(team__organization_id=organization_id)
+    if organization_ids is not None:
+        bridges = bridges.filter(team__organization_id__in=organization_ids)
     report_team: dict[uuid.UUID, int] = {}
     for report_id, team_id in bridges.values_list("report_id", "team_id"):
         report_team.setdefault(report_id, team_id)
@@ -387,8 +408,8 @@ def get_signals_billing_credits_by_team(
     return list(totals.items())
 
 
-def period_billable_credits_for_org(organization_id: str | uuid.UUID, begin: datetime, end: datetime) -> int:
-    """The org's billable signals credits for `[begin, end)` per the exact usage-report rules —
+def period_billable_credits_for_org(organization_id: str | uuid.UUID, *, period: BillingPeriod) -> int:
+    """The org's billable signals credits for `period` per the exact usage-report rules —
     including PRs created today that haven't been reported to billing yet.
 
     Powers the inbox usage widget's live PR count: the frontend takes the max of this and
@@ -397,5 +418,6 @@ def period_billable_credits_for_org(organization_id: str | uuid.UUID, begin: dat
     refunds stay included here (usage is truthful) and are netted separately by the widget.
     """
     return sum(
-        credits for _, credits in get_signals_billing_credits_by_team(begin, end, organization_id=organization_id)
+        credits
+        for _, credits in get_signals_billing_credits_by_team(period.start, period.end, organization_id=organization_id)
     )

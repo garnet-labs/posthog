@@ -6,6 +6,12 @@ from collections.abc import Callable
 from functools import wraps
 from typing import Any, TypeVar, cast
 
+from django.conf import settings
+
+from asgiref.sync import sync_to_async
+
+from posthog.temporal.common.utils import close_stale_db_connections
+
 from products.replay_vision.backend.temporal.metrics import record_activity_duration, record_side_effect_failure
 
 F = TypeVar("F", bound=Callable[..., Any])
@@ -31,6 +37,10 @@ def track_activity(name: str | None = None, side_effect: str | None = None) -> C
 
             @wraps(fn)
             async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
+                # Async ORM calls run on the same long-lived thread, so the same dead connections pile up there.
+                # Skipped in tests, as close_db_connections does, because it touches Django connections in tests without DB access.
+                if not settings.TEST:
+                    await sync_to_async(close_stale_db_connections)()
                 started = time.monotonic()
                 try:
                     result = await fn(*args, **kwargs)
@@ -44,6 +54,8 @@ def track_activity(name: str | None = None, side_effect: str | None = None) -> C
 
         @wraps(fn)
         def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
+            # Long-lived worker threads accumulate expired Postgres connections between activity runs.
+            close_stale_db_connections()
             started = time.monotonic()
             try:
                 result = fn(*args, **kwargs)

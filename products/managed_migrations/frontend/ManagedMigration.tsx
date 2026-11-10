@@ -3,18 +3,24 @@ import { Form } from 'kea-forms'
 
 import { IconSort } from '@posthog/icons'
 import { LemonButton, LemonTable, LemonTag, Link } from '@posthog/lemon-ui'
+import { Button } from '@posthog/quill'
 
+import { CodeSnippet, Language } from 'lib/components/CodeSnippet'
 import { FlaggedFeature } from 'lib/components/FlaggedFeature'
 import { TZLabel } from 'lib/components/TZLabel'
 import { FEATURE_FLAGS } from 'lib/constants'
 import { dayjs } from 'lib/dayjs'
+import { useFeatureFlag } from 'lib/hooks/useFeatureFlag'
 import { LemonCalendarSelectInput } from 'lib/lemon-ui/LemonCalendar/LemonCalendarSelect'
 import { LemonCheckbox } from 'lib/lemon-ui/LemonCheckbox'
 import { LemonField } from 'lib/lemon-ui/LemonField'
 import { LemonInput } from 'lib/lemon-ui/LemonInput'
 import { LemonProgress } from 'lib/lemon-ui/LemonProgress'
+import { LemonSegmentedButton } from 'lib/lemon-ui/LemonSegmentedButton'
 import { LemonSelect } from 'lib/lemon-ui/LemonSelect'
+import { LinkPrimitive } from 'lib/lemon-ui/Link'
 import { ProfilePicture } from 'lib/lemon-ui/ProfilePicture'
+import { humanFriendlyNumber } from 'lib/utils/numbers'
 import { sceneConfigurations } from 'scenes/scenes'
 import { Scene, SceneExport } from 'scenes/sceneTypes'
 import { urls } from 'scenes/urls'
@@ -78,9 +84,70 @@ function AmplitudeImportOptions({
     )
 }
 
+function IamRoleSetupInstructions({
+    managedMigration,
+}: {
+    managedMigration: ManagedMigrationForm
+}): JSX.Element | null {
+    const { awsIamSetup } = useValues(managedMigrationLogic)
+
+    if (!awsIamSetup?.available) {
+        return null
+    }
+
+    const bucket = managedMigration.s3_bucket
+    const prefix = managedMigration.s3_prefix
+    const permissionPolicy = awsIamSetup.permission_policy_template
+        .replaceAll('YOUR_BUCKET', bucket || '<YOUR_BUCKET>')
+        .replaceAll('YOUR_PREFIX', prefix || '')
+
+    return (
+        <div className="border rounded p-4 space-y-3 bg-surface-secondary">
+            <div className="font-semibold">Set up an IAM role for PostHog</div>
+            <ol className="list-decimal list-inside space-y-3 text-sm">
+                <li>
+                    In the AWS console, create an IAM role with the following trust policy (it lets PostHog's import
+                    role read from your bucket, and no one else):
+                    <CodeSnippet language={Language.JSON} compact>
+                        {awsIamSetup.trust_policy}
+                    </CodeSnippet>
+                    <div className="text-muted mt-1">
+                        The external ID <code>{awsIamSetup.external_id}</code> is unique to this project and must appear
+                        in the trust policy exactly as shown.
+                    </div>
+                </li>
+                <li>
+                    Attach this permission policy to the role. It fills in automatically from the bucket and prefix
+                    entered above:
+                    <CodeSnippet language={Language.JSON} compact>
+                        {permissionPolicy}
+                    </CodeSnippet>
+                    <div className="text-muted mt-1">
+                        {!bucket
+                            ? 'Enter your bucket above to replace <YOUR_BUCKET> in the policy.'
+                            : prefix
+                              ? `This grants read access to objects under ${prefix} only - nothing else in the bucket.`
+                              : 'No prefix is set, so this grants read access to the whole bucket. Set a prefix above to narrow what PostHog can read.'}
+                    </div>
+                </li>
+                <li>
+                    Paste the new role's ARN:
+                    <LemonField name="role_arn" className="mt-1">
+                        <LemonInput placeholder="arn:aws:iam::123456789012:role/posthog-import" />
+                    </LemonField>
+                </li>
+            </ol>
+        </div>
+    )
+}
+
 export function ManagedMigration(): JSX.Element {
-    const { managedMigration, isManagedMigrationSubmitting } = useValues(managedMigrationLogic)
+    const { managedMigration, isManagedMigrationSubmitting, awsIamSetup } = useValues(managedMigrationLogic)
     const { setManagedMigrationValue } = useActions(managedMigrationLogic)
+    const todayRailNav = useFeatureFlag('TODAY_RAIL_NAV')
+
+    const isS3Source = managedMigration.source_type === 's3' || managedMigration.source_type === 's3_gzip'
+    const usesIamRole = isS3Source && managedMigration.s3_auth_method === 'iam_role' && !!awsIamSetup?.available
 
     return (
         <Form logic={managedMigrationLogic} formKey="managedMigration" enableFormOnSubmit className="space-y-4">
@@ -89,9 +156,15 @@ export function ManagedMigration(): JSX.Element {
                     name="New managed migration"
                     resourceType={{ type: 'managed_migration', forceIcon: <IconSort /> }}
                     actions={
-                        <LemonButton type="primary" htmlType="submit" size="small">
-                            {managedMigration.is_trial ? 'Start trial run' : 'Import Data'}
-                        </LemonButton>
+                        todayRailNav ? (
+                            <Button variant="primary" type="submit">
+                                {managedMigration.is_trial ? 'Start trial run' : 'Import Data'}
+                            </Button>
+                        ) : (
+                            <LemonButton type="primary" htmlType="submit" size="small">
+                                {managedMigration.is_trial ? 'Start trial run' : 'Import Data'}
+                            </LemonButton>
+                        )
                     }
                     forceBackTo={{
                         path: urls.managedMigration(),
@@ -171,23 +244,57 @@ export function ManagedMigration(): JSX.Element {
                             </LemonField>
                         </div>
 
-                        <LemonField name="s3_prefix" label="S3 Prefix (optional)">
-                            <LemonInput placeholder="path/to/files/" />
-                        </LemonField>
-
                         <LemonField
-                            name="endpoint_url"
-                            label="Endpoint URL"
-                            showOptional
-                            info={
+                            name="s3_prefix"
+                            label="S3 Prefix (optional)"
+                            help={
                                 <>
-                                    Only required for S3-compatible storage like Cloudflare R2 or MinIO. For R2, use
-                                    https://ACCOUNT_ID.r2.cloudflarestorage.com and set region to "auto".
+                                    Matched as a plain string prefix: <code>exports</code> also matches keys under{' '}
+                                    <code>exports-old/</code>. End with <code>/</code> to match a single folder.
+                                    {usesIamRole && (
+                                        <>
+                                            {' '}
+                                            Must exactly match the prefix in your IAM role's permission policy,
+                                            including any trailing slash.
+                                        </>
+                                    )}
                                 </>
                             }
                         >
-                            <LemonInput placeholder="https://ACCOUNT_ID.r2.cloudflarestorage.com" />
+                            <LemonInput placeholder="path/to/files/" />
                         </LemonField>
+
+                        {awsIamSetup?.available && (
+                            <LemonField name="s3_auth_method" label="Authentication">
+                                <LemonSegmentedButton
+                                    value={managedMigration.s3_auth_method}
+                                    onChange={(value) => setManagedMigrationValue('s3_auth_method', value)}
+                                    options={[
+                                        { value: 'iam_role', label: 'IAM role (recommended)' },
+                                        { value: 'access_keys', label: 'Access keys' },
+                                    ]}
+                                    size="small"
+                                />
+                            </LemonField>
+                        )}
+
+                        {usesIamRole ? (
+                            <IamRoleSetupInstructions managedMigration={managedMigration} />
+                        ) : (
+                            <LemonField
+                                name="endpoint_url"
+                                label="Endpoint URL"
+                                showOptional
+                                info={
+                                    <>
+                                        Only required for S3-compatible storage like Cloudflare R2 or MinIO. For R2, use
+                                        https://ACCOUNT_ID.r2.cloudflarestorage.com and set region to "auto".
+                                    </>
+                                }
+                            >
+                                <LemonInput placeholder="https://ACCOUNT_ID.r2.cloudflarestorage.com" />
+                            </LemonField>
+                        )}
                     </>
                 )}
                 {(managedMigration.source_type === 'mixpanel' || managedMigration.source_type === 'amplitude') && (
@@ -239,9 +346,59 @@ export function ManagedMigration(): JSX.Element {
                         />
                     )}
 
-                {managedMigration.source_type === 'mixpanel' ? (
+                {managedMigration.source_type === 'mixpanel' && (
+                    <LemonField name="mixpanel_auth_method" label="Authentication">
+                        <LemonSegmentedButton
+                            value={managedMigration.mixpanel_auth_method}
+                            onChange={(value) => setManagedMigrationValue('mixpanel_auth_method', value)}
+                            options={[
+                                { value: 'service_account', label: 'Service account' },
+                                { value: 'project_secret', label: 'Project secret' },
+                            ]}
+                            size="small"
+                        />
+                    </LemonField>
+                )}
+
+                {usesIamRole ? null : managedMigration.source_type === 'mixpanel' &&
+                  managedMigration.mixpanel_auth_method === 'service_account' ? (
+                    <>
+                        <div className="flex gap-4">
+                            <LemonField
+                                name="mixpanel_service_account_username"
+                                label="Service account username"
+                                className="flex-1"
+                            >
+                                <LemonInput />
+                            </LemonField>
+
+                            <LemonField
+                                name="mixpanel_service_account_secret"
+                                label="Service account secret"
+                                className="flex-1"
+                            >
+                                <LemonInput type="password" />
+                            </LemonField>
+                        </div>
+                        <div className="text-secondary text-xs -mt-2">
+                            Create a service account under Organization settings → Service accounts in Mixpanel, and
+                            give it access to the project you're importing. See{' '}
+                            <Link to="https://docs.mixpanel.com/reference/service-accounts" target="_blank">
+                                Mixpanel's docs
+                            </Link>
+                            .
+                        </div>
+                        <LemonField
+                            name="mixpanel_project_id"
+                            label="Project ID"
+                            help="Find this under Project settings → Project Details in Mixpanel."
+                        >
+                            <LemonInput type="number" min={1} placeholder="1234567" />
+                        </LemonField>
+                    </>
+                ) : managedMigration.source_type === 'mixpanel' ? (
                     <LemonField
-                        name="secret_key"
+                        name="mixpanel_project_secret"
                         label="Project secret"
                         help={
                             <span>
@@ -308,9 +465,21 @@ export function ManagedMigration(): JSX.Element {
     )
 }
 
+function completedLabel(migration: ManagedMigrationData): string {
+    const eventsEmitted = migration.state?.events_emitted
+    if (eventsEmitted === undefined) {
+        return 'Complete'
+    }
+    if (eventsEmitted === 0) {
+        return 'Complete, no events imported'
+    }
+    return `Complete, ${humanFriendlyNumber(eventsEmitted)} events imported`
+}
+
 export function ManagedMigrations(): JSX.Element {
     const { managedMigrationId, migrations, migrationsLoading, promotingMigrationId } = useValues(managedMigrationLogic)
     const { pauseMigration, resumeMigration, promoteTrial, viewTrialResults } = useActions(managedMigrationLogic)
+    const todayRailNav = useFeatureFlag('TODAY_RAIL_NAV')
 
     const calculateProgress = (
         migration: ManagedMigrationData
@@ -319,7 +488,7 @@ export function ManagedMigrations(): JSX.Element {
             const parts = migration.state.parts
             const totalParts = parts.length
             const completedParts = parts.filter(
-                (part) => part.total_size !== null && part.total_size === part.current_offset
+                (part) => part.total_size !== null && part.current_offset >= part.total_size
             ).length
             return {
                 progress: totalParts > 0 ? (completedParts / totalParts) * 100 : 0,
@@ -344,14 +513,24 @@ export function ManagedMigrations(): JSX.Element {
                             forceIcon: <IconSort />,
                         }}
                         actions={
-                            <LemonButton
-                                data-attr="new-managed-migration"
-                                to={urls.managedMigrationNew()}
-                                type="primary"
-                                size="small"
-                            >
-                                New migration
-                            </LemonButton>
+                            todayRailNav ? (
+                                <Button
+                                    variant="primary"
+                                    data-attr="new-managed-migration"
+                                    render={<LinkPrimitive to={urls.managedMigrationNew()} />}
+                                >
+                                    New migration
+                                </Button>
+                            ) : (
+                                <LemonButton
+                                    data-attr="new-managed-migration"
+                                    to={urls.managedMigrationNew()}
+                                    type="primary"
+                                    size="small"
+                                >
+                                    New migration
+                                </LemonButton>
+                            )
                         }
                     />
                     <LemonTable
@@ -463,7 +642,7 @@ export function ManagedMigrations(): JSX.Element {
                                             />
                                             <span className="text-xs text-muted">
                                                 {migration.display_status === 'completed'
-                                                    ? 'Complete'
+                                                    ? completedLabel(migration)
                                                     : migration.display_status === 'paused'
                                                       ? 'Paused'
                                                       : migration.display_status === 'waiting_to_start'

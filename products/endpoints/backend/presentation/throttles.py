@@ -1,11 +1,10 @@
 """DRF throttles for the endpoints run API.
 
-Materialized endpoints get a higher rate budget than inline ones. Readiness is
-resolved through the facade (cached, with a DB fallback); the throttle classes
+Requests served from a materialized table get a higher rate budget than inline
+ones. That classification is resolved through the facade; the throttle classes
 and their request-parsing helpers are pure HTTP concerns and live here.
 """
 
-from prometheus_client import Counter
 from rest_framework.throttling import SimpleRateThrottle
 
 from posthog.rate_limit import (
@@ -15,13 +14,7 @@ from posthog.rate_limit import (
     ProjectSecretApiKeyTeamRateThrottle,
 )
 
-from products.endpoints.backend.facade.api import is_materialization_ready
-
-ENDPOINT_RATE_LIMITED_TOTAL = Counter(
-    "posthog_endpoint_rate_limited_total",
-    "Rate-limited endpoint requests",
-    labelnames=["scope"],
-)
+from products.endpoints.backend.facade.api import is_materialized_request, record_throttled_request
 
 
 def _parse_requested_version(request) -> int | None:
@@ -46,11 +39,20 @@ def _get_endpoint_info_from_request(request, view) -> tuple[int | None, str | No
 
 
 def _is_materialized_endpoint_request(request, view) -> bool:
-    """Check if this request targets a materialized endpoint version (cached check with lazy loading)."""
+    """Check if this request will be served from a materialized endpoint version."""
+    try:
+        body = request.data
+    except Exception:
+        # A body DRF cannot read takes the inline rate, because the view rejects the request.
+        # This has to be the first access to request.data: DRF replaces an unparsable body with
+        # an empty one, and an empty body reads as a clean materialized request. An unsupported
+        # media type instead raises on every access, and an error that escapes a throttle skips
+        # rate accounting for every scope.
+        return False
     team_id, endpoint_name, version = _get_endpoint_info_from_request(request, view)
     if not team_id or not endpoint_name:
         return False
-    return is_materialization_ready(team_id, endpoint_name, version)
+    return is_materialized_request(team_id, endpoint_name, version, body)
 
 
 class _MaterializedRateMixin(SimpleRateThrottle):
@@ -65,17 +67,18 @@ class _MaterializedRateMixin(SimpleRateThrottle):
     materialized_scope: str
 
     def allow_request(self, request, view):
-        if _is_materialized_endpoint_request(request, view):
+        materialized = _is_materialized_endpoint_request(request, view)
+        if materialized:
             self.rate = self.materialized_rate
             self.scope = self.materialized_scope
             self.num_requests, self.duration = self.parse_rate(self.rate)
 
         allowed = super().allow_request(request, view)
         if not allowed:
-            try:
-                ENDPOINT_RATE_LIMITED_TOTAL.labels(scope=self.scope).inc()
-            except Exception:
-                pass
+            team_id, endpoint_name, version = _get_endpoint_info_from_request(request, view)
+            record_throttled_request(
+                team_id, endpoint_name, version, materialized=materialized, scope=self.scope or "unknown"
+            )
         return allowed
 
 

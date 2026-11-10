@@ -4,8 +4,9 @@ import { IconX } from '@posthog/icons'
 import { LemonButton, LemonModal } from '@posthog/lemon-ui'
 
 import { IconHeatmap } from 'lib/lemon-ui/icons'
-import { buildRecordingMatchingEventFiltersForUrl } from 'scenes/heatmaps/components/heatmapRecordingFallbackLogic'
 import { SessionRecordingPlayer } from 'scenes/session-recordings/player/SessionRecordingPlayer'
+
+import { buildRecordingMatchingEventFiltersForUrl } from 'products/web_analytics/frontend/heatmaps/components/heatmapRecordingFallbackLogic'
 
 import { SessionRecordingPlayerLogicProps, sessionRecordingPlayerLogic } from '../sessionRecordingPlayerLogic'
 import { sessionPlayerModalLogic } from './sessionPlayerModalLogic'
@@ -91,7 +92,13 @@ export function SessionPlayerModal(): JSX.Element | null {
                                 Use this moment as background
                             </LemonButton>
                         ) : null}
-                        <LemonButton icon={<IconX />} size="small" onClick={closeSessionPlayer} tooltip="Close" />
+                        <LemonButton
+                            data-attr="player-modal-close"
+                            icon={<IconX />}
+                            size="small"
+                            onClick={closeSessionPlayer}
+                            tooltip="Close"
+                        />
                     </div>
                 </div>
             )}

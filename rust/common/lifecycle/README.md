@@ -105,6 +105,7 @@ All options except `name` have sensible defaults.
 | `.with_global_shutdown_timeout(duration)` | Hard ceiling on total shutdown. Monitor returns `ShutdownTimeout` if exceeded. Prevents indefinite hangs if a component doesn't check for cancellation. (see test `global_timeout_fires_when_component_hangs`) | `60s`           |
 | `.with_trap_signals(bool)`                | Install SIGINT/SIGTERM handlers. Set `false` in tests.                                                                                                                                                         | `true`          |
 | `.with_prestop_check(bool)`               | Poll for pre-stop shutdown file (K8s pre-stop hook pattern).                                                                                                                                                   | `true`          |
+| `.with_prestop_action(action)`            | What the pre-stop file does. `PrestopAction::Shutdown` starts graceful shutdown. `PrestopAction::Drain { max }` fails readiness and keeps serving until SIGTERM, for at most `max`. Turns the pre-stop check on. See [Draining before shutdown](#draining-before-shutdown). (see test `prestop_drain_serves_until_max`) | `Shutdown`      |
 | `.with_prestop_path(path)`                | Override the pre-stop file path.                                                                                                                                                                               | `/tmp/shutdown` |
 | `.with_health_poll_interval(duration)`    | Override health monitor poll frequency. The health monitor is automatically active when any component has `with_liveness_deadline`. (see test `stall_triggers_shutdown`)                                       | `5s`            |
 | `.with_shutdown_token(token)`             | Caller supplies an external `CancellationToken`. Use in tests to trigger deterministic, app-global shutdown (simulate `SIGTERM` from k8s etc.)                                                                                   | `None`          |
@@ -118,14 +119,14 @@ All options except `name` have sensible defaults.
 | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
 | `ComponentOptions::new()`           | Base options with defaults for all fields.                                                                                                                                                                                             | —                                                                  |
 | `.is_observability(bool)`           | Mark as an observability handle (e.g. metrics server). Shut down *after* all standard components finish. Cannot combine with `with_liveness_deadline`. (see test `observability_handle_shuts_down_after_standard_handles`)              | `false`                                                            |
-| `.is_advisory(bool)`               | Mark as advisory. Participates in health monitoring (gauge, `is_healthy()`) but stalls do NOT trigger shutdown. Monitor does not wait for advisory handles during shutdown. Requires `with_liveness_deadline`. Cannot combine with `is_observability`. (see test `advisory_handle_stall_does_not_trigger_shutdown`) | `false` |
+| `.is_advisory(bool)`               | Mark as advisory. Participates in health monitoring (gauge, `is_healthy()`) but neither stalls nor death trigger shutdown. Monitor does not wait for advisory handles during shutdown. Requires `with_liveness_deadline`. Cannot combine with `is_observability`. (see test `advisory_handle_stall_does_not_trigger_shutdown`) | `false` |
 | `.with_graceful_shutdown(duration)` | Max time for this component to clean up after shutdown begins. Exceeded = marked timed out. (see test `component_timeout_then_late_drop_preserves_timeout`)                                                                            | `None` — waits indefinitely (bounded by `global_shutdown_timeout`). Observability handles default to `1s` if unset. |
 | `.with_liveness_deadline(duration)` | Component must call `report_healthy()` within this interval or the health monitor considers it stalled. After `stall_threshold` consecutive stalled checks, the manager triggers global shutdown. (see test `stall_triggers_shutdown`) | `None` — no health monitoring                                      |
 | `.with_stall_threshold(n)`          | Number of consecutive stalled health checks before the manager triggers global shutdown. Set higher for tolerance of transient hiccups. Only meaningful with `with_liveness_deadline`. (see test `stall_threshold_allows_recovery`)    | `1` — immediate shutdown on first stall                            |
 
 ## K8s readiness and liveness
 
-**Readiness** (`/_readiness`) returns 200 until shutdown begins, then 503. K8s uses this to stop routing traffic to the pod. No per-component logic — it's purely "is the app accepting work?" (see test `readiness_200_until_shutdown_then_503`)
+**Readiness** (`/_readiness`) returns 200 until the app drains or shutdown begins, then 503. K8s uses this to stop routing traffic to the pod. No per-component logic — it's purely "is the app accepting work?" (see test `readiness_200_until_shutdown_then_503`)
 
 **Liveness** (`/_liveness`) always returns 200 — it means "the process is reachable." Health monitoring is handled internally by the manager's health poll task, not by K8s. When a component's heartbeat deadline expires, the health monitor increments a stall counter. After `stall_threshold` consecutive stalled checks, the manager triggers global shutdown via the same `ComponentEvent::Failure` path as `signal_failure()`. This ensures the app always gets coordinated graceful shutdown instead of K8s surprise-killing the pod. (see tests `stall_triggers_shutdown`, `stall_threshold_exceeded_triggers_shutdown`, `stall_threshold_allows_recovery`)
 
@@ -161,6 +162,30 @@ metrics_handle.work_completed();
 
 guard.wait().await?;
 ```
+
+### Draining before shutdown
+
+By default the pre-stop file starts graceful shutdown at once, the same as SIGTERM.
+A server can close connections that clients still use, because clients do not see the pod leave until K8s removes it from the Service endpoints.
+A client behind a proxy that reaches the pod through one ClusterIP never sees the pod leave, and keeps its pooled connections on it.
+
+`.with_prestop_action(PrestopAction::Drain { max })` turns the pre-stop window into a drain:
+
+- The pre-stop file fails readiness, and components keep serving. The manager logs `Lifecycle: drain started, prestop file detected`.
+- SIGTERM, SIGINT, a component failure or a liveness stall starts shutdown as usual. If none of them comes within `max` of the drain start, the manager starts shutdown itself and logs `Lifecycle: shutdown initiated, drain limit reached`.
+- Set the pod's preStop sleep to `max`, because kubelet sends SIGTERM only after the sleep ends.
+- Set the pod's `terminationGracePeriodSeconds` above `max` plus `with_global_shutdown_timeout`.
+
+```rust
+let mut manager = Manager::builder("my-service")
+    .with_prestop_action(PrestopAction::Drain { max: Duration::from_secs(20) })
+    .build();
+```
+
+An HTTP/1.1 server can send `Connection: close` on each response while `ReadinessHandler::is_ready()` returns false.
+Each client that sends a request during the drain then opens its next connection through the Service to a pod that stays.
+A pooled connection that carries no request during the drain still closes at shutdown, so clients must still retry a request that fails on a reused connection.
+See `close_connection_unless_ready` in `rust/feature-flags/src/router.rs` (see test `drain_closes_keep_alive_connections_after_the_response`).
 
 ## Using the handle
 
@@ -366,7 +391,7 @@ guard.wait().await?;
 
 ## Advisory handles
 
-Advisory handles (`is_advisory(true)`) participate in health monitoring — the health poll task updates their `lifecycle_component_healthy` gauge and their `is_healthy()` flag — but stalls do **not** trigger global shutdown.
+Advisory handles (`is_advisory(true)`) participate in health monitoring — the health poll task updates their `lifecycle_component_healthy` gauge and their `is_healthy()` flag — but neither a stall nor the component's death triggers global shutdown.
 The monitor does not wait for advisory handles during shutdown.
 
 ### When to use
@@ -378,10 +403,10 @@ The canonical example is `FallbackSink`: it needs to know if the primary Kafka s
 
 - **Health gauge updates**: The poll task still writes `lifecycle_component_healthy` for advisory handles — dashboards see the same metrics as standard handles.
 - **`is_healthy()` works**: Returns the poll task's latest health assessment via a shared `AtomicBool` (~1ns read). Starts `true` (Starting state is healthy). Flips to `false` after `stall_threshold` consecutive stalled/unhealthy polls. Flips back on recovery. Lags behind `report_healthy()` by up to `health_poll_interval`.
-- **Stall counting without shutdown**: Stall counts are tracked the same as standard handles — `stall_threshold` gates when `is_healthy()` flips to `false`. The only difference is that advisory handles never send `ComponentEvent::Failure`, so they never trigger global shutdown.
+- **Stall counting without shutdown**: Stall counts are tracked the same as standard handles — `stall_threshold` gates when `is_healthy()` flips to `false`. The health poll task never sends `ComponentEvent::Failure` for an advisory handle, so a stall alone never triggers global shutdown. Note that `signal_failure()` remains callable and *does* trigger shutdown — it is an explicit act by the component author, not a health signal.
 - **Not waited on during shutdown**: Advisory handles are not in the component maps, so the monitor's drain phases ignore them. The app shuts down as soon as all standard (and observability) components finish.
 - **Standard shutdown token**: Advisory handles receive the standard `shutdown_token`, so `shutdown_recv()` and `is_shutting_down()` work normally for cooperative cleanup.
-- **Drop guard**: Events from advisory handle drops are sent to the monitor channel but harmlessly ignored (no entry in component maps).
+- **Drop guard**: Dropping an advisory handle during normal operation sends `ComponentEvent::Died`, which the monitor logs and ignores rather than shutting down. This covers a best-effort component that fails to construct, returns early, or whose task panics. (see tests `advisory_handle_drop_during_normal_operation_does_not_trigger_shutdown`, `panic_in_advisory_task_does_not_trigger_shutdown`)
 - **Requires `with_liveness_deadline`**: The health poll task needs a deadline to evaluate. Registration panics without it.
 - **Cannot combine with `is_observability`**: Advisory and observability are mutually exclusive.
 - **Cannot use `with_graceful_shutdown`**: Advisory handles are not in the component maps, so graceful shutdown timeouts would be silently ignored. Registration panics if both are set.

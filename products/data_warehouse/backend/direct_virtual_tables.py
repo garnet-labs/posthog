@@ -10,6 +10,7 @@ objects the pure-direct path derives from physical rows, but from each
 from typing import TYPE_CHECKING
 
 from posthog.hogql.database.direct_clickhouse_table import DirectClickHouseTable
+from posthog.hogql.database.direct_motherduck_table import DirectMotherDuckTable
 from posthog.hogql.database.direct_mysql_table import DirectMySQLTable
 from posthog.hogql.database.direct_postgres_table import DirectPostgresTable
 from posthog.hogql.database.direct_redshift_table import DirectRedshiftTable
@@ -19,6 +20,11 @@ from posthog.hogql.database.direct_sql_table import DirectSQLTable
 from products.data_warehouse.backend.clickhouse_helpers import (
     clickhouse_schema_metadata_to_dwh_columns,
     get_clickhouse_source_location,
+)
+from products.data_warehouse.backend.motherduck_helpers import (
+    get_default_motherduck_catalog,
+    get_motherduck_source_location,
+    motherduck_schema_metadata_to_dwh_columns,
 )
 from products.data_warehouse.backend.mysql_helpers import (
     get_default_mysql_schema,
@@ -43,6 +49,7 @@ from products.data_warehouse.backend.snowflake_helpers import (
 )
 from products.warehouse_sources.backend.facade.hogql import hogql_fields_and_structure_for_columns
 from products.warehouse_sources.backend.facade.models import ExternalDataSchema
+from products.warehouse_sources.backend.facade.source_inputs import SourceInputsStore
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.sql.projection import (
     filter_dwh_columns_by_enabled_columns,
 )
@@ -105,7 +112,7 @@ def build_direct_table_for_schema(schema: "ExternalDataSchema", source: "Externa
         catalog, postgres_schema, table_name = get_postgres_source_location(
             schema_name=schema.name,
             schema_metadata=metadata,
-            default_schema=(source.job_inputs or {}).get("schema"),
+            default_schema=SourceInputsStore.load_settings(source).get("schema"),
         )
         return DirectPostgresTable(
             name=schema.name,
@@ -218,7 +225,7 @@ def build_direct_table_for_schema(schema: "ExternalDataSchema", source: "Externa
         clickhouse_database, table_name = get_clickhouse_source_location(
             schema_name=schema.name,
             schema_metadata=metadata,
-            default_database=(source.job_inputs or {}).get("database"),
+            default_database=SourceInputsStore.load(source).get("database"),
         )
         return DirectClickHouseTable(
             name=schema.name,
@@ -227,6 +234,42 @@ def build_direct_table_for_schema(schema: "ExternalDataSchema", source: "Externa
             clickhouse_table_name=table_name,
             external_data_source_id=str(source.id),
             connection_metadata=source.connection_metadata,
+            # No column-picker restriction → these fields are the complete physical schema, so a
+            # `SELECT *` can pass through to the server literally.
+            has_complete_columns=schema.enabled_columns is None,
+        )
+
+    if engine == "motherduck":
+        columns = motherduck_schema_metadata_to_dwh_columns(metadata)
+        if not columns:
+            return None
+        columns = filter_dwh_columns_by_enabled_columns(
+            columns,
+            schema.enabled_columns,
+            schema.primary_key_columns,
+            schema.incremental_field,
+            # Direct-MotherDuck columns are keyed by raw, case-sensitive source names.
+            normalize=False,
+        )
+        fields, _ = hogql_fields_and_structure_for_columns(columns)
+        catalog, motherduck_schema, table_name = get_motherduck_source_location(
+            schema_name=schema.name,
+            schema_metadata=metadata,
+            default_catalog=get_default_motherduck_catalog(source),
+        )
+        if not catalog:
+            return None
+        return DirectMotherDuckTable(
+            name=schema.name,
+            fields=fields,
+            motherduck_database=catalog,
+            motherduck_schema=motherduck_schema,
+            motherduck_table_name=table_name,
+            external_data_source_id=str(source.id),
+            connection_metadata=source.connection_metadata,
+            # No column-picker restriction → these fields are the complete physical schema, so a
+            # `SELECT *` can pass through to the server literally.
+            has_complete_columns=schema.enabled_columns is None,
         )
 
     return None

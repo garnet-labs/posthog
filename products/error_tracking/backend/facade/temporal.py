@@ -7,6 +7,9 @@ objects, not data, so they live in their own facade submodule — keeping the
 """
 
 from products.error_tracking.backend.temporal import ACTIVITIES, LIFECYCLE_ACTIVITIES, LIFECYCLE_WORKFLOWS, WORKFLOWS
+from products.error_tracking.backend.temporal.built_in_filters_refresh.schedule import (
+    create_error_tracking_built_in_filters_refresh_schedule,
+)
 from products.error_tracking.backend.temporal.recommendations_refresh.types import RecommendationsRefreshInputs
 from products.error_tracking.backend.temporal.spike_event_cleanup.schedule import (
     create_error_tracking_spike_event_cleanup_schedule,
@@ -14,6 +17,7 @@ from products.error_tracking.backend.temporal.spike_event_cleanup.schedule impor
 from products.error_tracking.backend.temporal.symbol_set_cleanup.schedule import (
     create_error_tracking_symbol_set_cleanup_schedule,
 )
+from products.error_tracking.backend.temporal.weekly_digest.schedule import create_error_tracking_weekly_digest_schedule
 
 __all__ = [
     "ACTIVITIES",
@@ -21,6 +25,8 @@ __all__ = [
     "LIFECYCLE_WORKFLOWS",
     "WORKFLOWS",
     "RecommendationsRefreshInputs",
+    "create_error_tracking_built_in_filters_refresh_schedule",
     "create_error_tracking_spike_event_cleanup_schedule",
     "create_error_tracking_symbol_set_cleanup_schedule",
+    "create_error_tracking_weekly_digest_schedule",
 ]

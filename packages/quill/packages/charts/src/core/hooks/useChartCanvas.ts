@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 
+import { buildDimensions, sameDimensions, type SizeRect } from '../canvas-size'
 import type { ChartDimensions, ChartMargins } from '../types'
 import { useLatest } from './useLatest'
 
@@ -22,24 +23,6 @@ interface UseChartCanvasResult {
     overlayCtx: CanvasRenderingContext2D | null
 }
 
-function sizeCanvas(canvas: HTMLCanvasElement, rect: DOMRect, dpr: number): void {
-    canvas.width = rect.width * dpr
-    canvas.height = rect.height * dpr
-    canvas.style.width = `${rect.width}px`
-    canvas.style.height = `${rect.height}px`
-}
-
-function buildDimensions(rect: DOMRect, margins: ChartMargins): ChartDimensions {
-    return {
-        width: rect.width,
-        height: rect.height,
-        plotLeft: margins.left,
-        plotTop: margins.top,
-        plotWidth: Math.max(0, rect.width - margins.left - margins.right),
-        plotHeight: Math.max(0, rect.height - margins.top - margins.bottom),
-    }
-}
-
 export function useChartCanvas(options: UseChartCanvasOptions): UseChartCanvasResult {
     const { margins } = options
     const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -51,7 +34,7 @@ export function useChartCanvas(options: UseChartCanvasOptions): UseChartCanvasRe
     // without re-binding when only margins change — re-binding risks a feedback loop with
     // y-tick-width measurement.
     const marginsRef = useLatest(margins)
-    const rectRef = useRef<DOMRect | null>(null)
+    const rectRef = useRef<SizeRect | null>(null)
 
     // Attach the ResizeObserver once. updateSize reads margins from the ref; when margins
     // change, the secondary effect below recomputes dimensions from the cached rect.
@@ -60,20 +43,19 @@ export function useChartCanvas(options: UseChartCanvasOptions): UseChartCanvasRe
         if (!wrapper) {
             return
         }
+        let deferredRepaint = false
 
-        const updateSize = (): void => {
+        // `forceRepaint` publishes fresh state even when nothing moved — for a restored context,
+        // whose bitmap came back blank while every value stayed identical.
+        // `layoutRect` overrides the measurement — getBoundingClientRect is scaled by ancestor
+        // transforms (e.g. a modal's open animation), so observer-driven updates pass the entry's
+        // transform-immune layout size instead.
+        const updateSize = (forceRepaint = false, layoutRect?: SizeRect): void => {
             const canvas = canvasRef.current
             const overlayCanvas = overlayCanvasRef.current
             if (!canvas || !overlayCanvas) {
                 return
             }
-
-            const rect = wrapper.getBoundingClientRect()
-            rectRef.current = rect
-            const dpr = window.devicePixelRatio || 1
-
-            sizeCanvas(canvas, rect, dpr)
-            sizeCanvas(overlayCanvas, rect, dpr)
 
             const context = canvas.getContext('2d')
             const overlayContext = overlayCanvas.getContext('2d')
@@ -81,27 +63,68 @@ export function useChartCanvas(options: UseChartCanvasOptions): UseChartCanvasRe
                 return
             }
 
-            setCanvasState({
-                ctx: context,
-                overlayCtx: overlayContext,
-                dimensions: buildDimensions(rect, marginsRef.current),
-            })
+            const rect = layoutRect ?? wrapper.getBoundingClientRect()
+            // A sub-pixel wrapper (a `display: none` ancestor, Chromium shrinking the viewport for a tall
+            // screenshot) has nothing to draw. Keep the last frame, and replay a requested repaint
+            // (a restored context) once a real size arrives.
+            if (rect.width < 1 || rect.height < 1) {
+                deferredRepaint ||= forceRepaint
+                return
+            }
+            const repaint = forceRepaint || deferredRepaint
+            deferredRepaint = false
+            rectRef.current = rect
+
+            // The backing stores are not resized here. `clearAndPrepare` resizes them in the same
+            // frame as the repaint, because a resize wipes the bitmap. A wipe here, in the observer
+            // callback, paints one blank frame before the draw loop runs, and a continuous resize
+            // (dragging a dashboard tile) keeps the chart blank until it stops.
+            //
+            // The draw loops key on `dimensions` *identity*, so publishing a fresh object is what
+            // schedules a repaint. A restored context needs one even though no value moved, so
+            // `repaint` skips the reuse of `prev`.
+            const next = buildDimensions(rect, marginsRef.current)
+            setCanvasState((prev) =>
+                prev &&
+                !repaint &&
+                prev.ctx === context &&
+                prev.overlayCtx === overlayContext &&
+                sameDimensions(prev.dimensions, next)
+                    ? prev
+                    : { ctx: context, overlayCtx: overlayContext, dimensions: next }
+            )
         }
 
+        // The synchronous measure can be transform-scaled (a chart mounting inside a modal's
+        // open animation reads the mid-animation size, and no resize ever fires because the
+        // layout size never changed). The observer's guaranteed initial delivery corrects it.
         updateSize()
 
-        const observer = new ResizeObserver(() => {
-            updateSize()
+        const observer = new ResizeObserver((entries) => {
+            const box = entries[entries.length - 1]?.borderBoxSize?.[0]
+            updateSize(false, box ? { width: box.inlineSize, height: box.blockSize } : undefined)
         })
         observer.observe(wrapper)
 
+        // A 2D context can be lost when the browser reclaims canvas memory. Its bitmap comes back
+        // blank on `contextrestored` and nothing repaints on its own, so the canvas stays empty
+        // while every DOM overlay (axis labels, goal lines, tooltip) keeps rendering against valid
+        // dimensions. Not supported everywhere: Firefox 125+ and Chrome 99+ fire it, Safari never
+        // does. `contextlost` is deliberately not handled — preventing its default tells the browser
+        // we'll restore the context ourselves, and then it never restores.
+        const onContextRestored = (): void => updateSize(true)
+        const restoreTargets = [canvasRef.current, overlayCanvasRef.current].filter(
+            (canvas): canvas is HTMLCanvasElement => !!canvas
+        )
+        restoreTargets.forEach((canvas) => canvas.addEventListener('contextrestored', onContextRestored))
+
         return () => {
             observer.disconnect()
+            restoreTargets.forEach((canvas) => canvas.removeEventListener('contextrestored', onContextRestored))
         }
         // Bind the observer once. `marginsRef` is a ref so `updateSize` always reads the
         // latest margins; depending on `marginsRef.current` here would disconnect and re-run
-        // `updateSize` on every margins change, synchronously clearing the canvas bitmap
-        // (a visible blank flash). The effect below handles margins-only updates instead.
+        // `updateSize` on every margins change. The effect below handles margins-only updates.
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
 
@@ -111,7 +134,13 @@ export function useChartCanvas(options: UseChartCanvasOptions): UseChartCanvasRe
         if (!rect) {
             return
         }
-        setCanvasState((prev) => (prev ? { ...prev, dimensions: buildDimensions(rect, margins) } : prev))
+        setCanvasState((prev) => {
+            if (!prev) {
+                return prev
+            }
+            const next = buildDimensions(rect, margins)
+            return sameDimensions(prev.dimensions, next) ? prev : { ...prev, dimensions: next }
+        })
     }, [margins.left, margins.right, margins.top, margins.bottom, margins])
 
     return {

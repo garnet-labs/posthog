@@ -3,6 +3,7 @@ import time
 import typing
 import asyncio
 import datetime as dt
+import contextlib
 import dataclasses
 import urllib.parse
 
@@ -18,9 +19,13 @@ from posthog.temporal.common.base import PostHogWorkflow
 from posthog.temporal.common.heartbeat import Heartbeater
 from posthog.temporal.common.logger import get_logger, get_write_only_logger
 
-from products.batch_exports.backend.service import BatchExportField, BatchExportInsertInputs, WorkflowsBatchExportInputs
+from products.batch_exports.backend.service import (
+    BatchExportField,
+    BatchExportInsertInputs,
+    WorkflowsBatchExportInputs,
+    migrate_batch_export_model,
+)
 from products.batch_exports.backend.temporal.batch_exports import (
-    OverBillingLimitError,
     StartBatchExportRunInputs,
     get_data_interval,
     start_batch_export_run,
@@ -30,7 +35,7 @@ from products.batch_exports.backend.temporal.pipeline.entrypoint import execute_
 from products.batch_exports.backend.temporal.pipeline.producer import Producer
 from products.batch_exports.backend.temporal.pipeline.transformer import JSONLStreamTransformer
 from products.batch_exports.backend.temporal.pipeline.types import BatchExportResult
-from products.batch_exports.backend.temporal.spmc import RecordBatchQueue, wait_for_schema_or_producer
+from products.batch_exports.backend.temporal.queue import RecordBatchQueue, wait_for_schema_or_producer
 from products.batch_exports.backend.temporal.utils import (
     handle_non_retryable_errors,
     make_retryable_with_exponential_backoff,
@@ -410,7 +415,8 @@ async def insert_into_workflows_activity_from_stage(inputs: WorkflowsInsertInput
         inputs.batch_export.data_interval_end or "END",
     )
 
-    async with Heartbeater():
+    async with Heartbeater(), contextlib.AsyncExitStack() as cleanup:
+        model = migrate_batch_export_model(inputs.batch_export.batch_export_model)
         queue = RecordBatchQueue(max_size_bytes=settings.BATCH_EXPORT_WORKFLOWS_RECORD_BATCH_QUEUE_MAX_SIZE_BYTES)
         producer = Producer()
         assert inputs.batch_export.batch_export_id is not None
@@ -421,6 +427,7 @@ async def insert_into_workflows_activity_from_stage(inputs: WorkflowsInsertInput
             data_interval_end=inputs.batch_export.data_interval_end,
             max_record_batch_size_bytes=1024 * 1024 * 60,  # 60MB
         )
+        cleanup.push_async_callback(producer.stop)
 
         record_batch_schema = await wait_for_schema_or_producer(queue, producer_task)
         if record_batch_schema is None:
@@ -459,9 +466,7 @@ async def insert_into_workflows_activity_from_stage(inputs: WorkflowsInsertInput
                 team_id=inputs.batch_export.team_id,
                 session=session,
                 request_task_group=tg,
-                model=inputs.batch_export.batch_export_model.name
-                if inputs.batch_export.batch_export_model
-                else "events",
+                model=model.name,
                 max_concurrent_requests=settings.BATCH_EXPORT_WORKFLOWS_MAX_CONCURRENT_REQUESTS,
                 max_pending_requests=settings.BATCH_EXPORT_WORKFLOWS_MAX_PENDING_REQUESTS,
             )
@@ -515,47 +520,43 @@ class WorkflowsBatchExportWorkflow(PostHogWorkflow):
         """Workflow implementation to export data to Workflows API."""
         is_backfill = inputs.get_is_backfill()
         is_earliest_backfill = inputs.get_is_earliest_backfill()
-        data_interval_start, data_interval_end = get_data_interval(
-            inputs.interval, inputs.data_interval_end, inputs.timezone
-        )
+        data_interval = get_data_interval(inputs.interval, inputs.data_interval_end, inputs.timezone)
         should_backfill_from_beginning = is_backfill and is_earliest_backfill
 
         start_batch_export_run_inputs = StartBatchExportRunInputs(
             team_id=inputs.team_id,
             batch_export_id=inputs.batch_export_id,
-            data_interval_start=data_interval_start.isoformat() if not should_backfill_from_beginning else None,
-            data_interval_end=data_interval_end.isoformat(),
+            data_interval_start=data_interval.start.isoformat() if not should_backfill_from_beginning else None,
+            data_interval_end=data_interval.end.isoformat(),
             exclude_events=inputs.exclude_events,
             include_events=inputs.include_events,
             backfill_id=inputs.backfill_details.backfill_id if inputs.backfill_details else None,
+            # Workflows exports are excluded from rows exported billing, so skip the check.
+            check_billing=False,
         )
 
-        try:
-            run_id = await temporalio.workflow.execute_activity(
-                start_batch_export_run,
-                start_batch_export_run_inputs,
-                start_to_close_timeout=dt.timedelta(minutes=5),
-                retry_policy=RetryPolicy(
-                    initial_interval=dt.timedelta(seconds=10),
-                    maximum_interval=dt.timedelta(seconds=60),
-                    maximum_attempts=0,
-                    non_retryable_error_types=["NotNullViolation", "IntegrityError", "OverBillingLimitError"],
-                ),
-            )
-        except OverBillingLimitError:
-            return
+        run_id = await temporalio.workflow.execute_activity(
+            start_batch_export_run,
+            start_batch_export_run_inputs,
+            start_to_close_timeout=dt.timedelta(minutes=5),
+            retry_policy=RetryPolicy(
+                initial_interval=dt.timedelta(seconds=10),
+                maximum_interval=dt.timedelta(seconds=60),
+                maximum_attempts=0,
+                non_retryable_error_types=["NotNullViolation", "IntegrityError", "OverBillingLimitError"],
+            ),
+        )
 
         batch_export_inputs = BatchExportInsertInputs(
             team_id=inputs.team_id,
-            data_interval_start=data_interval_start.isoformat() if not should_backfill_from_beginning else None,
-            data_interval_end=data_interval_end.isoformat(),
+            data_interval_start=data_interval.start.isoformat() if not should_backfill_from_beginning else None,
+            data_interval_end=data_interval.end.isoformat(),
             exclude_events=inputs.exclude_events,
             include_events=inputs.include_events,
             run_id=run_id,
             backfill_details=inputs.backfill_details,
             is_backfill=is_backfill,
             batch_export_model=inputs.batch_export_model,
-            batch_export_schema=inputs.batch_export_schema,
             batch_export_id=inputs.batch_export_id,
             destination_default_fields=workflows_default_fields(inputs.batch_export_id),
         )

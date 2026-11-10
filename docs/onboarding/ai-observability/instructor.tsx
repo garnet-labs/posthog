@@ -1,6 +1,7 @@
 import { OnboardingComponentsContext, createInstallation } from 'scenes/onboarding/shared/OnboardingDocsContentWrapper'
 
 import { StepDefinition } from '../steps'
+import { getOtelRequestContextStep } from './_snippets/otel-request-context'
 
 export const getInstructorSteps = (ctx: OnboardingComponentsContext): StepDefinition[] => {
     const { CodeBlock, CalloutBox, Markdown, Blockquote, dedent, snippets } = ctx
@@ -19,12 +20,12 @@ export const getInstructorSteps = (ctx: OnboardingComponentsContext): StepDefini
                             [Node.js](https://github.com/PostHog/posthog-js/tree/main/examples/example-ai-instructor)
                             and
                             [Python](https://github.com/PostHog/posthog-python/tree/master/examples/example-ai-instructor)
-                            examples on GitHub. If you're using the PostHog SDK wrapper instead of OpenTelemetry, see
-                            the [Node.js
+                            examples on GitHub. If you use the PostHog SDK wrapper instead of OpenTelemetry: see the
+                            [Node.js
                             wrapper](https://github.com/PostHog/posthog-js/tree/e08ff1be/examples/example-ai-instructor)
                             and [Python
                             wrapper](https://github.com/PostHog/posthog-python/tree/7223c52/examples/example-ai-instructor)
-                            examples.
+                            examples instead.
                         </Markdown>
                     </CalloutBox>
 
@@ -108,7 +109,7 @@ export const getInstructorSteps = (ctx: OnboardingComponentsContext): StepDefini
                                       }),
                                       spanProcessors: [
                                         new PostHogSpanProcessor({
-                                          apiKey: '<ph_project_token>',
+                                          projectToken: '<ph_project_token>',
                                           host: '<ph_client_api_host>',
                                         }),
                                       ],
@@ -187,9 +188,10 @@ export const getInstructorSteps = (ctx: OnboardingComponentsContext): StepDefini
 
                     <Blockquote>
                         <Markdown>
-                            **Note:** If you want to capture LLM events anonymously, omit the `posthog.distinct_id`
-                            resource attribute. See our docs on [anonymous vs identified
-                            events](https://posthog.com/docs/data/anonymous-vs-identified-events) to learn more.
+                            **Note:** To capture LLM events anonymously, omit the `posthog.distinct_id` resource
+                            attribute and don't set a distinct ID in the PostHog context. See our docs on [anonymous vs
+                            identified events](https://posthog.com/docs/data/anonymous-vs-identified-events) to learn
+                            more.
                         </Markdown>
                     </Blockquote>
 
@@ -203,6 +205,7 @@ export const getInstructorSteps = (ctx: OnboardingComponentsContext): StepDefini
                 </>
             ),
         },
+        getOtelRequestContextStep(ctx, { languages: ['Python', 'Node'] }),
     ]
 }
 

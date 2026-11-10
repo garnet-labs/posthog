@@ -46,6 +46,15 @@ Deterministic safety gates first, then Claude reviews for showstoppers.
 >   per `greptile.json` and root `REVIEW.md`) ground in the same bytes.
 > - `.stamphog/runtime-evidence.yml` — trusted bot logins and bypassable
 >   categories. Covered by the `stamphog_policy` deny.
+> - `attestations.py` (+ tests) and the `attestations` policy entry — upstream's
+>   "CI results that lift a deny" model (products/stamphog/AGENTS.md,
+>   "Attestations"), vendored with one local change: upstream's hosted server
+>   looks the Actions run up because the review sandbox holds no token; this
+>   copy runs as an Actions job with the repository token, so
+>   `actions_attestation_results` does that lookup here. The fork's entry is
+>   the `Dependency proof` job of `.github/workflows/garnet-ci.yml`, which
+>   lifts `deps_toolchain` for the dependency files it lists when the Garnet
+>   record of the recorded installs shows nothing new against master.
 > - `.github/workflows/pr-approval-agent.yml` — runs with `GITHUB_TOKEN` +
 >   `ANTHROPIC_API_KEY` repo secret instead of the Stamphog GitHub App;
 >   the decide-delta/dismiss jobs are kept but post as github-actions[bot].
@@ -312,3 +321,12 @@ Tier thresholds and deny categories calibrated against 356 PRs that received qui
 - Python-only cluster: median 13 lines/1 file, 3% has tests
 
 Key insight: size alone is not a safe proxy. Small PRs touching CI workflows, auth, or SAML should never be auto-approved regardless of size. The deny-list exists precisely for this.
+
+## Bots admitted by policy
+
+`bot_authors` in `.stamphog/policy.yml` names a bot whose pull requests stamphog reviews. The entry
+carries the bot's login and numeric id, the branch prefix it opens from, and `requires:
+every_file_attested`: the review approves only when a passing attestation lists every changed file.
+Files the attestation lists leave the size gate; a file it does not list fails the `attestations`
+gate. A pending attestation that could still list every file makes the review wait, as a pending
+deny lift does.

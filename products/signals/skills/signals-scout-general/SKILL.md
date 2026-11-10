@@ -1,5 +1,6 @@
 ---
 name: signals-scout-general
+scout-display-name: General
 description: >
   Cross-product Signals scout. Looks for cross-product correlations and explores the surfaces
   the per-product specialist scouts don't cover.
@@ -7,8 +8,9 @@ compatibility: >
   Runs as the PostHog Signals scout in a Claude sandbox with PostHog MCP scopes: signal_scout:read + signal_scout_internal:write (for
   scratchpad-remember/forget) + signal_scout_report:write (for emit-report/edit-report,
   granted because this scout authors reports directly via the report channel), llm_skill:read, plus standard
-  analytics reads. Uses the signals-scout MCP family: project-profile-get, runs-list, runs-retrieve,
-  scratchpad-search, scratchpad-remember, scratchpad-forget, emit-report, edit-report, members-list.
+  analytics reads. Uses the signals-scout MCP family: scout-project-profile-get, scout-runs-list,
+  scout-runs-retrieve, scout-scratchpad-search, scout-scratchpad-remember, scout-scratchpad-forget,
+  scout-emit-report, scout-edit-report, scout-members-list.
 allowed_tools:
   - emit_report
   - edit_report
@@ -44,16 +46,24 @@ Pick what looks interesting and follow it. The coverage map says what's live; th
 
 When sibling specialists are running, leave a surface they cover in depth to them on a future tick — the `skill_name`s on recent runs in `scout-runs-list` show the live roster (specialists exist for most product surfaces: error tracking, logs, AI observability, experiments, feature flags, session replay, web analytics, surveys, and more) — and spend your time on **cross-product correlations** or **surfaces no specialist covers**. When no specialists are running, the whole coverage map is your beat: work across it instead of narrowing to one corner.
 
+## Watch for new traffic
+
+Every few runs, check whether the project's event volume stepped up, and where the new events come from.
+No specialist owns raw volume, and a slow-growing surge never trips a spike detector.
+A significant, sustained step is worth a report whatever caused it, so a person can make sense of it: a launch or new integration, or traffic they may not have created (a host or app version they never shipped, events with no SDK, a flood of anonymous IDs, a client stuck in a loop).
+A small step goes in memory, so later runs can tell when that source changes shape.
+[`references/new-traffic.md`](references/new-traffic.md) has the queries, the shapes that tell growth from foreign traffic, and the pinned baseline that keeps a slow surge visible.
+
 ## Decide
 
 Search the inbox before you author — a report covering this finding may already exist (`inbox-reports-list`, then `inbox-reports-retrieve` the closest matches). Then, for each candidate finding:
 
 - **Edit** the existing report via `scout-edit-report` when the inbox already covers the topic — append a note with your fresh evidence, or rewrite the title/summary on a report you authored. This is the default when a match exists; don't mint a near-duplicate.
-- **Author** a fresh report via `scout-emit-report` when nothing in the inbox covers it (or a known issue has new evidence that changes the verdict). A fully-validated cross-product correlation is the natural fit. **Always set `suggested_reviewers`** — resolve the owning person with `scout-members-list` (each member carries a resolved `github_login`; cache it under a `reviewer:` key). It's how the report reaches a human; left empty, the report is assigned to nobody and is likely missed. The harness prompt carries the full report-channel contract (field schema, safety × actionability status mapping, reviewer routing, the non-idempotency caveat, and the edit rules) — this section only adds what's specific to a cross-product correlation.
+- **Author** a fresh report via `scout-emit-report` when nothing in the inbox covers it (or a known issue has new evidence that changes the verdict). A fully-validated cross-product correlation is the natural fit. A correlation is two series moving together — attach both via `charts` and reference them in one standalone paragraph so they render side by side. **Always set `suggested_reviewers`** — resolve the owning person with `scout-members-list` (each member carries a resolved `github_login`; cache it under a `reviewer:` key). It's how the report reaches a human; left empty, the report is assigned to nobody and is likely missed. The harness prompt carries the full report-channel contract (field schema, safety × actionability status mapping, reviewer routing, the non-idempotency caveat, and the edit rules) — this section only adds what's specific to a cross-product correlation.
 - **Remember** via `scout-scratchpad-remember` if it's below the bar but worth carrying forward, or to record what you ruled out and why.
 - **Skip** if the scratchpad or inbox already covers it.
 
-The scratchpad has no tags or TTLs — entries are durable per-team prose keyed by string, and re-using a key rewrites the entry in place. Encode the category in the key prefix:
+The scratchpad has no tags — entries are durable per-team prose keyed by string, and re-using a key rewrites the entry in place. `expires_at` is the opt-in TTL for a memory that is only true for a while; the harness prompt carries the rules for it. Encode the category in the key prefix:
 
 | Prefix        | Use for                                                                                                                              |
 | ------------- | ------------------------------------------------------------------------------------------------------------------------------------ |

@@ -5,15 +5,19 @@ Note: This module uses a real Snowflake connection.
 """
 
 import os
+import uuid
 import asyncio
 import datetime as dt
+from collections.abc import AsyncIterator
 
 import pytest
 
 import pyarrow as pa
 import pytest_asyncio
+import pyarrow.parquet as pq
 
 from products.batch_exports.backend.temporal.destinations.snowflake_batch_export import (
+    NamedBytesIO,
     SnowflakeClient,
     SnowflakeField,
     SnowflakeIncompatibleSchemaError,
@@ -22,6 +26,11 @@ from products.batch_exports.backend.temporal.destinations.snowflake_batch_export
     SnowflakeTable,
     SnowflakeType,
     SnowflakeWarehouseUsageError,
+)
+from products.batch_exports.backend.temporal.pipeline.transformer import (
+    ParquetStreamTransformer,
+    PipelineTransformer,
+    SchemaTransformer,
 )
 from products.batch_exports.backend.tests.temporal.destinations.snowflake.utils import SKIP_IF_MISSING_REQUIRED_ENV_VARS
 
@@ -32,7 +41,7 @@ pytestmark = [
 
 
 @pytest_asyncio.fixture
-async def snowflake_client(snowflake_config, database, schema):
+async def snowflake_client(snowflake_export_config, snowflake_integration_credentials, database, schema):
     """Create a SnowflakeClient with a test database and schema set up and cleaned up after tests."""
 
     inputs = SnowflakeInsertInputs(
@@ -42,10 +51,12 @@ async def snowflake_client(snowflake_config, database, schema):
         ).isoformat(),  # not important for this test
         data_interval_end=(dt.datetime.now(dt.UTC)).isoformat(),  # not important for this test
         table_name="test_table",  # not important for this test
-        **snowflake_config,
+        **snowflake_export_config,
     )
 
-    async with SnowflakeClient.from_inputs(inputs).connect(use_namespace=False) as client:
+    async with SnowflakeClient.from_integration(snowflake_integration_credentials, inputs).connect(
+        use_namespace=False
+    ) as client:
         # Set up: Create database and schema
         await client.execute_async_query(f'CREATE DATABASE IF NOT EXISTS "{database}"', fetch_results=False)
         await client.execute_async_query(f'CREATE SCHEMA IF NOT EXISTS "{database}"."{schema}"', fetch_results=False)
@@ -152,6 +163,8 @@ async def test_table(snowflake_client, database, schema, table_name):
         fields=(
             SnowflakeField("id", SnowflakeType("INTEGER", False), pa.int64(), True),
             SnowflakeField("text", SnowflakeType("TEXT", False), pa.string(), True),
+            SnowflakeField("amount", SnowflakeType("NUMBER", False, 38, 2), pa.decimal128(38, 2), True),
+            SnowflakeField.from_arrow_field(pa.field("native_uuid", pa.uuid())),
         ),
         parents=(database, schema),
     )
@@ -244,3 +257,129 @@ async def test_get_table_raises_incompatible_schema_on_missing_version_key_field
 
     assert "'missing_key_one'" in str(excinfo.value)
     assert "'missing_key_two'" in str(excinfo.value)
+
+
+async def test_put_file_to_snowflake_table_stage(snowflake_client, database, schema, test_table):
+    """Test files are put into Snowflake table stage."""
+    test_table.stage_prefix = f"{str(uuid.uuid4())}/{dt.datetime.now(dt.UTC):%Y-%m-%d_%H-%M-%S}"
+
+    n_legs = pa.array([2, 2, 4, 4, 5, 100])
+    animals = pa.array(["Flamingo", "Parrot", "Dog", "Horse", "Brittle stars", "Centipede"])
+    table = pa.Table.from_arrays([n_legs, animals], names=["id", "text"])
+    file_like = NamedBytesIO(b"", name="test_file")
+    pq.write_table(table, file_like)
+
+    file_like.seek(0)
+    await snowflake_client.put_file_to_snowflake_table_stage(file_like, test_table)
+
+    result = await snowflake_client.execute_async_query(
+        f"""
+        LIST '@%"{test_table.name}"/{test_table.stage_prefix}'
+        """,
+        timeout=60.0,
+    )
+    assert result is not None, "Expected at least one file"
+
+    rows, metadata = result
+    assert len(rows) == 1, "Expected only one file"
+
+    row = rows[0]
+    row_dict = dict(zip((field.name for field in metadata), row))
+    assert row_dict["name"] == f"{test_table.stage_prefix}/test_file"
+
+
+async def test_copy_loaded_files_to_snowflake_table_only_works_on_stage_prefix(
+    snowflake_client, database, schema, test_table
+):
+    """Test copying only copies and purges files under stage prefix.
+
+    This ensures that multiple COPY queries to the same table do not PURGE or
+    COPY each other files.
+    """
+    test_table.stage_prefix = first_prefix = f"{str(uuid.uuid4())}/{dt.datetime.now(dt.UTC):%Y-%m-%d_%H-%M-%S}"
+
+    ids = [2, 2, 4, 4, 5, 100]
+    text = ["Flamingo", "Parrot", "Dog", "Horse", "Brittle stars", "Centipede"]
+    n_legs = pa.array(ids)
+    animals = pa.array(text)
+    uuid_values = [
+        "00112233-4455-4677-8899-aabbccddeeff",
+        None,
+        "ffffffff-ffff-ffff-ffff-ffffffffffff",
+        "00000000-0000-0000-0000-000000000000",
+        "01900000-1234-7abc-8def-0123456789ab",
+        "00112233-4455-4677-8899-aabbccddeeff",
+    ]
+    uuids = pa.array([uuid.UUID(value).bytes if value is not None else None for value in uuid_values], type=pa.uuid())
+    table = pa.Table.from_arrays([n_legs, animals, uuids], names=["id", "text", "native_uuid"])
+
+    async def record_batches() -> AsyncIterator[pa.RecordBatch]:
+        for batch in table.to_batches(max_chunksize=2):
+            yield batch
+
+    destination = await snowflake_client.get_table(test_table)
+    assert destination["native_uuid"].data_type == pa.uuid()
+    transformer = PipelineTransformer(
+        transformers=(SchemaTransformer(table=destination), ParquetStreamTransformer(compression="zstd"))
+    )
+    file_like = NamedBytesIO(b"", name="test_file")
+    async for chunk in transformer.iter(record_batches()):
+        file_like.write(chunk.data)
+
+    file_like.seek(0)
+    await snowflake_client.put_file_to_snowflake_table_stage(file_like, test_table)
+
+    # Same file, different prefix
+    file_like.seek(0)
+    test_table.stage_prefix = second_prefix = f"{str(uuid.uuid4())}/{dt.datetime.now(dt.UTC):%Y-%m-%d_%H-%M-%S}"
+    await snowflake_client.put_file_to_snowflake_table_stage(file_like, test_table)
+
+    await snowflake_client.copy_loaded_files_to_snowflake_table(test_table, timeout=30.0)
+
+    # Check data was actually copied
+    result = await snowflake_client.execute_async_query(
+        f"""
+        SELECT * FROM "{test_table.name}"
+        """,
+        timeout=60.0,
+    )
+    assert result is not None, "Expected at least one row in table was copied"
+
+    rows, metadata = result
+    data: dict[str, list[int] | list[str]] = {"id": [], "text": []}
+    for row in rows:
+        dict_row = dict(zip((field.name for field in metadata), row))
+        data["id"].append(dict_row["id"])
+        data["text"].append(dict_row["text"])
+
+    assert sorted(data["id"]) == sorted(ids)
+    assert sorted(data["text"]) == sorted(text)
+    uuid_column = next(index for index, field in enumerate(metadata) if field.name == "native_uuid")
+    text_column = next(index for index, field in enumerate(metadata) if field.name == "text")
+    assert {row[text_column]: row[uuid_column] for row in rows} == dict(zip(text, uuid_values))
+
+    # Check that first prefix file should still be there
+    result = await snowflake_client.execute_async_query(
+        f"""
+        LIST '@%"{test_table.name}"/{first_prefix}'
+        """,
+        timeout=60.0,
+    )
+    assert result is not None, "Expected at least one file"
+
+    rows, metadata = result
+    assert len(rows) == 1, "Expected only one file"
+
+    row = rows[0]
+    row_dict = dict(zip((field.name for field in metadata), row))
+    assert row_dict["name"] == f"{first_prefix}/test_file"
+
+    # Check that second prefix file should have been purged by COPY
+    result = await snowflake_client.execute_async_query(
+        f"""
+        LIST '@%"{test_table.name}"/{second_prefix}'
+        """,
+        timeout=60.0,
+    )
+    rows, metadata = result
+    assert rows == []

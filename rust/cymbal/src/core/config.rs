@@ -1,3 +1,5 @@
+use std::num::NonZeroUsize;
+
 use aws_config::{BehaviorVersion, Region};
 use common_database::{get_pool_with_config, PoolConfig};
 use envconfig::Envconfig;
@@ -67,12 +69,31 @@ pub struct ResolverConfig {
     #[envconfig(default = "300")]
     pub frame_unresolved_ttl_seconds: u64,
 
+    // When enabled, a re-resolution that produced an unchanged frame snapshot refreshes
+    // created_at with a timestamp-only UPDATE instead of rewriting every row's full
+    // contents, and skips the write entirely when no row needs a freshness refresh yet.
+    #[envconfig(default = "false")]
+    pub skip_unchanged_frame_rewrites: bool,
+
     // TTL for the in-memory negative cache of symbol-set lookup failures in the `Saving` layer.
     // Like `frame_unresolved_ttl_seconds`, this is kept short: a failure record can become
     // resolvable the moment a user uploads the missing symbols, so a cached negative result
     // must not outlive that upload by long.
     #[envconfig(default = "300")]
     pub symbol_set_negative_cache_ttl_seconds: u64,
+
+    // TTL for the (team, symbol-set refs) -> latest-release-id cache in the resolution
+    // service. Kept short because a release (re)bound to already-cached refs only becomes
+    // visible after expiry; new releases usually ship new refs, which miss naturally.
+    #[envconfig(default = "60")]
+    pub release_id_cache_ttl_seconds: u64,
+
+    // Byte budget for that cache, weighed by the ref bytes each entry holds. Refs are
+    // event-controlled (frame source URLs, chunk ids), so an entry-count bound would let a
+    // flood of unique long refs grow the cache without limit. 32 MiB comfortably holds the
+    // working set of a 60s TTL at typical ref-set sizes.
+    #[envconfig(default = "33554432")]
+    pub release_id_cache_max_bytes: u64,
 
     // Maximum number of lines of pre and post context to get per frame
     #[envconfig(default = "15")]
@@ -82,6 +103,24 @@ pub struct ResolverConfig {
     // This limiter is shared across frame and exception symbol resolution paths.
     #[envconfig(default = "64")]
     pub symbol_resolution_concurrency: usize,
+
+    // Parsing a symbol set can need many times its decompressed size in memory, and the symbol
+    // store cache does not count that memory. Parses of symbol sets at least this large
+    // (decompressed) reserve their estimated peak memory from a shared budget, so together
+    // they cannot run the pod out of memory.
+    #[envconfig(default = "10000000")]
+    pub symbol_set_large_parse_bytes: NonZeroUsize,
+
+    #[envconfig(default = "2")]
+    pub symbol_set_max_concurrent_large_parses: NonZeroUsize,
+
+    // Set this below the memory limit minus the symbol store cache budget and the steady-state usage.
+    #[envconfig(default = "1000000000")]
+    pub symbol_set_parse_memory_budget_bytes: NonZeroUsize,
+
+    // Estimated peak parse memory, as a multiple of the decompressed symbol set size.
+    #[envconfig(default = "8")]
+    pub symbol_set_parse_memory_multiplier: NonZeroUsize,
 
     // Shared secret authenticating the cymbal <-> cymbal-resolution gRPC seam.
     #[envconfig(default = "")]
@@ -146,5 +185,28 @@ pub async fn get_aws_config(config: &ResolverConfig) -> aws_sdk_s3::Config {
             .behavior_version(BehaviorVersion::latest())
             .force_path_style(config.object_storage_force_path_style)
             .build()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use super::*;
+
+    #[test]
+    fn parse_limiter_settings_must_be_positive() {
+        for name in [
+            "SYMBOL_SET_LARGE_PARSE_BYTES",
+            "SYMBOL_SET_MAX_CONCURRENT_LARGE_PARSES",
+            "SYMBOL_SET_PARSE_MEMORY_BUDGET_BYTES",
+            "SYMBOL_SET_PARSE_MEMORY_MULTIPLIER",
+        ] {
+            let values = HashMap::from([(name.to_owned(), "0".to_owned())]);
+            assert!(matches!(
+                ResolverConfig::init_from_hashmap(&values),
+                Err(envconfig::Error::ParseError { name: field }) if field == name
+            ));
+        }
     }
 }

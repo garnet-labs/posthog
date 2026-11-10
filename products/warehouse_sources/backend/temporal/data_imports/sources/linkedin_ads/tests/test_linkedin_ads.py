@@ -11,13 +11,19 @@ from django.db import OperationalError
 import pyarrow as pa
 from parameterized import parameterized
 
-from posthog.models.integration import ERROR_TOKEN_REFRESH_FAILED, Integration
+from posthog.integrations import IntegrationNotFound
+from posthog.models.integration import ERROR_TOKEN_REFRESH_FAILED
 
-from products.warehouse_sources.backend.temporal.data_imports.pipelines.pipeline.batcher import Batcher
+from products.warehouse_sources.backend.temporal.data_imports.pipelines.core.arrow_utils import (
+    evolve_pyarrow_schema,
+    table_from_py_list,
+)
+from products.warehouse_sources.backend.temporal.data_imports.pipelines.core.batcher import Batcher
 from products.warehouse_sources.backend.temporal.data_imports.sources.generated_configs.linkedinads import (
     LinkedinAdsSourceConfig,
 )
 from products.warehouse_sources.backend.temporal.data_imports.sources.linkedin_ads.client import (
+    LinkedinAdsClient,
     LinkedinAdsDailyRateLimitError,
 )
 from products.warehouse_sources.backend.temporal.data_imports.sources.linkedin_ads.linkedin_ads import (
@@ -29,8 +35,14 @@ from products.warehouse_sources.backend.temporal.data_imports.sources.linkedin_a
     _extract_type_and_id_from_urn,
     _flatten_linkedin_record,
     _get_integration,
+    get_schemas,
     linkedin_ads_client,
     linkedin_ads_source,
+)
+from products.warehouse_sources.backend.temporal.data_imports.sources.linkedin_ads.schemas import (
+    DEMOGRAPHIC_RETENTION_DAYS,
+    FLOAT_FIELDS,
+    INT_FIELDS,
 )
 from products.warehouse_sources.backend.temporal.data_imports.sources.linkedin_ads.source import LinkedInAdsSource
 from products.warehouse_sources.backend.types import IncrementalFieldType
@@ -43,6 +55,20 @@ def _make_resume_manager(can_resume: bool = False, loaded_state: object = None) 
     return manager
 
 
+def _stats_schema(field_names: list[str], *, name: str = "creative_stats") -> LinkedinAdsSchema:
+    """A minimal stats schema, for the metric-coercion tests."""
+    return LinkedinAdsSchema(
+        name=name,
+        primary_keys=[],
+        field_names=field_names,
+        partition_keys=[],
+        partition_mode=None,
+        partition_format=None,
+        is_stats=True,
+        partition_size=1,
+    )
+
+
 def _small_batcher_factory(chunk_size: int):
     """Return a factory that builds a real Batcher with a tiny chunk_size for tests that
     need to drive the chunk-boundary / resume-token interaction deterministically."""
@@ -53,7 +79,6 @@ class TestLinkedinAdsHelperFunctions:
     """Test helper functions in linkedin_ads.py."""
 
     def test_extract_type_and_id_from_urn_valid(self):
-        """Test extracting ID and type from valid LinkedIn URN."""
         urn = "urn:li:sponsoredCampaign:12345678"
         result = _extract_type_and_id_from_urn(urn)
 
@@ -74,14 +99,12 @@ class TestLinkedinAdsHelperFunctions:
         assert _extract_type_and_id_from_urn(malformed) is None
 
     def test_convert_date_object_to_date_valid(self):
-        """Test converting LinkedIn date object to Python date."""
         date_obj = {"year": 2024, "month": 3, "day": 15}
         result = _convert_date_object_to_date(date_obj)
 
         assert result == dt.date(2024, 3, 15)
 
     def test_convert_date_object_to_date_invalid(self):
-        """Test converting invalid date object returns None."""
         invalid_cases = [
             {"year": 2024, "month": 3},  # Missing day
             {},  # Empty dict
@@ -93,7 +116,6 @@ class TestLinkedinAdsHelperFunctions:
             assert result is None
 
     def test_convert_timestamp_to_date_valid(self):
-        """Test converting LinkedIn timestamp to date."""
         timestamp_ms = 1709654400000
         last_modified = {"time": timestamp_ms}
         result = _convert_timestamp_to_date(last_modified)
@@ -105,7 +127,6 @@ class TestFlattenLinkedinRecord:
     """Test _flatten_linkedin_record function."""
 
     def test_flatten_date_range(self):
-        """Test flattening dateRange field."""
         record = {
             "dateRange": {"start": {"year": 2024, "month": 1, "day": 1}, "end": {"year": 2024, "month": 1, "day": 31}}
         }
@@ -127,7 +148,6 @@ class TestFlattenLinkedinRecord:
         assert result["date_end"] == dt.date(2024, 1, 31)
 
     def test_flatten_urn_columns(self):
-        """Test flattening URN columns."""
         record = {
             "campaignGroup": "urn:li:sponsoredCampaignGroup:123456789",
             "campaign": "urn:li:sponsoredCampaign:987654321",
@@ -150,20 +170,9 @@ class TestFlattenLinkedinRecord:
         assert result["campaign_id"] == 987654321
 
     def test_flatten_integer_fields(self):
-        """Test conversion of integer fields."""
-        record = {"impressions": 1000, "clicks": 50}
-        schema = LinkedinAdsSchema(
-            name="test",
-            primary_keys=[],
-            field_names=["impressions", "clicks"],
-            partition_keys=[],
-            partition_mode=None,
-            partition_format=None,
-            is_stats=True,
-            partition_size=1,
-        )
+        schema = _stats_schema(["impressions", "clicks"])
 
-        result = _flatten_linkedin_record(record, schema)
+        result = _flatten_linkedin_record({"impressions": 1000, "clicks": 50}, schema)
         assert result is not None
 
         assert result["impressions"] == 1000
@@ -175,28 +184,132 @@ class TestFlattenLinkedinRecord:
             ("costInUsd", "25.50", 25.50),
             ("costInLocalCurrency", "30.75", 30.75),
             ("conversionValueInLocalCurrency", "12.34", 12.34),
+            # LinkedIn flips these between JSON number and string, and omits them when zero.
+            ("costInUsd", 25, 25.0),
+            ("conversionValueInLocalCurrency", "", 0.0),
+            ("conversionValueInLocalCurrency", None, 0.0),
         ],
     )
-    def test_flatten_float_fields(self, field_name: str, raw_value: str, expected: float):
+    def test_flatten_float_fields(self, field_name: str, raw_value: typing.Any, expected: float):
         record = {field_name: raw_value}
-        schema = LinkedinAdsSchema(
-            name="test",
-            primary_keys=[],
-            field_names=[field_name],
-            partition_keys=[],
-            partition_mode=None,
-            partition_format=None,
-            is_stats=True,
-            partition_size=1,
-        )
+        schema = _stats_schema([field_name])
 
         result = _flatten_linkedin_record(record, schema)
         assert result is not None
 
         assert result[field_name] == expected
+        assert isinstance(result[field_name], float)
+
+    @pytest.mark.parametrize(
+        "raw_value, expected",
+        [
+            (3, 3),
+            (3.0, 3),
+            ("3", 3),
+            ("3.0", 3),
+            (" 3 ", 3),
+            ("", 0),
+            (None, 0),
+            # Fractional counts get rounded, consistently whichever way they were encoded.
+            (3.7, 4),
+            ("3.7", 4),
+            # Beyond float's 53-bit mantissa, so it must not round-trip through float.
+            (9007199254740993, 9007199254740993),
+        ],
+    )
+    def test_flatten_int_fields_parses_all_json_shapes(self, raw_value: typing.Any, expected: int):
+        """Count metrics land as int regardless of how LinkedIn encoded them."""
+        schema = _stats_schema(["impressions"])
+
+        result = _flatten_linkedin_record({"impressions": raw_value}, schema)
+        assert result is not None
+
+        assert result["impressions"] == expected
+        assert isinstance(result["impressions"], int)
+
+    def test_flatten_omitted_float_metric_becomes_typed_zero(self):
+        """Regression test: LinkedIn omits zero-valued metrics, and a batch where every row omitted
+        one used to infer as arrow `null` → `string`, which then failed to merge with a numeric
+        batch (`ArrowTypeError: ... conversion_value_in_local_currency ... string vs double`)."""
+        float_fields = ["costInUsd", "costInLocalCurrency", "conversionValueInLocalCurrency"]
+        schema = _stats_schema(float_fields)
+
+        result = _flatten_linkedin_record({}, schema)
+        assert result is not None
+
+        for field_name in float_fields:
+            assert result[field_name] == 0.0
+            assert isinstance(result[field_name], float)
+
+    def test_flatten_omitted_int_metric_becomes_typed_zero(self):
+        """Same as above for the count metrics, which were previously uncoerced entirely."""
+        int_fields = sorted(INT_FIELDS)
+        schema = _stats_schema(int_fields)
+
+        result = _flatten_linkedin_record({}, schema)
+        assert result is not None
+
+        for field_name in int_fields:
+            assert result[field_name] == 0
+            assert isinstance(result[field_name], int)
+
+    @pytest.mark.parametrize(
+        "field_name, raw_value, expected",
+        [
+            ("impressions", "n/a", 0),
+            ("costInUsd", "N/A", 0.0),
+        ],
+    )
+    def test_flatten_unparseable_metric_logs_and_defaults_to_zero(
+        self, field_name: str, raw_value: str, expected: float
+    ):
+        """An unparseable cell must not raise — that would kill a whole multi-year backfill."""
+        schema = _stats_schema([field_name])
+
+        with mock.patch(
+            "products.warehouse_sources.backend.temporal.data_imports.sources.linkedin_ads.linkedin_ads.module_logger"
+        ) as mock_logger:
+            result = _flatten_linkedin_record({field_name: raw_value}, schema)
+
+        assert result is not None
+        assert result[field_name] == expected
+        assert mock_logger.warning.call_args[0][0] == "linkedin_ads.unparseable_metric"
+
+    def test_flatten_metric_types_are_stable_across_records(self):
+        """The cross-batch invariant, expressed without arrow: a populated record and a record where
+        LinkedIn omitted everything must agree on the python type of every metric column."""
+        schema = _stats_schema([*sorted(INT_FIELDS), *sorted(FLOAT_FIELDS)])
+
+        populated = _flatten_linkedin_record({"impressions": 5, "costInUsd": "1.5"}, schema)
+        omitted = _flatten_linkedin_record({}, schema)
+        assert populated is not None and omitted is not None
+
+        for field_name in populated:
+            assert type(populated[field_name]) is type(omitted[field_name]), field_name
+
+    def test_omitted_metric_batch_merges_with_populated_batch(self):
+        """End-to-end guard: this is the assertion that actually pins the reported failure. Two
+        batches — one where LinkedIn omitted the metric for every row, one with values — must
+        produce mergeable arrow schemas."""
+        schema = _stats_schema(["conversionValueInLocalCurrency", "impressions"])
+
+        omitted = _flatten_linkedin_record({}, schema)
+        populated = _flatten_linkedin_record({"conversionValueInLocalCurrency": 1.5, "impressions": 10}, schema)
+        assert omitted is not None and populated is not None
+
+        omitted_schema = evolve_pyarrow_schema(table_from_py_list([omitted]), None).schema
+        populated_schema = evolve_pyarrow_schema(table_from_py_list([populated]), None).schema
+
+        pa.unify_schemas([omitted_schema, populated_schema])
+
+        # And confirm the pre-fix shape (an uncoerced None) is what used to break it, so this test
+        # fails loudly if the coercion is ever removed.
+        null_schema = evolve_pyarrow_schema(table_from_py_list([{"conversionValueInLocalCurrency": None}]), None).schema
+        value_schema = evolve_pyarrow_schema(table_from_py_list([{"conversionValueInLocalCurrency": 1.5}]), None).schema
+        with pytest.raises(pa.ArrowTypeError, match="incompatible types"):
+            pa.unify_schemas([null_schema, value_schema])
 
     def test_flatten_change_audit_stamps(self):
-        """Test flattening changeAuditStamps field."""
         record = {"changeAuditStamps": {"created": {"time": 1709654400000}, "lastModified": {"time": 1709740800000}}}
         schema = LinkedinAdsSchema(
             name="test",
@@ -216,7 +329,6 @@ class TestFlattenLinkedinRecord:
         assert str(result["last_modified_time"]) == "2024-03-06"
 
     def test_flatten_pivot_values(self):
-        """Test flattening pivotValues field."""
         record = {"pivotValues": ["urn:li:sponsoredCampaign:555666777", "urn:li:sponsoredAccount:888999000"]}
         schema = LinkedinAdsSchema(
             name="test",
@@ -257,7 +369,6 @@ class TestFlattenLinkedinRecord:
         assert result["targetingCriteria"]["ages"]["min"] == 25
 
     def test_flatten_missing_field_returns_none(self):
-        """Test missing fields return None."""
         record: dict[str, typing.Any] = {}  # Empty record
         schema = LinkedinAdsSchema(
             name="test",
@@ -315,6 +426,32 @@ class TestFlattenLinkedinRecord:
 
         assert result is None
 
+    def test_flatten_stats_row_without_date_range_is_dropped(self):
+        """`date_start` is the PK and partition key for stats resources — a row without one is
+        unusable, and an all-null `date_start` column has the same merge-failure exposure."""
+        schema = _stats_schema(["dateRange", "impressions"])
+
+        assert _flatten_linkedin_record({}, schema) is None
+        assert _flatten_linkedin_record({"dateRange": {"start": None, "end": None}}, schema) is None
+
+    def test_flatten_non_stats_row_without_date_range_is_kept(self):
+        """The drop only applies to stats resources."""
+        schema = LinkedinAdsSchema(
+            name="campaigns",
+            primary_keys=[],
+            field_names=["dateRange", "name"],
+            partition_keys=[],
+            partition_mode=None,
+            partition_format=None,
+            is_stats=False,
+            partition_size=1,
+        )
+
+        result = _flatten_linkedin_record({"name": "Q1"}, schema)
+
+        assert result is not None
+        assert result["date_start"] is None
+
     def test_flatten_created_at_long_to_virtual_columns(self):
         """`createdAt` / `lastModifiedAt` longs → `created_time` / `last_modified_time` virtual cols."""
         # 1625668063000 ms = 2021-07-07 (UTC)
@@ -358,16 +495,17 @@ class TestFlattenLinkedinRecord:
         assert result["created_time"] is None
 
 
-@mock.patch("products.warehouse_sources.backend.temporal.data_imports.sources.linkedin_ads.linkedin_ads.Integration")
+@mock.patch(
+    "products.warehouse_sources.backend.temporal.data_imports.sources.linkedin_ads.linkedin_ads.IntegrationManager"
+)
 class TestLinkedinAdsClientFunction:
     """Test linkedin_ads_client function."""
 
     def test_linkedin_ads_client_no_access_token(self, mock_integration_model):
-        """Test client creation with no access token raises error."""
         mock_integration = mock.MagicMock()
         mock_integration.access_token = None
         mock_integration.sensitive_config = {}  # no refresh token → not expired, skips refresh
-        mock_integration_model.objects.get.return_value = mock_integration
+        mock_integration_model.linkedin_ads.oauth.get.return_value = mock_integration
 
         config = LinkedinAdsSourceConfig(linkedin_ads_integration_id=123, account_id="456")
 
@@ -391,20 +529,18 @@ class TestLinkedinAdsClientFunction:
         mock_integration.sensitive_config = {}  # no refresh token → not expired, skips refresh
 
         def fake_get(*args, **kwargs):
-            calls.append("Integration.objects.get")
+            calls.append("IntegrationManager.get")
             return mock_integration
 
-        mock_integration_model.objects.get.side_effect = fake_get
+        mock_integration_model.linkedin_ads.oauth.get.side_effect = fake_get
 
         config = LinkedinAdsSourceConfig(linkedin_ads_integration_id=123, account_id="456")
         linkedin_ads_client(config, team_id=789)
 
-        assert calls == ["close_old_connections", "Integration.objects.get"]
+        assert calls == ["close_old_connections", "IntegrationManager.get"]
 
 
-_INTEGRATION_GET_PATH = (
-    "products.warehouse_sources.backend.temporal.data_imports.sources.linkedin_ads.linkedin_ads.Integration.objects.get"
-)
+_INTEGRATION_GET_PATH = "products.warehouse_sources.backend.temporal.data_imports.sources.linkedin_ads.linkedin_ads.IntegrationManager.linkedin_ads.oauth.get"
 _CLOSE_CONNECTIONS_PATH = (
     "products.warehouse_sources.backend.temporal.data_imports.sources.linkedin_ads.linkedin_ads.close_old_connections"
 )
@@ -467,10 +603,10 @@ class TestGetIntegrationDbResilience:
         assert sleep.call_args_list == [mock.call(2), mock.call(4), mock.call(6)]
 
     def test_missing_integration_is_not_retried(self):
-        get = mock.Mock(side_effect=Integration.DoesNotExist())
+        get = mock.Mock(side_effect=IntegrationNotFound("SDK text"))
 
         with mock.patch(_INTEGRATION_GET_PATH, get), mock.patch(_CLOSE_CONNECTIONS_PATH), mock.patch(_SLEEP_PATH):
-            with pytest.raises(Integration.DoesNotExist):
+            with pytest.raises(IntegrationNotFound, match="^Integration not found: 1$"):
                 _get_integration(integration_id=1, team_id=2)
 
         # A deleted integration row is non-retryable — don't mask it as a transient drop.
@@ -480,7 +616,9 @@ class TestGetIntegrationDbResilience:
 @mock.patch(
     "products.warehouse_sources.backend.temporal.data_imports.sources.linkedin_ads.linkedin_ads.OauthIntegration"
 )
-@mock.patch("products.warehouse_sources.backend.temporal.data_imports.sources.linkedin_ads.linkedin_ads.Integration")
+@mock.patch(
+    "products.warehouse_sources.backend.temporal.data_imports.sources.linkedin_ads.linkedin_ads.IntegrationManager"
+)
 class TestLinkedinAdsClientTokenRefresh:
     """Token refresh behaviour of linkedin_ads_client."""
 
@@ -496,7 +634,7 @@ class TestLinkedinAdsClientTokenRefresh:
         integration = mock.MagicMock()
         integration.access_token = "refreshed-token"
         integration.errors = ""
-        mock_integration_model.objects.get.return_value = integration
+        mock_integration_model.linkedin_ads.oauth.get.return_value = integration
 
         oauth = mock_oauth_cls.return_value
         oauth.access_token_expired.return_value = token_expired
@@ -513,7 +651,7 @@ class TestLinkedinAdsClientTokenRefresh:
         integration = mock.MagicMock()
         integration.access_token = "stale-token"
         integration.errors = ERROR_TOKEN_REFRESH_FAILED
-        mock_integration_model.objects.get.return_value = integration
+        mock_integration_model.linkedin_ads.oauth.get.return_value = integration
 
         oauth = mock_oauth_cls.return_value
         oauth.access_token_expired.return_value = True
@@ -535,7 +673,6 @@ class TestLinkedinAdsSource:
     """Test linkedin_ads_source function."""
 
     def test_linkedin_ads_source_with_incremental(self, mock_client_func):
-        """Test linkedin_ads_source with incremental field."""
         mock_client = mock.MagicMock()
         # Analytics endpoints are single-shot: one page, no next_page_token.
         mock_client.get_data_by_resource.return_value = [
@@ -899,3 +1036,283 @@ class TestLinkedinAdsSource:
         list(items)
 
         assert mock_client.get_data_by_resource.call_args[1]["date_start"] == "2024-01-01"
+
+
+class TestDemographicStatsFlattening:
+    @pytest.mark.parametrize(
+        "resource_name,pivot_value",
+        [
+            ("member_company_stats", "urn:li:organization:1111"),
+            # MEMBER_COMPANY_SIZE is the one demographic pivot whose value isn't a URN, so an
+            # id-parsing shortcut would silently drop every row on this table.
+            ("member_company_size_stats", "SIZE_11_TO_50"),
+            ("member_country_stats", "urn:li:geo:103644278"),
+            ("member_industry_stats", "urn:li:industry:96"),
+            ("member_job_title_stats", "urn:li:title:9"),
+            ("member_seniority_stats", "urn:li:seniority:6"),
+        ],
+    )
+    def test_pivot_value_is_kept_verbatim(self, resource_name: str, pivot_value: str):
+        schema = get_schemas()[resource_name]
+
+        flattened = _flatten_linkedin_record(
+            {
+                "impressions": 6,
+                "pivotValues": [pivot_value],
+                "dateRange": {
+                    "start": {"year": 2024, "month": 5, "day": 28},
+                    "end": {"year": 2024, "month": 5, "day": 28},
+                },
+            },
+            schema,
+        )
+
+        assert flattened is not None
+        assert flattened["pivot_value"] == pivot_value
+        assert flattened["date_start"] == dt.date(2024, 5, 28)
+        assert schema.primary_keys == ["date_start", "date_end", "pivot_value"]
+
+    @pytest.mark.parametrize("pivot_values", [[], [None], [""]])
+    def test_row_without_a_pivot_value_is_dropped(self, pivot_values: list):
+        schema = get_schemas()["member_industry_stats"]
+
+        flattened = _flatten_linkedin_record(
+            {
+                "impressions": 6,
+                "pivotValues": pivot_values,
+                "dateRange": {
+                    "start": {"year": 2024, "month": 5, "day": 28},
+                    "end": {"year": 2024, "month": 5, "day": 28},
+                },
+            },
+            schema,
+        )
+
+        assert flattened is None
+
+    def test_performance_stats_keep_their_entity_id_columns(self):
+        schema = get_schemas()["campaign_stats"]
+
+        flattened = _flatten_linkedin_record(
+            {
+                "impressions": 6,
+                "pivotValues": ["urn:li:sponsoredCampaign:123"],
+                "dateRange": {
+                    "start": {"year": 2024, "month": 5, "day": 28},
+                    "end": {"year": 2024, "month": 5, "day": 28},
+                },
+            },
+            schema,
+        )
+
+        assert flattened is not None
+        assert flattened["campaign_id"] == 123
+        assert "pivot_value" not in flattened
+
+    @mock.patch(
+        "products.warehouse_sources.backend.temporal.data_imports.sources.linkedin_ads.linkedin_ads.linkedin_ads_client"
+    )
+    def test_first_sync_stays_within_the_demographic_retention_window(self, mock_client_func):
+        mock_client = mock.MagicMock()
+        mock_client.get_data_by_resource.return_value = [([], None)]
+        mock_client_func.return_value = mock_client
+
+        result = linkedin_ads_source(
+            config=LinkedinAdsSourceConfig(linkedin_ads_integration_id=123, account_id="456"),
+            resource_name="member_industry_stats",
+            team_id=789,
+            resumable_source_manager=_make_resume_manager(),
+            logger=mock.MagicMock(),
+            should_use_incremental_field=True,
+            incremental_field="date_start",
+            incremental_field_type=IncrementalFieldType.Date,
+            db_incremental_field_last_value=None,
+        )
+
+        items = result.items()
+        assert isinstance(items, Iterable)
+        list(items)
+
+        date_start = dt.date.fromisoformat(mock_client.get_data_by_resource.call_args[1]["date_start"])
+        expected_floor = (dt.datetime.now() - dt.timedelta(days=DEMOGRAPHIC_RETENTION_DAYS)).date()
+        assert abs((date_start - expected_floor).days) <= 1
+        assert DEMOGRAPHIC_RETENTION_DAYS < INITIAL_ANALYTICS_LOOKBACK_DAYS
+
+
+class TestConversionsFlattening:
+    def test_conversion_record_flattens_to_queryable_columns(self):
+        schema = get_schemas()["conversions"]
+
+        flattened = _flatten_linkedin_record(
+            {
+                "id": 104012,
+                "name": "Signup",
+                "type": "SIGN_UP",
+                "enabled": True,
+                "account": "urn:li:sponsoredAccount:519072844",
+                "campaigns": ["urn:li:sponsoredCampaign:345396555"],
+                "attributionType": "LAST_TOUCH_BY_CAMPAIGN",
+                "postClickAttributionWindowSize": 30,
+                "viewThroughAttributionWindowSize": 7,
+                "value": {"amount": "10", "currencyCode": "USD"},
+                "created": 1563230311551,
+                "lastModified": 1563230411551,
+            },
+            schema,
+        )
+
+        assert flattened is not None
+        assert flattened["id"] == 104012
+        assert flattened["account_id"] == 519072844
+        assert flattened["value_amount"] == "10"
+        assert flattened["value_currency_code"] == "USD"
+        # `created_time` is the partition key, so it has to survive the epoch-ms conversion.
+        assert flattened["created_time"] == dt.date(2019, 7, 15)
+        assert flattened["last_modified_time"] == dt.date(2019, 7, 15)
+
+    def test_conversion_without_a_monetary_value_keeps_stable_columns(self):
+        schema = get_schemas()["conversions"]
+
+        flattened = _flatten_linkedin_record(
+            {"id": 104012, "name": "Signup", "created": 1563230311551},
+            schema,
+        )
+
+        assert flattened is not None
+        assert flattened["value_amount"] is None
+        assert flattened["value_currency_code"] is None
+
+
+class TestCreativeDestinationColumns:
+    @pytest.mark.parametrize(
+        "record, expected",
+        [
+            pytest.param(
+                {
+                    "content": {"reference": "urn:li:share:6778045555198214144"},
+                    "metadata": {"landingPage": "https://example.com/offer?utm_source=linkedin&utm_content=c1"},
+                },
+                ("urn:li:share:6778045555198214144", "https://example.com/offer?utm_source=linkedin&utm_content=c1"),
+                id="sponsored_post_with_looked_up_landing_page",
+            ),
+            pytest.param(
+                {"content": {"standardUpdateAd": {"reference": "urn:li:ugcPost:6856810298419044352"}}},
+                ("urn:li:ugcPost:6856810298419044352", None),
+                id="reference_inside_a_format_member",
+            ),
+            pytest.param(
+                {
+                    "content": {"textAd": {"headline": "Try it", "landingPage": "https://example.com/?utm_id=7"}},
+                    "metadata": {"landingPage": "https://example.com/ignored"},
+                },
+                (None, "https://example.com/?utm_id=7"),
+                id="text_ad_without_a_reference",
+            ),
+            pytest.param(
+                {"content": {"reference": "urn:li:adInMailContent:1234"}, "metadata": {"landingPage": ""}},
+                ("urn:li:adInMailContent:1234", None),
+                id="inmail_reference_is_not_a_post",
+            ),
+            pytest.param({"content": None, "metadata": {"landingPage": None}}, (None, None), id="no_content"),
+        ],
+    )
+    def test_creative_row_hoists_post_and_landing_page(self, record: dict, expected: tuple):
+        flattened = _flatten_linkedin_record({"id": "urn:li:sponsoredCreative:1", **record}, get_schemas()["creatives"])
+
+        assert flattened is not None
+        reference, landing_page = expected
+        assert flattened["content_reference"] == reference
+        assert flattened["landing_page_url"] == landing_page
+        is_post = reference is not None and reference.startswith(("urn:li:share:", "urn:li:ugcPost:"))
+        assert flattened["post_url"] == (f"https://www.linkedin.com/feed/update/{reference}/" if is_post else None)
+        assert "metadata" not in flattened
+
+
+@mock.patch("products.warehouse_sources.backend.temporal.data_imports.sources.linkedin_ads.client.RestliClient")
+@mock.patch(
+    "products.warehouse_sources.backend.temporal.data_imports.sources.linkedin_ads.linkedin_ads.linkedin_ads_client"
+)
+class TestCreativeLandingPageLookup:
+    _CREATIVES = [
+        {"id": "urn:li:sponsoredCreative:1", "intendedStatus": "ACTIVE", "content": {"reference": "urn:li:share:11"}},
+        {
+            "id": "urn:li:sponsoredCreative:2",
+            "intendedStatus": "ACTIVE",
+            "content": {"textAd": {"landingPage": "https://example.com/text?utm_source=li"}},
+        },
+        {"id": "urn:li:sponsoredCreative:3", "intendedStatus": "DRAFT", "content": {"reference": "urn:li:ugcPost:33"}},
+        {
+            "id": "urn:li:sponsoredCreative:4",
+            "intendedStatus": "ARCHIVED",
+            "content": {"reference": "urn:li:ugcPost:44"},
+        },
+    ]
+
+    @staticmethod
+    def _get_creative(**kwargs: typing.Any) -> mock.MagicMock:
+        creative_urn = kwargs["path_keys"]["creative_urn"]
+        if creative_urn == "urn:li:sponsoredCreative:1":
+            return mock.MagicMock(
+                status_code=200, entity={"metadata": {"landingPage": "https://example.com/post?utm_content=1"}}
+            )
+        not_found = mock.MagicMock(status_code=404)
+        not_found.response.text = '{"status":404,"code":"RESOURCE_NOT_FOUND","message":"Creative not found"}'
+        return not_found
+
+    @pytest.mark.parametrize(
+        "api_version, expected_lookups, expected_landing_pages",
+        [
+            pytest.param(
+                "202610",
+                ["urn:li:sponsoredCreative:1", "urn:li:sponsoredCreative:4"],
+                {
+                    1: "https://example.com/post?utm_content=1",
+                    2: "https://example.com/text?utm_source=li",
+                    3: None,
+                    4: None,
+                },
+                id="metadata_supported",
+            ),
+            pytest.param(
+                "202609",
+                [],
+                {1: None, 2: "https://example.com/text?utm_source=li", 3: None, 4: None},
+                id="metadata_not_in_this_version",
+            ),
+        ],
+    )
+    def test_landing_pages_are_looked_up_only_where_needed(
+        self,
+        mock_client_func,
+        mock_restli_client,
+        api_version: str,
+        expected_lookups: list[str],
+        expected_landing_pages: dict[int, str | None],
+    ):
+        finder_response = mock.MagicMock(status_code=200, elements=[dict(c) for c in self._CREATIVES])
+        finder_response.response.text = '{"metadata": {}}'
+        mock_restli_client.return_value.finder.return_value = finder_response
+        mock_restli_client.return_value.get.side_effect = self._get_creative
+        mock_client_func.return_value = LinkedinAdsClient("token", api_version=api_version)
+        manager = _make_resume_manager()
+
+        result = linkedin_ads_source(
+            config=LinkedinAdsSourceConfig(linkedin_ads_integration_id=123, account_id="456"),
+            resource_name="creatives",
+            team_id=789,
+            resumable_source_manager=manager,
+            logger=mock.MagicMock(),
+        )
+        items = result.items()
+        assert isinstance(items, Iterable)
+        rows = [row for table in items for row in table.to_pylist()]
+
+        get_calls = mock_restli_client.return_value.get.call_args_list
+        assert [call.kwargs["path_keys"]["creative_urn"] for call in get_calls] == expected_lookups
+        for call in get_calls:
+            assert call.kwargs["path_keys"]["account_id"] == "456"
+            assert call.kwargs["query_params"] == {"fields": "metadata"}
+            assert call.kwargs["version_string"] == api_version
+        # Each lookup is preceded by a safe point, so a long page of lookups can still hand off.
+        assert manager.safe_point.call_count == len(expected_lookups)
+        assert {row["id"]: row["landing_page_url"] for row in rows} == expected_landing_pages

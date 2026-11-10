@@ -1,31 +1,73 @@
 import json
-import requests
 from typing import Any, cast
 
+from posthog.test.base import BaseTest
+
 from django.http import HttpRequest
+from django.test import SimpleTestCase
 from django.test.client import RequestFactory
+
+import requests
 from parameterized import parameterized
 from rest_framework import status
+from rest_framework.exceptions import ValidationError as DRFValidationError
 
 from posthog.api.utils import (
     PaginationMode,
+    PublicIPOnlyHttpAdapter,
+    canonicalize_encoded_url,
     check_definition_ids_inclusion_field_sql,
     format_paginated_url,
     get_data,
-    get_target_entity,
+    hostname_in_allowed_url_list,
     is_async_query,
     is_insight_query,
+    parse_actor_property_filters,
     raise_if_user_provided_url_unsafe,
     safe_clickhouse_string,
-    PublicIPOnlyHttpAdapter,
+    strip_url_userinfo,
     unparsed_hostname_in_allowed_url_list,
+    validate_authorized_url_wildcards,
 )
-from posthog.models.filters.filter import Filter
-from posthog.test.base import BaseTest
 
 
 def return_true():
     return True
+
+
+class TestAppUrlCanonicalization(SimpleTestCase):
+    @parameterized.expand(
+        [
+            ("fully encoded url is decoded", "https%3A%2F%2Fexample.com%2Fpage", "https://example.com/page"),
+            # Decoding a URL that already has an authority is what let an encoded terminator
+            # smuggle in a second host, so a parseable URL has to come back untouched.
+            (
+                "url with an authority is untouched",
+                "https://example.com%2F@evil.test/",
+                "https://example.com%2F@evil.test/",
+            ),
+            ("double encoded url stays encoded", "https%253A%252F%252Fexample.com", "https%253A%252F%252Fexample.com"),
+            # Callers run this before their own urlparse, so it has to hand malformed input
+            # back rather than raise and turn a 400 into a 500.
+            ("unterminated ipv6 literal", "https://[::1", "https://[::1"),
+            ("nfkc unstable host", "https://exa℀mple.com/", "https://exa℀mple.com/"),
+        ]
+    )
+    def test_canonicalize_encoded_url(self, _name: str, url: str, expected: str) -> None:
+        assert canonicalize_encoded_url(url) == expected
+
+    @parameterized.expand(
+        [
+            ("userinfo is removed", "https://someone:secret@example.com/page", "https://example.com/page"),
+            ("port is kept", "https://someone@example.com:8443/page", "https://example.com:8443/page"),
+            # urlparse resolves the host after the *last* "@", so splitting on the first one
+            # would hand back a different host than the one the allowlist approved.
+            ("only the last delimiter splits", "https://a@b@example.com/page", "https://example.com/page"),
+            ("url without userinfo is untouched", "https://example.com/page", "https://example.com/page"),
+        ]
+    )
+    def test_strip_url_userinfo(self, _name: str, url: str, expected: str) -> None:
+        assert strip_url_userinfo(url) == expected
 
 
 class TestUtils(BaseTest):
@@ -74,38 +116,6 @@ class TestUtils(BaseTest):
             "api/some_url?offset=0",
         )
 
-    def test_get_target_entity(self):
-        request = lambda url: cast(Any, RequestFactory().get(url))
-        filter = Filter(
-            data={
-                "entity_id": "$pageview",
-                "entity_type": "events",
-                "events": [{"id": "$pageview", "type": "events"}],
-            }
-        )
-        entity = get_target_entity(filter)
-
-        assert entity.id == "$pageview"
-        assert entity.type == "events"
-        assert entity.math is None
-
-        filter = Filter(
-            data={
-                "entity_id": "$pageview",
-                "entity_type": "events",
-                "entity_math": "unique_group",
-                "events": [
-                    {"id": "$pageview", "type": "events", "math": "unique_group"},
-                    {"id": "$pageview", "type": "events"},
-                ],
-            }
-        )
-        entity = get_target_entity(filter)
-
-        assert entity.id == "$pageview"
-        assert entity.type == "events"
-        assert entity.math == "unique_group"
-
     def test_check_definition_ids_inclusion_field_sql(self):
         definition_ids = [
             "",
@@ -134,7 +144,7 @@ class TestUtils(BaseTest):
             assert query == "(id = ANY (%(named_key)s::uuid[]))"
             assert ids == ordered_expected_ids
 
-    # keep in sync with posthog/plugin-server/tests/utils.test.ts::safeClickhouseString
+    # keep in sync with nodejs/tests/utils.test.ts::safeClickhouseString
     def test_safe_clickhouse_string_valid_strings(self):
         valid_strings = [
             "$autocapture",
@@ -160,21 +170,20 @@ class TestUtils(BaseTest):
         for s in valid_strings:
             self.assertEqual(safe_clickhouse_string(s), s)
 
-    # keep in sync with posthog/plugin-server/tests/utils.test.ts::safeClickhouseString
+    # keep in sync with nodejs/tests/utils.test.ts::safeClickhouseString
     def test_safe_clickhouse_string_surrogates(self):
-        # flake8: noqa
-        self.assertEqual(safe_clickhouse_string("foo \ud83d\ bar"), "foo \\ud83d\\ bar")
-        self.assertEqual(safe_clickhouse_string("\ud83d\ bar"), "\\ud83d\\ bar")
-        self.assertEqual(safe_clickhouse_string("\ud800\ \ud803\ "), "\\ud800\\ \\ud803\\ ")
+        self.assertEqual(safe_clickhouse_string("foo \ud83d\\ bar"), "foo \\ud83d\\ bar")
+        self.assertEqual(safe_clickhouse_string("\ud83d\\ bar"), "\\ud83d\\ bar")
+        self.assertEqual(safe_clickhouse_string("\ud800\\ \ud803\\ "), "\\ud800\\ \\ud803\\ ")
 
-    # keep in sync with posthog/plugin-server/tests/utils.test.ts::safeClickhouseString
+    # keep in sync with nodejs/tests/utils.test.ts::safeClickhouseString
     def test_safe_clickhouse_string_unicode_non_surrogates(self):
         self.assertEqual(safe_clickhouse_string("✨"), "✨")
-        self.assertEqual(safe_clickhouse_string("foo \u2728\ bar"), "foo \u2728\ bar")
-        self.assertEqual(safe_clickhouse_string("💜 \u1f49c\ 💜"), "💜 \u1f49c\ 💜")
+        self.assertEqual(safe_clickhouse_string("foo \u2728\\ bar"), "foo \u2728\\ bar")
+        self.assertEqual(safe_clickhouse_string("💜 \u1f49c\\ 💜"), "💜 \u1f49c\\ 💜")
 
     def test_raise_if_user_provided_url_unsafe(self):
-        # Sync test cases with plugin-server/src/utils/fetch.test.ts
+        # Sync test cases with nodejs/src/common/utils/request.test.ts
         raise_if_user_provided_url_unsafe("https://google.com?q=20")  # Safe
         raise_if_user_provided_url_unsafe("https://posthog.com")  # Safe
         raise_if_user_provided_url_unsafe("https://posthog.com/foo/bar")  # Safe, with path
@@ -243,20 +252,14 @@ class TestUtils(BaseTest):
             ("TrendsQuery is insight", {"kind": "TrendsQuery"}, True, True),
             ("FunnelsQuery is insight", {"kind": "FunnelsQuery"}, True, True),
             ("HogQLQuery is insight", {"kind": "HogQLQuery"}, True, True),
+            (
+                "BIVisualizationNode wrapping HogQLQuery",
+                {"kind": "BIVisualizationNode", "source": {"kind": "HogQLQuery"}},
+                True,
+                True,
+            ),
             ("TracesQuery gets extended timeout only", {"kind": "TracesQuery"}, False, True),
             ("ExperimentQuery gets extended timeout only", {"kind": "ExperimentQuery"}, False, True),
-            (
-                "ExperimentTrendsQuery gets extended timeout only",
-                {"kind": "ExperimentTrendsQuery"},
-                False,
-                True,
-            ),
-            (
-                "ExperimentFunnelsQuery gets extended timeout only",
-                {"kind": "ExperimentFunnelsQuery"},
-                False,
-                True,
-            ),
             (
                 "ExperimentExposureQuery gets extended timeout only",
                 {"kind": "ExperimentExposureQuery"},
@@ -309,6 +312,25 @@ class TestUtils(BaseTest):
 
     @parameterized.expand(
         [
+            ("empty placeholder keeps no operator", [{}], [{}]),
+            (
+                "person_metadata gets the default",
+                [{"type": "person_metadata", "key": "created_at"}],
+                [{"type": "person_metadata", "key": "created_at", "operator": "exact"}],
+            ),
+            (
+                "a stray operator on a hogql filter is dropped",
+                [{"type": "hogql", "key": "properties.$browser = 'Safari'", "operator": "exact"}],
+                [{"type": "hogql", "key": "properties.$browser = 'Safari'"}],
+            ),
+            ("explicit empty type keeps no operator", [{"type": "empty"}], [{"type": "empty"}]),
+        ]
+    )
+    def test_parse_actor_property_filters(self, _name: str, properties: list[dict], expected: list[dict]) -> None:
+        assert parse_actor_property_filters(json.dumps(properties)) == expected
+
+    @parameterized.expand(
+        [
             ("empty allowlist", [], "http://localhost:8123", False),
             ("no allowlist", None, "http://localhost:8123", False),
             ("allowlist is empty string", ["     "], "http://localhost:8123", False),
@@ -317,7 +339,24 @@ class TestUtils(BaseTest):
             ("needle is whitespace", ["http://localhost"], "    ", False),
             ("needle is absent", ["http://localhost"], None, False),
             ("single element matches", ["http://localhost"], "http://localhost:8123", True),
-            ("single element matches but is url encoded", ["http://localhost"], "http%3A%2F%2Flocalhost:8123", True),
+            # A needle encoded whole has no authority to judge, so it is decoded once and the
+            # decoded form is both validated and redirected to. See #23504.
+            ("fully encoded needle is decoded", ["http://localhost"], "http%3A%2F%2Flocalhost:8123", True),
+            (
+                "fully encoded needle still has to match the allowlist",
+                ["http://localhost"],
+                "http%3A%2F%2Fevil.example",
+                False,
+            ),
+            # The decode only applies when there is no authority. A needle that already parses to a
+            # host is judged as-is, so a percent-encoded authority terminator cannot smuggle one in.
+            (
+                "encoded terminator in an authority is not decoded",
+                ["https://localhost"],
+                "https://localhost%2F@evil.example/",
+                False,
+            ),
+            ("url encoded dot in host", ["https://example.com"], "https://example%2Ecom/", False),
             ("multi element matches", ["http://localhost", "http://posthog.com"], "http://localhost:8123", True),
             ("scheme should be ignored", ["ftp://localhost"], "https://localhost:8123", True),
             ("needle is not in allowlist", ["http://localhost"], "http://posthog.com:8123", False),
@@ -332,9 +371,78 @@ class TestUtils(BaseTest):
                 "https://www.other.com",
                 False,
             ),
+            (
+                "encoded slash terminates the authority early",
+                ["https://example.com"],
+                "https://example.com%2F@evil.test/",
+                False,
+            ),
+            (
+                "encoded question mark terminates the authority early",
+                ["https://example.com"],
+                "https://example.com%3F@evil.test/",
+                False,
+            ),
+            (
+                "encoded hash terminates the authority early",
+                ["https://example.com"],
+                "https://example.com%23@evil.test/",
+                False,
+            ),
+            (
+                "encoded characters outside the authority are ignored",
+                ["https://example.com"],
+                "https://example.com/inbox?to=someone%40evil.test",
+                True,
+            ),
         ]
     )
     def test_unparsed_hostname_in_allowed_url_list(
         self, _name: str, allowlist: list[str], needle: str | None, expected: bool
     ) -> None:
         assert unparsed_hostname_in_allowed_url_list(allowlist, needle) == expected
+
+    @parameterized.expand(
+        [
+            ("wildcard spans several labels", ["https://*.example.com"], "a.b.example.com", True),
+            ("wildcard does not match the bare domain", ["https://*.example.com"], "example.com", False),
+            ("bare wildcard matches any host", ["https://*"], "attacker.test", True),
+            ("several wildcards in one entry", ["https://*.*.example.com"], "a.b.c.example.com", True),
+            ("wildcard inside a label", ["https://app*.example.com"], "app-eu.example.com", True),
+            ("wildcard inside a label may match nothing", ["https://foo*bar.example.com"], "foobar.example.com", True),
+            (
+                "literals between wildcards must appear in order",
+                ["https://a*b*c.example.com"],
+                "acb.example.com",
+                False,
+            ),
+            ("prefix and suffix may not overlap", ["https://a*a.com"], "a.com", False),
+            ("trailing literal still has to match", ["https://*.example.com"], "a.example.com.attacker.test", False),
+            ("leading literal still has to match", ["https://app.*.com"], "notapp.eu.com", False),
+        ]
+    )
+    def test_hostname_in_allowed_url_list_wildcards(
+        self, _name: str, allowlist: list[str], hostname: str, expected: bool
+    ) -> None:
+        assert hostname_in_allowed_url_list(allowlist, hostname) == expected
+
+    def test_hostname_in_allowed_url_list_skips_unparseable_entry(self) -> None:
+        assert hostname_in_allowed_url_list(["http://[", "https://example.com"], "example.com") is True
+
+    @parameterized.expand(
+        [
+            ("no wildcards", ["https://example.com"], False),
+            ("wildcard count at the cap", ["https://*.*.*.*.*.example.com"], False),
+            ("wildcard count over the cap", ["https://*.*.*.*.*.*.example.com"], True),
+            ("only one entry is over the cap", ["https://example.com", "https://*.*.*.*.*.*.com"], True),
+            ("wildcards in the path are not counted", ["https://example.com/*/*/*/*/*/*/*/*"], False),
+            ("entry with no parseable host", ["*.*.*.*.*.*.*.example.com"], False),
+            ("entry that cannot be parsed at all", ["http://["], True),
+        ]
+    )
+    def test_validate_authorized_url_wildcards(self, _name: str, urls: list[str], expect_error: bool) -> None:
+        if not expect_error:
+            validate_authorized_url_wildcards(urls)
+            return
+        with self.assertRaises(DRFValidationError):
+            validate_authorized_url_wildcards(urls)

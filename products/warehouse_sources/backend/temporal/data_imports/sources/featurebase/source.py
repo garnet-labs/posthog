@@ -1,17 +1,12 @@
 from typing import TYPE_CHECKING, Optional, cast
 
-from posthog.schema import (
+from products.warehouse_sources.backend.facade.codebase_detection import detect
+from products.warehouse_sources.backend.facade.source_config import (
     DataWarehouseSourceCategory,
-    ExternalDataSourceType as SchemaExternalDataSourceType,
     ReleaseStatus,
     SourceConfig,
     SourceFieldInputConfig,
     SourceFieldInputConfigType,
-)
-
-from products.warehouse_sources.backend.temporal.data_imports.pipelines.pipeline.typings import (
-    SourceInputs,
-    SourceResponse,
 )
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.base import (
     ExternalWebhookInfo,
@@ -28,6 +23,7 @@ from products.warehouse_sources.backend.temporal.data_imports.sources.common.can
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.registry import SourceRegistry
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.resumable import ResumableSourceManager
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.schema import SourceSchema
+from products.warehouse_sources.backend.temporal.data_imports.sources.common.typings import SourceInputs, SourceResponse
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.webhook_s3 import WebhookSourceManager
 from products.warehouse_sources.backend.temporal.data_imports.sources.featurebase.featurebase import (
     FeaturebaseResumeConfig,
@@ -51,7 +47,7 @@ from products.warehouse_sources.backend.temporal.data_imports.sources.generated_
 from products.warehouse_sources.backend.types import ExternalDataSourceType
 
 if TYPE_CHECKING:
-    from posthog.cdp.templates.hog_function_template import HogFunctionTemplateDC
+    from products.cdp.backend.templates.hog_function_template import HogFunctionTemplateDC
 
 
 @SourceRegistry.register
@@ -59,6 +55,8 @@ class FeaturebaseSource(
     ResumableSource[FeaturebaseSourceConfig, FeaturebaseResumeConfig],
     WebhookSource[FeaturebaseSourceConfig],
 ):
+    codebase_detection = detect(env=("^FEATUREBASE_",), script_hosts=("do.featurebase.app",), npm=("featurebase-js",))
+
     lists_tables_without_credentials = True  # static endpoint catalog — safe for public docs
 
     @property
@@ -68,10 +66,10 @@ class FeaturebaseSource(
     @property
     def get_source_config(self) -> SourceConfig:
         return SourceConfig(
-            name=SchemaExternalDataSourceType.FEATUREBASE,
+            name=ExternalDataSourceType.FEATUREBASE,
             category=DataWarehouseSourceCategory.CUSTOMER_SUPPORT,
             label="Featurebase",
-            releaseStatus=ReleaseStatus.ALPHA,
+            releaseStatus=ReleaseStatus.GA,
             caption=(
                 "Enter your Featurebase API key to pull your feedback posts, boards, comments, "
                 "upvoters, changelogs, and users into the PostHog Data warehouse.\n\n"
@@ -153,6 +151,16 @@ class FeaturebaseSource(
             ),
         }
 
+    def get_retryable_errors(self) -> set[str]:
+        # `_fetch_page` (featurebase.py) already retries `FeaturebaseRetryableError` (429/5xx),
+        # read timeouts, connection errors, and chunked-encoding errors with backoff; if that
+        # budget still exhausts, Temporal retries the whole activity, so the failure is transient
+        # and self-recovering rather than a bug to page on.
+        return {
+            "Featurebase API error (retryable)",
+            "HTTPSConnectionPool(host='do.featurebase.app', port=443)",
+        }
+
     def get_schemas(
         self,
         config: FeaturebaseSourceConfig,
@@ -168,6 +176,8 @@ class FeaturebaseSource(
                     "Maps which users upvoted which post as one row per (post, voter). "
                     "Costs one request chain per post, so it's off by default"
                 )
+            if endpoint == "survey_responses":
+                return "Answers submitted to your surveys as one row per (survey, response)"
             return None
 
         def _build_schema(endpoint: str) -> SourceSchema:

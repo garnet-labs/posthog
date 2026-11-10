@@ -27,12 +27,13 @@ permissions:
     id-token: write # OIDC for the tailnet join + hogplane token
 
 env:
-    HOG_HOST: https://hogland.hedgehog-kitefin.ts.net
-    HOG_OIDC_AUDIENCE: hogland.prod-us.posthog.dev
+    HOG_HOST: https://hogland-dev.hedgehog-kitefin.ts.net
+    HOG_OIDC_AUDIENCE: hogland.dev.posthog.dev
 
 jobs:
     cleanup-hogbox-preview:
         name: Reap stale hogbox previews
+        if: github.repository == 'PostHog/posthog'
         runs-on: ubuntu-24.04
         timeout-minutes: 15
         steps:
@@ -68,9 +69,9 @@ jobs:
                   echo "HOG_TOKEN=$token" >> "$GITHUB_ENV"
             # uv (repo convention): --no-project skips the monorepo sync, --with
             # pins the first-party SDK (exempted from the 7-day soak in [tool.uv]).
-            - uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+            - uses: ./.github/actions/setup-uv
               with:
-                  version: '0.11.28' # pinned: unpinned setup-uv calls GH API on every job, exhausts rate limit
+                  enable-cache: false
             - name: Reap previews for closed PRs
               working-directory: tools/hogbox-preview
               env:

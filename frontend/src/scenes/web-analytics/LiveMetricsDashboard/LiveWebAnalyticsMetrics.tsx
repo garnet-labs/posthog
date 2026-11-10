@@ -12,25 +12,26 @@ import clsx from 'clsx'
 import { useActions, useValues } from 'kea'
 import { ReactNode, useEffect, useMemo, useState } from 'react'
 
-import { IconDrag, IconFilter, IconGlobe, IconPencil, IconX } from '@posthog/icons'
-import { LemonBanner, LemonButton, LemonDivider, Popover } from '@posthog/lemon-ui'
+import { IconDrag, IconFilter, IconGlobe, IconPencil, IconRefresh, IconX } from '@posthog/icons'
+import { LemonBanner, LemonButton, LemonDivider, Popover, Spinner, Tooltip } from '@posthog/lemon-ui'
 
 import { FilterBar } from 'lib/components/FilterBar'
 import { liveUserCountLogic } from 'lib/components/LiveUserCount/liveUserCountLogic'
+import { PropertyFilterButton } from 'lib/components/PropertyFilters/components/PropertyFilterButton'
 import { PropertyFilters } from 'lib/components/PropertyFilters/PropertyFilters'
 import { isWebAnalyticsPropertyFilter } from 'lib/components/PropertyFilters/utils'
 import { TaxonomicFilterGroupType } from 'lib/components/TaxonomicFilter/types'
 import { FEATURE_FLAGS } from 'lib/constants'
 import { usePageVisibility } from 'lib/hooks/usePageVisibility'
 import { IconWithCount } from 'lib/lemon-ui/icons/icons'
+import { LemonSnack } from 'lib/lemon-ui/LemonSnack'
 import { featureFlagLogic } from 'lib/logic/featureFlagLogic'
 import { COUNTRY_CODE_TO_LONG_NAME, countryCodeToFlag } from 'lib/utils/country'
-import { LiveEventsFeed, LiveEventsFeedColumn } from 'scenes/activity/live/LiveEventsFeed'
+import { getWebAnalyticsLiveFeedColumns, LiveEventsFeed } from 'scenes/activity/live/LiveEventsFeed'
 import { teamLogic } from 'scenes/teamLogic'
 
-import { PropertyOperator } from '~/types'
-
-import { isLiveStreamFilter } from '../webAnalyticsFilterLogic'
+import { PathCleaningToggle } from '../PathCleaningToggle'
+import { LIVE_STREAM_OPERATORS, isLiveStreamFilter, webAnalyticsFilterLogic } from '../webAnalyticsFilterLogic'
 import { WebAnalyticsDomainSelector, WebAnalyticsLiveDeviceToggle } from '../WebAnalyticsFilters'
 import { webAnalyticsLogic } from '../webAnalyticsLogic'
 import { BreakdownLiveCard } from './BreakdownLiveCard'
@@ -39,25 +40,15 @@ import { LiveBotTrafficCard } from './LiveBotTrafficCard'
 import { CONTENT_CARD_SPAN, LiveContentCardId, LiveStatCardId } from './liveCards'
 import { LiveChartCard } from './LiveChartCard'
 import { LiveLocationsCard } from './LiveLocationsCard'
-import { LivePersonDrillDown } from './LivePersonDrillDown'
-import { LivePersonDrillDownSelection, livePersonDrillDownDrawerLogic } from './livePersonDrillDownDrawerLogic'
 import { LiveStatCard, LiveStatDivider } from './LiveStatCard'
 import { LiveTopPathsTable } from './LiveTopPathsTable'
 import { LiveTopReferrersTable } from './LiveTopReferrersTable'
 import { liveWebAnalyticsLayoutLogic } from './liveWebAnalyticsLayoutLogic'
 import { BotEventsPerMinuteChart, UsersPerMinuteChart } from './liveWebAnalyticsMetricsCharts'
 import { liveWebAnalyticsMetricsLogic } from './liveWebAnalyticsMetricsLogic'
-import {
-    BrowserBreakdownItem,
-    buildCityKey,
-    CityBreakdownItem,
-    CountryBreakdownItem,
-    DeviceBreakdownItem,
-} from './LiveWebAnalyticsMetricsTypes'
+import { BrowserBreakdownItem, CountryBreakdownItem, DeviceBreakdownItem } from './LiveWebAnalyticsMetricsTypes'
 import { LiveWorldMap } from './LiveWorldMap'
 
-const LIVE_FEED_COLUMNS_WITH_RECORDINGS: LiveEventsFeedColumn[] = ['event', 'person', 'url', 'recording', 'timestamp']
-const LIVE_FEED_COLUMNS_WITHOUT_RECORDINGS: LiveEventsFeedColumn[] = ['event', 'person', 'url', 'timestamp']
 const STATS_POLL_INTERVAL_MS = 1000
 
 const renderBrowserIcon = (d: BrowserBreakdownItem): JSX.Element => {
@@ -94,23 +85,25 @@ const LiveDashboardFilterRow = ({
     setEditing: (isEditing: boolean) => void
 }): JSX.Element => {
     const [displayFilters, setDisplayFilters] = useState(false)
-    const { rawWebAnalyticsFilters, deviceTypeFilter, validatedDomainFilter } = useValues(webAnalyticsLogic)
-    const { setCountryFilter, setReferrerFilter, setDeviceTypeFilter, setDomainFilter, setWebAnalyticsFilters } =
-        useActions(webAnalyticsLogic)
+    const { rawWebAnalyticsFilters, deviceTypeFilter, validatedDomainFilter, isPathCleaningEnabled } =
+        useValues(webAnalyticsLogic)
+    const { setDeviceTypeFilter, setWebAnalyticsFilters, setIsPathCleaningEnabled } = useActions(webAnalyticsLogic)
+    const { clearFilters } = useActions(webAnalyticsFilterLogic)
+    const { isRefreshing } = useValues(liveWebAnalyticsMetricsLogic)
+    const { loadInitialData } = useActions(liveWebAnalyticsMetricsLogic)
+    const { featureFlags } = useValues(featureFlagLogic)
 
     const hasDomainFilter = !!validatedDomainFilter && validatedDomainFilter !== 'all'
     const livePropertyFilters = rawWebAnalyticsFilters.filter(isLiveStreamFilter)
     const preservedOverviewFilters = rawWebAnalyticsFilters.filter((f) => !isLiveStreamFilter(f))
-    const activeFilterCount = livePropertyFilters.length + (deviceTypeFilter ? 1 : 0)
+    const activeFilterCount = rawWebAnalyticsFilters.length + (deviceTypeFilter ? 1 : 0)
     const hasFilters = activeFilterCount > 0 || hasDomainFilter
 
-    const resetFilters = (): void => {
-        setWebAnalyticsFilters(preservedOverviewFilters)
-        setCountryFilter(null)
-        setReferrerFilter(null)
-        setDeviceTypeFilter(null)
-        setDomainFilter(null)
-    }
+    const clearAllButton = (fullWidth: boolean): JSX.Element => (
+        <LemonButton size="small" type="tertiary" fullWidth={fullWidth} icon={<IconX />} onClick={() => clearFilters()}>
+            Clear all
+        </LemonButton>
+    )
 
     const filtersContent = (
         <div className="w-96 max-w-[90vw] p-3">
@@ -120,7 +113,7 @@ const LiveDashboardFilterRow = ({
                     <PropertyFilters
                         disablePopover
                         taxonomicGroupTypes={[TaxonomicFilterGroupType.EventProperties]}
-                        operatorAllowlist={[PropertyOperator.Exact]}
+                        operatorAllowlist={LIVE_STREAM_OPERATORS}
                         onChange={(filters) => {
                             const nextLiveFilters = filters
                                 .filter(isWebAnalyticsPropertyFilter)
@@ -139,11 +132,7 @@ const LiveDashboardFilterRow = ({
                     <span className="text-xs font-semibold text-muted">Device</span>
                     <WebAnalyticsLiveDeviceToggle fullWidth />
                 </div>
-                {hasFilters && (
-                    <LemonButton size="small" type="tertiary" fullWidth icon={<IconX />} onClick={resetFilters}>
-                        Clear filters
-                    </LemonButton>
-                )}
+                {hasFilters && clearAllButton(true)}
             </div>
         </div>
     )
@@ -151,9 +140,46 @@ const LiveDashboardFilterRow = ({
     return (
         <FilterBar
             className="mb-4"
-            left={null}
+            left={
+                activeFilterCount > 0 ? (
+                    <div className="flex flex-wrap gap-2 items-center">
+                        {rawWebAnalyticsFilters.map((filter, i) => (
+                            <PropertyFilterButton
+                                key={`${filter.type}-${filter.key}-${i}`}
+                                item={filter}
+                                onClose={() =>
+                                    setWebAnalyticsFilters(rawWebAnalyticsFilters.filter((_, idx) => idx !== i))
+                                }
+                            />
+                        ))}
+                        {deviceTypeFilter && (
+                            <LemonSnack onClose={() => setDeviceTypeFilter(null)}>
+                                Device: {deviceTypeFilter}
+                            </LemonSnack>
+                        )}
+                        {clearAllButton(false)}
+                    </div>
+                ) : null
+            }
             right={
                 <>
+                    {featureFlags[FEATURE_FLAGS.LIVESTREAM_HOGQL] ? (
+                        <LemonButton
+                            type="secondary"
+                            size="small"
+                            icon={<IconRefresh />}
+                            loading={isRefreshing}
+                            onClick={() => loadInitialData(true)}
+                            tooltip="Refresh live data"
+                            data-attr="web-analytics-live-refresh"
+                        />
+                    ) : (
+                        isRefreshing && (
+                            <Tooltip title="Refreshing live data">
+                                <Spinner className="text-lg text-muted" />
+                            </Tooltip>
+                        )
+                    )}
                     {isEditing ? (
                         <>
                             <LemonButton type="secondary" size="small" onClick={() => resetLayout()}>
@@ -193,6 +219,7 @@ const LiveDashboardFilterRow = ({
                             Filters
                         </LemonButton>
                     </Popover>
+                    <PathCleaningToggle value={isPathCleaningEnabled} onChange={setIsPathCleaningEnabled} />
                     <WebAnalyticsDomainSelector />
                 </>
             }
@@ -264,8 +291,11 @@ export const LiveWebAnalyticsMetrics = (): JSX.Element => {
         totalBotEligibleEvents,
         liveUserCount,
         hasActiveFilters,
+        hasBotQueryError,
         isLoading,
+        isBotLoading,
         recentEvents,
+        unstreamableTestAccountFilterCount,
     } = useValues(liveWebAnalyticsMetricsLogic)
     const { pauseStream, resumeStream } = useActions(liveWebAnalyticsMetricsLogic)
     const { liveUserCount: allDomainsLiveUserCount } = useValues(
@@ -280,53 +310,7 @@ export const LiveWebAnalyticsMetrics = (): JSX.Element => {
 
     const { featureFlags } = useValues(featureFlagLogic)
     const { currentTeam } = useValues(teamLogic)
-    const drillDownEnabled = !!featureFlags[FEATURE_FLAGS.WEB_ANALYTICS_LIVE_PERSON_DRILLDOWN]
-    const liveFeedColumns = currentTeam?.session_recording_opt_in
-        ? LIVE_FEED_COLUMNS_WITH_RECORDINGS
-        : LIVE_FEED_COLUMNS_WITHOUT_RECORDINGS
-    const { openDrillDown } = useActions(livePersonDrillDownDrawerLogic)
-
-    const buildRowClickHandler = <T,>(
-        isClickable: (item: T) => boolean,
-        toSelection: (item: T) => LivePersonDrillDownSelection
-    ): ((item: T) => void) | undefined =>
-        drillDownEnabled
-            ? (item: T): void => {
-                  if (isClickable(item)) {
-                      openDrillDown(toSelection(item))
-                  }
-              }
-            : undefined
-
-    const countrySelection = (countryCode: string): LivePersonDrillDownSelection => ({
-        breakdownType: 'country',
-        breakdownValue: countryCode,
-        breakdownLabel: COUNTRY_CODE_TO_LONG_NAME[countryCode] ?? countryCode,
-    })
-
-    const onCountryRowClick = buildRowClickHandler<CountryBreakdownItem>(
-        (item) => item.country !== 'Other',
-        (item) => countrySelection(item.country)
-    )
-    const onCityRowClick = buildRowClickHandler<CityBreakdownItem>(
-        (item) => item.cityName !== 'Other',
-        (item) => ({
-            breakdownType: 'city',
-            breakdownValue: buildCityKey(item.cityName, item.countryCode),
-            breakdownLabel: item.countryCode ? `${item.cityName}, ${item.countryCode}` : item.cityName,
-        })
-    )
-    const onDeviceRowClick = buildRowClickHandler<DeviceBreakdownItem>(
-        (item) => item.device !== 'Other',
-        (item) => ({ breakdownType: 'device', breakdownValue: item.device, breakdownLabel: item.device })
-    )
-    const onBrowserRowClick = buildRowClickHandler<BrowserBreakdownItem>(
-        (item) => item.browser !== 'Other',
-        (item) => ({ breakdownType: 'browser', breakdownValue: item.browser, breakdownLabel: item.browser })
-    )
-    const onMapCountryClick = drillDownEnabled
-        ? (countryCode: string): void => openDrillDown(countrySelection(countryCode))
-        : undefined
+    const liveFeedColumns = getWebAnalyticsLiveFeedColumns(!!currentTeam?.session_recording_opt_in)
     const { isVisible } = usePageVisibility()
     useEffect(() => {
         if (isVisible) {
@@ -355,12 +339,27 @@ export const LiveWebAnalyticsMetrics = (): JSX.Element => {
                         label="Users online"
                         value={displayedLiveUserCount}
                         isLoading={hasActiveFilters ? isLoading : undefined}
+                        tooltip="People active on your site right now."
                     />
                 )
             case 'unique_visitors':
-                return <LiveStatCard label="Unique visitors" value={totalUniqueVisitors} isLoading={isLoading} />
+                return (
+                    <LiveStatCard
+                        label="Unique visitors"
+                        value={totalUniqueVisitors}
+                        isLoading={isLoading}
+                        tooltip="Distinct visitors in the last 30 minutes."
+                    />
+                )
             case 'pageviews':
-                return <LiveStatCard label="Pageviews" value={totalPageviews} isLoading={isLoading} />
+                return (
+                    <LiveStatCard
+                        label="Pageviews"
+                        value={totalPageviews}
+                        isLoading={isLoading}
+                        tooltip="Total pages viewed in the last 30 minutes."
+                    />
+                )
         }
     }
 
@@ -373,8 +372,9 @@ export const LiveWebAnalyticsMetrics = (): JSX.Element => {
                         subtitle={timezone}
                         subtitleTooltip="Metrics are shown in your local timezone"
                         isLoading={isLoading}
+                        contentClassName="h-64 md:h-80"
                     >
-                        <UsersPerMinuteChart data={chartData} />
+                        <UsersPerMinuteChart data={chartData} timezone={timezone} />
                     </LiveChartCard>
                 )
             case 'top_paths':
@@ -397,7 +397,6 @@ export const LiveWebAnalyticsMetrics = (): JSX.Element => {
                         emptyMessage="No device data"
                         statLabel="unique devices"
                         isLoading={isLoading}
-                        onItemClick={onDeviceRowClick}
                     />
                 )
             case 'browsers':
@@ -412,7 +411,6 @@ export const LiveWebAnalyticsMetrics = (): JSX.Element => {
                         statLabel="unique browsers"
                         totalCount={totalBrowsers}
                         isLoading={isLoading}
-                        onItemClick={onBrowserRowClick}
                     />
                 )
             case 'top_countries':
@@ -427,7 +425,6 @@ export const LiveWebAnalyticsMetrics = (): JSX.Element => {
                             emptyMessage="No country data"
                             statLabel="unique visitors"
                             isLoading={isLoading}
-                            onItemClick={onCountryRowClick}
                         />
                     )
                 }
@@ -436,8 +433,6 @@ export const LiveWebAnalyticsMetrics = (): JSX.Element => {
                         countryData={topCountryBreakdown}
                         cityData={topCityBreakdown}
                         isLoading={isLoading}
-                        onCountryClick={onCountryRowClick}
-                        onCityClick={onCityRowClick}
                     />
                 )
             case 'bot_events_chart':
@@ -449,10 +444,13 @@ export const LiveWebAnalyticsMetrics = (): JSX.Element => {
                         title="Bot requests per minute"
                         subtitle={timezone}
                         subtitleTooltip="Metrics are shown in your local timezone"
-                        isLoading={isLoading}
+                        isLoading={isLoading || isBotLoading}
+                        errorMessage={
+                            hasBotQueryError ? "Couldn't load bot traffic. Refresh the page to try again." : undefined
+                        }
                         contentClassName="h-64 md:h-80"
                     >
-                        <BotEventsPerMinuteChart data={chartData} />
+                        <BotEventsPerMinuteChart data={chartData} timezone={timezone} />
                     </LiveChartCard>
                 )
             case 'bot_traffic':
@@ -464,7 +462,10 @@ export const LiveWebAnalyticsMetrics = (): JSX.Element => {
                         data={botBreakdown}
                         totalBotEvents={totalBotEvents}
                         totalEvents={totalBotEligibleEvents}
-                        isLoading={isLoading}
+                        isLoading={isLoading || isBotLoading}
+                        errorMessage={
+                            hasBotQueryError ? "Couldn't load bot traffic. Refresh the page to try again." : undefined
+                        }
                     />
                 )
             case 'countries':
@@ -476,7 +477,6 @@ export const LiveWebAnalyticsMetrics = (): JSX.Element => {
                         <LiveWorldMap
                             data={countryBreakdown}
                             totalEvents={countryBreakdown.reduce((sum, c) => sum + c.count, 0)}
-                            onCountryClick={onMapCountryClick}
                         />
                     </LiveChartCard>
                 )
@@ -522,6 +522,14 @@ export const LiveWebAnalyticsMetrics = (): JSX.Element => {
                 We'd love to hear what you think about the live dashboard.
             </LemonBanner>
 
+            {unstreamableTestAccountFilterCount > 0 && (
+                <LemonBanner type="warning" className="mb-2" dismissKey="live-web-analytics-test-account-stream-limit">
+                    Test account filtering applies to the last 30 minutes of history, but not to events as they stream
+                    in. Your filter matches on person or cohort data, which isn't available until events are processed.
+                    To filter the realtime view too, add an event property filter.
+                </LemonBanner>
+            )}
+
             <DndContext
                 sensors={sensors}
                 modifiers={[restrictToParentElement]}
@@ -557,8 +565,6 @@ export const LiveWebAnalyticsMetrics = (): JSX.Element => {
                     </div>
                 </SortableContext>
             </DndContext>
-
-            {drillDownEnabled && <LivePersonDrillDown />}
         </div>
     )
 }

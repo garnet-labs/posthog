@@ -20,30 +20,37 @@ import type {
     ElementsListParams,
     ElementsStatsRetrieveParams,
     ElementsValuesListParams,
+    EventsRetentionApi,
+    EventsRetentionUpdateApi,
     InsightApi,
     InsightBulkDeleteRequestApi,
     InsightBulkDeleteResponseApi,
     InsightBulkRestoreResponseApi,
+    InsightBulkSetTestAccountFilterRequestApi,
+    InsightBulkSetTestAccountFilterResponseApi,
+    InsightDataChecksApi,
+    InsightDataChecksRequestApi,
     InsightViewedRequestApi,
     InsightsActivityRetrieveParams,
     InsightsAllActivityRetrieveParams,
-    InsightsAnalyzeRetrieveParams,
     InsightsBulkDeleteCreateParams,
     InsightsBulkRestoreCreateParams,
+    InsightsBulkSetTestAccountFilterCreateParams,
     InsightsBulkUpdateTagsCreateParams,
     InsightsCancelCreateParams,
     InsightsCreateParams,
+    InsightsDataChecksCreateParams,
+    InsightsDataChecksRetrieveParams,
     InsightsDestroyParams,
     InsightsGenerateMetadataCreateParams,
     InsightsListParams,
     InsightsMyLastViewedRetrieveParams,
     InsightsPartialUpdateParams,
     InsightsRetrieveParams,
-    InsightsSuggestionsCreateParams,
-    InsightsSuggestionsRetrieveParams,
     InsightsTrendingRetrieveParams,
     InsightsUpdateParams,
     InsightsViewedCreateParams,
+    OrganizationEventsRetentionApi,
     PaginatedColumnConfigurationListApi,
     PaginatedElementListApi,
     PaginatedInsightListApi,
@@ -51,6 +58,8 @@ import type {
     PatchedColumnConfigurationApi,
     PatchedElementApi,
     PatchedInsightApi,
+    PathsV2SegmentToFunnelRequestApi,
+    PathsV2SegmentToFunnelResponseApi,
 } from './api.schemas'
 
 // https://stackoverflow.com/questions/49579094/typescript-conditional-types-filter-out-readonly-properties-pick-only-requir/49579497#49579497
@@ -69,6 +78,45 @@ type NonReadonly<T> = [T] extends [UnionToIntersection<T>]
           [P in keyof Writable<T>]: T[P] extends object ? NonReadonly<NonNullable<T[P]>> : T[P]
       }
     : DistributeReadOnlyOverUnions<T>
+
+export const getOrganizationEventsRetentionRetrieveUrl = (organizationId: string) => {
+    return `/api/organizations/${organizationId}/events_retention_setting/`
+}
+
+/**
+ * Returns the events retention window that every project without its own window uses, and the range an organization admin can set.
+ * @summary Get the organization's events retention window
+ */
+export const organizationEventsRetentionRetrieve = async (
+    organizationId: string,
+    options?: RequestInit
+): Promise<OrganizationEventsRetentionApi> => {
+    return apiMutator<OrganizationEventsRetentionApi>(getOrganizationEventsRetentionRetrieveUrl(organizationId), {
+        ...options,
+        method: 'GET',
+    })
+}
+
+export const getOrganizationEventsRetentionUpdateUrl = (organizationId: string) => {
+    return `/api/organizations/${organizationId}/events_retention_setting/`
+}
+
+/**
+ * Sets how long every project without its own window keeps events. Events older than the window are deleted on the next monthly cleanup and can't be restored. Organization admins only.
+ * @summary Set the organization's events retention window
+ */
+export const organizationEventsRetentionUpdate = async (
+    organizationId: string,
+    eventsRetentionUpdateApi: EventsRetentionUpdateApi,
+    options?: RequestInit
+): Promise<OrganizationEventsRetentionApi> => {
+    return apiMutator<OrganizationEventsRetentionApi>(getOrganizationEventsRetentionUpdateUrl(organizationId), {
+        ...options,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...options?.headers },
+        body: JSON.stringify(eventsRetentionUpdateApi),
+    })
+}
 
 export const getColumnConfigurationsListUrl = (projectId: string, params?: ColumnConfigurationsListParams) => {
     const normalizedParams = new URLSearchParams()
@@ -341,6 +389,45 @@ export const elementsValuesList = async (
     })
 }
 
+export const getEventsRetentionRetrieveUrl = (projectId: string) => {
+    return `/api/projects/${projectId}/events_retention/`
+}
+
+/**
+ * Returns how far back events stay queryable for this project, the windows set for the project and its organization, and the range an admin can set. Both window fields are null while no retention window applies to the project.
+ * @summary Get the events retention window for a project
+ */
+export const eventsRetentionRetrieve = async (
+    projectId: string,
+    options?: RequestInit
+): Promise<EventsRetentionApi> => {
+    return apiMutator<EventsRetentionApi>(getEventsRetentionRetrieveUrl(projectId), {
+        ...options,
+        method: 'GET',
+    })
+}
+
+export const getEventsRetentionUpdateUrl = (projectId: string) => {
+    return `/api/projects/${projectId}/events_retention/`
+}
+
+/**
+ * Sets how long this project keeps events, overriding the organization's window. Events older than the window are deleted on the next monthly cleanup and can't be restored. Organization admins only.
+ * @summary Set the events retention window for a project
+ */
+export const eventsRetentionUpdate = async (
+    projectId: string,
+    eventsRetentionUpdateApi: EventsRetentionUpdateApi,
+    options?: RequestInit
+): Promise<EventsRetentionApi> => {
+    return apiMutator<EventsRetentionApi>(getEventsRetentionUpdateUrl(projectId), {
+        ...options,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...options?.headers },
+        body: JSON.stringify(eventsRetentionUpdateApi),
+    })
+}
+
 export const getInsightsListUrl = (projectId: string, params?: InsightsListParams) => {
     const normalizedParams = new URLSearchParams()
 
@@ -357,14 +444,6 @@ export const getInsightsListUrl = (projectId: string, params?: InsightsListParam
         : `/api/projects/${projectId}/insights/`
 }
 
-/**
- * DRF ViewSet mixin that gates coalesced responses behind permission checks.
- *
- * The QueryCoalescingMiddleware attaches cached response data to
- * request.META["_coalesced_response"] for followers. This mixin runs DRF's
- * initial() (auth + permissions + throttling) before returning the
- * cached response, ensuring the request is authorized.
- */
 export const insightsList = async (
     projectId: string,
     params?: InsightsListParams,
@@ -392,14 +471,6 @@ export const getInsightsCreateUrl = (projectId: string, params?: InsightsCreateP
         : `/api/projects/${projectId}/insights/`
 }
 
-/**
- * DRF ViewSet mixin that gates coalesced responses behind permission checks.
- *
- * The QueryCoalescingMiddleware attaches cached response data to
- * request.META["_coalesced_response"] for followers. This mixin runs DRF's
- * initial() (auth + permissions + throttling) before returning the
- * cached response, ensuring the request is authorized.
- */
 export const insightsCreate = async (
     projectId: string,
     insightApi?: NonReadonly<InsightApi>,
@@ -430,14 +501,6 @@ export const getInsightsRetrieveUrl = (projectId: string, id: number | string, p
         : `/api/projects/${projectId}/insights/${id}/`
 }
 
-/**
- * DRF ViewSet mixin that gates coalesced responses behind permission checks.
- *
- * The QueryCoalescingMiddleware attaches cached response data to
- * request.META["_coalesced_response"] for followers. This mixin runs DRF's
- * initial() (auth + permissions + throttling) before returning the
- * cached response, ensuring the request is authorized.
- */
 export const insightsRetrieve = async (
     projectId: string,
     id: number | string,
@@ -466,14 +529,6 @@ export const getInsightsUpdateUrl = (projectId: string, id: number | string, par
         : `/api/projects/${projectId}/insights/${id}/`
 }
 
-/**
- * DRF ViewSet mixin that gates coalesced responses behind permission checks.
- *
- * The QueryCoalescingMiddleware attaches cached response data to
- * request.META["_coalesced_response"] for followers. This mixin runs DRF's
- * initial() (auth + permissions + throttling) before returning the
- * cached response, ensuring the request is authorized.
- */
 export const insightsUpdate = async (
     projectId: string,
     id: number | string,
@@ -509,14 +564,6 @@ export const getInsightsPartialUpdateUrl = (
         : `/api/projects/${projectId}/insights/${id}/`
 }
 
-/**
- * DRF ViewSet mixin that gates coalesced responses behind permission checks.
- *
- * The QueryCoalescingMiddleware attaches cached response data to
- * request.META["_coalesced_response"] for followers. This mixin runs DRF's
- * initial() (auth + permissions + throttling) before returning the
- * cached response, ensuring the request is authorized.
- */
 export const insightsPartialUpdate = async (
     projectId: string,
     id: number | string,
@@ -598,10 +645,10 @@ export const insightsActivityRetrieve = async (
     })
 }
 
-export const getInsightsAnalyzeRetrieveUrl = (
+export const getInsightsDataChecksRetrieveUrl = (
     projectId: string,
-    id: number,
-    params?: InsightsAnalyzeRetrieveParams
+    id: number | string,
+    params?: InsightsDataChecksRetrieveParams
 ) => {
     const normalizedParams = new URLSearchParams()
 
@@ -614,110 +661,22 @@ export const getInsightsAnalyzeRetrieveUrl = (
     const stringifiedParams = normalizedParams.toString()
 
     return stringifiedParams.length > 0
-        ? `/api/projects/${projectId}/insights/${id}/analyze/?${stringifiedParams}`
-        : `/api/projects/${projectId}/insights/${id}/analyze/`
+        ? `/api/projects/${projectId}/insights/${id}/data_checks/?${stringifiedParams}`
+        : `/api/projects/${projectId}/insights/${id}/data_checks/`
 }
 
 /**
- * DRF ViewSet mixin that gates coalesced responses behind permission checks.
- *
- * The QueryCoalescingMiddleware attaches cached response data to
- * request.META["_coalesced_response"] for followers. This mixin runs DRF's
- * initial() (auth + permissions + throttling) before returning the
- * cached response, ensuring the request is authorized.
+ * Run the data checks on a saved insight, found by its numeric id or its `short_id`. The checks read the query the insight stores, and work the same way as the checks on a query that is not saved. The `status` is `unsupported` for an insight that still stores legacy `filters` and no query. Nothing is stored.
  */
-export const insightsAnalyzeRetrieve = async (
+export const insightsDataChecksRetrieve = async (
     projectId: string,
-    id: number,
-    params?: InsightsAnalyzeRetrieveParams,
+    id: number | string,
+    params?: InsightsDataChecksRetrieveParams,
     options?: RequestInit
-): Promise<void> => {
-    return apiMutator<void>(getInsightsAnalyzeRetrieveUrl(projectId, id, params), {
+): Promise<InsightDataChecksApi> => {
+    return apiMutator<InsightDataChecksApi>(getInsightsDataChecksRetrieveUrl(projectId, id, params), {
         ...options,
         method: 'GET',
-    })
-}
-
-export const getInsightsSuggestionsRetrieveUrl = (
-    projectId: string,
-    id: number,
-    params?: InsightsSuggestionsRetrieveParams
-) => {
-    const normalizedParams = new URLSearchParams()
-
-    Object.entries(params || {}).forEach(([key, value]) => {
-        if (value !== undefined) {
-            normalizedParams.append(key, value === null ? 'null' : String(value))
-        }
-    })
-
-    const stringifiedParams = normalizedParams.toString()
-
-    return stringifiedParams.length > 0
-        ? `/api/projects/${projectId}/insights/${id}/suggestions/?${stringifiedParams}`
-        : `/api/projects/${projectId}/insights/${id}/suggestions/`
-}
-
-/**
- * DRF ViewSet mixin that gates coalesced responses behind permission checks.
- *
- * The QueryCoalescingMiddleware attaches cached response data to
- * request.META["_coalesced_response"] for followers. This mixin runs DRF's
- * initial() (auth + permissions + throttling) before returning the
- * cached response, ensuring the request is authorized.
- */
-export const insightsSuggestionsRetrieve = async (
-    projectId: string,
-    id: number,
-    params?: InsightsSuggestionsRetrieveParams,
-    options?: RequestInit
-): Promise<void> => {
-    return apiMutator<void>(getInsightsSuggestionsRetrieveUrl(projectId, id, params), {
-        ...options,
-        method: 'GET',
-    })
-}
-
-export const getInsightsSuggestionsCreateUrl = (
-    projectId: string,
-    id: number,
-    params?: InsightsSuggestionsCreateParams
-) => {
-    const normalizedParams = new URLSearchParams()
-
-    Object.entries(params || {}).forEach(([key, value]) => {
-        if (value !== undefined) {
-            normalizedParams.append(key, value === null ? 'null' : String(value))
-        }
-    })
-
-    const stringifiedParams = normalizedParams.toString()
-
-    return stringifiedParams.length > 0
-        ? `/api/projects/${projectId}/insights/${id}/suggestions/?${stringifiedParams}`
-        : `/api/projects/${projectId}/insights/${id}/suggestions/`
-}
-
-/**
- * DRF ViewSet mixin that gates coalesced responses behind permission checks.
- *
- * The QueryCoalescingMiddleware attaches cached response data to
- * request.META["_coalesced_response"] for followers. This mixin runs DRF's
- * initial() (auth + permissions + throttling) before returning the
- * cached response, ensuring the request is authorized.
- */
-export const insightsSuggestionsCreate = async (
-    projectId: string,
-    id: number,
-    insightApi?: NonReadonly<InsightApi>,
-    params?: InsightsSuggestionsCreateParams,
-    options?: RequestInit
-): Promise<void> => {
-    return apiMutator<void>(getInsightsSuggestionsCreateUrl(projectId, id, params), {
-        ...options,
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...options?.headers },
-        body: JSON.stringify(insightApi),
     })
 }
 
@@ -817,6 +776,45 @@ export const insightsBulkRestoreCreate = async (
     })
 }
 
+export const getInsightsBulkSetTestAccountFilterCreateUrl = (
+    projectId: string,
+    params?: InsightsBulkSetTestAccountFilterCreateParams
+) => {
+    const normalizedParams = new URLSearchParams()
+
+    Object.entries(params || {}).forEach(([key, value]) => {
+        if (value !== undefined) {
+            normalizedParams.append(key, value === null ? 'null' : String(value))
+        }
+    })
+
+    const stringifiedParams = normalizedParams.toString()
+
+    return stringifiedParams.length > 0
+        ? `/api/projects/${projectId}/insights/bulk_set_test_account_filter/?${stringifiedParams}`
+        : `/api/projects/${projectId}/insights/bulk_set_test_account_filter/`
+}
+
+/**
+ * Turn 'filter out internal and test users' on or off for every existing insight in the project. Requires project admin, matching the settings UI that fronts it. The setting of the same name only decides the default for new insights; this applies it to the insights that already exist. Only insights that store a query are changed; insights still holding legacy `filters` are counted in `legacy` and left as they are. Insights with nowhere to put the toggle, such as SQL insights, are left alone, as are insights the requester cannot edit. Dashboards follow their insights unless the dashboard sets its own override. Insights are updated in batches, so a failure part way through leaves the finished batches applied. Retrying is safe and picks up the rest.
+ */
+export const insightsBulkSetTestAccountFilterCreate = async (
+    projectId: string,
+    insightBulkSetTestAccountFilterRequestApi: InsightBulkSetTestAccountFilterRequestApi,
+    params?: InsightsBulkSetTestAccountFilterCreateParams,
+    options?: RequestInit
+): Promise<InsightBulkSetTestAccountFilterResponseApi> => {
+    return apiMutator<InsightBulkSetTestAccountFilterResponseApi>(
+        getInsightsBulkSetTestAccountFilterCreateUrl(projectId, params),
+        {
+            ...options,
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...options?.headers },
+            body: JSON.stringify(insightBulkSetTestAccountFilterRequestApi),
+        }
+    )
+}
+
 export const getInsightsBulkUpdateTagsCreateUrl = (projectId: string, params?: InsightsBulkUpdateTagsCreateParams) => {
     const normalizedParams = new URLSearchParams()
 
@@ -882,14 +880,6 @@ export const getInsightsCancelCreateUrl = (projectId: string, params?: InsightsC
         : `/api/projects/${projectId}/insights/cancel/`
 }
 
-/**
- * DRF ViewSet mixin that gates coalesced responses behind permission checks.
- *
- * The QueryCoalescingMiddleware attaches cached response data to
- * request.META["_coalesced_response"] for followers. This mixin runs DRF's
- * initial() (auth + permissions + throttling) before returning the
- * cached response, ensuring the request is authorized.
- */
 export const insightsCancelCreate = async (
     projectId: string,
     insightApi?: NonReadonly<InsightApi>,
@@ -901,6 +891,39 @@ export const insightsCancelCreate = async (
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...options?.headers },
         body: JSON.stringify(insightApi),
+    })
+}
+
+export const getInsightsDataChecksCreateUrl = (projectId: string, params?: InsightsDataChecksCreateParams) => {
+    const normalizedParams = new URLSearchParams()
+
+    Object.entries(params || {}).forEach(([key, value]) => {
+        if (value !== undefined) {
+            normalizedParams.append(key, value === null ? 'null' : String(value))
+        }
+    })
+
+    const stringifiedParams = normalizedParams.toString()
+
+    return stringifiedParams.length > 0
+        ? `/api/projects/${projectId}/insights/data_checks/?${stringifiedParams}`
+        : `/api/projects/${projectId}/insights/data_checks/`
+}
+
+/**
+ * Check the events behind an insight for the common ways they mislead: internal and test users, local development traffic, bots and crawlers, and events sent twice. Works for trends, funnels, stickiness and lifecycle insights whose series are events. The checks apply the insight's own filters, and read the newest days of its date range, up to 7. The bot and duplicate checks read a sample of those days. For a token, the internal users check matches the emails of the organization's members only with the `organization_member:read` scope, and its verified domains only with `organization:read`. It names the emails it finds only with `person:read`. Nothing is stored. This route runs the query it is sent, so it needs query access as well as insight access. To check a saved insight by its id, send a GET request to `insights/{id}/data_checks/`.
+ */
+export const insightsDataChecksCreate = async (
+    projectId: string,
+    insightDataChecksRequestApi: InsightDataChecksRequestApi,
+    params?: InsightsDataChecksCreateParams,
+    options?: RequestInit
+): Promise<InsightDataChecksApi> => {
+    return apiMutator<InsightDataChecksApi>(getInsightsDataChecksCreateUrl(projectId, params), {
+        ...options,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...options?.headers },
+        body: JSON.stringify(insightDataChecksRequestApi),
     })
 }
 
@@ -1017,7 +1040,7 @@ export const getInsightsViewedCreateUrl = (projectId: string, params?: InsightsV
 }
 
 /**
- * Record that the current user has just viewed one or more insights. Submitted ids that do not belong to the current project or that point at deleted insights are silently dropped. Returns 201 on success regardless of how many ids were retained.
+ * Record that the current user has just viewed one or more insights. Submitted ids that do not belong to the current project or that point at deleted insights are silently dropped, as are views from impersonated staff-support sessions. Returns 201 on success regardless of how many ids were retained.
  */
 export const insightsViewedCreate = async (
     projectId: string,
@@ -1030,5 +1053,26 @@ export const insightsViewedCreate = async (
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...options?.headers },
         body: JSON.stringify(insightViewedRequestApi),
+    })
+}
+
+export const getPathsV2SegmentToFunnelCreateUrl = (projectId: string) => {
+    return `/api/projects/${projectId}/paths_v2/segment_to_funnel/`
+}
+
+/**
+ * Converts a displayed journeys segment into the funnel query that reproduces its unique-actor count exactly. In open mode only a single edge converts (a two-step funnel with the inactivity gap as conversion window); in anchored mode any anchor-rooted chain converts (window W). The funnel is returned as JSON and is not executed or persisted here.
+ * @summary Convert a journey segment to a funnel
+ */
+export const pathsV2SegmentToFunnelCreate = async (
+    projectId: string,
+    pathsV2SegmentToFunnelRequestApi: PathsV2SegmentToFunnelRequestApi,
+    options?: RequestInit
+): Promise<PathsV2SegmentToFunnelResponseApi> => {
+    return apiMutator<PathsV2SegmentToFunnelResponseApi>(getPathsV2SegmentToFunnelCreateUrl(projectId), {
+        ...options,
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...options?.headers },
+        body: JSON.stringify(pathsV2SegmentToFunnelRequestApi),
     })
 }

@@ -12,20 +12,15 @@ import {
 } from 'kea'
 import { loaders } from 'kea-loaders'
 import { router } from 'kea-router'
+import type { LocationChangedPayload } from 'kea-router/lib/types'
 import { v4 as uuidv4 } from 'uuid'
 
 import api, { CountedPaginatedResponse } from 'lib/api'
-import {
-    TAXONOMIC_LIST_KEY_FAMILY,
-    TAXONOMIC_LIST_SEARCH_KEY_FAMILY,
-    invalidateTaxonomicResourcesWhere,
-} from 'lib/components/TaxonomicFilter/hooks/useTaxonomicResource'
-import { TaxonomicFilterGroupType } from 'lib/components/TaxonomicFilter/types'
+import { ConcurrencyController } from 'lib/utils/concurrencyController'
 import { deleteWithUndo } from 'lib/utils/deleteWithUndo'
 import { permanentlyMount } from 'lib/utils/kea-logic-builders'
 import { COHORT_EVENT_TYPES_WITH_EXPLICIT_DATETIME } from 'scenes/cohorts/CohortFilters/constants'
 import { BehavioralFilterKey } from 'scenes/cohorts/CohortFilters/types'
-import { personsLogic } from 'scenes/persons/personsLogic'
 import { isAuthenticatedTeam, teamLogic } from 'scenes/teamLogic'
 import { urls } from 'scenes/urls'
 
@@ -40,13 +35,55 @@ import {
     FilterLogicalOperator,
 } from '~/types'
 
+import * as cohortsApi from 'products/cohorts/frontend/generated/api'
+import { personsLogic } from 'products/persons/frontend/logics/personsLogic'
+
 import type { TeamPublicType, TeamType } from '../types'
 
 const POLL_TIMEOUT = 5000
 
+export function getReferencedCohortIds(query: unknown): number[] {
+    const ids = new Set<number>()
+    const add = (value: unknown): void => {
+        for (const candidate of Array.isArray(value) ? value : [value]) {
+            if (typeof candidate === 'number' || (typeof candidate === 'string' && /^\d+$/.test(candidate))) {
+                const id = Number(candidate)
+                if (Number.isSafeInteger(id) && id > 0) {
+                    ids.add(id)
+                }
+            }
+        }
+    }
+    const visit = (value: unknown): void => {
+        if (!value || typeof value !== 'object') {
+            return
+        }
+        if (Array.isArray(value)) {
+            value.forEach(visit)
+            return
+        }
+        const node = value as Record<string, unknown>
+        if (node.type === 'cohort') {
+            add(node.value)
+        }
+        if (node.breakdown_type === 'cohort') {
+            add(node.breakdown)
+        }
+        Object.values(node).forEach(visit)
+    }
+    visit(query)
+    return [...ids]
+}
+
+export function isIndividualInsightPath(pathname: string): boolean {
+    const match = pathname.match(/^(?:\/project\/[^/]+)?\/insights\/([^/]+)(?:\/[^/]+){0,2}\/?$/)
+    return !!match && match[1] !== 'quick-start'
+}
+
 export const COHORTS_PER_PAGE = 100
 
-export const MAX_COHORTS_FOR_FULL_LIST = 2000
+// The cohort list returns at most 1000 rows per request, so a full-list load reads every page.
+const COHORTS_FULL_LIST_PAGE_SIZE = 1000
 
 export interface CohortFilters {
     search?: string
@@ -56,6 +93,24 @@ export interface CohortFilters {
 export const DEFAULT_COHORT_FILTERS: CohortFilters = {
     search: undefined,
     page: 1,
+}
+
+async function loadAllCohortPages<T>(
+    loadPage: (params: {
+        limit: number
+        offset: number
+    }) => Promise<{ count: number; next?: string | null; results: T[] }>
+): Promise<CountedPaginatedResponse<T>> {
+    const results: T[] = []
+    let count = 0
+    let hasNextPage = true
+    while (hasNextPage) {
+        const page = await loadPage({ limit: COHORTS_FULL_LIST_PAGE_SIZE, offset: results.length })
+        results.push(...page.results)
+        count = page.count
+        hasNextPage = !!page.next && page.results.length > 0
+    }
+    return { count, results }
 }
 
 export function processCohort(cohort: CohortType): CohortType {
@@ -95,12 +150,25 @@ function convertTimeValueToRelativeTime(criteria: AnyCohortCriteriaType): string
     }
 }
 
+// Mirrors BEHAVIORAL_VALUE_ALIASES in posthog/models/property/property.py: values older cohort
+// builders stored that the backend still resolves to a canonical behavioral type. The API hands
+// them back verbatim, so without this the frontend treats them as unmapped and renders no fields.
+// A Map, not an object literal: a stored value of 'constructor' or 'toString' resolves to an
+// Object.prototype member on a plain lookup.
+const BEHAVIORAL_VALUE_ALIASES = new Map<string, BehavioralEventType>([
+    ['performed_event_multiple_times', BehavioralEventType.PerformMultipleEvents],
+])
+
 function processCohortCriteria(criteria: AnyCohortCriteriaType): AnyCohortCriteriaType {
     if (!criteria.type) {
         return criteria
     }
 
     const processedCriteria = { ...criteria }
+
+    if (criteria.type === BehavioralFilterKey.Behavioral && typeof criteria.value === 'string') {
+        processedCriteria.value = BEHAVIORAL_VALUE_ALIASES.get(criteria.value) ?? criteria.value
+    }
 
     if (
         [BehavioralFilterKey.Cohort, BehavioralFilterKey.Person, BehavioralFilterKey.PersonMetadata].includes(
@@ -118,8 +186,8 @@ function processCohortCriteria(criteria: AnyCohortCriteriaType): AnyCohortCriter
     if (
         [BehavioralFilterKey.Behavioral].includes(criteria.type) &&
         !('explicit_datetime' in criteria) &&
-        criteria.value &&
-        COHORT_EVENT_TYPES_WITH_EXPLICIT_DATETIME.includes(criteria.value)
+        processedCriteria.value &&
+        COHORT_EVENT_TYPES_WITH_EXPLICIT_DATETIME.includes(processedCriteria.value)
     ) {
         processedCriteria.explicit_datetime = convertTimeValueToRelativeTime(criteria)
     }
@@ -129,22 +197,6 @@ function processCohortCriteria(criteria: AnyCohortCriteriaType): AnyCohortCriter
     }
 
     return processedCriteria
-}
-
-/**
- * Predicate for `invalidateTaxonomicResourcesWhere` — matches the cache
- * entries belonging to the `Cohorts` / `CohortsWithAllUsers` taxonomic
- * groups. `useGroupList.ts` caches under two key families — `remoteKey`
- * (`TAXONOMIC_LIST_KEY_FAMILY`) and `serverSearchKey`
- * (`TAXONOMIC_LIST_SEARCH_KEY_FAMILY`) — both shaped
- * `[family, groupType, ...fetch params]` and growing with new fetch params,
- * so rely only on the leading two positions here.
- */
-function isCohortTaxonomicListKey(key: unknown[]): boolean {
-    if (key[0] !== TAXONOMIC_LIST_KEY_FAMILY && key[0] !== TAXONOMIC_LIST_SEARCH_KEY_FAMILY) {
-        return false
-    }
-    return key[1] === TaxonomicFilterGroupType.Cohorts || key[1] === TaxonomicFilterGroupType.CohortsWithAllUsers
 }
 
 // Generated by kea-typegen. Update if you're an agent, ignore if you're human.
@@ -161,6 +213,30 @@ export interface cohortsModelValues {
 
 // Generated by kea-typegen. Update if you're an agent, ignore if you're human.
 export interface cohortsModelActions {
+    locationChanged: ({
+        method,
+        pathname,
+        search,
+        searchParams,
+        hash,
+        hashParams,
+        initial,
+        url,
+        routerState,
+    }: LocationChangedPayload) => {
+        hash: string
+        hashParams: Record<string, any>
+        initial: boolean
+        method: 'POP' | 'PUSH' | 'REPLACE'
+        pathname: string
+        routerState: Record<string, any>
+        search: string
+        searchParams: Record<string, any>
+        url: string
+    } // router
+    cacheCohort: (cohort: CohortType) => {
+        cohort: CohortType
+    }
     cohortCreated: (cohort: CohortType) => {
         cohort: CohortType
     }
@@ -179,19 +255,34 @@ export interface cohortsModelActions {
         errorObject?: any
     }
     loadAllCohortsSuccess: (
-        allCohorts: {
-            count: number
-            results: CohortType[]
-        },
+        allCohorts: CountedPaginatedResponse<CohortType>,
         payload?: any
     ) => {
-        allCohorts: {
-            count: number
-            results: CohortType[]
-        }
+        allCohorts: CountedPaginatedResponse<CohortType>
         payload?: any
     }
     loadCohorts: () => any
+    loadCohortsByIds: ({ ids }: { ids: number[] }) => {
+        ids: number[]
+    }
+    loadCohortsByIdsFailure: (
+        error: string,
+        errorObject?: any
+    ) => {
+        error: string
+        errorObject?: any
+    }
+    loadCohortsByIdsSuccess: (
+        allCohorts: CountedPaginatedResponse<CohortType>,
+        payload?: {
+            ids: number[]
+        }
+    ) => {
+        allCohorts: CountedPaginatedResponse<CohortType>
+        payload?: {
+            ids: number[]
+        }
+    }
     loadCohortsFailure: (
         error: string,
         errorObject?: any
@@ -200,16 +291,10 @@ export interface cohortsModelActions {
         errorObject?: any
     }
     loadCohortsSuccess: (
-        cohorts: {
-            count: number
-            results: CohortType[]
-        },
+        cohorts: CountedPaginatedResponse<CohortType>,
         payload?: any
     ) => {
-        cohorts: {
-            count: number
-            results: CohortType[]
-        }
+        cohorts: CountedPaginatedResponse<CohortType>
         payload?: any
     }
     setPollTimeout: (pollTimeout: number | null) => {
@@ -239,37 +324,100 @@ export const cohortsModel = kea<cohortsModelType>([
     path(['models', 'cohortsModel']),
     connect(() => ({
         values: [teamLogic, ['currentTeam']],
+        actions: [router, ['locationChanged']],
     })),
     actions(() => ({
         setPollTimeout: (pollTimeout: number | null) => ({ pollTimeout }),
         updateCohort: (cohort: CohortType) => ({ cohort }),
+        cacheCohort: (cohort: CohortType) => ({ cohort }),
         deleteCohort: (cohort: Partial<CohortType>) => ({ cohort }),
         cohortCreated: (cohort: CohortType) => ({ cohort }),
         hydrateAllCohortsFromExport: (cohorts: Pick<CohortType, 'id' | 'name'>[]) => ({ cohorts }),
     })),
-    loaders(() => ({
+    loaders(({ actions, values, cache }) => ({
         cohorts: {
             __default: { count: 0, results: [] } as CountedPaginatedResponse<CohortType>,
             loadCohorts: async () => {
-                const response = await api.cohorts.listPaginated({
-                    limit: MAX_COHORTS_FOR_FULL_LIST,
-                })
+                if (!isAuthenticatedTeam(values.currentTeam)) {
+                    return values.cohorts
+                }
+                const projectId = String(values.currentTeam.project_id)
+                const response = await loadAllCohortPages((params) => cohortsApi.cohortsList(projectId, params))
                 personsLogic.findMounted({ syncWithUrl: true })?.actions.loadCohorts()
                 return {
                     count: response.count,
-                    results: response.results.map((cohort) => processCohort(cohort)),
+                    // The shared cache still exposes the legacy shape to its consumers.
+                    results: response.results.map((cohort) => processCohort(cohort as unknown as CohortType)),
                 }
             },
         },
         allCohorts: {
             __default: { count: 0, results: [] } as CountedPaginatedResponse<CohortType>,
+            loadCohortsByIds: async ({ ids }: { ids: number[] }) => {
+                if (!isAuthenticatedTeam(values.currentTeam)) {
+                    return values.allCohorts
+                }
+                const projectId = String(values.currentTeam.project_id)
+                const requests: ConcurrencyController = (cache.cohortRequests ??= new ConcurrencyController(10))
+                const referenced: Set<number> = (cache.referencedCohortIds ??= new Set<number>())
+                ids.forEach((id) => referenced.add(id))
+                const pending: Set<number> = (cache.pendingCohortIds ??= new Set<number>())
+                const missing = [...new Set(ids)].filter(
+                    (id) => Number.isSafeInteger(id) && id > 0 && !values.cohortsById[id] && !pending.has(id)
+                )
+                missing.forEach((id) => pending.add(id))
+                const results = await Promise.allSettled(
+                    missing.map(async (id) => {
+                        try {
+                            const cohort = await requests.run({ fn: () => cohortsApi.cohortsRetrieve(projectId, id) })
+                            // The shared cache still exposes the legacy shape to its consumers.
+                            actions.cacheCohort(cohort as unknown as CohortType)
+                            const referencedIds = getReferencedCohortIds(cohort.filters)
+                            if (referencedIds.length) {
+                                actions.loadCohortsByIds({ ids: referencedIds })
+                            }
+                        } catch (error) {
+                            if (![403, 404].includes((error as { status?: number }).status ?? 0)) {
+                                throw error
+                            }
+                        } finally {
+                            pending.delete(id)
+                        }
+                    })
+                )
+                const failure = results.find((result) => result.status === 'rejected')
+                if (failure?.status === 'rejected') {
+                    throw failure.reason
+                }
+                return values.allCohorts
+            },
             loadAllCohorts: async () => {
-                const response = await api.cohorts.listPaginated({
-                    limit: MAX_COHORTS_FOR_FULL_LIST,
-                })
+                cache.fullListRequested = true
+                // `allCohorts` feeds `cohortsById`, mostly id + name lookups, so request the
+                // basic payload that drops the legacy `groups`/`query` JSON. Fetching the full
+                // payload for every cohort on this hot path was slow enough to hit the
+                // gateway timeout on cohort-heavy teams. `filters` stays in the basic payload:
+                // the feature-flag intent warning reads it off `cohortsById` (see
+                // featureFlagIntentWarningLogic.hasBehavioralCriteria), and its raw shape is
+                // what that check expects, so no `processCohort` normalization is needed here.
+                if (!isAuthenticatedTeam(values.currentTeam)) {
+                    return values.allCohorts
+                }
+                const projectId = String(values.currentTeam.project_id)
+                const response = await loadAllCohortPages((params) =>
+                    cohortsApi.cohortsList(projectId, { ...params, basic: true })
+                )
+                const listedIds = new Set<CohortType['id']>(response.results.map(({ id }) => id))
                 return {
                     count: response.count,
-                    results: response.results.map((cohort) => processCohort(cohort)),
+                    // `groups` is dropped from the basic payload but required on CohortType, so
+                    // add the empty default back — nothing reading `cohortsById` uses `groups`.
+                    results: [
+                        ...response.results.map((cohort) => ({ ...(cohort as unknown as CohortType), groups: [] })),
+                        ...values.allCohorts.results.filter(
+                            ({ id }) => !listedIds.has(id) && cache.referencedCohortIds?.has(id)
+                        ),
+                    ],
                 }
             },
         },
@@ -315,6 +463,10 @@ export const cohortsModel = kea<cohortsModelType>([
         // Update allCohorts state to keep breadcrumbs in sync when cohorts are modified
         // The cohortsById selector depends on allCohorts, not cohorts
         allCohorts: {
+            cacheCohort: (state, { cohort }) => ({
+                ...state,
+                results: [...state.results.filter(({ id }) => id !== cohort.id), cohort],
+            }),
             updateCohort: (state, { cohort }) => {
                 if (!cohort) {
                     return state
@@ -373,17 +525,18 @@ export const cohortsModel = kea<cohortsModelType>([
         ],
         count: [(selectors) => [selectors.cohorts], (cohorts: CountedPaginatedResponse<CohortType>) => cohorts.count],
     }),
-    listeners(({ actions }) => ({
-        // Flush the TaxonomicFilter cohort cache whenever cohorts mutate
-        // so the next open of the cohort picker re-fetches the first page.
-        // The picker pins its request to `?search=&limit=100` and runs
-        // fuse client-side — invalidation here is what keeps that snappy
-        // local cache honest after create / update / delete.
-        cohortCreated: () => {
-            invalidateTaxonomicResourcesWhere(isCohortTaxonomicListKey)
+    listeners(({ actions, values, cache }) => ({
+        loadAllCohortsFailure: () => {
+            cache.fullListRequested = false
         },
-        updateCohort: () => {
-            invalidateTaxonomicResourcesWhere(isCohortTaxonomicListKey)
+        locationChanged: ({ pathname }) => {
+            if (
+                !isIndividualInsightPath(pathname) &&
+                isAuthenticatedTeam(values.currentTeam) &&
+                !cache.fullListRequested
+            ) {
+                actions.loadAllCohorts()
+            }
         },
         loadCohortsSuccess: async ({ cohorts }: { cohorts: CountedPaginatedResponse<CohortType> }) => {
             const is_calculating = cohorts.results.filter((cohort) => cohort.is_calculating).length > 0
@@ -400,17 +553,13 @@ export const cohortsModel = kea<cohortsModelType>([
             actions.setPollTimeout(window.setTimeout(actions.loadAllCohorts, POLL_TIMEOUT))
         },
         deleteCohort: async ({ cohort }) => {
-            invalidateTaxonomicResourcesWhere(isCohortTaxonomicListKey)
             await deleteWithUndo({
                 endpoint: api.cohorts.determineDeleteEndpoint(),
                 object: cohort,
                 callback: (undo) => {
-                    if (undo) {
-                        // The delete-time invalidation above already ran; a restore needs its
-                        // own, or pickers keep serving the deleted-state cache for staleTime.
-                        invalidateTaxonomicResourcesWhere(isCohortTaxonomicListKey)
-                    }
-                    actions.loadCohorts()
+                    // Refresh `allCohorts` (the source for `cohortsById`) so an undo restores
+                    // the row's name to breadcrumbs and pickers, not just the `cohorts` list.
+                    actions.loadAllCohorts()
                     if (cohort.id && cohort.id !== 'new') {
                         if (undo) {
                             refreshTreeItem('cohort', String(cohort.id))
@@ -420,6 +569,8 @@ export const cohortsModel = kea<cohortsModelType>([
                         }
                     }
                 },
+                // The reducers already removed the cohort, so reload to bring back its name in breadcrumbs and pickers.
+                onError: () => actions.loadAllCohorts(),
             })
         },
     })),
@@ -428,7 +579,10 @@ export const cohortsModel = kea<cohortsModelType>([
     }),
     afterMount(({ actions, values }) => {
         if (isAuthenticatedTeam(values.currentTeam)) {
-            actions.loadAllCohorts()
+            // Other scenes still rely on eager loading; insightDataLogic resolves its own references.
+            if (!isIndividualInsightPath(router.values.location.pathname)) {
+                actions.loadAllCohorts()
+            }
         } else {
             // Shared views can't hit /api/cohorts — seed from the inlined export payload.
             const exportedCohorts = getCurrentExporterData()?.cohorts
@@ -436,7 +590,6 @@ export const cohortsModel = kea<cohortsModelType>([
                 actions.hydrateAllCohortsFromExport(exportedCohorts)
             }
         }
-        actions.loadCohorts()
     }),
     permanentlyMount(),
 ])

@@ -39,7 +39,7 @@ from products.endpoints.backend.models import (
     _breakdown_property_names,
     can_materialize_query,
 )
-from products.product_analytics.backend.models.insight_variable import InsightVariable
+from products.product_analytics.backend.facade.api import insight_variables_by_code_names, insight_variables_by_ids
 
 
 def validate_data_freshness(data_freshness_seconds: int | None) -> None:
@@ -54,6 +54,18 @@ def validate_data_freshness(data_freshness_seconds: int | None) -> None:
         )
 
 
+def _is_current_data_freshness(
+    data_freshness_seconds: int | None, endpoint: Endpoint | None, version_number: int | None
+) -> bool:
+    """True when the value equals what the API already reports for the version being updated."""
+    if data_freshness_seconds is None or endpoint is None:
+        return False
+    try:
+        return endpoint.get_version(version_number).data_freshness_seconds == data_freshness_seconds
+    except EndpointVersion.DoesNotExist:
+        return False
+
+
 def validate_bucket_overrides(bucket_overrides: dict[str, str] | None) -> None:
     """Raise ValidationError if any bucket override value is not in SUPPORTED_BUCKET_FUNCTIONS."""
     if not bucket_overrides:
@@ -65,9 +77,20 @@ def validate_bucket_overrides(bucket_overrides: dict[str, str] | None) -> None:
         raise ValidationError(f"Invalid bucket override values: {invalid}. Valid options: {valid_options}")
 
 
+DIRECT_CONNECTION_UNSUPPORTED = (
+    "Endpoints can't query a direct connection. "
+    "Switch the connection to PostHog (ClickHouse) and query a synced table instead."
+)
+
+
 def validate_hogql_query(query: HogQLQuery, team: Team, user: User) -> None:
     """Validate that a HogQL query parses, its variables are valid, and the author can
     access every table/view it references."""
+    # A direct connection reads the customer's database live, so there is nothing for an
+    # endpoint to materialize and its table names only exist while that connection is selected.
+    if query.connectionId:
+        raise ValidationError({"query": DIRECT_CONNECTION_UNSUPPORTED})
+
     try:
         ast_node = parse_select(query.query)
     except ExposedHogQLError as e:
@@ -139,7 +162,7 @@ def sync_hogql_query_variables(query: HogQLQuery, team: Team) -> None:
             continue
         existing_variable_ids.append(variable.variableId)
 
-    team_variables = InsightVariable.objects.filter(team=team, id__in=existing_variable_ids)
+    team_variables = insight_variables_by_ids(team.pk, existing_variable_ids)
     team_variables_by_id = {str(variable.id): variable for variable in team_variables}
 
     synced_variables: dict[str, HogQLVariable] = {}
@@ -157,16 +180,16 @@ def sync_hogql_query_variables(query: HogQLQuery, team: Team) -> None:
 
     missing_code_names = placeholder_names - existing_code_names
     if missing_code_names:
-        missing_variables = InsightVariable.objects.filter(team=team, code_name__in=missing_code_names)
+        missing_variables = insight_variables_by_code_names(team.pk, missing_code_names)
 
-        for variable in missing_variables:
-            if not variable.code_name:
+        for definition in missing_variables:
+            if not definition.code_name:
                 continue
-            synced_variables[str(variable.id)] = HogQLVariable(
-                variableId=str(variable.id),
-                code_name=variable.code_name,
-                value=variable.default_value,
-                isNull=variable.default_value is None,
+            synced_variables[str(definition.id)] = HogQLVariable(
+                variableId=str(definition.id),
+                code_name=definition.code_name,
+                value=definition.default_value,
+                isNull=definition.default_value is None,
             )
 
     query.variables = synced_variables or None
@@ -212,10 +235,7 @@ def validate_variable_placeholders(node: ast.AST, variables: Optional[dict[str, 
             raise ValidationError({"query": f"Variable ID(s) not valid UUIDs: {', '.join(sorted(invalid_uuids))}. "})
 
         if valid_uuids:
-            existing_ids = {
-                str(id)
-                for id in InsightVariable.objects.filter(team=team, id__in=valid_uuids).values_list("id", flat=True)
-            }
+            existing_ids = {str(variable.id) for variable in insight_variables_by_ids(team.pk, valid_uuids)}
             invalid_ids = valid_uuids - existing_ids
 
         if invalid_ids:
@@ -302,7 +322,8 @@ def validate_update_request(
     version_number: int | None = None,
 ) -> None:
     """Validate an update payload against the endpoint's resulting state."""
-    validate_data_freshness(data.data_freshness_seconds)
+    if not _is_current_data_freshness(data.data_freshness_seconds, endpoint, version_number):
+        validate_data_freshness(data.data_freshness_seconds)
 
     # Determine final states after this request (for validation)
     will_be_active = data.is_active if data.is_active is not None else (endpoint.is_active if endpoint else True)

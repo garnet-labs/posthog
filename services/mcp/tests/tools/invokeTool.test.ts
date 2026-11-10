@@ -1,15 +1,21 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { PostHogApiError, PostHogPermissionError, PostHogRateLimitError, PostHogValidationError } from '@/lib/errors'
+import { ApiClient } from '@/api/client'
+import {
+    MCPToolResultError,
+    PostHogApiError,
+    PostHogPermissionError,
+    PostHogRateLimitError,
+    PostHogValidationError,
+} from '@/lib/errors'
 import { invokeMcpTool } from '@/tools/posthogAiTools/invokeTool'
 import type { Context } from '@/tools/types'
 
+// A real client, so these run the path a tool actually takes — through the client's fetch seam,
+// which is what points a request at the host the client was built for.
 function makeContext(): Context {
     return {
-        api: {
-            baseUrl: 'https://us.posthog.com',
-            config: { apiToken: 'phx_test' },
-        },
+        api: new ApiClient({ apiToken: 'phx_test', baseUrl: 'https://us.posthog.com' }),
         stateManager: {
             getProjectId: vi.fn().mockResolvedValue(2),
         },
@@ -37,11 +43,49 @@ describe('invokeMcpTool', () => {
         expect(result).toEqual({ success: true, content: 'rows' })
     })
 
+    it.each(['unknown_identifier', null, undefined])(
+        'preserves backend error type and optional code through the API client: %s',
+        async (errorCode) => {
+            const content =
+                'Tool failed: MaxToolRetryableError: Check the column names. You may retry with adjusted inputs.'
+            stubFetch(
+                new Response(
+                    JSON.stringify({
+                        success: false,
+                        content,
+                        error_type: 'validation',
+                        error_code: errorCode,
+                    }),
+                    { status: 200 }
+                )
+            )
+
+            const error = await invokeMcpTool(makeContext(), 'execute_sql', { query: 'SELECT missing_column' }).catch(
+                (e) => e
+            )
+
+            expect(error).toBeInstanceOf(MCPToolResultError)
+            expect({ message: error.message, errorType: error.errorType, errorCode: error.errorCode }).toEqual({
+                message: content,
+                errorType: 'validation',
+                errorCode: errorCode ?? undefined,
+            })
+            expect(fetch).toHaveBeenCalledOnce()
+        }
+    )
+
+    it('keeps failures from older backends as errors during a rolling deploy', async () => {
+        stubFetch(new Response(JSON.stringify({ success: false, content: 'Tool failed' })))
+
+        await expect(invokeMcpTool(makeContext(), 'execute_sql', {})).rejects.toMatchObject({ message: 'Tool failed' })
+    })
+
     it('throws PostHogRateLimitError on a 429 so it is not bucketed as an internal error', async () => {
+        // `Retry-After` is past the client's total retry budget, so this returns without waiting.
         stubFetch(
             new Response(JSON.stringify({ detail: 'Request was throttled.' }), {
                 status: 429,
-                headers: { 'Retry-After': '7' },
+                headers: { 'Retry-After': '600' },
             })
         )
 
@@ -50,7 +94,7 @@ describe('invokeMcpTool', () => {
         expect(error).toBeInstanceOf(PostHogRateLimitError)
         expect(error).toBeInstanceOf(PostHogApiError)
         expect((error as PostHogRateLimitError).status).toBe(429)
-        expect((error as PostHogRateLimitError).retryAfterSeconds).toBe(7)
+        expect((error as PostHogRateLimitError).retryAfterSeconds).toBe(600)
     })
 
     it('throws PostHogApiError carrying the status on a 5xx', async () => {

@@ -98,7 +98,7 @@ const meta: Meta<typeof ManageAlertsModal> = {
         layout: 'fullscreen',
         viewMode: 'story',
         mockDate: '2026-07-16',
-        featureFlags: [FEATURE_FLAGS.ALERTS_REDESIGNED_EDIT_MODAL],
+        featureFlags: { [FEATURE_FLAGS.INSIGHT_ALERTS_EMPTY_STATE_EXPERIMENT]: 'test' },
         testOptions: { viewport: { width: 1000, height: 700 } },
     },
     args: {
@@ -128,3 +128,32 @@ export default meta
 type Story = StoryObj<typeof meta>
 
 export const WithAlerts: Story = {}
+
+export const Empty: Story = {
+    args: {
+        insightLogicProps: {
+            ...meta.args!.insightLogicProps!,
+            cachedInsight: { ...meta.args!.insightLogicProps!.cachedInsight!, alerts: [] },
+        },
+    },
+}
+
+export const EmptyUnsupported: Story = {
+    ...Empty,
+    args: { ...Empty.args, canCreateAlertForInsight: false },
+}
+
+export const EmptyNarrow: Story = {
+    ...Empty,
+    parameters: { testOptions: { viewport: { width: 560, height: 800 } } },
+}
+
+export const EmptyControl: Story = {
+    ...Empty,
+    parameters: { featureFlags: { [FEATURE_FLAGS.INSIGHT_ALERTS_EMPTY_STATE_EXPERIMENT]: 'control' } },
+}
+
+export const EmptyFlagOff: Story = {
+    ...Empty,
+    parameters: { featureFlags: { [FEATURE_FLAGS.INSIGHT_ALERTS_EMPTY_STATE_EXPERIMENT]: false } },
+}

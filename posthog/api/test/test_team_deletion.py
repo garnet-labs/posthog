@@ -1,9 +1,9 @@
 import json
-from datetime import timedelta
+import datetime as dt
 
-from freezegun import freeze_time
+import time_machine
 from posthog.test.base import NonAtomicBaseTest
-from unittest.mock import ANY, MagicMock, patch
+from unittest.mock import ANY, patch
 
 from django.conf import settings
 
@@ -11,13 +11,16 @@ from temporalio.service import RPCError
 
 from posthog.models import OrganizationMembership, Team
 from posthog.models.activity_logging.activity_log import ActivityLog
+from posthog.models.integration import Integration
 from posthog.temporal.common.client import sync_connect
 from posthog.temporal.common.schedule import describe_schedule
 from posthog.temporal.common.test_utils import start_test_worker
 from posthog.temporal.tests.delete_teams.inline import execute_deletion_workflows_inline
 
-from products.batch_exports.backend.temporal import ACTIVITIES, WORKFLOWS
+from products.batch_exports.backend.facade.temporal import ACTIVITIES, WORKFLOWS
 from products.early_access_features.backend.models import EarlyAccessFeature
+from products.growth.backend.models import SdkVersionsDaily
+from products.web_analytics.backend.models.health_rollups import EventsHealthDaily, HostProxyDaily, SessionIdState
 
 
 class TestTeamDeletionSideEffects(NonAtomicBaseTest):
@@ -39,7 +42,17 @@ class TestTeamDeletionSideEffects(NonAtomicBaseTest):
         self.organization_membership.save()
         self.client.force_login(self.user)
 
-    @freeze_time("2022-02-08")
+    def _create_aws_s3_integration(self, team: Team) -> Integration:
+        return Integration.objects.create(
+            team=team,
+            kind=Integration.IntegrationKind.AWS_S3,
+            integration_id="prod-aws",
+            config={"name": "prod-aws", "aws_account_id": "123456789012"},
+            sensitive_config={"aws_access_key_id": "abc123", "aws_secret_access_key": "secret"},
+            created_by=self.user,
+        )
+
+    @time_machine.travel("2022-02-08", tick=False)
     def test_delete_team_activity_log(self):
         team: Team = Team.objects.create_with_data(initiating_user=self.user, organization=self.organization)
 
@@ -76,6 +89,9 @@ class TestTeamDeletionSideEffects(NonAtomicBaseTest):
                 "client": None,
                 "created_at": ANY,
                 "ip_address": None,
+                "credential_type": None,
+                "credential_id": None,
+                "impersonated_by_id": None,
             },
             {
                 # The env→project rewrite routes the delete through the project-delete path, which cascades
@@ -86,7 +102,9 @@ class TestTeamDeletionSideEffects(NonAtomicBaseTest):
                 "detail": {
                     "changes": None,
                     "context": None,
-                    "name": "Default project",
+                    # The org's first project holds the plain default name, so this team's
+                    # implicit project got the suffixed one
+                    "name": "Default project 2",
                     "short_id": None,
                     "trigger": None,
                     "type": None,
@@ -101,6 +119,9 @@ class TestTeamDeletionSideEffects(NonAtomicBaseTest):
                 "was_impersonated": False,
                 "client": None,
                 "ip_address": "127.0.0.1",
+                "credential_type": "session",
+                "credential_id": ANY,
+                "impersonated_by_id": None,
             },
             {
                 "_state": ANY,
@@ -124,6 +145,9 @@ class TestTeamDeletionSideEffects(NonAtomicBaseTest):
                 "was_impersonated": False,
                 "client": None,
                 "ip_address": "127.0.0.1",
+                "credential_type": "session",
+                "credential_id": ANY,
+                "impersonated_by_id": None,
             },
         ]
 
@@ -149,17 +173,40 @@ class TestTeamDeletionSideEffects(NonAtomicBaseTest):
         EarlyAccessFeature.objects.create(
             team=team, name="Test flag", description="A fancy new flag.", stage="beta", feature_flag=flag
         )
+        for team_id in (team.id, self.team.id):
+            SdkVersionsDaily.objects.unscoped().create(
+                team_id=team_id,
+                day=dt.date(2026, 10, 22),
+                lib="web",
+                lib_version="1.0.0",
+                event_count=1,
+                max_timestamp=dt.datetime(2026, 10, 22, tzinfo=dt.UTC),
+            )
+            EventsHealthDaily.objects.unscoped().create(
+                team_id=team_id,
+                day=dt.date(2026, 10, 22),
+                event="$pageview",
+                has_custom_api_host=False,
+                has_scroll_depth=False,
+                session_id_state=SessionIdState.VALID,
+                event_count=1,
+            )
+            HostProxyDaily.objects.unscoped().create(
+                team_id=team_id, day=dt.date(2026, 10, 22), host="example.com", has_custom_api_host=False, event_count=1
+            )
 
         with execute_deletion_workflows_inline():
             response = self.client.delete(f"/api/environments/{team.id}")
         self.assertEqual(response.status_code, 204)
         self.assertFalse(Team.objects.filter(id=team.id).exists())
+        for model in (SdkVersionsDaily, EventsHealthDaily, HostProxyDaily):
+            self.assertFalse(model.objects.for_team(team.id).exists())
+            self.assertTrue(model.objects.for_team(self.team.id).exists())
 
         # Verify personhog RPCs were called for persons-DB cleanup
         fake = get_active_fake()
         for rpc in [
             "delete_hash_key_overrides_by_teams",
-            "delete_personless_distinct_ids_batch_for_team",
             "delete_persons_batch_for_team",
             "delete_groups_batch_for_team",
             "delete_group_type_mappings_batch_for_team",
@@ -168,17 +215,17 @@ class TestTeamDeletionSideEffects(NonAtomicBaseTest):
 
     def test_delete_batch_exports(self):
         team: Team = Team.objects.create_with_data(initiating_user=self.user, organization=self.organization)
+        integration = self._create_aws_s3_integration(team)
 
         batch_export_data = {
             "name": "my-production-s3-bucket-destination",
             "destination": {
                 "type": "AwsS3",
+                "integration": integration.id,
                 "config": {
                     "bucket_name": "my-production-s3-bucket",
                     "region": "us-east-1",
                     "prefix": "posthog-events/",
-                    "aws_access_key_id": "abc123",
-                    "aws_secret_access_key": "secret",
                 },
             },
             "interval": "hour",
@@ -213,17 +260,17 @@ class TestTeamDeletionSideEffects(NonAtomicBaseTest):
     def test_delete_team_with_already_deleted_batch_export(self):
         """Team deletion should succeed even if batch exports were already soft-deleted."""
         team: Team = Team.objects.create_with_data(initiating_user=self.user, organization=self.organization)
+        integration = self._create_aws_s3_integration(team)
 
         batch_export_data = {
             "name": "my-production-s3-bucket-destination",
             "destination": {
                 "type": "AwsS3",
+                "integration": integration.id,
                 "config": {
                     "bucket_name": "my-production-s3-bucket",
                     "region": "us-east-1",
                     "prefix": "posthog-events/",
-                    "aws_access_key_id": "abc123",
-                    "aws_secret_access_key": "secret",
                 },
             },
             "interval": "hour",
@@ -257,51 +304,15 @@ class TestTeamDeletionSideEffects(NonAtomicBaseTest):
                 response = self.client.delete(f"/api/environments/{team.id}")
             assert response.status_code == 204
 
-    @patch("posthog.temporal.common.schedule.delete_schedule")
-    @patch("posthog.models.team.util.sync_connect")
-    def test_delete_data_modeling_schedules(self, mock_sync_connect, mock_delete_schedule):
-        from products.data_modeling.backend.facade.models import DataWarehouseSavedQuery
-
+    @patch("posthog.temporal.common.client.sync_connect")
+    @patch("products.data_modeling.backend.facade.api.delete_team_data_modeling_schedules")
+    def test_team_is_still_deleted_when_the_schedule_teardown_fails(self, mock_delete_schedules, _batch_export_connect):
         team: Team = Team.objects.create_with_data(initiating_user=self.user, organization=self.organization)
-
-        saved_query = DataWarehouseSavedQuery.objects.create(
-            team=team,
-            name="test_scheduled_query",
-            query={"kind": "HogQLQuery", "query": "SELECT 1"},
-            sync_frequency_interval=timedelta(hours=1),
-        )
-
-        mock_temporal = MagicMock()
-        mock_sync_connect.return_value = mock_temporal
+        mock_delete_schedules.side_effect = Exception("temporal is unreachable")
 
         with execute_deletion_workflows_inline():
             response = self.client.delete(f"/api/environments/{team.id}")
+
         assert response.status_code == 204
-
-        mock_delete_schedule.assert_called_once_with(mock_temporal, schedule_id=str(saved_query.id))
-
-    @patch("posthog.temporal.common.schedule.delete_schedule")
-    @patch("posthog.models.team.util.sync_connect")
-    def test_delete_data_modeling_schedules_handles_not_found(self, mock_sync_connect, mock_delete_schedule):
-        import temporalio.service
-
-        from products.data_modeling.backend.facade.models import DataWarehouseSavedQuery
-
-        team: Team = Team.objects.create_with_data(initiating_user=self.user, organization=self.organization)
-
-        DataWarehouseSavedQuery.objects.create(
-            team=team,
-            name="test_missing_schedule",
-            query={"kind": "HogQLQuery", "query": "SELECT 1"},
-            sync_frequency_interval=timedelta(hours=1),
-        )
-
-        mock_temporal = MagicMock()
-        mock_sync_connect.return_value = mock_temporal
-        mock_delete_schedule.side_effect = temporalio.service.RPCError(
-            "not found", temporalio.service.RPCStatusCode.NOT_FOUND, b""
-        )
-
-        with execute_deletion_workflows_inline():
-            response = self.client.delete(f"/api/environments/{team.id}")
-        assert response.status_code == 204
+        mock_delete_schedules.assert_any_call(team.id)
+        assert not Team.objects.filter(id=team.id).exists()

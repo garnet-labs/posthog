@@ -14,8 +14,7 @@ Temporal provides us with abstractions that handle the distributed execution whi
 
 That being said, if you do decide to develop an application or feature with Temporal, this README will guide you through how we develop with Temporal, common pitfalls, and useful additional abstractions we have developed over time.
 
-> DuckLake copy workflow configuration lives in `posthog/ducklake/README.md`.
-> DuckLake copy workflow configuration lives in `posthog/ducklake/TEMPORAL.md`.
+> DuckLake copy workflow configuration lives in `products/managed_warehouse/backend/README.md`.
 
 ## Temporal concepts
 
@@ -503,7 +502,8 @@ Per Temporal's own guidance: write the **majority** of tests as the cheapest har
 
 Async tests that touch the Django ORM via `sync_to_async` / `database_sync_to_async` will fail without `@pytest.mark.django_db(transaction=True)`. asgiref dispatches the wrapped sync function to a separate thread, which gets its own DB connection, which can't see the test's wrapping atomic transaction. The test will create a row, the activity will fail to find it.
 
-`transaction=True` swaps fast transaction-rollback for slow TRUNCATE-everything between tests. This is the correct workaround — there's no clean way to share a Django connection across threads — but it's expensive, so **only use it when needed**:
+`transaction=True` swaps fast transaction-rollback for a flush between tests, which deletes the rows of every table the test wrote.
+The flush keeps `django_content_type` and `auth_permission`, so a test that changes those rows leaks the change to later tests. This is the correct workaround — there's no clean way to share a Django connection across threads — but it's slower, so **only use it when needed**:
 
 ```python
 # Async test + Django ORM = needs transaction=True
@@ -583,4 +583,4 @@ The per-test cost is the same as N separate functions, but the file shrinks and 
 
 - All of batch exports is built in Temporal, see [example workflows in batch exports](https://github.com/PostHog/posthog/tree/master/products/batch_exports/backend/temporal/destinations).
 - [Examples on unit testing Temporal workflows](https://github.com/PostHog/posthog/tree/master/products/batch_exports/backend/tests/temporal) are available in the batch exports tests.
-- DuckLake data modeling writes leverage Temporal too; follow the [DuckLake copy workflow configuration guide](../ducklake/README.md) to see how we configure environment variables, bucket layouts, and IAM perms for the copy workflow.
+- DuckLake data modeling writes leverage Temporal too. See the [DuckLake copy workflow configuration guide](../../products/managed_warehouse/backend/README.md) for environment variables, bucket layouts, and IAM permissions.

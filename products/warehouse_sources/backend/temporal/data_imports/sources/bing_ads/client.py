@@ -8,20 +8,12 @@ from bingads import AuthorizationData, OAuthTokens, OAuthWebAuthCodeGrant, Servi
 from bingads.v13 import reporting
 from suds import WebFault
 
-from posthog.settings import integrations
-
 from products.warehouse_sources.backend.temporal.data_imports.sources.common.integration_accounts import (
     IntegrationAccount,
 )
 
 from .schemas import REPORT_CONFIG, RESOURCE_SCHEMAS, BingAdsResource
-from .utils import (
-    ENVIRONMENT,
-    REPORT_POLL_INTERVAL_MS,
-    build_report_request,
-    download_and_extract_report_csv,
-    parse_csv_to_dicts,
-)
+from .utils import ENVIRONMENT, REPORT_POLL_INTERVAL_MS, build_report_request, iter_report_row_pages
 
 logger = structlog.get_logger(__name__)
 
@@ -29,6 +21,10 @@ logger = structlog.get_logger(__name__)
 BING_ADS_API_VERSION = 13
 # Microsoft's documented maximum page size for GetCustomersInfo.
 GET_CUSTOMERS_INFO_MAX_RESULTS = 1000
+# GetCampaignsByAccountId defaults CampaignType to Search only when omitted, so Performance Max /
+# Audience / Dynamic Search Ads / Shopping / App / Hotel campaigns never sync. Request every documented
+# type (space-delimited flags for SOAP).
+ALL_CAMPAIGN_TYPES = "App Audience DynamicSearchAds Hotel PerformanceMax Search Shopping"
 
 
 def _as_list(value: Any) -> list[Any]:
@@ -92,14 +88,14 @@ def _wrap_with_fault_detail(e: Exception, context: str) -> ValueError:
 
 
 class BingAdsClient:
-    def __init__(self, access_token: str, refresh_token: str, developer_token: str):
+    def __init__(self, access_token: str, refresh_token: str, developer_token: str, client_id: str, client_secret: str):
         self.developer_token = developer_token
         self._customer_id: int | None = None
 
         # The SDK requires OAuth setup
         self.oauth = OAuthWebAuthCodeGrant(
-            client_id=integrations.BING_ADS_CLIENT_ID,
-            client_secret=integrations.BING_ADS_CLIENT_SECRET,
+            client_id=client_id,
+            client_secret=client_secret,
             redirection_uri="",
         )
 
@@ -190,7 +186,7 @@ class BingAdsClient:
                 environment=ENVIRONMENT,
             )
 
-            campaigns = service_client.GetCampaignsByAccountId(AccountId=account_id)
+            campaigns = service_client.GetCampaignsByAccountId(AccountId=account_id, CampaignType=ALL_CAMPAIGN_TYPES)
         except Exception as e:
             raise _wrap_with_fault_detail(e, "Failed to fetch campaigns") from e
 
@@ -222,7 +218,7 @@ class BingAdsClient:
         customer_id: int,
         start_date: datetime,
         end_date: datetime,
-    ) -> list[dict[str, Any]]:
+    ) -> Generator[list[dict[str, Any]]]:
         report_config = REPORT_CONFIG[resource]
         schema = RESOURCE_SCHEMAS[resource]
 
@@ -252,8 +248,9 @@ class BingAdsClient:
                     end_date=end_date,
                 )
 
-                # Download and extract CSV from ZIP
-                csv_data = download_and_extract_report_csv(
+                # Yielded from inside the working directory so the SDK keeps it for the whole read,
+                # and from inside the try so a fault raised mid-download still reports its detail.
+                yield from iter_report_row_pages(
                     reporting_service_manager=reporting_service_manager,
                     report_request=report_request,
                     report_type=report_config["report_type"],
@@ -261,8 +258,6 @@ class BingAdsClient:
                 )
         except Exception as e:
             raise _wrap_with_fault_detail(e, f"Failed to generate {resource.value} report") from e
-
-        return parse_csv_to_dicts(csv_data)
 
     def get_data_by_resource(
         self,
@@ -278,6 +273,6 @@ class BingAdsClient:
         elif resource in REPORT_CONFIG:
             if not start_date or not end_date:
                 raise ValueError("start_date and end_date required for performance reports")
-            yield self.get_performance_report(resource, account_id, customer_id, start_date, end_date)
+            yield from self.get_performance_report(resource, account_id, customer_id, start_date, end_date)
         else:
             raise ValueError(f"Unsupported resource: {resource}")

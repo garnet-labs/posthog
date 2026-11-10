@@ -10,7 +10,11 @@ from parameterized import parameterized
 from rest_framework import status
 
 from posthog.models import ActivityLog, EventDefinition, EventProperty, Organization, PropertyDefinition, Team
-from posthog.taxonomy.property_definition_api import PropertyDefinitionQuerySerializer, PropertyDefinitionViewSet
+from posthog.taxonomy.property_definition_api import (
+    PropertyDefinitionQuerySerializer,
+    PropertyDefinitionViewSet,
+    QueryContext,
+)
 
 
 def exclude_virtual_properties(results: list) -> list:
@@ -106,6 +110,17 @@ class TestPropertyDefinitionAPI(APIBaseTest):
         assert len(db_results) == len(self.EXPECTED_PROPERTY_DEFINITIONS) - 1
         assert "first_visit" not in [r["name"] for r in db_results]
 
+    @parameterized.expand(
+        [
+            ["malformed excluded_properties", "excluded_properties=abc"],
+            ["malformed event_names", "event_names=%27"],
+        ]
+    )
+    def test_list_property_definitions_rejects_malformed_json_query_params(self, _name: str, query: str) -> None:
+        response = self.client.get(f"/api/projects/{self.team.pk}/property_definitions/?{query}")
+
+        assert response.status_code == status.HTTP_400_BAD_REQUEST
+
     def test_list_property_definitions_with_exclude_restricted(self):
         from posthog.constants import AvailableFeature
 
@@ -195,6 +210,17 @@ class TestPropertyDefinitionAPI(APIBaseTest):
         assert response.status_code == status.HTTP_200_OK
         db_results = self._exclude_virtual(response.json()["results"])
         assert len(db_results) == 6
+
+    def test_list_property_definitions_omits_person_property_setters(self):
+        for name in ("$set", "$set_once"):
+            PropertyDefinition.objects.get_or_create(team=self.team, name=name, property_type="String")
+
+        response = self.client.get(f"/api/projects/{self.team.pk}/property_definitions/?search=set")
+
+        assert response.status_code == status.HTTP_200_OK
+        names = [r["name"] for r in response.json()["results"]]
+        assert "$set" not in names
+        assert "$set_once" not in names
 
     def test_list_numerical_property_definitions(self):
         response = self.client.get(f"/api/projects/{self.team.pk}/property_definitions/?is_numerical=true")
@@ -545,17 +571,27 @@ class TestPropertyDefinitionAPI(APIBaseTest):
             (
                 "Get all group1 properties",
                 "type=group&group_type_index=1",
-                ["group1 another", "group1 property", "$virt_revenue", "$virt_mrr"],
+                ["group1 another", "group1 property", "$group_key", "$virt_revenue", "$virt_mrr"],
             ),
             (
                 "Get all group2 properties",
                 "type=group&group_type_index=2",
-                ["group2 property", "$virt_revenue", "$virt_mrr"],
+                ["group2 property", "$group_key", "$virt_revenue", "$virt_mrr"],
             ),
             (
                 "Search group1 properties containing 'prop'",
                 "type=group&search=prop&group_type_index=1",
                 ["group1 property"],
+            ),
+            (
+                "Search for the group key by its name",
+                "type=group&search=group_key&group_type_index=1",
+                ["$group_key"],
+            ),
+            (
+                "Search for the group key by its label",
+                "type=group&search=Group%20key&group_type_index=1",
+                ["$group_key"],
             ),
         ]
     )
@@ -960,8 +996,10 @@ class TestPropertyDefinitionAPI(APIBaseTest):
         )
         assert response.status_code == status.HTTP_200_OK
         # Virtual properties should still be included when excluding hidden
-        virtual_props = [prop for prop in response.json()["results"] if prop["name"].startswith("$virt_")]
-        assert len(virtual_props) == len(PropertyDefinitionViewSet._BUILTIN_VIRTUAL_PERSON_PROPERTIES)
+        virtual_props = [prop for prop in response.json()["results"] if prop.get("virtual")]
+        assert {p["name"] for p in virtual_props} == {
+            p["name"] for p in PropertyDefinitionViewSet._BUILTIN_VIRTUAL_PERSON_PROPERTIES
+        }
 
     @parameterized.expand(
         [
@@ -1001,35 +1039,45 @@ class TestPropertyDefinitionAPI(APIBaseTest):
         )
         assert response.status_code == status.HTTP_200_OK
         # Virtual properties should still be included when excluding core properties
-        virtual_props = [prop for prop in response.json()["results"] if prop["name"].startswith("$virt_")]
-        assert len(virtual_props) == len(PropertyDefinitionViewSet._BUILTIN_VIRTUAL_PERSON_PROPERTIES)
+        virtual_props = [prop for prop in response.json()["results"] if prop.get("virtual")]
+        assert {p["name"] for p in virtual_props} == {
+            p["name"] for p in PropertyDefinitionViewSet._BUILTIN_VIRTUAL_PERSON_PROPERTIES
+        }
 
         response = self.client.get(
             f"/api/projects/{self.team.pk}/property_definitions/?type=group&group_type_index=0&exclude_core_properties=true"
         )
         assert response.status_code == status.HTTP_200_OK
         # Virtual properties should still be included when excluding core properties
-        virtual_props = [prop for prop in response.json()["results"] if prop["name"].startswith("$virt_")]
-        assert len(virtual_props) == len(PropertyDefinitionViewSet._BUILTIN_VIRTUAL_GROUP_PROPERTIES)
+        virtual_props = [prop for prop in response.json()["results"] if prop.get("virtual")]
+        assert {p["name"] for p in virtual_props} == {
+            p["name"] for p in PropertyDefinitionViewSet._BUILTIN_VIRTUAL_GROUP_PROPERTIES
+        }
 
     def test_virtual_property_type_filter(self):
         response = self.client.get(f"/api/projects/{self.team.pk}/property_definitions/?type=person")
         assert response.status_code == status.HTTP_200_OK
         # Should include virtual properties when type=person
-        virtual_props = [prop for prop in response.json()["results"] if prop["name"].startswith("$virt_")]
-        assert len(virtual_props) == len(PropertyDefinitionViewSet._BUILTIN_VIRTUAL_PERSON_PROPERTIES)
+        virtual_props = [prop for prop in response.json()["results"] if prop.get("virtual")]
+        assert {p["name"] for p in virtual_props} == {
+            p["name"] for p in PropertyDefinitionViewSet._BUILTIN_VIRTUAL_PERSON_PROPERTIES
+        }
 
         response = self.client.get(f"/api/projects/{self.team.pk}/property_definitions/?type=group&group_type_index=0")
         assert response.status_code == status.HTTP_200_OK
         # Should include virtual properties when type=group
-        virtual_props = [prop for prop in response.json()["results"] if prop["name"].startswith("$virt_")]
-        assert len(virtual_props) == len(PropertyDefinitionViewSet._BUILTIN_VIRTUAL_GROUP_PROPERTIES)
+        virtual_props = [prop for prop in response.json()["results"] if prop.get("virtual")]
+        assert {p["name"] for p in virtual_props} == {
+            p["name"] for p in PropertyDefinitionViewSet._BUILTIN_VIRTUAL_GROUP_PROPERTIES
+        }
 
         response = self.client.get(f"/api/projects/{self.team.pk}/property_definitions/?type=event")
         assert response.status_code == status.HTTP_200_OK
         # Should include virtual event properties (bot detection)
-        virtual_props = [prop for prop in response.json()["results"] if prop["name"].startswith("$virt_")]
-        assert len(virtual_props) == len(PropertyDefinitionViewSet._BUILTIN_VIRTUAL_EVENT_PROPERTIES)
+        virtual_props = [prop for prop in response.json()["results"] if prop.get("virtual")]
+        assert {p["name"] for p in virtual_props} == {
+            p["name"] for p in PropertyDefinitionViewSet._BUILTIN_VIRTUAL_EVENT_PROPERTIES
+        }
         virtual_names = {p["name"] for p in virtual_props}
         assert "$virt_is_bot" in virtual_names
         assert "$virt_traffic_type" in virtual_names
@@ -1037,11 +1085,29 @@ class TestPropertyDefinitionAPI(APIBaseTest):
         assert "$virt_bot_name" in virtual_names
 
 
+class TestPropertyDefinitionListStatementTimeout(APIBaseTest):
+    def test_cancelled_list_query_returns_a_retryable_503(self) -> None:
+        # Postgres cancels the statement, psycopg raises, and Django re-raises it as a bare
+        # OperationalError. Without the handler that renders as a 500, which the taxonomic filter
+        # shows as "no properties" rather than as a failure the user can retry.
+        slow_count_sql = "SELECT count(*) AS full_count FROM (SELECT pg_sleep(3)) s WHERE %(project_id)s IS NOT NULL"
+
+        with (
+            patch.object(QueryContext, "as_count_sql", return_value=slow_count_sql),
+            patch("posthog.taxonomy.property_definition_api.DEFINITION_LIST_STATEMENT_TIMEOUT_MS", 250),
+        ):
+            response = self.client.get(f"/api/projects/{self.team.pk}/property_definitions/")
+
+        assert response.status_code == status.HTTP_503_SERVICE_UNAVAILABLE
+        assert response.json()["code"] == "property_definitions_timeout"
+
+
 class TestPropertyDefinitionQuerySerializer(SimpleTestCase):
     @parameterized.expand(
         [
             ["defaults", {}],
             ["event with event_names", {"type": "event", "event_names": '["foo","bar"]'}],
+            ["empty excluded_properties list", {"excluded_properties": "[]"}],
             ["person", {"type": "person"}],
             ["group with valid index", {"type": "group", "group_type_index": 3}],
         ]
@@ -1052,6 +1118,11 @@ class TestPropertyDefinitionQuerySerializer(SimpleTestCase):
     @parameterized.expand(
         [
             ["event_names set for non-event type", {"type": "person", "event_names": '["foo","bar"]'}],
+            ["event_names not JSON", {"type": "event", "event_names": "abc"}],
+            ["event_names not a list", {"type": "event", "event_names": '{"foo": 1}'}],
+            ["excluded_properties not JSON", {"excluded_properties": "abc"}],
+            ["excluded_properties not a list", {"excluded_properties": "1"}],
+            ["excluded_properties with nested list", {"excluded_properties": '[["foo"]]'}],
             ["group type without index", {"type": "group"}],
             ["group_type_index above limit", {"type": "group", "group_type_index": 77}],
             ["negative group_type_index", {"type": "group", "group_type_index": -1}],

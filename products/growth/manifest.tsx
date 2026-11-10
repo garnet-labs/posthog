@@ -17,12 +17,20 @@ export const manifest: ProductManifest = {
                 'Review probable links between anonymous visitors and identified persons, recovered from first-party signals.',
             iconType: 'persons',
         },
+        AIEnrichment: {
+            name: 'AI enrichment',
+            import: () => import('./frontend/aiEnrichment/AIEnrichmentScene'),
+            instanceLevel: true,
+        },
     },
     routes: {
         '/identity-matching': ['IdentityMatching', 'identityMatching'],
+        '/ai-enrichment': ['AIEnrichment', 'aiEnrichment'],
+        '/ai-enrichment/:label': ['AIEnrichment', 'aiEnrichment'],
     },
     urls: {
         identityMatching: (): string => '/identity-matching',
+        aiEnrichment: (label?: string): string => `/ai-enrichment${label ? `/${encodeURIComponent(label)}` : ''}`,
     },
     treeItemsProducts: [
         {
@@ -30,9 +38,11 @@ export const manifest: ProductManifest = {
             intents: [ProductKey.MARKETING_ANALYTICS],
             category: ProductItemCategory.UNRELEASED,
             href: urls.identityMatching(),
+            searchKeywords: ['identity resolution', 'deanonymization'],
             flag: FEATURE_FLAGS.IDENTITY_MATCHING,
             tags: ['alpha'],
             iconType: 'persons',
+            iconColor: ['var(--color-product-identity-matching-light)', 'var(--color-product-identity-matching-dark)'],
             sceneKey: 'IdentityMatching',
         },
     ],

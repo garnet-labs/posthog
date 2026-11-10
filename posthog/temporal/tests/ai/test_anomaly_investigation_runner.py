@@ -1,13 +1,17 @@
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
+from langchain_core.messages import AIMessage
 from parameterized import parameterized
 
+from posthog.temporal.ai.anomaly_investigation.report import salvage_report
 from posthog.temporal.ai.anomaly_investigation.runner import (
     FINAL_REPORT_TOOL_NAME,
+    MAX_TOOL_CALLS,
     _build_callbacks,
     _parse_report,
     _report_from_tool_calls,
+    run_investigation,
 )
 
 
@@ -142,6 +146,90 @@ def test_report_from_tool_calls_rejects_unrecoverable_stringified_hypotheses(_na
     assert report is None
 
 
+@parameterized.expand(
+    [
+        # Hypothesis fields flattened to the top level, with the evidence array leaked as
+        # a tagged string under `hypotheses` (trace shape from 2026-07-27).
+        (
+            "flattened_hypothesis_with_leaked_evidence_tag",
+            {
+                "verdict": "true_positive",
+                "summary": "s",
+                "title": "Single account driving skips",
+                "rationale": "One tenant loops on the cap check.",
+                "hypotheses": '\n<parameter name="evidence">["88% of events from one distinct_id."]',
+            },
+            [("Single account driving skips", ["88% of events from one distinct_id."])],
+            [],
+        ),
+        # The recommendations parameter concatenated into the hypotheses string value.
+        (
+            "sibling_recommendations_concatenated_into_hypotheses_string",
+            {
+                "verdict": "true_positive",
+                "summary": "s",
+                "hypotheses": '[{"title": "Bulk sync", "rationale": "Batch job.", "evidence": ["0 -> 54 in one bucket."]}], "recommendations": ["Check the connector."]',
+            },
+            [("Bulk sync", ["0 -> 54 in one bucket."])],
+            ["Check the connector."],
+        ),
+        # Leaked tag plus an array cut off before its closing bracket.
+        (
+            "truncated_hypotheses_array_missing_closing_bracket",
+            {
+                "verdict": "true_positive",
+                "summary": "s",
+                "hypotheses": '\n<parameter name="hypotheses">[{"title": "Batch eval run", "rationale": "Tight burst.", "evidence": ["7x hourly baseline."]}',
+                "recommendations": ["Confirm the eval job."],
+            },
+            [("Batch eval run", ["7x hourly baseline."])],
+            ["Confirm the eval job."],
+        ),
+    ]
+)
+def test_report_from_tool_calls_recovers_production_manglings(
+    _name: str,
+    args: dict,
+    expected_hypotheses: list[tuple[str, list[str]]],
+    expected_recommendations: list[str],
+) -> None:
+    report = _report_from_tool_calls([{"name": FINAL_REPORT_TOOL_NAME, "args": args}])
+
+    assert report is not None
+    assert report.verdict == "true_positive"
+    assert [(hypothesis.title, hypothesis.evidence) for hypothesis in report.hypotheses] == expected_hypotheses
+    assert report.recommendations == expected_recommendations
+
+
+def test_salvage_report_keeps_verdict_and_summary_when_hypotheses_unrecoverable() -> None:
+    report = salvage_report(
+        {
+            "verdict": "true_positive",
+            "summary": "One tenant drove the spike.",
+            "hypotheses": "prose with no recoverable array",
+            "recommendations": ["Check the tenant."],
+        }
+    )
+
+    assert report is not None
+    assert report.verdict == "true_positive"
+    assert report.summary == "One tenant drove the spike."
+    assert report.hypotheses == []
+    assert report.recommendations == ["Check the tenant."]
+
+
+@parameterized.expand(
+    [
+        ("invalid_verdict", {"verdict": "maybe", "summary": "x"}),
+        # A blank summary must not gate notifications: a salvaged false_positive with no
+        # explanation would silently suppress the alert.
+        ("blank_summary", {"verdict": "false_positive", "summary": "   ", "hypotheses": "prose"}),
+    ]
+)
+def test_salvage_report_rejects_untrustworthy_args(_name: str, args: dict) -> None:
+    assert salvage_report(args) is None
+
+
 def test_report_from_tool_calls_ignores_invalid_structured_final_report() -> None:
     report = _report_from_tool_calls(
         [
@@ -212,3 +300,228 @@ def test_build_callbacks_skips_when_default_client_missing() -> None:
         callbacks = _build_callbacks(team=team, alert=None)
 
     assert callbacks == []
+
+
+class _ScriptedRunnable:
+    def __init__(self, responses: list) -> None:
+        self._responses = list(responses)
+
+    async def ainvoke(self, messages, config=None):
+        response = self._responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+
+def _budget_burning_turn() -> AIMessage:
+    return AIMessage(
+        content="",
+        tool_calls=[{"name": "noop_tool", "args": {}, "id": f"call-{i}"} for i in range(MAX_TOOL_CALLS)],
+    )
+
+
+def _report_turn(args: dict) -> AIMessage:
+    return AIMessage(content="", tool_calls=[{"name": FINAL_REPORT_TOOL_NAME, "args": args, "id": "report-1"}])
+
+
+_UNRECOVERABLE_REPORT_ARGS = {
+    "verdict": "true_positive",
+    "summary": "One tenant drove the spike.",
+    "hypotheses": "prose with no recoverable array",
+    "recommendations": ["Check the tenant."],
+}
+_VALID_REPORT_ARGS = {
+    "verdict": "true_positive",
+    "summary": "One tenant drove the spike.",
+    "hypotheses": [{"title": "Runaway tenant", "rationale": "Loops on the cap check.", "evidence": []}],
+    "recommendations": ["Check the tenant."],
+}
+
+
+@pytest.mark.parametrize(
+    "report_args,following_turns,expected_verdict,expected_tool_calls,tool_error",
+    [
+        pytest.param(_UNRECOVERABLE_REPORT_ARGS, [], "true_positive", 1, False, id="salvage_previous_report"),
+        pytest.param({"verdict": "maybe", "summary": "x"}, [], "inconclusive", 1, False, id="fallback_without_salvage"),
+        pytest.param(
+            _UNRECOVERABLE_REPORT_ARGS,
+            [AIMessage(content="", tool_calls=[{"name": "fetch_metric_series", "args": {}, "id": "call-2"}])],
+            "inconclusive",
+            2,
+            False,
+            id="do_not_salvage_report_before_new_evidence",
+        ),
+        pytest.param(
+            _UNRECOVERABLE_REPORT_ARGS,
+            [
+                AIMessage(content="", tool_calls=[{"name": "fetch_metric_series", "args": {}, "id": "call-2"}]),
+                _report_turn(_UNRECOVERABLE_REPORT_ARGS),
+            ],
+            "true_positive",
+            2,
+            False,
+            id="salvage_report_after_new_evidence",
+        ),
+        pytest.param(
+            _UNRECOVERABLE_REPORT_ARGS,
+            [
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {"name": FINAL_REPORT_TOOL_NAME, "args": _UNRECOVERABLE_REPORT_ARGS, "id": "report-2"},
+                        {"name": "fetch_metric_series", "args": {}, "id": "call-2"},
+                    ],
+                )
+            ],
+            "inconclusive",
+            2,
+            False,
+            id="do_not_salvage_report_before_tool_in_same_turn",
+        ),
+        pytest.param(
+            _UNRECOVERABLE_REPORT_ARGS,
+            [
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {"name": "fetch_metric_series", "args": {}, "id": "call-2"},
+                        {"name": FINAL_REPORT_TOOL_NAME, "args": _UNRECOVERABLE_REPORT_ARGS, "id": "report-2"},
+                    ],
+                )
+            ],
+            "inconclusive",
+            2,
+            False,
+            id="do_not_salvage_report_after_tool_in_same_turn",
+        ),
+        pytest.param(
+            _UNRECOVERABLE_REPORT_ARGS,
+            [AIMessage(content="", tool_calls=[{"name": "fetch_metric_series", "args": {}, "id": "call-2"}])],
+            "true_positive",
+            2,
+            True,
+            id="salvage_report_after_failed_tool",
+        ),
+        pytest.param(
+            _UNRECOVERABLE_REPORT_ARGS,
+            [AIMessage(content="", tool_calls=[{"name": "fetch_metric_series", "args": {}, "id": "call-2"}])],
+            "true_positive",
+            2,
+            "Error: no insight bound to this investigation.",
+            id="salvage_report_after_tool_error_result",
+        ),
+        pytest.param(
+            _UNRECOVERABLE_REPORT_ARGS,
+            [AIMessage(content="", tool_calls=[{"name": "fetch_metric_series", "args": {}, "id": "call-2"}])],
+            "true_positive",
+            2,
+            "Error fetching series: query failed",
+            id="salvage_report_after_series_error_result",
+        ),
+        pytest.param(
+            _UNRECOVERABLE_REPORT_ARGS,
+            [AIMessage(content="", tool_calls=[{"name": "simulate_detector", "args": {}, "id": "call-2"}])],
+            "true_positive",
+            2,
+            "Error running simulation: query failed",
+            id="salvage_report_after_simulation_error_result",
+        ),
+        pytest.param(
+            _UNRECOVERABLE_REPORT_ARGS,
+            [AIMessage(content="", tool_calls=[{"name": "missing_tool", "args": {}, "id": "call-2"}])],
+            "true_positive",
+            2,
+            False,
+            id="salvage_report_after_unknown_tool",
+        ),
+    ],
+)
+async def test_loop_failure_keeps_best_report_and_tool_count(
+    report_args: dict,
+    following_turns: list[AIMessage],
+    expected_verdict: str,
+    expected_tool_calls: int,
+    tool_error: bool | str,
+) -> None:
+    llm = MagicMock()
+    llm.bind_tools.side_effect = lambda tools: _ScriptedRunnable(
+        [
+            AIMessage(content="", tool_calls=[{"name": "noop_tool", "args": {}, "id": "call-1"}]),
+            _report_turn(report_args),
+            *following_turns,
+            RuntimeError("LLM unavailable"),
+        ]
+    )
+
+    with (
+        patch("ee.hogai.llm.MaxChatAnthropic", return_value=llm),
+        patch("posthog.temporal.ai.anomaly_investigation.runner.posthoganalytics") as mock_module,
+        patch(
+            "posthog.temporal.ai.anomaly_investigation.runner.InvestigationToolkit.fetch_metric_series",
+            new_callable=AsyncMock,
+            return_value=tool_error if isinstance(tool_error, str) else "New metric evidence",
+            side_effect=RuntimeError("tool failed") if tool_error is True else None,
+        ),
+        patch(
+            "posthog.temporal.ai.anomaly_investigation.runner.InvestigationToolkit.simulate_detector",
+            new_callable=AsyncMock,
+            return_value=tool_error if isinstance(tool_error, str) else "New metric evidence",
+        ),
+    ):
+        mock_module.default_client = None
+        result = await run_investigation(
+            team=MagicMock(id=1),
+            user=MagicMock(id=2),
+            anomaly_context="anomaly context",
+        )
+
+    assert result.report.verdict == expected_verdict
+    assert result.tool_calls_used == expected_tool_calls
+    assert result.report.tool_calls_used == expected_tool_calls
+
+
+@pytest.mark.parametrize(
+    "finalize_responses,expected_hypothesis_count",
+    [
+        pytest.param(
+            [_report_turn(_UNRECOVERABLE_REPORT_ARGS), _report_turn(_VALID_REPORT_ARGS)],
+            1,
+            id="retry_recovers_full_report",
+        ),
+        pytest.param(
+            [_report_turn(_UNRECOVERABLE_REPORT_ARGS), _report_turn(_UNRECOVERABLE_REPORT_ARGS)],
+            0,
+            id="salvage_after_failed_retry",
+        ),
+        pytest.param(
+            [_report_turn(_UNRECOVERABLE_REPORT_ARGS), _report_turn({"verdict": "maybe", "summary": "x"})],
+            0,
+            id="salvage_first_attempt_when_retry_comes_back_worse",
+        ),
+    ],
+)
+async def test_finalize_turn_retries_then_salvages_invalid_report(
+    finalize_responses: list, expected_hypothesis_count: int
+) -> None:
+    llm = MagicMock()
+    llm.bind_tools.side_effect = lambda tools: (
+        _ScriptedRunnable([_budget_burning_turn()]) if len(tools) > 1 else _ScriptedRunnable(finalize_responses)
+    )
+
+    with (
+        patch("ee.hogai.llm.MaxChatAnthropic", return_value=llm),
+        patch("posthog.temporal.ai.anomaly_investigation.runner.posthoganalytics") as mock_module,
+    ):
+        mock_module.default_client = None
+        result = await run_investigation(
+            team=MagicMock(id=1),
+            user=MagicMock(id=2),
+            anomaly_context="anomaly context",
+            alert=None,
+        )
+
+    assert result.tool_calls_used == MAX_TOOL_CALLS
+    assert result.report.verdict == "true_positive"
+    assert result.report.summary == "One tenant drove the spike."
+    assert len(result.report.hypotheses) == expected_hypothesis_count
+    assert result.report.recommendations == ["Check the tenant."]

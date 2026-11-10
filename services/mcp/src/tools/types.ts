@@ -15,9 +15,40 @@ export type SessionState = {
     uuid: string
 }
 
+// Null clears a selection without restoring the pin; undefined means no override was saved.
+export type SessionScopedState = {
+    // Defaults are separate from explicit switches so delayed initialization cannot undo a switch.
+    defaultContext: { organizationId?: string; projectId?: number } | undefined
+    defaultProjectId: number | undefined
+    activeProjectId: string | null | undefined
+    activeOrgId: string | null | undefined
+    appliedPinProjectId: string | undefined
+    appliedPinOrgId: string | undefined
+}
+
+/**
+ * The resolver snapshots the session selection and optional pin per request.
+ * The token cache is shared across sessions, so it cannot hold their selections.
+ */
+export type PinnedActiveContext = {
+    /** The org and project ids that the request params, or the session's saved pin, pinned. */
+    pin: { organizationId?: string | undefined; projectId?: string | undefined }
+    /** True when an MCP session records switches across requests. */
+    sessionScoped: boolean
+    /** Effective ids for this request. A switch updates them in place. */
+    orgId?: string | undefined
+    projectId?: string | undefined
+}
+
 export type CachedUser = ApiUser
-export type CachedOrg = Schemas.OrganizationBasic
+export type CachedOrg = Schemas.Organization
 export type CachedProject = Schemas.ProjectBackwardCompat
+
+/** An unread field is undefined and keeps its search guidance, so a failed read never hides content. */
+export type BusinessKnowledgeContent = {
+    hasSources?: boolean | undefined
+    hasRepositories?: boolean | undefined
+}
 
 export type State = {
     projectId: string | undefined
@@ -25,7 +56,9 @@ export type State = {
     distinctId: string | undefined
     region: CloudRegion | undefined
     apiKey: ApiRedactedPersonalApiKey | undefined
+    apiKeyFetchedAt: number | undefined
     clientName: string | undefined
+    oauthClientId: string | undefined
     mcpClientName: string | undefined
     mcpClientVersion: string | undefined
     mcpProtocolVersion: string | undefined
@@ -39,7 +72,13 @@ export type State = {
     Record<PrefixedString<'cachedOrg'>, CachedOrg | undefined> &
     Record<PrefixedString<'cachedOrgFetchedAt'>, number | undefined> &
     Record<PrefixedString<'cachedProject'>, CachedProject | undefined> &
-    Record<PrefixedString<'cachedProjectFetchedAt'>, number | undefined>
+    Record<PrefixedString<'cachedProjectFetchedAt'>, number | undefined> &
+    Record<PrefixedString<'integrationKinds'>, string[] | undefined> &
+    Record<PrefixedString<'integrationKindsFetchedAt'>, number | undefined> &
+    Record<PrefixedString<'gatewayTools'>, Schemas.AvailableToolsResponse | undefined> &
+    Record<PrefixedString<'gatewayToolsFetchedAt'>, number | undefined> &
+    Record<PrefixedString<'businessKnowledgeContent'>, BusinessKnowledgeContent | undefined> &
+    Record<PrefixedString<'businessKnowledgeContentFetchedAt'>, number | undefined>
 
 export type Env = {
     /**
@@ -85,6 +124,10 @@ export type Env = {
      * Falls back to the production US host if not set.
      */
     POSTHOG_ANALYTICS_HOST: string | undefined
+    /** Override the published product skills archive, primarily for local development. */
+    POSTHOG_MCP_SKILLS_URL?: string | undefined
+    POSTHOG_MCP_SKILLS_SHA256?: string | undefined
+    POSTHOG_MCP_LOCAL_SKILLS_URL?: string | undefined
 }
 
 export type Context = {
@@ -107,6 +150,16 @@ export type Context = {
      * stateManager when not provided.
      */
     trackEvent: (event: AnalyticsEvent, properties?: Record<string, unknown>) => Promise<void>
+    /**
+     * Which PostHog connection this context runs through, when it runs through one at all. Set only
+     * by the forwarded context (see lib/connection-forwarding.ts); absent on a local call.
+     */
+    connection?: {
+        /** Project on this side that owns the connection. */
+        localProjectId: string
+        /** Integration id of the connection. */
+        connectionId: string
+    }
 }
 
 export type Tool<TSchema extends z.ZodType = z.ZodType, TResult = unknown> = {
@@ -114,6 +167,13 @@ export type Tool<TSchema extends z.ZodType = z.ZodType, TResult = unknown> = {
     title: string
     description: string
     schema: TSchema
+    /**
+     * JSON Schema to advertise instead of deriving one from `schema`. Set for proxied
+     * third-party tools, whose contract is defined upstream as JSON Schema: their `schema`
+     * is permissive (the upstream server validates), so deriving from it would describe
+     * nothing. PostHog's own tools leave this unset and stay Zod-derived.
+     */
+    rawInputSchema?: Record<string, unknown>
     handler: (context: Context, params: z.infer<TSchema>) => Promise<TResult>
     scopes: string[]
     annotations: {
@@ -123,6 +183,8 @@ export type Tool<TSchema extends z.ZodType = z.ZodType, TResult = unknown> = {
         readOnlyHint: boolean
     }
     _meta?: ToolMeta
+    /** Appended to the `render-ui` result so the model knows what the rendered app already shows. */
+    renderedNote?: string
 }
 
 export type ToolBase<TSchema extends z.ZodType = z.ZodType, TResult = unknown> = Omit<
@@ -142,6 +204,7 @@ export type ToolUiMeta = {
 export const POSTHOG_META_KEY = 'com.posthog.mcp' as const
 export const POSTHOG_FORMATTED_RESULTS_OVERRIDE_KEY = '__formatted_results_override' as const
 export const POSTHOG_INFORMATIONAL_RESPONSE_KEY = '__informational_response' as const
+export const POSTHOG_TEXT_PROJECTION_KEY = '__text_projection' as const
 
 export type PostHogToolMeta = {
     /**

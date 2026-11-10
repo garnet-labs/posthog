@@ -87,6 +87,24 @@ pub struct Config {
     #[envconfig(default = "2")]
     pub analysis_max_concurrent_jobs: usize,
 
+    /// Messages scanned per synchronous browse request while filling a page
+    /// of matches; a rarely-matching filter stops here and resumes from the
+    /// returned cursor on the next request.
+    #[envconfig(default = "25000")]
+    pub browse_scan_message_count: u64,
+
+    #[envconfig(default = "10")]
+    pub browse_deadline_secs: u64,
+
+    /// Kafka transfers full records even though browsing only returns
+    /// headers, so bound the bytes fetched per request. 256 MiB by default.
+    #[envconfig(default = "268435456")]
+    pub browse_max_fetch_bytes: u64,
+
+    /// Concurrent synchronous browse requests; more are rejected with 429.
+    #[envconfig(default = "3")]
+    pub browse_max_concurrent: usize,
+
     /// `kubernetes` discovers consumer pods via the K8s API; `static` uses
     /// the fixed `STATIC_PODS` list (local testing, like the
     /// ingestion-consumer's static worker discovery).
@@ -123,16 +141,91 @@ pub struct Config {
     #[envconfig(from = "DEBUG_API_SECRET")]
     pub debug_api_secret: Option<String>,
 
+    #[envconfig(from = "PARITY_MONITOR_URL")]
+    pub parity_monitor_url: Option<String>,
+
     #[envconfig(default = "10000")]
     pub kafka_metadata_timeout_ms: u64,
 
     #[envconfig(default = "1000")]
     pub kafka_fetch_poll_timeout_ms: u64,
+
+    /// Comma-separated etcd endpoints for the etcd explorer and personhog
+    /// topology tools. Empty disables both tools.
+    #[envconfig(from = "ETCD_ENDPOINTS", default = "")]
+    pub etcd_endpoints: String,
+
+    /// Comma-separated key prefixes the etcd explorer may read and write.
+    /// Every operation's key must fall under one of them.
+    #[envconfig(from = "ETCD_ALLOWED_PREFIXES", default = "/")]
+    pub etcd_allowed_prefixes: String,
+
+    /// Key prefix the personhog coordination state lives under; must match
+    /// the personhog services' `ETCD_PREFIX`.
+    #[envconfig(from = "PERSONHOG_ETCD_PREFIX", default = "/personhog/")]
+    pub personhog_etcd_prefix: String,
+
+    /// Versioned S3 bucket that keeps a copy of `config/changelog` after
+    /// every change; empty disables backups and restore.
+    #[envconfig(from = "CHANGELOG_BACKUP_BUCKET", default = "")]
+    pub changelog_backup_bucket: String,
+
+    /// The personhog changelog's Kafka cluster; unset means `KAFKA_HOSTS`.
+    #[envconfig(from = "PERSONHOG_KAFKA_HOSTS")]
+    pub personhog_kafka_hosts: Option<String>,
+
+    /// TLS for `PERSONHOG_KAFKA_HOSTS`; unset means `KAFKA_TLS`.
+    #[envconfig(from = "PERSONHOG_KAFKA_TLS")]
+    pub personhog_kafka_tls: Option<bool>,
+
+    /// Per-phase handoff deadline used to flag stuck handoffs; must match
+    /// the coordinator's `COORDINATOR_HANDOFF_DEADLINE_SECS` to agree with
+    /// its cancellation decisions.
+    #[envconfig(from = "PERSONHOG_HANDOFF_DEADLINE_SECS", default = "120")]
+    pub personhog_handoff_deadline_secs: u64,
+
+    /// Warming-phase deadline, mirroring `COORDINATOR_WARMING_DEADLINE_SECS`.
+    #[envconfig(from = "PERSONHOG_WARMING_DEADLINE_SECS", default = "1800")]
+    pub personhog_warming_deadline_secs: u64,
 }
 
 impl Config {
     pub fn init_with_defaults() -> Result<Self, envconfig::Error> {
         Self::init_from_env()
+    }
+
+    /// This config pointed at the personhog changelog's Kafka cluster.
+    pub fn personhog_kafka(&self) -> Config {
+        let mut config = self.clone();
+        if let Some(hosts) = self
+            .personhog_kafka_hosts
+            .as_ref()
+            .filter(|h| !h.is_empty())
+        {
+            config.kafka_hosts = hosts.clone();
+        }
+        if let Some(tls) = self.personhog_kafka_tls {
+            config.kafka_tls = tls;
+        }
+        config
+    }
+
+    pub fn etcd_endpoint_list(&self) -> Vec<String> {
+        self.etcd_endpoints
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect()
+    }
+
+    pub fn etcd_allowed_prefix_list(&self) -> Vec<String> {
+        self.etcd_allowed_prefixes
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .collect()
     }
 
     pub fn pod_targets(&self) -> Vec<PodTarget> {
@@ -180,6 +273,26 @@ pub struct PodTarget {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_personhog_cluster_overrides_only_what_is_set() {
+        let mut config = Config::init_with_defaults().expect("config defaults are valid");
+        config.kafka_hosts = "main:9092".to_string();
+        config.kafka_tls = false;
+        let unset = config.personhog_kafka();
+        assert_eq!(
+            (unset.kafka_hosts.as_str(), unset.kafka_tls),
+            ("main:9092", false)
+        );
+
+        config.personhog_kafka_hosts = Some("personhog:9094".to_string());
+        config.personhog_kafka_tls = Some(true);
+        let set = config.personhog_kafka();
+        assert_eq!(
+            (set.kafka_hosts.as_str(), set.kafka_tls),
+            ("personhog:9094", true)
+        );
+    }
 
     #[test]
     fn pod_targets_support_namespace_prefix_with_default_fallback() {

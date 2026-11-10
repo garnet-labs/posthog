@@ -1,22 +1,21 @@
 import { useActions, useValues } from 'kea'
 import React from 'react'
 
-import { IconFeatures, IconHelmet, IconMap, IconWarning } from '@posthog/icons'
+import { IconExpand45, IconFeatures, IconHelmet, IconMap, IconWarning } from '@posthog/icons'
 import { LemonButton, Link } from '@posthog/lemon-ui'
 
 import { incidentStatusLogic } from 'lib/components/HelpMenu/incidentStatusLogic'
-import { SupportForm } from 'lib/components/Support/SupportForm'
-import { supportLogic } from 'lib/components/Support/supportLogic'
+import { DEFAULT_PAID_RESPONSE_TIME, getSupportPlanRows } from 'lib/components/Support/supportResponseTime'
 import { FEATURE_FLAGS } from 'lib/constants'
 import { dayjs } from 'lib/dayjs'
+import { billingLogic } from 'lib/logic/billing/billingLogic'
 import { featureFlagLogic } from 'lib/logic/featureFlagLogic'
-import { billingLogic } from 'scenes/billing/billingLogic'
-import { preflightLogic } from 'scenes/PreflightCheck/preflightLogic'
+import { preflightLogic } from 'lib/logic/preflightLogic'
 import { urls } from 'scenes/urls'
 import { userLogic } from 'scenes/userLogic'
 
 import { ProductKey } from '~/queries/schema/schema-general'
-import { AvailableFeature, BillingFeatureType, BillingPlan, BillingType, SidePanelTab } from '~/types'
+import { BillingPlan, BillingType, SidePanelTab } from '~/types'
 
 import { SidePanelTickets } from 'products/conversations/frontend/components/SidePanel/SidePanelTickets'
 import { sidepanelTicketsLogic } from 'products/conversations/frontend/components/SidePanel/sidepanelTicketsLogic'
@@ -114,108 +113,34 @@ const SupportResponseTimesTable = ({
     const { supportPlans, billingPlan } = useValues(billingLogic)
     const { user } = useValues(userLogic)
 
-    const knownEnterpriseOrgIds = ['018713f3-8d56-0000-32fa-75ce97e6662f']
-    const isKnownEnterpriseOrg = knownEnterpriseOrgIds.includes(user?.organization?.id || '')
-
     const hasBoostTrial = billing?.trial?.status === 'active' && billing.trial?.target === 'boost'
     const hasScaleTrial = billing?.trial?.status === 'active' && billing.trial?.target === 'scale'
     const hasEnterpriseTrial = billing?.trial?.status === 'active' && billing.trial?.target === 'enterprise'
 
     const hasExpiredTrial = billing?.trial?.status === 'expired'
     const expiredTrialDate = hasExpiredTrial ? dayjs(billing?.trial?.expires_at) : null
-    const getResponseTimeFeature = (planName: string): BillingFeatureType | undefined => {
-        // Find the plan in supportPlans
-        const plan = supportPlans?.find((p) => p.name?.includes(planName))
-
-        // Return the support_response_time feature if found
-        return plan?.features?.find((f) => f.key === AvailableFeature.SUPPORT_RESPONSE_TIME)
-    }
-
-    const getCurrentPlan = (): string => {
-        if (isKnownEnterpriseOrg || hasEnterpriseTrial || billingPlan === BillingPlan.Enterprise) {
-            return 'enterprise'
-        } else if (hasScaleTrial) {
-            return 'scale_trial'
-        } else if (hasBoostTrial) {
-            return 'boost_trial'
-        } else if (billingPlan) {
-            return billingPlan
-        }
-        return 'free'
-    }
-
-    const currentPlan = getCurrentPlan()
-
-    const plansToDisplay: {
-        name: string
-        current_plan: boolean | undefined
-        features: any[]
-        plan_key: string
-        link?: string
-        legacy_product?: boolean | null
-    }[] = [
-        {
-            name: 'Free',
-            current_plan: currentPlan === 'free',
-            features: [{ note: 'Community support only' }],
-            plan_key: BillingPlan.Free,
-            link: 'https://posthog.com/questions',
-        },
-        {
-            name: 'Pay-as-you-go',
-            current_plan: currentPlan === 'paid',
-            features: [{ note: '72 hours' }],
-            plan_key: BillingPlan.Paid,
-        },
-        {
-            name: 'Boost',
-            current_plan: currentPlan === 'boost',
-            features: [getResponseTimeFeature('Boost') || { note: '1 business day' }],
-            plan_key: BillingPlan.Boost,
-        },
-        ...(billingPlan === BillingPlan.Teams
-            ? [
-                  {
-                      name: 'Teams',
-                      current_plan: currentPlan === 'teams',
-                      features: [getResponseTimeFeature('Teams') || { note: '1 business day' }],
-                      plan_key: BillingPlan.Teams,
-                      legacy_product: true,
-                  },
-              ]
-            : []),
-        {
-            name: 'Scale',
-            current_plan: currentPlan === 'scale',
-            features: [getResponseTimeFeature('Scale') || { note: '1 business day' }],
-            plan_key: BillingPlan.Scale,
-        },
-        {
-            name: 'Enterprise',
-            current_plan: currentPlan === 'enterprise',
-            features: [getResponseTimeFeature('Enterprise') || { note: '1 business day' }],
-            plan_key: BillingPlan.Enterprise,
-        },
-    ]
+    const plansToDisplay = getSupportPlanRows({
+        billing,
+        billingPlan,
+        supportPlans,
+        organizationId: user?.organization?.id,
+    })
 
     return (
         <div className="grid grid-cols-2 border rounded *:px-2 *:py-0.5 bg-surface-primary mb-2">
             {plansToDisplay.map((plan, index) => {
-                const isBold = plan.current_plan
-
-                const responseNote = plan.features.find((f: any) => f.note)?.note
+                const isBold = plan.isCurrentPlan
+                const responseNote = plan.responseTime
 
                 return (
-                    <React.Fragment key={plan.plan_key}>
+                    <React.Fragment key={plan.key}>
                         <div
                             className={`${index > 0 ? 'border-t' : ''} col-span-1 ${isBold ? 'font-semibold' : ''}`}
                             data-attr="support-plan-name"
                         >
                             <span className={`${isCompact ? '' : 'text-sm'}`}>
                                 {plan.name}
-                                {plan.legacy_product && (
-                                    <span className="text-muted text-xs font-normal"> (legacy)</span>
-                                )}
+                                {plan.legacy && <span className="text-muted text-xs font-normal"> (legacy)</span>}
                                 {isBold && ' '}
                                 {isBold && <span className="text-muted text-xs font-normal">(your plan)</span>}
                             </span>
@@ -249,7 +174,7 @@ const SupportResponseTimesTable = ({
             {(hasBoostTrial || hasScaleTrial || hasEnterpriseTrial) && (
                 <>
                     <div className="font-bold border-t">Your trial</div>
-                    <div className="font-bold border-t text-right">1 business day</div>
+                    <div className="font-bold border-t text-right">{DEFAULT_PAID_RESPONSE_TIME}</div>
                     {billing?.trial?.expires_at && (
                         <div className="col-span-2 text-sm">
                             (Trial expires {dayjs(billing.trial.expires_at).format('MMMM D, YYYY')})
@@ -261,238 +186,155 @@ const SupportResponseTimesTable = ({
     )
 }
 
-function SupportFormBlock({
-    onCancel,
-    billing,
-    isSubmitting,
-}: {
-    onCancel: () => void
-    billing: BillingType | null | undefined
-    isSubmitting: boolean
-}): JSX.Element {
-    return (
-        <Section title="Email an engineer">
-            <SupportForm />
-            <LemonButton
-                form="support-modal-form"
-                htmlType="submit"
-                type="primary"
-                data-attr="submit"
-                fullWidth
-                center
-                className="mt-4"
-                loading={isSubmitting}
-            >
-                Submit
-            </LemonButton>
-            <LemonButton
-                form="support-modal-form"
-                type="secondary"
-                onClick={onCancel}
-                fullWidth
-                center
-                className="mt-2 mb-4"
-            >
-                Cancel
-            </LemonButton>
-
-            <br />
-
-            <div className="mb-2">
-                <strong>Support is open Monday - Friday</strong>
-            </div>
-            <SupportResponseTimesTable billing={billing} isCompact={true} />
-        </Section>
-    )
-}
-
 export function SidePanelSupport(): JSX.Element {
     const { preflight } = useValues(preflightLogic)
-    const { featureFlags } = useValues(featureFlagLogic)
     useValues(userLogic)
-    const {
-        isEmailFormOpen,
-        title: supportPanelTitle,
-        targetArea,
-        isSendSupportRequestSubmitting,
-    } = useValues(supportLogic)
-    const { closeEmailForm, openEmailForm, closeSupportForm, resetSendSupportRequest } = useActions(supportLogic)
-    const { openSidePanel } = useActions(sidePanelStateLogic)
+    const { openSidePanel, closeSidePanel } = useActions(sidePanelStateLogic)
     const { billing, billingLoading, billingPlan } = useValues(billingLogic)
-    const { tickets, canCreateTicket } = useValues(sidepanelTicketsLogic)
+    const { tickets, canCreateTicket, view, currentTicket } = useValues(sidepanelTicketsLogic)
 
-    const useProductSupportSidePanel = featureFlags[FEATURE_FLAGS.PRODUCT_SUPPORT_SIDE_PANEL]
-
-    // With the side panel on, a billing CTA grants an exemption that `canCreateTicket` already carries.
-    // The `targetArea` arm is for the classic Zendesk form, which never reaches that listener.
-    const canEmail = canCreateTicket || targetArea === 'billing'
     const isCloudOrDev = preflight?.cloud || process.env.NODE_ENV === 'development'
-    const showEmailSupport = isCloudOrDev && canEmail
     const showMaxAI = isCloudOrDev
     const isBillingLoaded = !billingLoading && billing !== undefined
     // Free plans can't open new tickets, but tickets they already have (billing questions, PostHog AI
     // bug reports) stay readable and repliable here
-    const showTickets = isCloudOrDev && useProductSupportSidePanel && (canCreateTicket || tickets.length > 0)
-
-    const handleOpenEmailForm = (): void => {
-        if (showEmailSupport && isBillingLoaded) {
-            openEmailForm()
-        }
-    }
+    const showTickets = isCloudOrDev && (canCreateTicket || tickets.length > 0)
 
     return (
         <div className="SidePanelSupport contents">
             <SidePanelContentContainer>
-                <SidePanelPaneHeader showCloseButton={false} title={isEmailFormOpen ? supportPanelTitle : 'Support'} />
-                <div className="p-0 justify-start flex-none px-1 max-w-160 w-full mx-auto flex flex-col">
-                    {isEmailFormOpen && showEmailSupport && isBillingLoaded && !useProductSupportSidePanel ? (
-                        <SupportFormBlock
-                            billing={billing}
-                            isSubmitting={isSendSupportRequestSubmitting}
-                            onCancel={() => {
-                                closeEmailForm()
-                                closeSupportForm()
-                                resetSendSupportRequest()
-                            }}
+                <SidePanelPaneHeader showCloseButton={false} title="Support">
+                    {showTickets && (
+                        <LemonButton
+                            size="xsmall"
+                            icon={<IconExpand45 />}
+                            to={urls.myTickets(view === 'ticket' ? currentTicket?.id : undefined)}
+                            onClick={() => closeSidePanel()}
+                            tooltip="View your tickets full screen"
+                            // LemonButton's tooltip→aria-label fallback only applies to plain buttons,
+                            // not links (`to` renders a Link), so an icon-only link needs it explicitly
+                            aria-label="View your tickets full screen"
+                            data-attr="support-panel-expand-tickets"
                         />
-                    ) : (
-                        <>
-                            {showMaxAI && isBillingLoaded && (
-                                <Section title="Ask PostHog AI">
-                                    <div>
-                                        <p>PostHog AI can now answer 80%+ of the support questions we receive! Nice.</p>
-                                        <p>
-                                            Let PostHog AI read 100s of pages of docs for you, write SQL queries and
-                                            expressions, regex patterns, etc.
-                                        </p>
-                                        <LemonButton
-                                            type="primary"
-                                            fullWidth
-                                            center
-                                            onClick={() => {
-                                                openSidePanel(SidePanelTab.Max)
-                                            }}
-                                            targetBlank={false}
-                                            className="mt-2"
-                                        >
-                                            Chat with PostHog AI
-                                        </LemonButton>
-                                    </div>
-                                </Section>
-                            )}
-
-                            {showTickets && isBillingLoaded && (
-                                <Section title={canCreateTicket ? 'Contact us' : 'Your tickets'}>
-                                    <StatusPageAlert />
-                                    <SupportMessageOverride />
-                                    <p>
-                                        {canCreateTicket
-                                            ? "Can't find what you need and PostHog AI unable to help? Message our support engineers."
-                                            : 'You can keep replying to tickets you already have open.'}
-                                    </p>
-                                    <SidePanelTickets />
-                                </Section>
-                            )}
-
-                            {showEmailSupport && isBillingLoaded && !useProductSupportSidePanel && (
-                                <Section title="Contact us">
-                                    <StatusPageAlert />
-                                    <SupportMessageOverride />
-                                    <p>Can't find what you need and PostHog AI unable to help?</p>
-                                    <LemonButton
-                                        type="secondary"
-                                        fullWidth
-                                        center
-                                        onClick={handleOpenEmailForm}
-                                        className="mt-2"
-                                        disabled={billingLoading}
-                                    >
-                                        {billingLoading ? 'Loading...' : 'Email our support engineers'}
-                                    </LemonButton>
-                                </Section>
-                            )}
-
-                            {!showEmailSupport && isBillingLoaded && (
-                                <Section title="">
-                                    <h3>Can't find what you need in the docs?</h3>
-                                    <p>
-                                        With the free plan you can ask the community via the link below, or explore your
-                                        upgrade choices for the ability to email a support engineer.
-                                    </p>
-                                </Section>
-                            )}
-
-                            {/* Community forum */}
-                            <Section title="Ask the community">
+                    )}
+                </SidePanelPaneHeader>
+                <div className="p-0 justify-start flex-none px-1 max-w-160 w-full mx-auto flex flex-col">
+                    {showMaxAI && isBillingLoaded && (
+                        <Section title="Ask PostHog AI">
+                            <div>
+                                <p>PostHog AI can now answer 80%+ of the support questions we receive! Nice.</p>
                                 <p>
-                                    Questions about features, how-tos, or use cases? There are thousands of discussions
-                                    in our community forums.
+                                    Let PostHog AI read 100s of pages of docs for you, write SQL queries and
+                                    expressions, regex patterns, etc.
                                 </p>
                                 <LemonButton
-                                    type="secondary"
+                                    type="primary"
                                     fullWidth
                                     center
-                                    to="https://posthog.com/questions"
-                                    targetBlank
+                                    onClick={() => {
+                                        openSidePanel(SidePanelTab.Max)
+                                    }}
+                                    targetBlank={false}
                                     className="mt-2"
                                 >
-                                    Ask the community
+                                    Chat with PostHog AI
                                 </LemonButton>
-                            </Section>
-
-                            {/* Add support hours and table */}
-                            <div className="mb-2">
-                                <strong>Support is open Monday - Friday</strong>
                             </div>
-                            <SupportResponseTimesTable billing={billing} isCompact={true} />
-                            {billingPlan !== BillingPlan.Enterprise && (
-                                <div className="flex justify-end">
-                                    <Link to={urls.organizationBilling([ProductKey.PLATFORM_AND_SUPPORT])}>
-                                        Upgrade support plan
-                                    </Link>
-                                </div>
-                            )}
-
-                            {/* Share feedback section */}
-                            <Section title="Share feedback">
-                                <ul>
-                                    <li>
-                                        <LemonButton
-                                            type="secondary"
-                                            status="alt"
-                                            to="https://posthog.com/wip"
-                                            icon={<IconHelmet />}
-                                            targetBlank
-                                        >
-                                            See what we're building
-                                        </LemonButton>
-                                    </li>
-                                    <li>
-                                        <LemonButton
-                                            type="secondary"
-                                            status="alt"
-                                            to="https://posthog.com/roadmap"
-                                            icon={<IconMap />}
-                                            targetBlank
-                                        >
-                                            Vote on our roadmap
-                                        </LemonButton>
-                                    </li>
-                                    <li>
-                                        <LemonButton
-                                            type="secondary"
-                                            status="alt"
-                                            to="https://github.com/PostHog/posthog/issues/new?&labels=enhancement&template=feature_request.yml"
-                                            icon={<IconFeatures />}
-                                            targetBlank
-                                        >
-                                            Request a feature
-                                        </LemonButton>
-                                    </li>
-                                </ul>
-                            </Section>
-                        </>
+                        </Section>
                     )}
+
+                    {showTickets && isBillingLoaded && (
+                        <Section title={canCreateTicket ? 'Contact us' : 'Your tickets'}>
+                            <StatusPageAlert />
+                            <SupportMessageOverride />
+                            <p>
+                                {canCreateTicket
+                                    ? "Can't find what you need and PostHog AI unable to help? Message our support engineers."
+                                    : 'You can keep replying to tickets you already have open.'}
+                            </p>
+                            <SidePanelTickets />
+                        </Section>
+                    )}
+
+                    {!showTickets && isBillingLoaded && (
+                        <Section title="">
+                            <h3>Can't find what you need in the docs?</h3>
+                            <p>
+                                With the free plan you can ask the community via the link below, or explore your upgrade
+                                choices to message our support engineers.
+                            </p>
+                        </Section>
+                    )}
+
+                    {/* Community forum */}
+                    <Section title="Ask the community">
+                        <p>
+                            Questions about features, how-tos, or use cases? There are thousands of discussions in our
+                            community forums.
+                        </p>
+                        <LemonButton
+                            type="secondary"
+                            fullWidth
+                            center
+                            to="https://posthog.com/questions"
+                            targetBlank
+                            className="mt-2"
+                        >
+                            Ask the community
+                        </LemonButton>
+                    </Section>
+
+                    {/* Add support hours and table */}
+                    <div className="mb-2">
+                        <strong>Support is open Monday - Friday</strong>
+                    </div>
+                    <SupportResponseTimesTable billing={billing} isCompact={true} />
+                    {billingPlan !== BillingPlan.Enterprise && (
+                        <div className="flex justify-end">
+                            <Link to={urls.organizationBilling([ProductKey.PLATFORM_AND_SUPPORT])}>
+                                Upgrade support plan
+                            </Link>
+                        </div>
+                    )}
+
+                    {/* Share feedback section */}
+                    <Section title="Share feedback">
+                        <ul>
+                            <li>
+                                <LemonButton
+                                    type="secondary"
+                                    status="alt"
+                                    to="https://posthog.com/wip"
+                                    icon={<IconHelmet />}
+                                    targetBlank
+                                >
+                                    See what we're building
+                                </LemonButton>
+                            </li>
+                            <li>
+                                <LemonButton
+                                    type="secondary"
+                                    status="alt"
+                                    to="https://posthog.com/roadmap"
+                                    icon={<IconMap />}
+                                    targetBlank
+                                >
+                                    Vote on our roadmap
+                                </LemonButton>
+                            </li>
+                            <li>
+                                <LemonButton
+                                    type="secondary"
+                                    status="alt"
+                                    to="https://posthog.com/roadmap?idea=new"
+                                    icon={<IconFeatures />}
+                                    targetBlank
+                                >
+                                    Request a feature
+                                </LemonButton>
+                            </li>
+                        </ul>
+                    </Section>
                 </div>
             </SidePanelContentContainer>
         </div>

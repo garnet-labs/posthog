@@ -1,10 +1,16 @@
 from typing import Any
 
-from posthog.test.base import BaseTest
+from django.test import SimpleTestCase
 
 from parameterized import parameterized
+from pydantic import (
+    TypeAdapter,
+    ValidationError as PydanticValidationError,
+)
 
 from posthog.schema import ConversionGoalFilter1, ConversionGoalFilter2, ConversionGoalFilter3
+
+from posthog.api.team.marketing_config import MarketingAnalyticsConversionGoalList
 
 from products.marketing_analytics.backend.hogql_queries.utils import convert_team_conversion_goals_to_objects
 
@@ -54,8 +60,10 @@ DATA_WAREHOUSE_NODE_GOAL_WITHOUT_ID_FIELD: dict[str, Any] = {
     "schema_map": {},
 }
 
+TEAM_PK = 0
 
-class TestConvertTeamConversionGoalsToObjects(BaseTest):
+
+class TestConvertTeamConversionGoalsToObjects(SimpleTestCase):
     @parameterized.expand(
         [
             ("events_node_with_dw_fields", EVENTS_NODE_GOAL_WITH_DW_FIELDS, ConversionGoalFilter1),
@@ -69,14 +77,14 @@ class TestConvertTeamConversionGoalsToObjects(BaseTest):
         ]
     )
     def test_converts_goal_to_expected_filter(self, _name, goal, expected_type):
-        result = convert_team_conversion_goals_to_objects([goal], self.team.pk)
+        result = convert_team_conversion_goals_to_objects([goal], TEAM_PK)
 
         self.assertEqual(len(result), 1)
         self.assertIsInstance(result[0], expected_type)
         self.assertEqual(result[0].conversion_goal_id, goal["conversion_goal_id"])
 
     def test_data_warehouse_node_derives_id_field_from_distinct_id_field(self):
-        result = convert_team_conversion_goals_to_objects([DATA_WAREHOUSE_NODE_GOAL_WITHOUT_ID_FIELD], self.team.pk)
+        result = convert_team_conversion_goals_to_objects([DATA_WAREHOUSE_NODE_GOAL_WITHOUT_ID_FIELD], TEAM_PK)
 
         self.assertEqual(len(result), 1)
         goal = result[0]
@@ -84,8 +92,31 @@ class TestConvertTeamConversionGoalsToObjects(BaseTest):
         self.assertEqual(goal.id_field, DATA_WAREHOUSE_NODE_GOAL_WITHOUT_ID_FIELD["distinct_id_field"])
         self.assertEqual(goal.distinct_id_field, DATA_WAREHOUSE_NODE_GOAL_WITHOUT_ID_FIELD["distinct_id_field"])
 
+    def test_write_schema_requires_the_id_this_rebuild_needs(self):
+        # A goal stored without conversion_goal_id can't be rebuilt here, and the failure is
+        # swallowed, so it disappears from every report. The write-facing schema has to keep
+        # demanding the field rather than advertising it as optional.
+        goal_without_id: dict[str, Any] = {
+            "kind": "ActionsNode",
+            "conversion_goal_name": "Did action",
+            "name": "Did action",
+            "id": 42,
+            "schema_map": {},
+        }
+
+        self.assertEqual(convert_team_conversion_goals_to_objects([goal_without_id], TEAM_PK), [])
+
+        with self.assertRaises(PydanticValidationError) as caught:
+            TypeAdapter(MarketingAnalyticsConversionGoalList).validate_python([goal_without_id])
+        # Assert the specific error: any payload trips some union member, so a bare assertRaises
+        # would still pass with conversion_goal_id back to optional.
+        self.assertIn(
+            ("missing", "conversion_goal_id"),
+            [(error["type"], error["loc"][-1]) for error in caught.exception.errors()],
+        )
+
     def test_events_node_drops_data_warehouse_fields(self):
-        result = convert_team_conversion_goals_to_objects([EVENTS_NODE_GOAL_WITH_DW_FIELDS], self.team.pk)
+        result = convert_team_conversion_goals_to_objects([EVENTS_NODE_GOAL_WITH_DW_FIELDS], TEAM_PK)
 
         self.assertEqual(len(result), 1)
         goal = result[0]

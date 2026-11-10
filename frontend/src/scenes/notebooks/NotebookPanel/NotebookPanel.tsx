@@ -1,6 +1,7 @@
 import './NotebookPanel.scss'
 
 import { useActions, useValues } from 'kea'
+import { useState } from 'react'
 
 import { IconExpand45 } from '@posthog/icons'
 import { Link } from '@posthog/lemon-ui'
@@ -22,7 +23,8 @@ import { NotebookPanelDropzone } from './NotebookPanelDropzone'
 import { notebookPanelLogic } from './notebookPanelLogic'
 
 export function NotebookPanel(): JSX.Element | null {
-    const { selectedNotebook, droppedResource, dropProperties } = useValues(notebookPanelLogic)
+    const [collapsedToolbarContainer, setCollapsedToolbarContainer] = useState<HTMLDivElement | null>(null)
+    const { selectedNotebook, droppedResource } = useValues(notebookPanelLogic)
     const { selectNotebook, closeSidePanel } = useActions(notebookPanelLogic)
     const { notebook } = useValues(notebookLogic({ shortId: selectedNotebook, target: NotebookTarget.Popover }))
     const editable = !notebook?.is_template
@@ -34,11 +36,11 @@ export function NotebookPanel(): JSX.Element | null {
     const contentWidthHasEffect = size === 'medium'
 
     return (
-        <div ref={ref} className={cn('NotebookPanel', 'bg-transparent')} {...dropProperties}>
+        <div ref={ref} className={cn('NotebookPanel', 'bg-transparent')}>
             {!droppedResource ? (
                 <>
                     <SidePanelContentContainer>
-                        <SidePanelPaneHeader title="Notebooks">
+                        <SidePanelPaneHeader title="Notebooks" className="h-auto min-h-10 flex-wrap gap-y-1">
                             <div className="flex gap-1 overflow-hidden">
                                 <NotebookListMini
                                     selectedNotebookId={selectedNotebook}
@@ -52,7 +54,8 @@ export function NotebookPanel(): JSX.Element | null {
                             </div>
 
                             <div className="flex-1" />
-                            <div className="flex items-center gap-1">
+                            <div className="flex flex-wrap items-center justify-end gap-1 ml-auto">
+                                <div ref={setCollapsedToolbarContainer} className="shrink-0 empty:hidden" />
                                 {selectedNotebook && <NotebookPresence shortId={selectedNotebook} />}
                                 <NotebookMenu shortId={selectedNotebook} inPanel />
                                 {contentWidthHasEffect && <NotebookExpandButton size="small" inPanel={true} />}
@@ -70,7 +73,12 @@ export function NotebookPanel(): JSX.Element | null {
                                 </Link>
                             </div>
                         </SidePanelPaneHeader>
-                        <Notebook key={selectedNotebook} shortId={selectedNotebook} editable={editable} />
+                        <Notebook
+                            key={selectedNotebook}
+                            shortId={selectedNotebook}
+                            editable={editable}
+                            collapsedToolbarContainer={collapsedToolbarContainer}
+                        />
                     </SidePanelContentContainer>
                 </>
             ) : null}

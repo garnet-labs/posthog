@@ -1,9 +1,8 @@
-import { getLanguage } from 'lib/components/CodeSnippet/CodeSnippet'
 import { Collapsible } from 'lib/ui/Collapsible/Collapsible'
 
 import { ErrorTrackingStackFrame, ErrorTrackingStackFrameContext, ErrorTrackingStackFrameRecord } from '../types'
-import { CodeVariablesInlineBanner } from './CodeVariablesInlineBanner'
 import { FrameContext } from './FrameContext'
+import { getFrameLanguage } from './frameLanguage'
 import { FrameVariables } from './FrameVariables'
 
 export interface CollapsibleFrameContentProps {
@@ -18,16 +17,17 @@ export function CollapsibleFrameContent({
     record,
     onFrameContextClick,
 }: CollapsibleFrameContentProps): JSX.Element | null {
-    const { lang, code_variables } = frame
-    const hasCodeVariables = code_variables && Object.keys(code_variables).length > 0
+    const { code_variables } = frame
     if (!record || !record.context) {
         return null
     }
     return (
-        <Collapsible.Panel>
+        <Collapsible.Panel className="border-t-[color:var(--frame-border,var(--color-border-primary))]">
             <div onClick={(e) => onFrameContextClick?.(record.context!, e)}>
-                <FrameContext context={record.context} language={getLanguage(lang)} />
-                {hasCodeVariables ? <FrameVariables variables={code_variables!} /> : <CodeVariablesInlineBanner />}
+                <FrameContext context={record.context} language={getFrameLanguage(frame)} />
+                {code_variables && Object.keys(code_variables).length > 0 && (
+                    <FrameVariables variables={code_variables} />
+                )}
             </div>
         </Collapsible.Panel>
     )

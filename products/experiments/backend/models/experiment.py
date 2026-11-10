@@ -1,3 +1,4 @@
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any, Literal
 
 from django.contrib.postgres.fields import ArrayField
@@ -10,6 +11,7 @@ from posthog.models.file_system.constants import DEFAULT_SURFACE
 from posthog.models.file_system.file_system_mixin import FileSystemSyncMixin
 from posthog.models.file_system.file_system_representation import FileSystemRepresentation
 from posthog.models.scoping.root_mixin import TeamScopedRootMixin
+from posthog.models.tagged_items_relation import Taggable
 from posthog.models.utils import RootTeamMixin, UUIDModel
 
 from products.feature_flags.backend.facade.filters import (
@@ -45,7 +47,7 @@ ExposureFreezeBlocker = (
 )
 
 
-class Experiment(FileSystemSyncMixin, ModelActivityMixin, RootTeamMixin, models.Model):
+class Experiment(Taggable, FileSystemSyncMixin, ModelActivityMixin, RootTeamMixin, models.Model):
     class ExperimentType(models.TextChoices):
         WEB = "web", "web"
         PRODUCT = "product", "product"
@@ -82,6 +84,9 @@ class Experiment(FileSystemSyncMixin, ModelActivityMixin, RootTeamMixin, models.
     end_date = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
+    # Optimistic-concurrency token: bumped on every user-facing update so stale
+    # clients can be detected. Null (pre-backfill rows) is treated as 0.
+    version = models.IntegerField(default=0, null=True, blank=True)
     archived = models.BooleanField(default=False)
     # Whether archiving this experiment also auto-archived its linked feature flag,
     # so unarchiving only undoes an archive the experiment itself performed.
@@ -148,8 +153,29 @@ class Experiment(FileSystemSyncMixin, ModelActivityMixin, RootTeamMixin, models.
     # is skipped when the team has several — never inferred.
     repository = models.CharField(max_length=255, null=True, blank=True)
 
+    # A started experiment's rule ID selects v2 analysis; legacy experiments keep both fields null.
+    feature_flag_rule_id = models.UUIDField(null=True, blank=True)
+    # The immutable first-start snapshot preserves the rule and relevant flag context after winner shipping.
+    feature_flag_rule_snapshot = models.JSONField(null=True, blank=True)
+
     class Meta:
         db_table = "posthog_experiment"
+        constraints = [
+            # Rule IDs are UUIDs that no later experiment may reuse, so uniqueness is global, not per team.
+            models.UniqueConstraint(
+                fields=["feature_flag_rule_id"],
+                condition=models.Q(feature_flag_rule_id__isnull=False),
+                name="posthog_experiment_feature_flag_rule_id_uniq",
+            )
+        ]
+        indexes = [
+            # The hourly recalculation scans select running experiments across all teams.
+            models.Index(
+                fields=["start_date"],
+                name="posthog_exp_running_start_idx",
+                condition=models.Q(deleted=False, status="running"),
+            ),
+        ]
 
     def __str__(self):
         return self.name or "Untitled"
@@ -175,6 +201,13 @@ class Experiment(FileSystemSyncMixin, ModelActivityMixin, RootTeamMixin, models.
     @property
     def is_stopped(self) -> bool:
         return self.is_launched and self.end_date is not None
+
+    @property
+    def hours_since_launch(self) -> float | None:
+        # Counts to now also after the end date.
+        if self.start_date is None:
+            return None
+        return (timezone.now() - self.start_date).total_seconds() / 3600
 
     @property
     def is_paused(self) -> bool:
@@ -278,9 +311,6 @@ class Experiment(FileSystemSyncMixin, ModelActivityMixin, RootTeamMixin, models.
             "created_at": self.created_at,
         }
 
-    def get_stats_config(self, key: str):
-        return self.stats_config.get(key) if self.stats_config else None
-
     @classmethod
     def get_file_system_unfiled(cls, team: "Team", surface: str = DEFAULT_SURFACE) -> QuerySet["Experiment"]:
         base_qs = cls.objects.filter(team=team).exclude(deleted=True)
@@ -301,7 +331,7 @@ class Experiment(FileSystemSyncMixin, ModelActivityMixin, RootTeamMixin, models.
         )
 
 
-def _live_experiments_for_flag(feature_flag_id: Any) -> "QuerySet[Experiment]":
+def live_experiments_for_flag(feature_flag_id: Any) -> "QuerySet[Experiment]":
     """Single source of truth for the `has_experiment` predicate: a flag has a linked
     experiment iff a non-deleted Experiment row references it. The Rust flags service
     (rust/feature-flags/src/flags/feature_flag_list.rs) mirrors this in hand-written SQL —
@@ -314,12 +344,25 @@ def _live_experiments_for_flag(feature_flag_id: Any) -> "QuerySet[Experiment]":
 
 def live_experiment_exists() -> Exists:
     """`Exists` subquery for `.annotate()` over many flags. For a single in-hand flag, use `flag_has_live_experiment`."""
-    return Exists(_live_experiments_for_flag(OuterRef("pk")))
+    return Exists(live_experiments_for_flag(OuterRef("pk")))
 
 
 def flag_has_live_experiment(feature_flag_id: int) -> bool:
     """Instance-level companion to `live_experiment_exists` — same predicate, one flag."""
-    return _live_experiments_for_flag(feature_flag_id).exists()
+    return live_experiments_for_flag(feature_flag_id).exists()
+
+
+def metric_display_rank(ordered_uuids: Sequence[str] | None) -> Callable[[str], int]:
+    """Sort key over metric uuids in the order the experiment's metrics page lists them, from
+    `primary_metrics_ordered_uuids` / `secondary_metrics_ordered_uuids`.
+
+    Metrics missing from the ordering array rank last rather than vanishing, and share one rank so
+    a stable sort keeps their stored order. Every surface that presents metrics in display order
+    ranks with this, so they cannot disagree on which metric a user put first.
+    """
+    order = {uuid: index for index, uuid in enumerate(ordered_uuids or [])}
+    fallback = len(order)
+    return lambda uuid: order.get(uuid, fallback)
 
 
 def get_experiment_rule(experiment: Experiment) -> ExperimentRuleConfig:
@@ -338,12 +381,10 @@ LEGACY_METRIC_KINDS: frozenset[str] = frozenset({"ExperimentTrendsQuery", "Exper
 
 def experiment_has_legacy_metrics(experiment: "Experiment") -> bool:
     """Check if experiment uses legacy metric formats."""
-    # Check inline metrics
     all_metrics = (experiment.metrics or []) + (experiment.metrics_secondary or [])
     if any(m.get("kind") in LEGACY_METRIC_KINDS for m in all_metrics):
         return True
 
-    # Check saved metrics
     if experiment.experimenttosavedmetric_set.filter(saved_metric__query__kind__in=LEGACY_METRIC_KINDS).exists():
         return True
 
@@ -358,13 +399,13 @@ def saved_metric_has_legacy_query(saved_metric: "ExperimentSavedMetric") -> bool
 class ExperimentHoldout(ModelActivityMixin, RootTeamMixin, models.Model):
     name = models.CharField(max_length=400)
     description = models.CharField(max_length=400, null=True, blank=True)
-    team = models.ForeignKey("posthog.Team", on_delete=models.CASCADE)
+    team = models.ForeignKey("posthog.Team", on_delete=models.CASCADE, related_name="+")
 
     # Filters define the definition of the holdout
     # This is then replicated across flags for experiments in the holdout
     filters = models.JSONField(default=list)
 
-    created_by = models.ForeignKey("posthog.User", on_delete=models.SET_NULL, null=True)
+    created_by = models.ForeignKey("posthog.User", on_delete=models.SET_NULL, null=True, related_name="+")
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -385,10 +426,10 @@ class ExperimentHoldout(ModelActivityMixin, RootTeamMixin, models.Model):
         return self.filters[0]["rollout_percentage"] if self.filters else None
 
 
-class ExperimentSavedMetric(ModelActivityMixin, RootTeamMixin, models.Model):
+class ExperimentSavedMetric(Taggable, ModelActivityMixin, RootTeamMixin, models.Model):
     name = models.CharField(max_length=400)
     description = models.CharField(max_length=400, null=True, blank=True)
-    team = models.ForeignKey("posthog.Team", on_delete=models.CASCADE)
+    team = models.ForeignKey("posthog.Team", on_delete=models.CASCADE, related_name="+")
 
     query = models.JSONField()
 
@@ -396,7 +437,7 @@ class ExperimentSavedMetric(ModelActivityMixin, RootTeamMixin, models.Model):
     # has things like if this metric was migrated from a legacy metric
     metadata = models.JSONField(null=True, blank=True, default=dict)
 
-    created_by = models.ForeignKey("posthog.User", on_delete=models.SET_NULL, null=True)
+    created_by = models.ForeignKey("posthog.User", on_delete=models.SET_NULL, null=True, related_name="+")
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -461,7 +502,7 @@ class ExperimentTimeseriesRecalculation(UUIDModel):
         COMPLETED = "completed", "Completed"
         FAILED = "failed", "Failed"
 
-    team = models.ForeignKey("posthog.Team", on_delete=models.CASCADE)
+    team = models.ForeignKey("posthog.Team", on_delete=models.CASCADE, related_name="+")
     experiment = models.ForeignKey("Experiment", on_delete=models.CASCADE)
     metric = models.JSONField()
     fingerprint = models.CharField(max_length=64)  # SHA256 hash
@@ -505,15 +546,52 @@ class ExperimentMetricsRecalculation(TeamScopedRootMixin, UUIDModel):
         MANUAL = "manual", "Manual"
         AGENT_MCP = "agent_mcp", "Agent (MCP)"
         COLD_RUN = "cold_run", "Cold Run"
+        # The frontend refreshes a running experiment on page load when its latest results are older than its
+        # staleness threshold. Advances the window to now, so every metric recomputes.
         STALE_REFRESH = "stale_refresh", "Stale Refresh"
+        # Deprecated: feature no longer available.
         AUTO_REFRESH = "auto_refresh", "Auto Refresh"
-        CONFIG_CHANGE = "config_change", "Config Change"
+        # Experiment-scoped change (start/end date, excluded variants, exposure criteria): advances the
+        # window to now, so every metric recomputes.
+        EXPERIMENT_CONFIG_CHANGE = "experiment_config_change", "Experiment Config Change"
+        # Metric-scoped change (add metric, breakdown add/remove/attribution/limit): reuses the latest
+        # completed window, so unchanged metrics load from cache and only new or changed metrics recompute.
+        METRIC_CONFIG_CHANGE = "metric_config_change", "Metric Config Change"
+        # A user retries the failed metrics of the latest run: reuses its window, so the metrics that already
+        # have rows load from cache and only the failed ones recompute.
+        MANUAL_RETRY = "manual_retry", "Manual Retry"
+        # The frontend fills a gap it found in the latest run on page load (a metric with no row, or one
+        # added after the run finished). Same window reuse as MANUAL_RETRY; kept separate so analytics can
+        # tell a user action from an automatic heal.
+        HEAL_LATEST_RUN = "heal_latest_run", "Heal Latest Run"
         # Deprecated: never emitted, retained for old rows.
+        CONFIG_CHANGE = "config_change", "Config Change"
         EXPERIMENT_LAUNCH = "experiment_launch", "Experiment Launch"
         EXPERIMENT_STOP = "experiment_stop", "Experiment Stop"
         EXPERIMENT_UPDATE = "experiment_update", "Experiment Update"
+        # Written by the daily timeseries workflow, not by a user: a completed run assembled from the
+        # timeseries points of one daily run, so the latest read serves fresh data without a recompute.
+        TIMESERIES_SYNC = "timeseries_sync", "Timeseries Sync"
+        # Written by the scheduled recalculation workflow, not by a user: advances the window to now
+        # so every metric recomputes on fresh data.
+        SCHEDULED = "scheduled", "Scheduled"
 
-    team = models.ForeignKey("posthog.Team", on_delete=models.CASCADE)
+    class RequestTrigger(models.TextChoices):
+        """The subset of Trigger a client may send on POST. Each value must also exist on Trigger.
+
+        The rest are set server side: agent_mcp by the view from the client header, timeseries_sync and
+        scheduled by their workflows. auto_refresh and the deprecated values have no sender.
+        """
+
+        MANUAL = "manual", "Manual"
+        MANUAL_RETRY = "manual_retry", "Manual Retry"
+        COLD_RUN = "cold_run", "Cold Run"
+        STALE_REFRESH = "stale_refresh", "Stale Refresh"
+        HEAL_LATEST_RUN = "heal_latest_run", "Heal Latest Run"
+        EXPERIMENT_CONFIG_CHANGE = "experiment_config_change", "Experiment Config Change"
+        METRIC_CONFIG_CHANGE = "metric_config_change", "Metric Config Change"
+
+    team = models.ForeignKey("posthog.Team", on_delete=models.CASCADE, related_name="+")
     experiment = models.ForeignKey("Experiment", on_delete=models.CASCADE)
 
     status = models.CharField(max_length=20, choices=Status, default=Status.PENDING)
@@ -530,12 +608,7 @@ class ExperimentMetricsRecalculation(TeamScopedRootMixin, UUIDModel):
     created_at = models.DateTimeField(auto_now_add=True)
     started_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
-    created_by = models.ForeignKey(
-        "posthog.User",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-    )
+    created_by = models.ForeignKey("posthog.User", on_delete=models.SET_NULL, null=True, blank=True, related_name="+")
 
     class Meta:
         indexes = [

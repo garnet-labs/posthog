@@ -1,8 +1,10 @@
 use std::io::Write;
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::config::KafkaConfig;
 use common_liveness::SyncLivenessReporter;
+use lifecycle::Handle;
 use lz4::EncoderBuilder;
 use rdkafka::error::KafkaError;
 use rdkafka::producer::{
@@ -188,6 +190,60 @@ where
     Ok(api)
 }
 
+/// Completes the kafka-producer lifecycle component with a bounded
+/// flush instead of waiting for the last producer reference to drop.
+///
+/// The component's handle rides inside the producer context, which
+/// every clone of the producer shares — so without explicit shutdown
+/// work, the component completed only when everything holding the
+/// producer let go, and a queue wedged against a stalled broker held
+/// its shutdown phase to the global timeout. This task flushes what
+/// the queue holds within `bound` once the component's phase shuts
+/// down, then reports completion either way.
+///
+/// A timed-out flush drops only records nobody awaited: a caller that
+/// awaits each record's delivery before it commits or acks has already
+/// seen those records leave the queue, and anything left is best effort
+/// or retried by the caller's own redelivery.
+pub fn spawn_bounded_flush_on_shutdown(
+    producer: FutureProducer<KafkaContext>,
+    handle: Handle,
+    bound: Duration,
+) {
+    tokio::spawn(async move {
+        handle.shutdown_recv().await;
+        let queued = producer.in_flight_count();
+        // Flush blocks, and so can the producer teardown after it; both
+        // stay off the async workers. Completion is reported first, so
+        // a teardown that outlives the flush bound cannot hold the
+        // phase.
+        let flushed = tokio::task::spawn_blocking(move || {
+            let outcome = producer.flush(bound);
+            let remaining = producer.in_flight_count();
+            drop(producer);
+            (outcome, remaining)
+        })
+        .await;
+        match flushed {
+            Ok((Ok(()), _)) => {
+                info!(queued, "kafka producer flushed at shutdown");
+            }
+            Ok((Err(e), remaining)) => {
+                warn!(
+                    queued,
+                    remaining,
+                    error = %e,
+                    "kafka producer flush hit its shutdown bound; undelivered records dropped"
+                );
+            }
+            Err(e) => {
+                warn!(error = %e, "kafka producer shutdown flush task failed");
+            }
+        }
+        handle.work_completed();
+    });
+}
+
 /// A producer context that reports liveness (like [`KafkaContext`]) and, for
 /// each produced message, invokes a caller-supplied closure with the delivery
 /// report. This lets a caller observe delivery outcomes — e.g. emit
@@ -239,7 +295,47 @@ impl<K: Send + Sync + 'static> ProducerContext for ThreadedKafkaContext<K> {
 /// the opt-in path for fire-and-forget producers that want delivery
 /// observability without a per-message task; existing `FutureProducer` callers
 /// are unaffected.
+///
+/// Pings the brokers before returning, so an unreachable cluster fails here
+/// rather than silently later. That costs up to 15s at startup and makes an
+/// unreachable cluster fatal to construction: appropriate when the producer
+/// carries data the service exists to deliver. Best-effort producers should
+/// use [`create_threaded_kafka_producer_no_ping`] instead.
 pub async fn create_threaded_kafka_producer<K, L, F>(
+    config: &KafkaConfig,
+    liveness: L,
+    on_delivery: F,
+) -> Result<ThreadedProducer<ThreadedKafkaContext<K>>, KafkaError>
+where
+    K: Send + Sync + 'static,
+    L: SyncLivenessReporter + Clone + 'static,
+    F: Fn(&DeliveryResult, K) + Send + Sync + 'static,
+{
+    let producer = create_threaded_kafka_producer_no_ping(config, liveness, on_delivery)?;
+
+    ping_brokers(&producer)?;
+
+    Ok(producer)
+}
+
+/// Same as [`create_threaded_kafka_producer`] but returns as soon as the client
+/// is built, with no startup broker ping.
+///
+/// librdkafka connects and fetches metadata lazily on its own refresh
+/// schedule, so a producer built this way recovers by itself once the cluster
+/// becomes reachable. The ping only converts that transient state into an
+/// immediate error, which is the wrong trade for a best-effort producer: a
+/// broker blip at boot would disable the feature for the process's whole life,
+/// and the 15s fetch runs while the caller is still assembling itself.
+///
+/// Because construction no longer proves the cluster is reachable, judge these
+/// producers by their delivery reports (see [`ThreadedKafkaContext`]) rather
+/// than by whether they were built.
+///
+/// Synchronous by design: there is nothing to await once the ping is gone, and
+/// callers building a producer outside an async context (including tests)
+/// shouldn't need a runtime for it.
+pub fn create_threaded_kafka_producer_no_ping<K, L, F>(
     config: &KafkaConfig,
     liveness: L,
     on_delivery: F,
@@ -251,12 +347,7 @@ where
 {
     let client_config = build_client_config(config);
     debug!("rdkafka configuration (threaded): {:?}", client_config);
-    let producer: ThreadedProducer<ThreadedKafkaContext<K>> =
-        client_config.create_with_context(ThreadedKafkaContext::new(liveness, on_delivery))?;
-
-    ping_brokers(&producer)?;
-
-    Ok(producer)
+    client_config.create_with_context(ThreadedKafkaContext::new(liveness, on_delivery))
 }
 
 #[derive(Error, Debug)]
@@ -493,11 +584,52 @@ mod tests {
 
     use lz4::Decoder;
 
+    use common_liveness::SyncLivenessReporter;
+    use rdkafka::producer::DeliveryResult;
+
     use super::{
-        build_client_config, compress_lz4_frame, maybe_compress_lz4_frame, EnvelopeEncoding,
+        build_client_config, compress_lz4_frame, create_threaded_kafka_producer_no_ping,
+        maybe_compress_lz4_frame, EnvelopeEncoding,
     };
     use crate::config::KafkaConfig;
     use crate::kafka_consumer::LZ4_FRAME_MAGIC;
+
+    #[derive(Clone, Copy)]
+    struct AlwaysHealthy;
+
+    impl SyncLivenessReporter for AlwaysHealthy {
+        fn report_healthy(&self) {}
+        fn report_unhealthy(&self) {}
+    }
+
+    /// The no-ping builder must return promptly against an unreachable cluster
+    /// (TEST-NET-1) instead of failing after the 15s metadata fetch its pinging
+    /// sibling performs. That is the whole reason best-effort producers use it,
+    /// and this is also what keeps it callable without a tokio runtime.
+    #[test]
+    fn no_ping_producer_builds_promptly_against_unreachable_broker() {
+        let config = KafkaConfig {
+            kafka_hosts: "192.0.2.1:9092".to_string(),
+            ..Default::default()
+        };
+
+        let start = std::time::Instant::now();
+        let producer = create_threaded_kafka_producer_no_ping(
+            &config,
+            AlwaysHealthy,
+            |_: &DeliveryResult, ()| {},
+        );
+        let elapsed = start.elapsed();
+
+        assert!(
+            producer.is_ok(),
+            "an unreachable cluster must not fail construction"
+        );
+        assert!(
+            elapsed < std::time::Duration::from_secs(2),
+            "took {elapsed:?}, so a broker round-trip is still happening"
+        );
+    }
 
     #[test]
     fn client_id_is_set_only_when_non_empty() {

@@ -8,6 +8,7 @@ from posthog.models.utils import CreatedMetaFields, UpdatedMetaFields, UUIDModel
 
 class DisplayType(StrEnum):
     TEXT = "text"
+    LINK = "link"
     NUMBER = "number"
     CURRENCY = "currency"
     PERCENT = "percent"
@@ -32,6 +33,7 @@ class DataType(StrEnum):
 
 DATA_TYPE_BY_DISPLAY_TYPE: dict[DisplayType, DataType] = {
     DisplayType.TEXT: DataType.STRING,
+    DisplayType.LINK: DataType.STRING,
     DisplayType.NUMBER: DataType.NUMERIC,
     DisplayType.CURRENCY: DataType.NUMERIC,
     DisplayType.PERCENT: DataType.NUMERIC,
@@ -46,12 +48,19 @@ NUMERIC_DISPLAY_TYPES = [
 ]
 
 
+CANONICAL_LAST_SLACK_MESSAGE_AT = "Last Slack message at"
+
+CANONICAL_DISPLAY_TYPE_BY_NAME: dict[str, DisplayType] = {
+    CANONICAL_LAST_SLACK_MESSAGE_AT: DisplayType.DATETIME,
+}
+
+
 class CustomPropertyDefinition(TeamScopedRootMixin, UUIDModel, CreatedMetaFields, UpdatedMetaFields):
-    team = models.ForeignKey("posthog.Team", on_delete=models.CASCADE)
+    team = models.ForeignKey("posthog.Team", on_delete=models.CASCADE, related_name="+")
 
     target_type = models.CharField(
         choices=[(t.value, t.value) for t in TargetType],
-        default=TargetType.ACCOUNT,
+        default=TargetType.ACCOUNT.value,
         max_length=20,
         help_text="What entity this property is attached to: an account (default), a person, or a group.",
     )
@@ -65,7 +74,7 @@ class CustomPropertyDefinition(TeamScopedRootMixin, UUIDModel, CreatedMetaFields
     name = models.CharField(max_length=400)
     description = models.TextField(null=True)
     display_type = models.CharField(
-        choices=[(t.value, t.value) for t in DisplayType], default=DisplayType.TEXT, max_length=20
+        choices=[(t.value, t.value) for t in DisplayType], default=DisplayType.TEXT.value, max_length=20
     )
     is_big_number = models.BooleanField(
         default=False, help_text="Whether the property is a big number and should be abbreviated. E.g.: 10,000 -> 10K"

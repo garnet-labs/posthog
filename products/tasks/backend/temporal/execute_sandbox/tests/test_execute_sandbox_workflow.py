@@ -12,6 +12,10 @@ from products.tasks.backend.temporal.execute_sandbox.activities.reap_orphaned_sa
     ReapOrphanedSandboxResult,
     reap_orphaned_sandbox,
 )
+from products.tasks.backend.temporal.execute_sandbox.activities.sandbox_state import (
+    ClearPersistedSandboxIdInput,
+    clear_persisted_sandbox_id,
+)
 from products.tasks.backend.temporal.execute_sandbox.workflow import (
     PARENT_ACK_SIGNAL,
     PARENT_ATTACHED_SIGNAL,
@@ -25,13 +29,15 @@ from products.tasks.backend.temporal.execute_sandbox.workflow import (
     PendingFollowup,
     SandboxEvent,
 )
-from products.tasks.backend.temporal.process_task.activities.get_sandbox_for_repository import (
-    GetSandboxForRepositoryOutput,
-)
+from products.tasks.backend.temporal.process_task.activities.cleanup_sandbox import CleanupSandboxInput, cleanup_sandbox
 from products.tasks.backend.temporal.process_task.activities.get_task_processing_context import TaskProcessingContext
+from products.tasks.backend.temporal.process_task.activities.provision_sandbox import GetSandboxForRepositoryOutput
 from products.tasks.backend.temporal.process_task.activities.send_followup_to_sandbox import STEER_DECLINED_OUTCOME
 from products.tasks.backend.temporal.process_task.activities.start_agent_server import StartAgentServerOutput
-from products.tasks.backend.temporal.process_task.credential_refresh import CredentialRefreshExitReason
+from products.tasks.backend.temporal.process_task.credential_refresh import (
+    TASK_ROWS_GONE_ERROR_MESSAGE,
+    CredentialRefreshExitReason,
+)
 
 
 def _build_context(
@@ -124,7 +130,7 @@ class TestShouldForwardPendingUserMessage:
             # Resume runs already replay the original prompt — forwarding would
             # double up. Both resume markers must short-circuit.
             ({"mode": "background", "resume_from_run_id": "prev"}, False),
-            ({"mode": "background", "handoff_resumed": True}, False),
+            ({"mode": "background", "same_run_resume": True}, False),
         ],
     )
     def test_forwards_only_in_background_and_not_on_resume(self, state: dict, expected: bool):
@@ -162,12 +168,20 @@ class TestParseInputs:
 
 
 class TestSignalHandlers:
-    async def test_parent_attached_sets_parent_id_and_queues_ack(self, silent_workflow_logger):
+    @pytest.mark.parametrize("patched", [True, False])
+    @pytest.mark.parametrize("delivery_closed", [True, False])
+    async def test_parent_attached_sets_parent_id_and_queues_ack(
+        self, monkeypatch, silent_workflow_logger, patched: bool, delivery_closed: bool
+    ) -> None:
         workflow = ExecuteSandboxWorkflow()
+        workflow._parent_signal_delivery_closed = delivery_closed
+        monkeypatch.setattr(execute_sandbox_workflow_module.workflow, "in_workflow", lambda: True)
+        monkeypatch.setattr(execute_sandbox_workflow_module.workflow, "patched", lambda _: patched)
 
         await workflow.parent_attached("ack-1", "parent-wf-id")
 
         assert workflow._parent_workflow_id == "parent-wf-id"
+        assert workflow._parent_signal_delivery_closed is (delivery_closed and not patched)
         assert workflow._pending_outbound == [
             OutboundSignal(
                 target_signal=PARENT_ACK_SIGNAL,
@@ -735,6 +749,19 @@ class TestPersistSandboxId:
 
 
 class TestRun:
+    async def test_relay_detected_sandbox_loss_marks_sandbox_gone(self, monkeypatch, silent_workflow_logger):
+        workflow = ExecuteSandboxWorkflow()
+        workflow._context = _build_context()
+        execute_activity_mock = AsyncMock(return_value=True)
+        monkeypatch.setattr(execute_sandbox_workflow_module.workflow, "execute_activity", execute_activity_mock)
+
+        await workflow._relay_sandbox_events(
+            StartAgentServerOutput(sandbox_url="https://sandbox.example", connect_token="token"),
+            "sandbox-123",
+        )
+
+        assert workflow._sandbox_gone is True
+
     async def test_credential_refresh_exit_marks_sandbox_gone(self, monkeypatch, silent_workflow_logger):
         workflow = ExecuteSandboxWorkflow()
         workflow._context = _build_context()
@@ -748,9 +775,25 @@ class TestRun:
         refresh_loop_mock.assert_awaited_once_with(workflow.context, "sandbox-123")
         silent_workflow_logger.warning.assert_called_once_with(
             "execute_sandbox_sandbox_gone_detected",
-            run_id="run-id",
-            sandbox_id="sandbox-123",
+            extra={"run_id": "run-id", "sandbox_id": "sandbox-123"},
         )
+
+    async def test_credential_refresh_task_gone_marks_the_run_failed(self, monkeypatch, silent_workflow_logger):
+        # An interactive run is exempt from the terminal status write on its normal
+        # completion path, so without this the workflow would report success for a run
+        # whose rows were deleted underneath it.
+        workflow = ExecuteSandboxWorkflow()
+        workflow._context = _build_context()
+        refresh_loop_mock = AsyncMock(return_value=CredentialRefreshExitReason.TASK_GONE)
+
+        monkeypatch.setattr(execute_sandbox_workflow_module, "run_credential_refresh_loop", refresh_loop_mock)
+
+        await workflow._run_credential_refresh_until_sandbox_gone("sandbox-123")
+
+        assert workflow._sandbox_gone is True
+        assert workflow._completion_status == "failed"
+        assert workflow._completion_error == TASK_ROWS_GONE_ERROR_MESSAGE
+        assert workflow._completion_error_type == "TaskRunDeletedError"
 
     async def test_credential_refresh_credentials_unavailable_does_not_mark_sandbox_gone(
         self, monkeypatch, silent_workflow_logger
@@ -766,8 +809,7 @@ class TestRun:
         assert workflow._sandbox_gone is False
         silent_workflow_logger.warning.assert_called_once_with(
             "execute_sandbox_credential_refresh_stopped_credentials_unavailable",
-            run_id="run-id",
-            sandbox_id="sandbox-123",
+            extra={"run_id": "run-id", "sandbox_id": "sandbox-123"},
         )
 
     @pytest.mark.parametrize(
@@ -786,7 +828,7 @@ class TestRun:
             use_modal_resume_snapshots=use_modal_resume_snapshots,
         )
         update_status_mock = AsyncMock()
-        cleanup_sandbox_mock = AsyncMock()
+        execute_activity_mock = AsyncMock()
         create_resume_snapshot_mock = AsyncMock()
 
         monkeypatch.setattr(workflow, "_reap_orphaned_sandbox", AsyncMock())
@@ -796,9 +838,8 @@ class TestRun:
         monkeypatch.setattr(workflow, "_track_workflow_event", AsyncMock())
         monkeypatch.setattr(workflow, "_persist_sandbox_id", AsyncMock())
         monkeypatch.setattr(workflow, "_read_sandbox_logs", AsyncMock())
-        monkeypatch.setattr(workflow, "_cleanup_sandbox", cleanup_sandbox_mock)
+        monkeypatch.setattr(execute_sandbox_workflow_module.workflow, "execute_activity", execute_activity_mock)
         monkeypatch.setattr(workflow, "_create_resume_snapshot", create_resume_snapshot_mock)
-        monkeypatch.setattr(workflow, "_clear_persisted_sandbox_id", AsyncMock())
         monkeypatch.setattr(workflow, "_flush_all_pending_outbound", AsyncMock())
         monkeypatch.setattr(workflow, "_relay_sandbox_events", AsyncMock())
         monkeypatch.setattr(workflow, "_run_credential_refresh_until_sandbox_gone", AsyncMock())
@@ -835,7 +876,11 @@ class TestRun:
             call for call in update_status_mock.await_args_list if call.args[:1] in (("failed",), ("cancelled",))
         ]
         assert terminal_status_writes == []
-        cleanup_sandbox_mock.assert_awaited_once_with("sandbox-123")
+        activity_inputs = {call.args[0]: call.args[1] for call in execute_activity_mock.await_args_list}
+        assert activity_inputs[cleanup_sandbox] == CleanupSandboxInput(sandbox_id="sandbox-123", run_id="run-id")
+        assert activity_inputs[clear_persisted_sandbox_id] == ClearPersistedSandboxIdInput(
+            run_id="run-id", sandbox_id="sandbox-123"
+        )
         completed_signals = [
             outbound for outbound in workflow._pending_outbound if outbound.target_signal == PARENT_COMPLETED_SIGNAL
         ]
@@ -1244,11 +1289,33 @@ class TestCompletionStatusOnExceptionPaths:
         assert isinstance(payload, ChildCompletionPayload)
         assert payload.success is False
 
-    async def test_exception_run_signals_success_false_with_failed_marker(self, monkeypatch, silent_workflow_logger):
+    @pytest.mark.parametrize("organization_denied", [False, True])
+    async def test_exception_run_signals_success_false_with_failed_marker(
+        self, monkeypatch, silent_workflow_logger, organization_denied
+    ):
         workflow = ExecuteSandboxWorkflow()
-        get_context_mock = AsyncMock(side_effect=RuntimeError("db down"))
+        message = (
+            "This organization is scheduled for deletion. Select another organization to run tasks."
+            if organization_denied
+            else "db down"
+        )
+        error_type = "OrganizationExecutionError" if organization_denied else "RuntimeError"
+        error: Exception = RuntimeError(message)
+        if organization_denied:
+            error = ActivityError(
+                "Activity task failed",
+                scheduled_event_id=1,
+                started_event_id=2,
+                identity="worker-1",
+                activity_type="start_agent_server",
+                activity_id="activity-1",
+                retry_state=RetryState.NON_RETRYABLE_FAILURE,
+            )
+            error.__cause__ = ApplicationError(message, type=error_type, non_retryable=True)
+        get_context_mock = AsyncMock(side_effect=error)
+        update_status_mock = AsyncMock()
         monkeypatch.setattr(workflow, "_get_task_processing_context", get_context_mock)
-        monkeypatch.setattr(workflow, "_update_task_run_status", AsyncMock())
+        monkeypatch.setattr(workflow, "_update_task_run_status", update_status_mock)
         monkeypatch.setattr(workflow, "_track_workflow_event", AsyncMock())
         monkeypatch.setattr(workflow, "_reap_orphaned_sandbox", AsyncMock())
         monkeypatch.setattr(workflow, "_flush_all_pending_outbound", AsyncMock())
@@ -1257,7 +1324,9 @@ class TestCompletionStatusOnExceptionPaths:
 
         assert result.success is False
         assert workflow._completion_status == "failed"
-        assert workflow._completion_error == "db down"
+        assert result.error == message
+        assert workflow._completion_error == message
+        update_status_mock.assert_awaited_with("failed", error_message=message, run_id="run-id", error_type=error_type)
         completed_signals = [
             outbound for outbound in workflow._pending_outbound if outbound.target_signal == PARENT_COMPLETED_SIGNAL
         ]
@@ -1265,4 +1334,4 @@ class TestCompletionStatusOnExceptionPaths:
         payload = completed_signals[0].args[0]
         assert isinstance(payload, ChildCompletionPayload)
         assert payload.success is False
-        assert payload.error == "db down"
+        assert payload.error == message

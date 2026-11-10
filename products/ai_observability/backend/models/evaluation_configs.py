@@ -1,4 +1,5 @@
-from typing import Annotated, Any, Literal
+import math
+from typing import Annotated, Any, Literal, Self
 
 from django.db import models
 
@@ -17,6 +18,8 @@ class OutputType(models.TextChoices):
     """What type of result is expected"""
 
     BOOLEAN = "boolean", "Boolean (Pass/Fail)"
+    NUMERIC = "numeric", "Numeric"
+    CATEGORICAL = "categorical", "Categorical"
     SENTIMENT = "sentiment", "Sentiment"
 
 
@@ -24,6 +27,15 @@ class LLMJudgeConfig(BaseModel):
     """Configuration for LLM judge evaluations"""
 
     prompt: str = Field(..., min_length=1, description="Evaluation criteria prompt")
+    judge_method: Literal["llm", "decision"] | None = Field(
+        default=None, description="Judge method. Omit to keep the saved method; null restores automatic routing."
+    )
+    include_media: bool | None = Field(default=None, description="Set to false to judge text only.")
+    # Matches llm.types.ReasoningLevel; importing the llm package here would load provider SDKs at startup.
+    reasoning_level: Literal["minimal", "low", "medium", "high"] | None = Field(
+        default=None,
+        description="How much the judge model reasons before it answers. Null uses the model's default.",
+    )
 
     @field_validator("prompt")
     @classmethod
@@ -50,11 +62,144 @@ class HogEvalConfig(BaseModel):
 class BooleanOutputConfig(BaseModel):
     """Configuration for boolean output type"""
 
+    model_config = ConfigDict(extra="forbid")
+
     allows_na: bool = False
+    # Detector-style evaluations look for a problem, so their true result is the undesirable one and
+    # must be reported as a fail. Defaulting to False keeps stored configs written before this field
+    # reading exactly as they did, with no backfill and no default to re-supply at each read site.
+    true_is_failure: bool = False
+    decision_threshold: float | None = Field(default=None, ge=0, le=1, strict=True, allow_inf_nan=False)
+
+
+class NumericPassingRule(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
+
+    operator: Literal["gte", "lte"]
+    threshold: float
+
+    def passes(self, score: float) -> bool:
+        return score >= self.threshold if self.operator == "gte" else score <= self.threshold
+
+
+class NumericScoreOutOfBounds(ValueError):
+    pass
+
+
+class NumericOutputConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, allow_inf_nan=False)
+
+    min: float | None = None
+    max: float | None = None
+    step: float | None = Field(default=None, gt=0)
+    allows_na: bool = False
+    passing_rule: NumericPassingRule | None = None
+
+    @model_validator(mode="after")
+    def validate_bounds(self) -> Self:
+        if self.min is not None and self.max is not None and self.min > self.max:
+            raise ValueError("Minimum score cannot exceed maximum score")
+        if self.passing_rule is not None:
+            self.passing_rule.threshold = self.validate_score(self.passing_rule.threshold)
+        return self
+
+    def validate_score(self, value: object) -> float:
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            raise ValueError("Numeric evaluations must return a finite number")
+        try:
+            score = float(value)
+        except OverflowError as error:
+            raise ValueError("Numeric evaluations must return a finite number") from error
+        if not math.isfinite(score):
+            raise ValueError("Numeric evaluations must return a finite number")
+        # One representable step absorbs arithmetic roundoff without rounding genuine outliers.
+        if self.min is not None and score < self.min:
+            if score < math.nextafter(self.min, -math.inf):
+                raise NumericScoreOutOfBounds(f"Score must be at least {self.min}")
+            score = self.min
+        if self.max is not None and score > self.max:
+            if score > math.nextafter(self.max, math.inf):
+                raise NumericScoreOutOfBounds(f"Score must be at most {self.max}")
+            score = self.max
+        return score
+
+
+# Limit category configuration size to stay within Temporal's activity payload limit.
+MAX_CATEGORICAL_OPTIONS = 100
+
+
+class CategoricalOption(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
+
+    key: str = Field(min_length=1, max_length=128, pattern=r"^[a-z0-9]+(?:[_-][a-z0-9]+)*$")
+    label: str = Field(min_length=1, max_length=256)
+
+
+class CategoricalPassingRule(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    categories: list[str]
+
+    @model_validator(mode="after")
+    def validate_categories(self) -> Self:
+        if len(set(self.categories)) != len(self.categories):
+            raise ValueError("Select each passing category only once")
+        self.categories.sort()
+        return self
+
+    def passes(self, categories: list[str]) -> bool:
+        if not categories:
+            return not self.categories
+        return set(categories) <= set(self.categories)
+
+
+class InvalidEvaluationCategories(ValueError):
+    pass
+
+
+class CategoricalOutputConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    options: list[CategoricalOption] = Field(min_length=1, max_length=MAX_CATEGORICAL_OPTIONS)
+    selection_mode: Literal["single", "multiple"] = "single"
+    allows_na: bool = False
+    passing_rule: CategoricalPassingRule | None = None
+
+    @model_validator(mode="after")
+    def validate_options(self) -> Self:
+        keys = {option.key for option in self.options}
+        if len(keys) != len(self.options):
+            raise ValueError("Category keys must be unique")
+        if self.passing_rule is not None:
+            rule = self.passing_rule
+            if self.selection_mode == "single" and not rule.categories:
+                raise ValueError("Choose at least one passing category.")
+            if not set(rule.categories) <= keys:
+                raise ValueError("Passing rules must use configured category keys")
+        return self
+
+    def validate_result(self, value: object) -> list[str]:
+        if self.selection_mode == "single" and isinstance(value, str):
+            value = [value]
+        if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+            raise ValueError("Return category keys as a list, or one category key for single selection")
+        if self.selection_mode == "single" and len(value) != 1:
+            raise InvalidEvaluationCategories("Single selection must return exactly one category")
+        keys = {option.key for option in self.options}
+        if not set(value) <= keys:
+            raise InvalidEvaluationCategories("Return only configured category keys")
+        if len(value) != len(set(value)):
+            raise InvalidEvaluationCategories("Return each category only once")
+        return value
 
 
 class SentimentEvalConfig(BaseModel):
-    """Configuration for sentiment evaluations."""
+    """Configuration for sentiment evaluations.
+
+    The classifier is an English-trained model, so labels are unreliable for other languages. A
+    multilingual agent should use an llm_judge evaluation instead. See
+    posthog/temporal/ai_observability/sentiment/README.md.
+    """
 
     source: Literal["user_messages"] = Field(
         default="user_messages",
@@ -83,6 +228,32 @@ TRACE_EVAL_MAX_QUIET_PERIOD_SECONDS = 30 * 60
 TRACE_EVAL_DEFAULT_MAX_AGE_SECONDS = 2 * 60 * 60
 TRACE_EVAL_MIN_MAX_AGE_SECONDS = 60
 TRACE_EVAL_MAX_MAX_AGE_SECONDS = 2 * 60 * 60
+
+# Session-target bounds. Sessions are long and bursty (mean 2.66h, p99 duration 48h), and the
+# premature-settle rate barely improves past a day of quiet (23.6% at 5m, 2.1% at 24h), so the
+# ceilings are session-sized rather than trace-sized. The 7-day max_age ceiling stays well inside
+# ai_events retention (30 days) so a settled session is still fetchable.
+SESSION_EVAL_DEFAULT_WINDOW_SECONDS = 30 * 60
+SESSION_EVAL_MIN_WINDOW_SECONDS = 10
+SESSION_EVAL_MAX_WINDOW_SECONDS = 7 * 24 * 60 * 60
+
+SESSION_EVAL_DEFAULT_QUIET_PERIOD_SECONDS = 60 * 60
+SESSION_EVAL_MIN_QUIET_PERIOD_SECONDS = 10
+SESSION_EVAL_MAX_QUIET_PERIOD_SECONDS = 24 * 60 * 60
+
+SESSION_EVAL_DEFAULT_MAX_AGE_SECONDS = 24 * 60 * 60
+SESSION_EVAL_MIN_MAX_AGE_SECONDS = 60
+SESSION_EVAL_MAX_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
+
+# Lives here rather than beside MAX_TRACE_EVAL_EVENTS (run_trace_evaluation.py) because both the
+# settle poll and the session fetch enforce it, and those two modules can't import each other.
+MAX_SESSION_EVAL_EVENTS = 2500
+
+# A session fetch is a whole conversation rather than one trace, so a preview samples fewer of them
+# than the trace path does — each sampled session can carry up to MAX_SESSION_EVAL_EVENTS events.
+# Shared so the editor endpoint and the Max tool hold the same bound. Fidelity per session is never
+# traded away: a previewed session is fetched exactly as the online evaluation would fetch it.
+SESSION_TEST_HOG_MAX_SAMPLES = 3
 
 
 class FixedWindowSettleConfig(BaseModel):
@@ -130,26 +301,93 @@ SettleConfig = Annotated[FixedWindowSettleConfig | InactivitySettleConfig, Field
 _SETTLE_CONFIG_ADAPTER: TypeAdapter[FixedWindowSettleConfig | InactivitySettleConfig] = TypeAdapter(SettleConfig)
 
 
+class SessionFixedWindowSettleConfig(BaseModel):
+    """Wait a fixed window after the first matching generation, then evaluate the session."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    strategy: Literal["fixed_window"] = "fixed_window"
+    window_seconds: int = Field(
+        default=SESSION_EVAL_DEFAULT_WINDOW_SECONDS,
+        ge=SESSION_EVAL_MIN_WINDOW_SECONDS,
+        le=SESSION_EVAL_MAX_WINDOW_SECONDS,
+        description="Seconds to wait after the first matching generation before evaluating.",
+    )
+
+
+class SessionInactivitySettleConfig(BaseModel):
+    """Evaluate once the session has had no new activity for the quiet period."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    strategy: Literal["inactivity"] = "inactivity"
+    quiet_period_seconds: int = Field(
+        default=SESSION_EVAL_DEFAULT_QUIET_PERIOD_SECONDS,
+        ge=SESSION_EVAL_MIN_QUIET_PERIOD_SECONDS,
+        le=SESSION_EVAL_MAX_QUIET_PERIOD_SECONDS,
+        description="Seconds without new session activity before the unit counts as settled.",
+    )
+    max_age_seconds: int = Field(
+        default=SESSION_EVAL_DEFAULT_MAX_AGE_SECONDS,
+        ge=SESSION_EVAL_MIN_MAX_AGE_SECONDS,
+        le=SESSION_EVAL_MAX_MAX_AGE_SECONDS,
+        description="Hard cap on the total wait from the first matching generation.",
+    )
+
+    @model_validator(mode="after")
+    def validate_max_age_covers_quiet_period(self) -> "SessionInactivitySettleConfig":
+        if self.max_age_seconds < self.quiet_period_seconds:
+            raise ValueError("max_age_seconds must be greater than or equal to quiet_period_seconds")
+        return self
+
+
+SessionSettleConfig = Annotated[
+    SessionFixedWindowSettleConfig | SessionInactivitySettleConfig, Field(discriminator="strategy")
+]
+
+_SESSION_SETTLE_CONFIG_ADAPTER: TypeAdapter[SessionFixedWindowSettleConfig | SessionInactivitySettleConfig] = (
+    TypeAdapter(SessionSettleConfig)
+)
+
+# Membership here is what makes a target an aggregate target. `validate_target_config` looks the
+# adapter up rather than checking a separate list of names, so the two can't drift apart.
+_SETTLE_CONFIG_ADAPTERS: dict[str, TypeAdapter[Any]] = {
+    "trace": _SETTLE_CONFIG_ADAPTER,
+    "session": _SESSION_SETTLE_CONFIG_ADAPTER,
+}
+
+# Traces default to fixed_window because rows saved before strategies existed have no `strategy`
+# key and meant exactly that. Sessions have no such legacy, and a fixed window measured from the
+# first matching generation is unrelated to when a session ends, so they default to inactivity.
+DEFAULT_SETTLE_STRATEGY_BY_TARGET: dict[str, str] = {"trace": "fixed_window", "session": "inactivity"}
+
+
 def validate_target_config(target: str, target_config: dict) -> dict:
     """Validate target_config based on target.
 
-    Trace targets carry a settle config discriminated on `strategy`; rows saved before
-    strategies existed have no `strategy` key and mean fixed_window. Every other target
-    (generation today) carries no config, so its bag is normalized to empty — this also
-    strips a stale settle config if a user switches a trace eval back to generation.
+    Aggregate targets (trace, session) carry a settle config discriminated on `strategy`, with
+    per-target bounds. Trace rows saved before strategies existed have no `strategy` key and mean
+    fixed_window. Every other target (generation today) carries no config, so its bag is
+    normalized to empty — this also strips a stale settle config when a user switches an
+    aggregate eval back to generation.
     """
-    if target != "trace":
+    adapter = _SETTLE_CONFIG_ADAPTERS.get(target)
+    if adapter is None:
         return {}
     try:
         config = {**(target_config or {})}
-        config.setdefault("strategy", "fixed_window")
-        return _SETTLE_CONFIG_ADAPTER.validate_python(config).model_dump()
+        config.setdefault("strategy", DEFAULT_SETTLE_STRATEGY_BY_TARGET[target])
+        return adapter.validate_python(config).model_dump()
     except Exception as e:
-        raise ValueError(f"Invalid target_config for trace: {str(e)}") from e
+        raise ValueError(f"Invalid target_config for {target}: {str(e)}") from e
 
 
 # Mapping: (evaluation_type, output_type) -> (evaluation_config_model, output_config_model)
 EVALUATION_CONFIG_MODELS: dict[tuple[str, str], tuple[type[BaseModel], type[BaseModel]]] = {
+    (EvaluationType.LLM_JUDGE.value, OutputType.CATEGORICAL.value): (LLMJudgeConfig, CategoricalOutputConfig),
+    (EvaluationType.HOG.value, OutputType.CATEGORICAL.value): (HogEvalConfig, CategoricalOutputConfig),
+    (EvaluationType.LLM_JUDGE.value, OutputType.NUMERIC.value): (LLMJudgeConfig, NumericOutputConfig),
+    (EvaluationType.HOG.value, OutputType.NUMERIC.value): (HogEvalConfig, NumericOutputConfig),
     (EvaluationType.LLM_JUDGE.value, OutputType.BOOLEAN.value): (LLMJudgeConfig, BooleanOutputConfig),
     (EvaluationType.HOG.value, OutputType.BOOLEAN.value): (HogEvalConfig, BooleanOutputConfig),
     (EvaluationType.SENTIMENT.value, OutputType.SENTIMENT.value): (SentimentEvalConfig, SentimentOutputConfig),
@@ -161,10 +399,18 @@ EVALUATION_CONFIG_CONTENT_KEYS: dict[str, str] = {
     EvaluationType.SENTIMENT.value: "source",
 }
 
-REPORTABLE_OUTPUT_TYPES: tuple[str, ...] = (OutputType.BOOLEAN.value, OutputType.SENTIMENT.value)
+REPORTABLE_OUTPUT_TYPES: tuple[str, ...] = (
+    OutputType.BOOLEAN.value,
+    OutputType.SENTIMENT.value,
+    OutputType.NUMERIC.value,
+    OutputType.CATEGORICAL.value,
+)
+# Sentiment is generation-only (see the target check in the evaluations API), so the aggregate
+# targets support boolean, numeric, and categorical results.
 REPORTABLE_OUTPUT_TYPES_BY_TARGET: dict[str, tuple[str, ...]] = {
     "generation": REPORTABLE_OUTPUT_TYPES,
-    "trace": (OutputType.BOOLEAN.value,),
+    "trace": (OutputType.BOOLEAN.value, OutputType.NUMERIC.value, OutputType.CATEGORICAL.value),
+    "session": (OutputType.BOOLEAN.value, OutputType.NUMERIC.value, OutputType.CATEGORICAL.value),
 }
 
 
@@ -172,7 +418,9 @@ def evaluation_uses_model_configuration(evaluation_type: str | None) -> bool:
     return evaluation_type == EvaluationType.LLM_JUDGE.value
 
 
-def evaluation_supports_reports(output_type: str | None, target: str | None) -> bool:
+def evaluation_supports_reports(output_type: str | None, target: str | None, output_config: dict | None = None) -> bool:
+    if output_type in (OutputType.NUMERIC, OutputType.CATEGORICAL) and not (output_config or {}).get("passing_rule"):
+        return False
     return output_type in REPORTABLE_OUTPUT_TYPES_BY_TARGET.get(target or "", ())
 
 

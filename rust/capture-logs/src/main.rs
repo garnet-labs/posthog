@@ -3,8 +3,11 @@ use std::time::Duration;
 
 use axum::{extract::DefaultBodyLimit, http::Method, routing::get, routing::post, Router};
 use capture::metrics_middleware::track_metrics;
+use capture_logs::authorizer::Authorizer;
 use capture_logs::config::Config;
+use capture_logs::endpoints::aws_firehose;
 use capture_logs::endpoints::datadog;
+use capture_logs::endpoints::prometheus;
 use capture_logs::kafka::KafkaSink;
 use capture_logs::middleware::translate_compression_query_param;
 use capture_logs::service::Service;
@@ -117,11 +120,13 @@ async fn main() {
         .expect("could not bind management port");
 
     let token_dropper = TokenDropper::new(&config.drop_events_by_token.unwrap_or_default());
-    let token_dropper_arc = Arc::new(token_dropper);
+    let authorizer = Authorizer::new(Arc::new(token_dropper));
     let logs_service = match Service::new(
         kafka_sink,
-        token_dropper_arc,
+        authorizer,
         config.max_request_body_size_bytes,
+        config.firehose_max_request_body_size_bytes,
+        config.max_backfill_days,
     )
     .await
     {
@@ -184,11 +189,51 @@ async fn main() {
             "/i/v1/logs/datadog/:token/api/v2/logs",
             post(datadog::export_datadog_logs_http).options(options_handler),
         )
-        .with_state(logs_service)
+        .with_state(logs_service.clone())
         .layer(DefaultBodyLimit::max(config.max_request_body_size_bytes))
         .layer(axum::middleware::from_fn(track_metrics))
         .layer(RequestDecompressionLayer::new())
-        .layer(axum::middleware::from_fn(translate_compression_query_param))
+        .layer(axum::middleware::from_fn(translate_compression_query_param));
+
+    // Prometheus remote-write sends `Content-Encoding: snappy` and vmagent
+    // sends `Content-Encoding: zstd`, which RequestDecompressionLayer rejects
+    // with 415 before the handler runs. This route is deliberately kept off
+    // that layer (and the gzip query-param shim); the handler decodes the body
+    // itself.
+    let prometheus_router = Router::new()
+        .route(
+            "/i/v1/prometheus/write",
+            post(prometheus::export_prometheus_remote_write_http).options(options_handler),
+        )
+        .route(
+            "/i/v1/prometheus/write/:token",
+            post(prometheus::export_prometheus_remote_write_http).options(options_handler),
+        )
+        .with_state(logs_service.clone())
+        .layer(DefaultBodyLimit::max(config.max_request_body_size_bytes))
+        .layer(axum::middleware::from_fn(track_metrics));
+
+    // Amazon Data Firehose HTTP endpoint destination. Its own router because Firehose buffers up to
+    // 64 MiB per delivery, so the body cap is separate, and because Firehose only understands a
+    // JSON error body: the outermost layer re-shapes rejections raised by the layers below it.
+    let firehose_router = Router::new()
+        .route(
+            "/i/v1/logs/aws/firehose",
+            post(aws_firehose::export_aws_firehose_logs_http).options(options_handler),
+        )
+        .with_state(logs_service)
+        .layer(DefaultBodyLimit::max(
+            config.firehose_max_request_body_size_bytes,
+        ))
+        .layer(axum::middleware::from_fn(track_metrics))
+        .layer(RequestDecompressionLayer::new())
+        .layer(axum::middleware::from_fn(
+            aws_firehose::shape_layer_rejections,
+        ));
+
+    let http_router = http_router
+        .merge(prometheus_router)
+        .merge(firehose_router)
         .layer(cors);
 
     let http_server = tokio::spawn(async move {
