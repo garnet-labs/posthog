@@ -31,10 +31,6 @@ import {
 } from "@posthog/core/integrations/repositoryKeys";
 import { useService } from "@posthog/di/react";
 import { useOptionalAuthenticatedClient } from "@posthog/ui/features/auth/authClient";
-import {
-  getAuthIdentity,
-  useAuthStateValue,
-} from "@posthog/ui/features/auth/store";
 import { AUTH_SCOPED_QUERY_META } from "@posthog/ui/features/auth/useCurrentUser";
 import {
   type Integration,
@@ -45,7 +41,6 @@ import { useSettingsStore } from "@posthog/ui/features/settings/settingsStore";
 import { useAuthenticatedInfiniteQuery } from "@posthog/ui/hooks/useAuthenticatedInfiniteQuery";
 import { useAuthenticatedQuery } from "@posthog/ui/hooks/useAuthenticatedQuery";
 import { useDebounce } from "@posthog/ui/primitives/hooks/useDebounce";
-import { logger } from "@posthog/ui/shell/logger";
 import {
   type QueryClient,
   useQueries,
@@ -86,10 +81,9 @@ export interface IntegrationsQueryOptions {
 
 export function useIntegrations(options: IntegrationsQueryOptions = {}) {
   const setIntegrations = useIntegrationStore((state) => state.setIntegrations);
-  const scope = useAuthStateValue(getAuthIdentity);
 
   const query = useAuthenticatedQuery(
-    integrationKeys.list(scope),
+    integrationKeys.list(),
     (client) => client.getIntegrations() as Promise<Integration[]>,
     {
       refetchInterval: options.refetchInterval ?? false,
@@ -98,51 +92,35 @@ export function useIntegrations(options: IntegrationsQueryOptions = {}) {
   );
 
   useEffect(() => {
-    setIntegrations(query.data ?? [], scope);
-  }, [query.data, scope, setIntegrations]);
+    if (query.data) {
+      setIntegrations(query.data);
+    }
+  }, [query.data, setIntegrations]);
 
   return query;
 }
 
-export function useGithubRepositoryQueries(githubIntegrations: Integration[]) {
+function useAllGithubRepositories(githubIntegrations: Integration[]) {
   const client = useOptionalAuthenticatedClient();
-  const scope = useAuthStateValue(getAuthIdentity);
 
   return useQueries({
     queries: githubIntegrations.map((integration) => ({
-      queryKey: integrationKeys.repositories(integration.id, scope),
-      queryFn: async ({ signal }: { signal: AbortSignal }) => {
+      queryKey: integrationKeys.repositories(integration.id),
+      queryFn: async () => {
         if (!client) throw new Error("Not authenticated");
-        try {
-          const repos = await client.getGithubRepositories(
-            integration.id,
-            signal,
-          );
-          return { integrationId: integration.id, repos };
-        } catch (error) {
-          if (!signal.aborted) {
-            logger
-              .scope("github-repositories")
-              .error("Failed to load repositories", {
-                integrationId: integration.id,
-                error,
-              });
-          }
-          throw error;
-        }
+        const repos = await client.getGithubRepositories(integration.id);
+        return { integrationId: integration.id, repos };
       },
       enabled: !!client,
       staleTime: 5 * 60 * 1000,
       meta: AUTH_SCOPED_QUERY_META,
     })),
+    combine: (results) =>
+      combineGithubRepositories(
+        results,
+        githubIntegrations.map((integration) => integration.id),
+      ),
   });
-}
-
-function useAllGithubRepositories(githubIntegrations: Integration[]) {
-  return combineGithubRepositories(
-    useGithubRepositoryQueries(githubIntegrations),
-    githubIntegrations.map((integration) => integration.id),
-  );
 }
 
 export function useUserGithubIntegrations(

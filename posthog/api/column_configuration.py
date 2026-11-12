@@ -22,7 +22,7 @@ from posthog.models import ColumnConfiguration
 
 logger = structlog.get_logger(__name__)
 
-TEAM_EDITABLE_VIEW_CONTEXT_KEYS = {"customer_analytics_accounts_columns", "customer_analytics_account_notes"}
+TEAM_EDITABLE_VIEW_CONTEXT_KEYS = {"customer_analytics_accounts_columns"}
 
 
 class ColumnConfigurationListQuerySerializer(serializers.Serializer):

@@ -520,7 +520,7 @@ export interface TicketUpdateRequestApi {
      * @nullable
      */
     snoozed_until?: string | null
-    /** Tag names to set on the ticket. The list replaces the ticket's current tags. A request can add up to 100 new tags. */
+    /** Tag names to set on the ticket. */
     tags?: string[]
 }
 
@@ -564,7 +564,7 @@ export interface PatchedTicketUpdateRequestApi {
      * @nullable
      */
     snoozed_until?: string | null
-    /** Tag names to set on the ticket. The list replaces the ticket's current tags. A request can add up to 100 new tags. */
+    /** Tag names to set on the ticket. */
     tags?: string[]
 }
 

@@ -2,8 +2,6 @@ import { useActions, useValues } from 'kea'
 
 import { LemonSelect } from '@posthog/lemon-ui'
 
-import { QuillChartOptionSelect } from 'lib/components/ChartOptions/QuillChartOptionSelect'
-import { useQuillSurface } from 'lib/components/QuillSurface/quillSurfaceContext'
 import { insightLogic } from 'scenes/insights/insightLogic'
 
 import { FunnelsFilter } from '~/queries/schema/schema-general'
@@ -15,7 +13,6 @@ export function FunnelStepReferencePicker(): JSX.Element | null {
     const { insightProps } = useValues(insightLogic)
     const { insightFilter } = useValues(funnelDataLogic(insightProps))
     const { updateInsightFilter } = useActions(funnelDataLogic(insightProps))
-    const quillSurface = useQuillSurface()
 
     const { funnelStepReference } = (insightFilter || {}) as FunnelsFilter
 
@@ -29,28 +26,11 @@ export function FunnelStepReferencePicker(): JSX.Element | null {
             label: 'Relative to previous step',
         },
     ]
-    const value = funnelStepReference || FunnelStepReference.total
-    const onChange = (stepRef: FunnelStepReference | null): void => {
-        if (stepRef) {
-            updateInsightFilter({ funnelStepReference: stepRef })
-        }
-    }
-
-    if (quillSurface) {
-        return (
-            <QuillChartOptionSelect
-                data-attr="funnel-step-reference-selector"
-                value={value}
-                onChange={onChange}
-                options={options}
-            />
-        )
-    }
 
     return (
         <LemonSelect
-            value={value}
-            onChange={onChange}
+            value={funnelStepReference || FunnelStepReference.total}
+            onChange={(stepRef) => stepRef && updateInsightFilter({ funnelStepReference: stepRef })}
             dropdownMatchSelectWidth={false}
             data-attr="funnel-step-reference-selector"
             options={options}

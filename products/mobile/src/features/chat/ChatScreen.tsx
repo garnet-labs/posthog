@@ -666,9 +666,6 @@ export function ChatScreen({
                                 </ScrollView>
                             ) : (
                                 <SessionThread
-                                    feedbackContext={
-                                        session.taskId ? { sessionId: session.taskId, runtime: 'sandbox' } : undefined
-                                    }
                                     session={session}
                                     topInset={contentInset}
                                     onRetryHistory={() => {

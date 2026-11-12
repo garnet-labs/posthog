@@ -40,7 +40,6 @@ export function QueryInfo({ tabId, view, tabbed = false }: QueryInfoProps): JSX.
         upstreamLoading,
         upstreamLoadFailed,
         upstreamViewMode,
-        saveAsViewDisabledReason,
     } = useValues(sqlEditorLogic)
     const targetView = view ?? editingView
     // Mounting it loads the lineage for the view being edited.
@@ -131,7 +130,6 @@ export function QueryInfo({ tabId, view, tabbed = false }: QueryInfoProps): JSX.
                         <LemonButton
                             size="small"
                             onClick={() => saveAsView({ materializeAfterSave: true })}
-                            disabledReason={saveAsViewDisabledReason}
                             type="primary"
                             loading={updatingDataWarehouseSavedQuery}
                         >

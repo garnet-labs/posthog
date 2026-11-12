@@ -2,7 +2,7 @@ import { useActions, useValues } from 'kea'
 import posthog from 'posthog-js'
 import { useEffect, useMemo } from 'react'
 
-import { IconBottomPanel, IconPalette, IconRabbit, IconSearch, IconTortoise } from '@posthog/icons'
+import { IconBottomPanel, IconRabbit, IconSearch, IconTortoise } from '@posthog/icons'
 import { LemonMenuItems, Link } from '@posthog/lemon-ui'
 
 import { SettingsButton, SettingsMenu } from 'lib/components/PanelSettings/PanelSettings'
@@ -105,10 +105,8 @@ export function usePlayerChromeMenuItems(): LemonMenuItems {
     const {
         logicProps: { mode },
         playerControlsOverlay,
-        ambientBackground,
     } = useValues(sessionRecordingPlayerLogic)
-    const { setPlayerControlsOverlay, setAmbientBackground, setPause, openHeatmap } =
-        useActions(sessionRecordingPlayerLogic)
+    const { setPlayerControlsOverlay, setPause, openHeatmap } = useActions(sessionRecordingPlayerLogic)
     const { modalContext } = useValues(sessionPlayerModalLogic)
 
     const showControlsLayoutToggle = !!mode && ModesWithInteractions.includes(mode)
@@ -122,12 +120,6 @@ export function usePlayerChromeMenuItems(): LemonMenuItems {
                 onClick: () => setPlayerControlsOverlay(!playerControlsOverlay),
                 'data-attr': 'toggle-player-controls-overlay',
             },
-            {
-                label: ambientBackground ? 'Use plain bars around recording' : 'Fill bars with recording colors',
-                icon: <IconPalette />,
-                onClick: () => setAmbientBackground(!ambientBackground),
-                'data-attr': 'toggle-player-ambient-background',
-            },
             showHeatmap && {
                 label: 'Use as heatmap background',
                 icon: <IconHeatmap />,
@@ -138,15 +130,6 @@ export function usePlayerChromeMenuItems(): LemonMenuItems {
                 'data-attr': 'player-view-heatmap',
             },
         ],
-        [
-            showControlsLayoutToggle,
-            playerControlsOverlay,
-            ambientBackground,
-            showHeatmap,
-            setPlayerControlsOverlay,
-            setAmbientBackground,
-            setPause,
-            openHeatmap,
-        ]
+        [showControlsLayoutToggle, playerControlsOverlay, showHeatmap, setPlayerControlsOverlay, setPause, openHeatmap]
     )
 }

@@ -16,6 +16,7 @@ from django.http import HttpRequest
 
 import structlog
 from drf_spectacular.utils import empty
+from posthoganalytics import capture_exception
 from prometheus_client import Counter
 from requests.adapters import HTTPAdapter
 from rest_framework import request, serializers, status
@@ -287,8 +288,6 @@ ASYNC_QUERY_KINDS = INSIGHT_KINDS | {
     "TracesQuery",
     "ExperimentQuery",
     "ExperimentExposureQuery",
-    # Server-owned HogQL sections keep the extended timeout their standalone HogQLQuery tiles had.
-    "MCPDashboardQuery",
 }
 _EXTRA_ASYNC_KINDS = ASYNC_QUERY_KINDS - INSIGHT_KINDS
 
@@ -678,8 +677,7 @@ class ServerTimingsGathered:
         return all_timings
 
     def to_header_string(self, hogql_timings: list[QueryTiming] | None = None) -> str:
-        slowest_hogql_timings = sorted(hogql_timings or [], key=lambda timing: timing.t, reverse=True)[:20]
-        timings = self.generate_timings(slowest_hogql_timings).items()
+        timings = self.generate_timings(hogql_timings).items()
         result: list[str] = []
         current_length = 0
 
@@ -698,11 +696,9 @@ class ServerTimingsGathered:
                 The timings header is a debug signal we don't rely on for functionality
                 so not receiving all timings is not the worse thing in the world
                 """
-                logger.info(
-                    "server_timing_header_truncated",
-                    timing_count=len(timings),
-                    included_timing_count=len(result),
-                    header_length=current_length,
+                capture_exception(
+                    Exception(f"Server timing header exceeded 10k limit with {len(timings)} timings"),
+                    properties={"generated_so_far": ", ".join(result), "length_of_timings": len(timings)},
                 )
                 break
 

@@ -1,12 +1,14 @@
-import { useValues } from 'kea'
+import { useActions, useValues } from 'kea'
 import { useState } from 'react'
 
-import { LemonBanner, LemonButton, lemonToast } from '@posthog/lemon-ui'
+import { LemonBanner, LemonButton, LemonInputSelect, lemonToast } from '@posthog/lemon-ui'
 
 import api from 'lib/api'
-import { TagsInputSelect } from 'lib/components/TagsInputSelect'
+import { useOnMountEffect } from 'lib/hooks/useOnMountEffect'
 import { LemonSegmentedButton } from 'lib/lemon-ui/LemonSegmentedButton'
 import { projectLogic } from 'scenes/projectLogic'
+
+import { tagsModel } from '~/models/tagsModel'
 
 export type BulkTagAction = 'add' | 'remove' | 'set'
 
@@ -46,7 +48,14 @@ export function BulkUpdateTagsForm({
     const [selectedTags, setSelectedTags] = useState<string[]>([])
     const [loading, setLoading] = useState(false)
 
+    const { tags } = useValues(tagsModel)
+    const { loadTags } = useActions(tagsModel)
     const { currentProjectId } = useValues(projectLogic)
+
+    // The form mounts fresh each time its host opens, so this doubles as the on-open refresh.
+    useOnMountEffect(() => {
+        loadTags()
+    })
 
     const submit = async (): Promise<void> => {
         setLoading(true)
@@ -66,6 +75,7 @@ export function BulkUpdateTagsForm({
                 )
             }
             onClose()
+            loadTags()
             onSuccess?.(response)
         } catch (error: any) {
             // The server explains rule failures such as a project that requires tags, so show its
@@ -94,8 +104,11 @@ export function BulkUpdateTagsForm({
                 size="small"
                 fullWidth
             />
-            <TagsInputSelect
+            <LemonInputSelect
+                mode="multiple"
+                allowCustomValues
                 value={selectedTags}
+                options={(tags as string[]).map((t: string) => ({ key: t, label: t }))}
                 onChange={setSelectedTags}
                 placeholder="Enter tags..."
                 data-attr="bulk-tag-input"

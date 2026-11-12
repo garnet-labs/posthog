@@ -1,6 +1,5 @@
 import { useActions, useValues } from 'kea'
 
-import { hasOpenImplementationPr } from '@posthog/agent-contracts/signal-report-state'
 import { IconCheckCircle, IconHide, IconLeave, IconPerson, IconX } from '@posthog/icons'
 import { LemonButton, LemonMenu } from '@posthog/lemon-ui'
 
@@ -9,7 +8,7 @@ import { userLogic } from 'scenes/userLogic'
 import { inboxBulkActionsLogic } from '../../logics/inboxBulkActionsLogic'
 import { inboxFiltersLogic } from '../../logics/inboxFiltersLogic'
 import { SignalReport, SignalReportStatus } from '../../types'
-import { canUnassignMe } from '../../utils/reportActions'
+import { canUnassignMe, hasOpenImplementationPr } from '../../utils/reportActions'
 import { isReportClaimable } from '../../utils/reportClaim'
 import { reviewerRemovalReasonOptions } from '../../utils/reviewerRemovalReasons'
 import { openDismissReportDialog } from './DismissReportDialog'

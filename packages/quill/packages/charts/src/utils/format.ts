@@ -147,15 +147,11 @@ export function compactNumber(value: number | null): string {
     if (value === null) {
         return '-'
     }
-    if (!Number.isFinite(value)) {
-        return humanFriendlyNumber(value)
-    }
     value = parseFloat(value.toPrecision(3))
     let magnitude = 0
-    while (Math.abs(value) >= 1000 && magnitude < COMPACT_NUMBER_MAGNITUDES.length - 1) {
+    while (Math.abs(value) >= 1000) {
         magnitude++
-        // Re-round, because repeated division leaves float residue above about 1e21
-        value = parseFloat((value / 1000).toPrecision(3))
+        value /= 1000
     }
     return magnitude > 0 ? `${value} ${COMPACT_NUMBER_MAGNITUDES[magnitude]}` : value.toString()
 }

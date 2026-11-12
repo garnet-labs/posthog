@@ -69,15 +69,15 @@ export function TodayObjectHoverCard({
     preview: TodayObjectPreview
     onAction: () => void
 }): JSX.Element {
-    const { href, ref, type, surface } = preview
+    const { href, ref, type } = preview
     const { glanceFor } = useValues(todayObjectGlanceLogic)
     const { showGlance } = useActions(todayObjectGlanceLogic)
     const glanceRef = ref && GLANCE_TYPES.includes(baseObjectType(type)) ? ref : null
     useEffect(() => {
         if (glanceRef) {
-            showGlance(type, glanceRef, surface)
+            showGlance(type, glanceRef)
         }
-    }, [glanceRef, type, surface, showGlance])
+    }, [glanceRef, type, showGlance])
     const glance = glanceRef ? glanceFor(type, glanceRef) : null
     const opened = activityDetail(preview.lastViewedAt)
     const { Item: ActionItem } = useMemo(() => cardMenuParts(onAction), [onAction])

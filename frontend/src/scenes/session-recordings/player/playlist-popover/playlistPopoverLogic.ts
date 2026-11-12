@@ -277,13 +277,13 @@ export const playlistPopoverLogic = kea<playlistPopoverLogicType>([
             },
 
             addToPlaylist: async ({ playlist }) => {
-                await addRecordingToPlaylist(playlist.short_id, props.sessionRecordingId)
+                await addRecordingToPlaylist(playlist.short_id, props.sessionRecordingId, true)
                 actions.reportRecordingPinnedToList(true)
                 return [playlist, ...values.currentPlaylists]
             },
 
             removeFromPlaylist: async ({ playlist }) => {
-                await removeRecordingFromPlaylist(playlist.short_id, props.sessionRecordingId)
+                await removeRecordingFromPlaylist(playlist.short_id, props.sessionRecordingId, true)
                 actions.reportRecordingPinnedToList(false)
                 return values.currentPlaylists.filter((x) => x.short_id !== playlist.short_id)
             },

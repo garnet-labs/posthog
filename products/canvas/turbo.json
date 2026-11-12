@@ -10,11 +10,7 @@
                 "backend/temporal/**",
                 "backend/models.py",
                 "backend/migrations/**",
-                "backend/scopes.py",
-                "backend/apps.py",
-                "backend/checks.py",
-                "backend/logic/visibility.py",
-                "backend/search_sync.py"
+                "backend/scopes.py"
             ],
             "outputs": [],
             "cache": true

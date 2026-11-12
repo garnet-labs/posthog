@@ -20,6 +20,7 @@ import {
     MobileNodeType,
     NodeType,
     attributes,
+    documentNode,
     elementNode,
     keyboardEvent,
     serializedNodeWithId,
@@ -987,7 +988,7 @@ function isNode(x: unknown): x is serializedNodeWithId {
     return isObject(x) && 'type' in x && 'id' in x
 }
 
-function isNodeWithChildren(x: unknown): x is Extract<addedNodeMutation['node'], { childNodes: unknown[] }> {
+function isNodeWithChildren(x: unknown): x is elementNode | documentNode {
     return isNode(x) && 'childNodes' in x && Array.isArray(x.childNodes)
 }
 
@@ -997,7 +998,7 @@ function isNodeWithChildren(x: unknown): x is Extract<addedNodeMutation['node'],
  */
 function cloneWithoutChildren(converted: addedNodeMutation): addedNodeMutation {
     const cloned = { ...converted }
-    const clonedNode = { ...converted.node }
+    const clonedNode: serializedNodeWithId = { ...converted.node }
     if (isNodeWithChildren(clonedNode)) {
         clonedNode.childNodes = []
     }

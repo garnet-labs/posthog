@@ -3,7 +3,7 @@ import { loaders } from 'kea-loaders'
 import { router, urlToAction } from 'kea-router'
 import type { PostHog } from 'posthog-js/dist/module'
 
-import { inStorybook } from 'lib/utils/dom'
+import { inStorybook, inStorybookTestRunner } from 'lib/utils/dom'
 import { permanentlyMount } from 'lib/utils/kea-logic-builders'
 
 import { WebVitalsMetric } from '~/queries/schema/schema-general'
@@ -112,7 +112,11 @@ export const webVitalsToolbarLogic = kea<webVitalsToolbarLogicType>([
                 getWebVitals: async (_, breakpoint) => {
                     // If web vitals autocapture is disabled, we don't want to fetch the data
                     // because it's likely we won't have any data
-                    if (!values.posthog?.webVitalsAutocapture?.isEnabled && !inStorybook()) {
+                    if (
+                        !values.posthog?.webVitalsAutocapture?.isEnabled &&
+                        !inStorybook() &&
+                        !inStorybookTestRunner()
+                    ) {
                         return { LCP: null, FCP: null, CLS: null, INP: null } as WebVitalsMetrics
                     }
 
@@ -154,7 +158,7 @@ export const webVitalsToolbarLogic = kea<webVitalsToolbarLogicType>([
     })),
 
     afterMount(({ values, actions, cache }) => {
-        if (!values.posthog?.webVitalsAutocapture?.isEnabled && !inStorybook()) {
+        if (!values.posthog?.webVitalsAutocapture?.isEnabled && !inStorybook() && !inStorybookTestRunner()) {
             actions.nullifyLocalWebVitals()
         } else {
             const METRICS_AND_PROPERTIES: Record<WebVitalsMetric, string> = {

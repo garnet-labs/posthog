@@ -1,13 +1,10 @@
+import time
 import asyncio
 import threading
 import contextvars
-from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from products.warehouse_sources.backend.temporal.data_imports.pipelines.core import (
-    async_iterate as async_iterate_module,
-)
 from products.warehouse_sources.backend.temporal.data_imports.pipelines.core.async_iterate import (
     async_iterate,
     run_in_source_executor,
@@ -67,43 +64,20 @@ async def test_async_iterate_context_mutation_persists_across_iterations():
     assert _probe.get() == "outer"
 
 
-class _JobTrackingExecutor(ThreadPoolExecutor):
-    def __init__(self) -> None:
-        super().__init__(max_workers=2)
-        self._submitted_jobs = 0
-        self.cleanup_entered = threading.Event()
-
-    def submit(self, fn, /, *args, **kwargs):
-        self._submitted_jobs += 1
-        if self._submitted_jobs == 2:
-            close = args[0]
-
-            def cleanup():
-                # Signal inside Context.run so a started job cannot hide a context re-entry failure.
-                self.cleanup_entered.set()
-                return close()
-
-            return super().submit(fn, cleanup)
-        return super().submit(fn, *args, **kwargs)
-
-
 @pytest.mark.asyncio
-async def test_async_iterate_close_runs_when_cancelled_mid_iteration(monkeypatch: pytest.MonkeyPatch):
+async def test_async_iterate_close_runs_when_cancelled_mid_iteration():
     # Regression: reusing the iteration ctx for the finally-block _close
     # caused RuntimeError on cancellation (ctx still entered by the
     # in-flight _next), which skipped iterator.close() and leaked DB /
     # network resources. Using a fresh cleanup_ctx prevents that.
     closed_flag = threading.Event()
-    next_entered = threading.Event()
-    next_released = threading.Event()
 
     class SlowIterator:
         def __iter__(self):
             return self
 
         def __next__(self):
-            next_entered.set()
-            next_released.wait()
+            time.sleep(0.5)  # blocks long enough for cancellation to fire
             return 1
 
         def close(self):
@@ -113,23 +87,11 @@ async def test_async_iterate_close_runs_when_cancelled_mid_iteration(monkeypatch
         async for _ in async_iterate(SlowIterator()):
             pass
 
-    executor = _JobTrackingExecutor()
-    monkeypatch.setattr(async_iterate_module, "_SOURCE_ITERATOR_EXECUTOR", executor)
-
     task = asyncio.create_task(consume())
-    try:
-        assert await asyncio.to_thread(next_entered.wait, 5), "the first next() never started"
-        task.cancel()
-        assert await asyncio.to_thread(executor.cleanup_entered.wait, 5), "the cleanup context was never entered"
-    finally:
-        next_released.set()
-        if not task.cancelling():
-            task.cancel()
-        try:
-            with pytest.raises(asyncio.CancelledError):
-                await task
-        finally:
-            executor.shutdown()
+    await asyncio.sleep(0.05)  # let the first _next actually enter ctx.run
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
 
     # close() must have run despite cancellation mid-iteration.
     assert closed_flag.wait(timeout=3.0), "iterator.close() was not called"

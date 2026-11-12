@@ -5,7 +5,7 @@ import { LemonBadge, LemonButton, LemonMenu, LemonMenuItem, LemonMenuSection, Sp
 
 import { getAccessControlDisabledReason } from 'lib/utils/accessControlUtils'
 import { cn } from 'lib/utils/css-classes'
-import { inStorybook } from 'lib/utils/dom'
+import { inStorybook, inStorybookTestRunner } from 'lib/utils/dom'
 import { urls } from 'scenes/urls'
 import { userLogic } from 'scenes/userLogic'
 
@@ -94,7 +94,12 @@ export function SuggestedDashboardsMenu(): JSX.Element | null {
                 data-attr="metrics-suggested-dashboards-menu"
             >
                 <span className="flex items-center gap-1">
-                    <span className={cn('rainbow-text font-semibold', !inStorybook() && 'rainbow-text-animating')}>
+                    <span
+                        className={cn(
+                            'rainbow-text font-semibold',
+                            !(inStorybook() || inStorybookTestRunner()) && 'rainbow-text-animating'
+                        )}
+                    >
                         Suggested
                     </span>
                     {newSuggestionCount > 0 && (

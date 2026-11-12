@@ -80,7 +80,6 @@ export type SettingSectionId =
     | 'project-customization'
     | 'project-integrations'
     | 'project-logs'
-    | 'project-privacy'
     | 'project-product-analytics'
     | 'project-replay'
     | 'project-surveys'

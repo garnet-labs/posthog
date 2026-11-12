@@ -81,11 +81,13 @@ def service_account_description(aorganization, request) -> str:
 
 
 @pytest_asyncio.fixture
-async def integration(request, aorganization, ateam, bigquery_config, service_account_description) -> Integration:
+async def integration(
+    request, aorganization, ateam, bigquery_config, service_account_description
+) -> None | Integration:
     try:
         integration_type = request.param
     except Exception:
-        integration_type = "key_file"
+        return None
 
     match integration_type:
         case "impersonated":
@@ -99,8 +101,10 @@ async def integration(request, aorganization, ateam, bigquery_config, service_ac
 
             integration = await impersonated_integration(ateam, bigquery_config)
             await set_service_account_description_for_integration(integration, service_account_description)
-        case _:
+        case "key_file":
             integration = await key_file_integration(ateam, bigquery_config)
+        case _:
+            integration = None
 
     return integration
 

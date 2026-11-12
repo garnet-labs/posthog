@@ -1,6 +1,5 @@
 import type { ExplainChartData, StoryChapter } from './explainChartTypes'
 import { anchorOf, chapterFacts, overviewFacts, type StoryFactsOptions } from './storyFacts'
-import { funnelChapterFacts, funnelFactsSteps, funnelOverviewFacts } from './storyFunnelFacts'
 
 export interface StoryPage {
     title: string
@@ -22,24 +21,7 @@ function isPointRange(range: [number, number] | null, length: number): range is 
     return Number.isInteger(start) && Number.isInteger(end) && start >= 0 && start <= end && end < length
 }
 
-interface StoryFacts {
-    pointCount: number
-    overview: string
-    anchor: (range: [number, number]) => number
-    chapter: (range: [number, number]) => string
-}
-
-function factsOf(data: ExplainChartData, formatValue: StoryFactsOptions['formatValue']): StoryFacts {
-    if (data.shape === 'funnel_steps') {
-        const steps = funnelFactsSteps(data)
-        return {
-            pointCount: steps.length,
-            overview: funnelOverviewFacts(steps, formatValue),
-            // The marker sits on the step that people reached, or failed to reach.
-            anchor: ([, end]) => end,
-            chapter: (range) => funnelChapterFacts(steps, range, formatValue),
-        }
-    }
+export function buildStoryPages(data: ExplainChartData, formatValue: StoryFactsOptions['formatValue']): StoryPage[] {
     const series = data.results[data.seriesIndex]
     const values = series?.data ?? []
     const days = series?.days ?? []
@@ -48,34 +30,24 @@ function factsOf(data: ExplainChartData, formatValue: StoryFactsOptions['formatV
         lastPointInProgress: data.lastPointInProgress,
         formatValue,
     }
-    return {
-        pointCount: values.length,
-        overview: overviewFacts(values, options),
-        anchor: (range) => anchorOf(values, range, options),
-        chapter: (range) => chapterFacts(values, days, range, options),
-    }
-}
-
-export function buildStoryPages(data: ExplainChartData, formatValue: StoryFactsOptions['formatValue']): StoryPage[] {
-    const facts = factsOf(data, formatValue)
     const summary: StoryPage = {
         title: SUMMARY_TITLE,
         range: null,
         anchor: null,
-        facts: facts.overview,
+        facts: overviewFacts(values, options),
         chapter: null,
     }
     const chapters = data.chapters.map((chapter): StoryPage => {
-        const range = isPointRange(chapter.range, facts.pointCount) ? chapter.range : null
+        const range = isPointRange(chapter.range, values.length) ? chapter.range : null
         return {
             title: chapter.title,
             range,
-            anchor: range ? facts.anchor(range) : null,
-            facts: range ? facts.chapter(range) : '',
+            anchor: range ? anchorOf(values, range, options) : null,
+            facts: range ? chapterFacts(values, days, range, options) : '',
             chapter,
         }
     })
-    // Numbered in chart order, so the markers read left to right. A chapter with no point comes last.
-    const startOf = (page: StoryPage): number => page.range?.[0] ?? facts.pointCount
+    // Numbered in date order, so the markers read left to right. A chapter with no point comes last.
+    const startOf = (page: StoryPage): number => page.range?.[0] ?? values.length
     return [summary, ...chapters.sort((a, b) => startOf(a) - startOf(b))]
 }

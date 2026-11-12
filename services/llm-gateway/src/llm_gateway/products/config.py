@@ -90,7 +90,6 @@ _POSTHOG_CODE_AGENT_MODELS: Final[frozenset[str]] = frozenset(
     {
         "claude-fable-5",
         "claude-fable-5-1",
-        "claude-fable-5-2",
         "claude-opus-4-5",
         "claude-opus-4-6",
         "claude-opus-4-7",
@@ -153,7 +152,6 @@ PRODUCTS: Final[dict[str, ProductConfig]] = {
             {
                 "claude-fable-5",
                 "claude-fable-5-1",
-                "claude-fable-5-2",
                 "claude-opus-4-5",
                 "claude-opus-4-6",
                 "claude-opus-4-7",

@@ -247,13 +247,11 @@ def test_schemas_hide_internal_tables_and_offer_only_comparable_columns() -> Non
         schemas = {schema.name: schema for schema in CloudflareD1Source().get_schemas(CONFIG, team_id=1)}
 
     assert sorted(schemas) == ["active_users", "memberships", "recent_events", "users"]
-    assert sorted(
-        (field["field"], field["type"], field["is_indexed"]) for field in schemas["users"].incremental_fields
-    ) == [
-        ("born", IncrementalFieldType.Date, False),
-        ("created_at", IncrementalFieldType.DateTime, True),
+    assert [(field["field"], field["type"], field["is_indexed"]) for field in schemas["users"].incremental_fields] == [
         ("id", IncrementalFieldType.Integer, True),
         ("score", IncrementalFieldType.Numeric, False),
+        ("created_at", IncrementalFieldType.DateTime, True),
+        ("born", IncrementalFieldType.Date, False),
     ]
     # A view pages by offset, and an offset breaks once a later attempt moves the watermark.
     assert schemas["recent_events"].incremental_fields == []

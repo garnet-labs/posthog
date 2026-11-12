@@ -14,7 +14,8 @@ from products.signals.backend.report_generation.reviewer_telemetry import captur
 @pytest.fixture
 def organization():
     org = Organization.objects.create(name="test-reviewer-telemetry-org")
-    return org
+    yield org
+    org.delete()
 
 
 @pytest.fixture

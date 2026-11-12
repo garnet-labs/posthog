@@ -3,7 +3,6 @@ import { forms } from 'kea-forms'
 import type { DeepPartial, DeepPartialMap, FieldName, ValidationErrorType } from 'kea-forms'
 
 import api from 'lib/api'
-import type { LockedSetupValues } from 'lib/components/CyclotronJob/integrations/integrationSetupRegistry'
 import { integrationsLogic } from 'lib/integrations/integrationsLogic'
 import { lemonToast } from 'lib/lemon-ui/LemonToast'
 
@@ -12,7 +11,6 @@ import type { IntegrationType } from '~/types'
 export interface PostgreSQLSetupModalLogicProps {
     isOpen: boolean
     integration?: IntegrationType | null
-    locked?: LockedSetupValues
     onComplete: (integrationId?: number) => void
 }
 
@@ -202,7 +200,6 @@ export const postgreSQLSetupModalLogic = kea<postgreSQLSetupModalLogicType>([
                 ssl_mode: 'no',
                 use_system_ca: false,
                 ssl_root_cert: null as string | null,
-                ...props.locked?.values,
             },
             errors: ({ host, port, user, password, ssl_mode, use_system_ca, ssl_root_cert }) => ({
                 host: host?.trim() ? undefined : 'Host is required',
@@ -216,11 +213,8 @@ export const postgreSQLSetupModalLogic = kea<postgreSQLSetupModalLogicType>([
             }),
             submit: async () => {
                 try {
-                    // Locked values win over the form, so a value changed outside the read-only field is not saved.
-                    const { name, host, port, user, password, ssl_mode, use_system_ca, ssl_root_cert } = {
-                        ...values.postgreSQLIntegration,
-                        ...props.locked?.values,
-                    }
+                    const { name, host, port, user, password, ssl_mode, use_system_ca, ssl_root_cert } =
+                        values.postgreSQLIntegration
                     const integration = await api.integrations.create({
                         kind: 'postgresql',
                         config: {

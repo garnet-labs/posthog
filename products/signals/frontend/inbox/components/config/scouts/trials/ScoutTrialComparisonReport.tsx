@@ -175,11 +175,11 @@ export function ScoutTrialComparisonReport({
                             ),
                         },
                         {
-                            title: 'Credits',
+                            title: 'Cost',
                             key: 'cost',
                             width: 105,
                             tooltip:
-                                'Total scout credits used. Unavailable if any run is missing usage. Judging usage is separate.',
+                                'Total scout cost. Unavailable if any run is missing cost. Judging charges are separate.',
                             render: (_, { costUsd }) => (
                                 <span className={costUsd === null ? 'text-muted' : undefined}>
                                     {costUsd === null ? 'Unavailable' : formatRunCost(costUsd)}

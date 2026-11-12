@@ -2,6 +2,7 @@ import { MakeLogicType, actions, afterMount, connect, kea, listeners, path, redu
 import { loaders } from 'kea-loaders'
 import posthog from 'posthog-js'
 
+import api from 'lib/api'
 import {
     type TraceDialogCloseReason,
     type TraceDialogEntryPoint,
@@ -18,18 +19,27 @@ import {
     resolveTraceSessionId,
     type TraceIdentity,
 } from 'products/tracing/frontend/traceIdentity'
-import { type TraceSpanPages, loadTraceSpanPages } from 'products/tracing/frontend/traceSpanPages'
+import { resolveTraceLookupRange } from 'products/tracing/frontend/traceLinks'
 import { tracingConfigLogic } from 'products/tracing/frontend/tracingConfigLogic'
 import { tracingCorrelationConfigLogic } from 'products/tracing/frontend/tracingCorrelationConfigLogic'
 import type { Span, SpanInspectorTab, TraceViewMode } from 'products/tracing/frontend/types'
 
 import { traceViewLogic } from '../TraceView/traceViewLogic'
 
+// The trace endpoint pages at 2,000 spans, so this caps the dialog at 10,000. Bigger traces open in
+// Tracing, which pages in on scroll.
+const TRACE_DIALOG_MAX_PAGES = 5
+
 // Pinned: autocapture and the span keys both match on the dialog's data-attr.
 export const TRACE_DIALOG_DATA_ATTR = 'trace-dialog'
 const TRACE_DIALOG_SELECTOR = `[data-attr="${TRACE_DIALOG_DATA_ATTR}"]`
 
 export const TRACE_DIALOG_VIEW_ID = 'trace-dialog'
+
+export interface TraceDialogSpans {
+    spans: Span[]
+    truncated: boolean
+}
 
 interface TraceDialogSession {
     entryPoint: TraceDialogEntryPoint
@@ -69,7 +79,7 @@ export interface traceDialogLogicValues {
     openedAtUs: number | null
     traceIdentity: TraceIdentity
     traceSessionId: string | null
-    traceSpans: TraceSpanPages | null
+    traceSpans: TraceDialogSpans | null
     traceSpansFailed: boolean
     traceSpansLoading: boolean
 }
@@ -160,10 +170,10 @@ export interface traceDialogLogicActions {
         errorObject?: any
     }
     loadTraceSpansSuccess: (
-        traceSpans: TraceSpanPages | null,
+        traceSpans: TraceDialogSpans | null,
         payload?: TraceLinkParams
     ) => {
-        traceSpans: TraceSpanPages | null
+        traceSpans: TraceDialogSpans | null
         payload?: TraceLinkParams
     }
     openInTracing: () => {
@@ -184,13 +194,13 @@ export interface traceDialogLogicActions {
 export interface traceDialogLogicMeta {
     __keaTypeGenInternalSelectorTypes: {
         traceIdentity: (
-            traceSpans: TraceSpanPages | null,
+            traceSpans: TraceDialogSpans | null,
             configuredDistinctIdKeys: string[] | undefined,
             configuredSessionIdKeys: string[] | undefined,
             correlationLinksEnabled: boolean
         ) => TraceIdentity
         traceSessionId: (
-            traceSpans: TraceSpanPages | null,
+            traceSpans: TraceDialogSpans | null,
             configuredSessionIdKeys: string[] | undefined,
             sessionErrorBadgesEnabled: boolean
         ) => string | null
@@ -251,10 +261,36 @@ export const traceDialogLogic = kea<traceDialogLogicType>([
     }),
     loaders(({ values }) => ({
         traceSpans: [
-            null as TraceSpanPages | null,
+            null as TraceDialogSpans | null,
             {
-                loadTraceSpans: async (trace: TraceLinkParams, breakpoint): Promise<TraceSpanPages | null> =>
-                    loadTraceSpanPages(trace, breakpoint, () => values.isOpen),
+                loadTraceSpans: async (trace: TraceLinkParams, breakpoint): Promise<TraceDialogSpans | null> => {
+                    const dateRange = resolveTraceLookupRange(trace.ts)
+                    const seen = new Set<string>()
+                    const spans: Span[] = []
+                    let offset: number | undefined = undefined
+                    try {
+                        for (let page = 0; page < TRACE_DIALOG_MAX_PAGES; page++) {
+                            const response = await api.tracing.getTrace(trace.traceId, { dateRange, offset })
+                            breakpoint()
+                            // A page that adds no new span means the pages overlap, so paging further only repeats them.
+                            const fresh = (response.results as Span[]).filter((span) => !seen.has(span.span_id))
+                            fresh.forEach((span) => seen.add(span.span_id))
+                            spans.push(...fresh)
+                            if (!response.hasMore || response.nextOffset == null || fresh.length === 0) {
+                                return { spans, truncated: false }
+                            }
+                            if (!values.isOpen) {
+                                return { spans, truncated: true }
+                            }
+                            offset = response.nextOffset
+                        }
+                    } catch (error) {
+                        // A failure from a load that a newer one replaced must not mark the newer trace as failed.
+                        breakpoint()
+                        throw error
+                    }
+                    return { spans, truncated: true }
+                },
             },
         ],
     })),
@@ -290,7 +326,7 @@ export const traceDialogLogic = kea<traceDialogLogicType>([
         traceIdentity: [
             (s) => [s.traceSpans, s.configuredDistinctIdKeys, s.configuredSessionIdKeys, s.correlationLinksEnabled],
             (
-                traceSpans: TraceSpanPages | null,
+                traceSpans: TraceDialogSpans | null,
                 distinctIdKeys: string[] | undefined,
                 sessionIdKeys: string[] | undefined,
                 linksEnabled: boolean
@@ -304,7 +340,7 @@ export const traceDialogLogic = kea<traceDialogLogicType>([
         traceSessionId: [
             (s) => [s.traceSpans, s.configuredSessionIdKeys, s.sessionErrorBadgesEnabled],
             (
-                traceSpans: TraceSpanPages | null,
+                traceSpans: TraceDialogSpans | null,
                 sessionIdKeys: string[] | undefined,
                 badgesEnabled: boolean
             ): string | null =>

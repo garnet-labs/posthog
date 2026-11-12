@@ -12,7 +12,6 @@ import { BroadcastSendError, findMergeTag } from './broadcastSendError'
 export interface BroadcastSendErrorAction {
     label: string
     onClick: () => void
-    disabledReason?: string
 }
 
 /** Sending again goes to the whole audience, so a sender has to know when that repeats the email for some people. */
@@ -146,12 +145,7 @@ export function BroadcastSendErrorBanner({
             alignItems="start"
             action={
                 action
-                    ? {
-                          children: action.label,
-                          onClick: action.onClick,
-                          disabledReason: action.disabledReason,
-                          'data-attr': 'broadcast-send-error-action',
-                      }
+                    ? { children: action.label, onClick: action.onClick, 'data-attr': 'broadcast-send-error-action' }
                     : undefined
             }
         >

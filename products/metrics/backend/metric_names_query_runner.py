@@ -207,7 +207,7 @@ class MetricNamesQueryRunner:
             query_type="MetricNamesQuery",
             query=self._names_query(),
             team=self.team,
-            workload=Workload.METRICS,
+            workload=Workload.LOGS,
             settings=_SPARKLINE_QUERY_SETTINGS if self.names else _QUERY_SETTINGS,
         )
         return [{"name": name, "metric_type": metric_type} for name, _services, metric_type in response.results]
@@ -218,7 +218,7 @@ class MetricNamesQueryRunner:
             query_type="MetricNamesQuery",
             query=self._build_query(),
             team=self.team,
-            workload=Workload.METRICS,
+            workload=Workload.LOGS,
             settings=settings,
         )
         if not response.results:
@@ -285,7 +285,7 @@ class MetricNamesQueryRunner:
             query_type="MetricNamesSparklineQuery",
             query=query,
             team=self.team,
-            workload=Workload.METRICS,
+            workload=Workload.LOGS,
             settings=_SPARKLINE_QUERY_SETTINGS,
         )
 

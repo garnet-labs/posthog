@@ -6,7 +6,6 @@ import {
     TaxonomicFilterGroupType,
 } from 'lib/components/TaxonomicFilter/types'
 import { LemonButtonProps } from 'lib/lemon-ui/LemonButton'
-import type { LemonSelectOptionLeaf } from 'lib/lemon-ui/LemonSelect'
 
 import { ChartDisplayCategory, InsightType, PropertyOperator } from '~/types'
 
@@ -104,19 +103,4 @@ export interface MathSelectorProps {
     query?: Record<string, any>
     fullWidth?: boolean
     truncateText?: { maxWidthClass: string }
-}
-
-/** An option whose math comes in variants, such as "Count per user" with average, median and so on. */
-export interface MathOptionChoice {
-    prefix: string
-    value: string
-    options: LemonSelectOptionLeaf<string>[]
-    onSelect: (value: string) => void
-}
-
-export type MathSelectorOption = LemonSelectOptionLeaf<string> & { choice?: MathOptionChoice }
-
-export interface MathSelectorSection {
-    options: MathSelectorOption[]
-    footer?: React.ReactNode
 }

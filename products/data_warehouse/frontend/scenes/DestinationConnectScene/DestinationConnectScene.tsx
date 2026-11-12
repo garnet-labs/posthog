@@ -1,7 +1,9 @@
 import { useActions, useValues } from 'kea'
 
-import { LemonButton, Spinner } from '@posthog/lemon-ui'
+import { LemonButton } from '@posthog/lemon-ui'
 
+import 'lib/components/CyclotronJob/integrations/integrationSetups'
+import { getIntegrationSetup } from 'lib/components/CyclotronJob/integrations/integrationSetupRegistry'
 import { NotFound } from 'lib/components/NotFound'
 import { FEATURE_FLAGS } from 'lib/constants'
 import { LemonBanner } from 'lib/lemon-ui/LemonBanner'
@@ -14,7 +16,6 @@ import { SceneTitleSection } from '~/layout/scenes/components/SceneTitleSection'
 
 import { destinationTypeLabel } from '../../shared/components/DestinationIcon'
 import { destinationConnectSceneLogic } from './destinationConnectSceneLogic'
-import { DestinationMigrationPrefillConfirm } from './DestinationMigrationPrefillConfirm'
 
 export const scene: SceneExport = {
     component: DestinationConnectScene,
@@ -23,26 +24,15 @@ export const scene: SceneExport = {
 
 export function DestinationConnectScene(): JSX.Element {
     const { featureFlags } = useValues(featureFlagLogic)
-    const {
-        kind,
-        destinationDefinition,
-        integrationSetup,
-        setupModalOpen,
-        openSetupDisabledReason,
-        integrationId,
-        handBackStatus,
-        migrationItemId,
-        migrationPrefillLoading,
-        setupLock,
-        showPrefillConfirm,
-    } = useValues(destinationConnectSceneLogic)
-    const { setModalOpen, completeSetup } = useActions(destinationConnectSceneLogic)
+    const { kind, destinationDefinition, isModalOpen, integrationId, handBackStatus } =
+        useValues(destinationConnectSceneLogic)
+    const { setModalOpen, setIntegrationId } = useActions(destinationConnectSceneLogic)
 
     if (!featureFlags[FEATURE_FLAGS.WAREHOUSE_MULTI_DESTINATION]) {
         return <NotFound object="page" caption="Warehouse destinations isn't available for this project yet." />
     }
 
-    const SetupModal = integrationSetup?.SetupModal
+    const SetupModal = kind ? getIntegrationSetup(kind)?.SetupModal : undefined
     if (!kind || !destinationDefinition || !SetupModal) {
         return (
             <SceneContent>
@@ -55,14 +45,6 @@ export function DestinationConnectScene(): JSX.Element {
                         : "This link doesn't say which connection to set up."}{' '}
                     Add the destination from warehouse destinations instead.
                 </LemonBanner>
-            </SceneContent>
-        )
-    }
-
-    if (migrationPrefillLoading) {
-        return (
-            <SceneContent>
-                <Spinner />
             </SceneContent>
         )
     }
@@ -81,7 +63,6 @@ export function DestinationConnectScene(): JSX.Element {
                 }
             />
             <div className="max-w-200">
-                {showPrefillConfirm && <DestinationMigrationPrefillConfirm />}
                 {integrationId !== null ? (
                     <LemonBanner type={handBackStatus === 'sending' ? 'info' : 'success'}>
                         <p className="font-semibold mb-1">{typeLabel} connection saved</p>
@@ -103,11 +84,10 @@ export function DestinationConnectScene(): JSX.Element {
                         )}
                     </LemonBanner>
                 ) : (
-                    !setupModalOpen && (
+                    !isModalOpen && (
                         <LemonButton
                             type="primary"
                             onClick={() => setModalOpen(true)}
-                            disabledReason={openSetupDisabledReason}
                             data-attr="warehouse-destination-connect-open"
                         >
                             Enter credentials
@@ -116,13 +96,10 @@ export function DestinationConnectScene(): JSX.Element {
                 )}
             </div>
             <SetupModal
-                // The form reads its locked values once, so another migration item gets a fresh form.
-                key={String(migrationItemId)}
-                isOpen={setupModalOpen}
+                isOpen={isModalOpen && integrationId === null}
                 kind={kind}
-                locked={setupLock}
                 // The modals' close button calls onComplete with the click event, so only a number is a saved id.
-                onComplete={(id) => (typeof id === 'number' ? completeSetup(id, migrationItemId) : setModalOpen(false))}
+                onComplete={(id) => (typeof id === 'number' ? setIntegrationId(id) : setModalOpen(false))}
                 onClose={() => setModalOpen(false)}
             />
         </SceneContent>

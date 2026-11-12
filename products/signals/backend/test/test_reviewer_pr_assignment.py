@@ -54,7 +54,9 @@ def dri_flag():
 def org_and_team():
     org = Organization.objects.create(name="pr-assign-org")
     team = Team.objects.create(organization=org, name="pr-assign-team")
-    return org, team
+    yield org, team
+    team.delete()
+    org.delete()
 
 
 def _make_reviewer(org: Organization, login: str, *, opted_in: bool) -> User:

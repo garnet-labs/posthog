@@ -230,11 +230,7 @@ const meta: Meta = {
                 '/api/projects/:team_id/insights/': { results: INSIGHTS, next: null, count: INSIGHTS.length },
                 '/api/environments/:team_id/file_system/': fileSystemHandler,
                 '/api/projects/:team_id/file_system/': fileSystemHandler,
-                '/api/projects/:team_id/tags/': {
-                    results: ['finance', 'growth', 'onboarding', 'weekly'],
-                    next: null,
-                    count: 4,
-                },
+                '/api/projects/:team_id/tags/': ['finance', 'growth', 'onboarding', 'weekly'],
             },
             post: {
                 '/api/projects/:team_id/file_system/home_folder/': { id: 'home-folder', path: 'Home' },

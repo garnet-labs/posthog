@@ -1,7 +1,6 @@
 import { MakeLogicType, actions, afterMount, connect, kea, key, listeners, path, props, reducers, selectors } from 'kea'
 import { loaders } from 'kea-loaders'
 import { router, urlToAction } from 'kea-router'
-import posthog from 'posthog-js'
 
 import { toast } from '@posthog/quill'
 
@@ -191,14 +190,8 @@ export interface spaceSceneLogicActions {
         spaces: ChannelDTOApi[]
     } // todaySpacesLogic
     loadTaskActivity: (_?: void | undefined) => void // todaySpacesLogic
-    applySuggestion: (
-        prompt: string,
-        suggestionId: string,
-        position: number
-    ) => {
-        position: number
+    applySuggestion: (prompt: string) => {
         prompt: string
-        suggestionId: string
     }
     canvasDeleteFailed: () => {
         value: true
@@ -483,11 +476,7 @@ export const spaceSceneLogic = kea<spaceSceneLogicType>([
         savingFinished: true,
         sessionStarted: (sessionId: string) => ({ sessionId }),
         focusComposer: true,
-        applySuggestion: (prompt: string, suggestionId: string, position: number) => ({
-            prompt,
-            suggestionId,
-            position,
-        }),
+        applySuggestion: (prompt: string) => ({ prompt }),
         setAutoArchiveSelection: (selection: AutoArchiveSelection) => ({ selection }),
         setAutoArchiveCustomDays: (days: number | null) => ({ days }),
         saveAutoArchiveCustomDays: true,
@@ -882,12 +871,7 @@ export const spaceSceneLogic = kea<spaceSceneLogicType>([
         sessionUpdated: () => {
             actions.loadSessions()
         },
-        applySuggestion: ({ prompt, suggestionId, position }) => {
-            posthog.capture('today space suggestion clicked', {
-                suggestion_id: suggestionId,
-                position,
-                space_role: values.space?.system_role ?? null,
-            })
+        applySuggestion: ({ prompt }) => {
             actions.setSeed({ prompt, autoSubmit: false })
             actions.focusComposer()
         },

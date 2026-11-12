@@ -3,8 +3,6 @@ export type SignalReportStatus =
   | "candidate"
   | "in_progress"
   | "ready"
-  | "monitoring"
-  | "closed"
   | "resolved"
   | "failed"
   | "pending_input"

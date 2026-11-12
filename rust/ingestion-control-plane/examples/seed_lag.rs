@@ -52,7 +52,6 @@ fn headers(token: &str, distinct_id: &str, event: &str, historical: bool) -> Own
         dlq_step: None,
         dlq_timestamp: None,
         content_encoding: None,
-        legacy_property_splice: None,
     }
     .into()
 }

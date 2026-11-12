@@ -18,7 +18,6 @@ import { lemonBannerLogic } from 'lib/lemon-ui/LemonBanner/lemonBannerLogic'
 import { LemonTab, LemonTabs } from 'lib/lemon-ui/LemonTabs'
 import { LinkPrimitive } from 'lib/lemon-ui/Link'
 import { Spinner } from 'lib/lemon-ui/Spinner/Spinner'
-import { preflightLogic } from 'lib/logic/preflightLogic'
 import { useAttachedLogic } from 'lib/logic/scenes/useAttachedLogic'
 import { cn } from 'lib/utils/css-classes'
 import { sceneConfigurations } from 'scenes/scenes'
@@ -45,7 +44,7 @@ import {
     SessionRecordingPlaylistLogicProps,
     sessionRecordingsPlaylistLogic,
 } from './playlist/sessionRecordingsPlaylistLogic'
-import { SCENE_PLAYLIST_LOGIC_PROPS, humanFriendlyTabName, sessionReplaySceneLogic } from './sessionReplaySceneLogic'
+import { SCENE_PLAYLIST_LOGIC_PROPS, sessionReplaySceneLogic } from './sessionReplaySceneLogic'
 
 const HedgehogExplorer = pngHoggie(explorerPng)
 
@@ -200,10 +199,9 @@ function ReplayVisionPromoBanner(): JSX.Element | null {
     const { isDismissed } = useValues(lemonBannerLogic({ dismissKey: REPLAY_VISION_PROMO_DISMISS_KEY }))
     // The promo waits until the field guide banner is closed so the two never stack
     const { isDismissed: isFieldGuideDismissed } = useValues(lemonBannerLogic({ dismissKey: FIELD_GUIDE_DISMISS_KEY }))
-    const { isHobby } = useValues(preflightLogic)
 
     // A dismissed LemonBanner renders null but the viewed tracker would still fire, skewing impressions
-    if (isHobby || isDismissed || !isFieldGuideDismissed) {
+    if (isDismissed || !isFieldGuideDismissed) {
         return null
     }
 
@@ -323,7 +321,7 @@ const ReplayPageTabs: ReplayTab[] = [
 export function SessionRecordingsPageTabs(): JSX.Element | null {
     const { tab } = useValues(sessionReplaySceneLogic)
     const { replayLayout } = useValues(playerSettingsLogic)
-    if (isNewReplayLayout(replayLayout)) {
+    if (tab === ReplayTabs.Home && isNewReplayLayout(replayLayout)) {
         return null
     }
     return (
@@ -346,32 +344,17 @@ export function SessionRecordingsPageTabs(): JSX.Element | null {
     )
 }
 
-function ReplayTitleSection(): JSX.Element {
-    const { tab } = useValues(sessionReplaySceneLogic)
-    const { replayLayout } = useValues(playerSettingsLogic)
-    const collectionsUnderRecordings = tab === ReplayTabs.Playlists && isNewReplayLayout(replayLayout)
-    const replayName = sceneConfigurations[Scene.Replay].name
-    return (
-        <SceneTitleSection
-            name={collectionsUnderRecordings ? humanFriendlyTabName(tab) : replayName}
-            resourceType={{
-                type: sceneConfigurations[Scene.Replay].iconType || 'default_icon_type',
-            }}
-            forceBackTo={
-                collectionsUnderRecordings
-                    ? { key: Scene.Replay, name: replayName, path: urls.replay(ReplayTabs.Home) }
-                    : undefined
-            }
-            actions={<Header />}
-        />
-    )
-}
-
 export function SessionsRecordings(): JSX.Element {
     return (
         <BindLogic logic={sessionReplaySceneLogic} props={{}}>
             <SceneContent className="h-full">
-                <ReplayTitleSection />
+                <SceneTitleSection
+                    name={sceneConfigurations[Scene.Replay].name}
+                    resourceType={{
+                        type: sceneConfigurations[Scene.Replay].iconType || 'default_icon_type',
+                    }}
+                    actions={<Header />}
+                />
                 <SessionRecordingsPageTabs />
                 <MainPanel />
             </SceneContent>

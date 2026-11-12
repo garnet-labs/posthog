@@ -7,7 +7,6 @@ mod continuous;
 #[cfg(test)]
 mod harness;
 mod poll;
-mod redelivery;
 
 use std::sync::Arc;
 

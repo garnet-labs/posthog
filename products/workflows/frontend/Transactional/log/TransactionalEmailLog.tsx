@@ -13,7 +13,6 @@ import { urls } from 'scenes/urls'
 import type { TransactionalEmailLogEntryApi } from 'products/messaging/frontend/generated/api.schemas'
 
 import { messageTemplatesLogic } from '../../TemplateLibrary/messageTemplatesLogic'
-import { EmailDirectionToggle } from '../comingSoon/EmailDirectionToggle'
 import { EMAIL_STATUS_DESCRIPTION, EMAIL_STATUS_LABEL, EMAIL_STATUS_TAG, emailReasonText } from './emailLogStatus'
 import { QuillTransactionalEmailLogFilters } from './QuillTransactionalEmailLogFilters'
 import { TransactionalEmailLogDateFilter } from './TransactionalEmailLogDateFilter'
@@ -57,7 +56,6 @@ export function TransactionalEmailLog(): JSX.Element {
 
     return (
         <div className="flex flex-col gap-2">
-            <EmailDirectionToggle />
             {todayRailNav ? (
                 <QuillTransactionalEmailLogFilters emailOptions={emailOptions} statusOptions={STATUS_OPTIONS} />
             ) : (

@@ -9,8 +9,10 @@ import { ErrorEventType } from 'lib/components/Errors/types'
 import type { TimelineMarkerColor } from 'lib/components/SessionTimeline/SessionTimeline'
 import { usableId } from 'lib/components/ViewTraceButton/usableId'
 import { ViewTraceButton } from 'lib/components/ViewTraceButton/ViewTraceButton'
+import { useFeatureFlag } from 'lib/hooks/useFeatureFlag'
 import { Tabs, TabsList, TabsTrigger } from 'lib/ui/quill'
 
+import { ViewLogsButton } from 'products/logs/frontend/components/ViewLogsButton'
 import { useOpenTraceDialog } from 'products/tracing/frontend/components/TraceDialog/useOpenTraceDialog'
 
 import { ExceptionCardFooter } from './ExceptionCardFooter'
@@ -19,7 +21,6 @@ import { LogsTab } from './Tabs/LogsTab/LogsTab'
 import { PropertiesTab } from './Tabs/PropertiesTab'
 import { SessionTab } from './Tabs/SessionTab'
 import { StackTraceTab } from './Tabs/StackTraceTab'
-import { TraceTab } from './Tabs/TraceTab'
 
 interface ExceptionCardContentProps {
     eventId?: string
@@ -86,9 +87,10 @@ function ExceptionCardContent({
     renderStackTraceActions,
     label,
 }: ExceptionCardContentProps): JSX.Element {
-    const { currentTab, logsEnabled, traceTabEnabled } = useValues(exceptionCardLogic)
-    const { spanId, traceId } = useValues(errorPropertiesLogic)
+    const { currentTab } = useValues(exceptionCardLogic)
+    const { sessionId, spanId, traceId } = useValues(errorPropertiesLogic)
     const { setCurrentTab } = useActions(exceptionCardLogic)
+    const logsEnabled = useFeatureFlag('LOGS_IN_ERROR_TRACKING')
     const openTraceDialog = useOpenTraceDialog()
     const usableTraceId = usableId(traceId)
     const usableSpanId = usableId(spanId)
@@ -123,8 +125,7 @@ function ExceptionCardContent({
                         value === 'properties' ||
                         value === 'timeline' ||
                         value === 'recording' ||
-                        value === 'logs' ||
-                        value === 'trace'
+                        value === 'logs'
                     ) {
                         setCurrentTab(value)
                     }
@@ -133,7 +134,7 @@ function ExceptionCardContent({
             >
                 {/* Container query, not viewport: the card sits in a resizable split pane. At @xl and up,
                     symmetric 1fr gutters centre the tab bar; below it the gutters shrink to their content
-                    so the tab bar keeps the slack. Just above @xl a 1fr share is narrower than the action,
+                    so the tab bar keeps the slack. Just above @xl a 1fr share is narrower than two actions,
                     so the right gutter never drops below its content and the tab bar sits off-centre until
                     there is room; the left gutter keeps the logomark's 1.125rem (text-lg) so the tab bar
                     scrolls before the logo is cut in half. The container wraps the header alone — inline-size
@@ -196,18 +197,9 @@ function ExceptionCardContent({
                                     Logs
                                 </TabsTrigger>
                             )}
-                            {traceTabEnabled && (
-                                <TabsTrigger
-                                    value="trace"
-                                    className="text-sm"
-                                    style={{ '--background': 'transparent' } as CSSProperties}
-                                >
-                                    Trace
-                                </TabsTrigger>
-                            )}
                         </TabsList>
                         <div className="flex justify-end gap-1">
-                            {!traceTabEnabled && usableTraceId && (
+                            {usableTraceId && (
                                 <ViewTraceButton
                                     traceId={usableTraceId}
                                     spanId={usableSpanId}
@@ -223,6 +215,15 @@ function ExceptionCardContent({
                                     }
                                 />
                             )}
+                            {sessionId && (currentTab === 'timeline' || currentTab === 'recording') ? (
+                                <ViewLogsButton
+                                    sessionId={sessionId}
+                                    timestamp={timestamp}
+                                    openedFrom="exception"
+                                    size="xsmall"
+                                    data-attr="error-tracking-session-view-logs"
+                                />
+                            ) : null}
                         </div>
                     </div>
                 </div>
@@ -230,9 +231,6 @@ function ExceptionCardContent({
                 <PropertiesTab value="properties" className="flex-1 min-h-0" />
                 <SessionTab timestamp={timestamp} eventMarkerColor={eventMarkerColor} />
                 {logsEnabled && <LogsTab timestamp={timestamp} />}
-                {traceTabEnabled && (
-                    <TraceTab eventId={eventId} traceId={usableTraceId} spanId={usableSpanId} timestamp={timestamp} />
-                )}
                 <ExceptionCardFooter eventId={eventId} fingerprint={fingerprint} label={label} timestamp={timestamp} />
             </Tabs>
         </LemonCard>

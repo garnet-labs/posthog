@@ -1,22 +1,11 @@
-import { useActions } from 'kea'
-
 import { LemonButton } from '@posthog/lemon-ui'
 
 import { urls } from 'scenes/urls'
-import { RecommendationsActionLocation } from 'scenes/web-analytics/tabs/marketing-analytics/frontend/logic/marketingAnalyticsLogic'
 
 import { RecommendationDataGapDescription } from './RecommendationDataGapDescription'
 import { RecommendationDataGap } from './recommendations'
-import { recommendationsLogic } from './recommendationsLogic'
 
-export function RecommendationDataGapList({
-    gaps,
-    location,
-}: {
-    gaps: RecommendationDataGap[]
-    location: RecommendationsActionLocation
-}): JSX.Element {
-    const { reportRecommendationsActionClicked } = useActions(recommendationsLogic)
+export function RecommendationDataGapList({ gaps }: { gaps: RecommendationDataGap[] }): JSX.Element {
     const sourceIds = [...new Set(gaps.map((gap) => gap.sourceId))]
     return (
         <div className="flex w-[28rem] max-w-[90vw] flex-col gap-2 p-1">
@@ -35,7 +24,6 @@ export function RecommendationDataGapList({
                                 type="secondary"
                                 to={urls.dataWarehouseSource(`managed-${sourceId}`)}
                                 data-attr="marketing-recommendations-data-gap-manage-source"
-                                onClick={() => reportRecommendationsActionClicked('manage_source', location)}
                             >
                                 Manage source
                             </LemonButton>

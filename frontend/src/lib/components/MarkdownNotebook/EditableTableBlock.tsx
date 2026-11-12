@@ -1,5 +1,4 @@
 import clsx from 'clsx'
-import posthog from 'posthog-js'
 import {
     ClipboardEvent as ReactClipboardEvent,
     FormEvent,
@@ -17,7 +16,7 @@ import { IconMinus, IconPlus, IconTrash } from '@posthog/icons'
 import { LemonButton } from '@posthog/lemon-ui'
 
 import { shouldUseMarkdownPaste } from './documentModel'
-import { getInlineLinkPasteResult, getSelectionRange, restoreSelection } from './domSelection'
+import { getInlineLinkPasteResult, getSelectionRange } from './domSelection'
 import { RestoreSelectionRequest, TableCellPosition, TextSelectionPointerStartEvent } from './editorTypes'
 import { splitInlineNodesAt } from './inlineContent'
 import { htmlElementToInlineNodes, inlineNodesToHtml, parseMarkdownNotebook } from './markdown'
@@ -83,8 +82,6 @@ export function tableControlStyle(variables: Record<string, string>): CSSPropert
 
 // Keep in sync with the 1.25rem add-zone size in MarkdownNotebook.scss
 const TABLE_INSERT_ZONE_SIZE_REM = 1.25
-// Keep in sync with the 1.5rem row remove zone width in MarkdownNotebook.scss
-const TABLE_REMOVE_ZONE_SIZE_REM = 1.5
 const DEFAULT_ROOT_FONT_SIZE_PX = 16
 
 export function getTableInsertZoneSize(element: Element): number {
@@ -135,7 +132,6 @@ export function EditableTableBlock({
     const tableGridRef = useRef<HTMLDivElement | null>(null)
     const tableRef = useRef<HTMLTableElement | null>(null)
     const [controlLayout, setControlLayout] = useState<TableStructureControlLayout | null>(null)
-    const [hoverPosition, setHoverPosition] = useState<{ x: number; y: number } | null>(null)
 
     const updateTableControlLayout = useCallback((): void => {
         if (mode !== 'edit') {
@@ -245,8 +241,7 @@ export function EditableTableBlock({
         })
     }
 
-    const addTableRowAfter = (rowIndex: number, columnIndex: number, source: 'keyboard' | 'pointer'): void => {
-        posthog.capture('notebook table structure changed', { action: 'add', dimension: 'row', source })
+    const addTableRowAfter = (rowIndex: number, columnIndex: number): void => {
         const insertIndex = Math.max(0, Math.min(rowIndex + 1, rows.length))
         updateNode(node.id, (currentNode) => {
             if (currentNode.type !== 'table') {
@@ -301,8 +296,7 @@ export function EditableTableBlock({
               }
     }
 
-    const addTableColumnAfter = (columnIndex: number, source: 'keyboard' | 'pointer'): void => {
-        posthog.capture('notebook table structure changed', { action: 'add', dimension: 'column', source })
+    const addTableColumnAfter = (columnIndex: number): void => {
         const insertIndex = Math.max(0, Math.min(columnIndex + 1, columnCount))
         updateNode(node.id, (currentNode) => {
             if (currentNode.type !== 'table') {
@@ -421,48 +415,6 @@ export function EditableTableBlock({
         left: clampTableInsertControlCenter(control.left, tableLeft, tableWidth, insertZoneSize),
     }))
 
-    const rowControlLeft =
-        clampTableInsertControlCenter(
-            hoverPosition?.x ?? tableLeft + tableWidth / 2,
-            tableLeft,
-            tableWidth,
-            insertZoneSize
-        ) - tableLeft
-    const columnControlTop =
-        clampTableInsertControlCenter(
-            hoverPosition?.y ?? tableTop + tableHeight / 2,
-            tableTop,
-            tableHeight,
-            insertZoneSize
-        ) - tableTop
-    const nearestIndex = (values: number[], coordinate: number | undefined, maxDistance = Infinity): number => {
-        if (coordinate === undefined || !values.length) {
-            return -1
-        }
-        const nearest = values.reduce(
-            (closest, value, index) =>
-                Math.abs(value - coordinate) < Math.abs(values[closest] - coordinate) ? index : closest,
-            0
-        )
-        return Math.abs(values[nearest] - coordinate) <= maxDistance ? nearest : -1
-    }
-    const activeRowInsert = nearestIndex(controlLayout?.rowInsertTops ?? [], hoverPosition?.y, insertZoneSize / 2)
-    const activeColumnInsert = nearestIndex(
-        controlLayout?.columnInsertLefts ?? [],
-        hoverPosition?.x,
-        insertZoneSize / 2
-    )
-    // The band covers the add-column and remove zones, so that the pointer can reach the remove control.
-    const rowRemoveBandWidth = insertZoneSize * (1 + TABLE_REMOVE_ZONE_SIZE_REM / TABLE_INSERT_ZONE_SIZE_REM)
-    const activeRowRemove = nearestIndex(
-        controlLayout?.rowRemoveRects.map(({ top, height }) => top + height / 2) ?? [],
-        hoverPosition && hoverPosition.x >= tableLeft + tableWidth - rowRemoveBandWidth ? hoverPosition.y : undefined
-    )
-    const activeColumnRemove = nearestIndex(
-        controlLayout?.columnRemoveRects.map(({ left, width }) => left + width / 2) ?? [],
-        hoverPosition && hoverPosition.y <= tableTop + insertZoneSize / 2 ? hoverPosition.x : undefined
-    )
-
     return (
         <div
             className={clsx(
@@ -472,26 +424,7 @@ export function EditableTableBlock({
             ref={setBlockRef}
         >
             <div className="MarkdownNotebook__table-scroll">
-                <div
-                    className="MarkdownNotebook__table-grid"
-                    ref={tableGridRef}
-                    onMouseMove={
-                        mode === 'edit'
-                            ? (event) => {
-                                  if (
-                                      (event.target as HTMLElement).closest(
-                                          '.MarkdownNotebook__table-structure-control'
-                                      )
-                                  ) {
-                                      return
-                                  }
-                                  const rect = event.currentTarget.getBoundingClientRect()
-                                  setHoverPosition({ x: event.clientX - rect.left, y: event.clientY - rect.top })
-                              }
-                            : undefined
-                    }
-                    onMouseLeave={() => setHoverPosition(null)}
-                >
+                <div className="MarkdownNotebook__table-grid" ref={tableGridRef}>
                     <table ref={tableRef}>
                         <thead>
                             <tr>
@@ -536,18 +469,14 @@ export function EditableTableBlock({
                     </table>
                     {mode === 'edit' ? (
                         <div className="MarkdownNotebook__table-structure-overlay" contentEditable={false}>
-                            {rowInsertControls.map((control, index) => (
+                            {rowInsertControls.map((control) => (
                                 <div
-                                    className={clsx(
-                                        'MarkdownNotebook__table-add-zone MarkdownNotebook__table-row-add-zone',
-                                        activeRowInsert === index && 'MarkdownNotebook__table-control-zone--active'
-                                    )}
+                                    className="MarkdownNotebook__table-add-zone MarkdownNotebook__table-row-add-zone"
                                     key={control.key}
                                     style={tableControlStyle({
                                         '--table-control-left': `${tableLeft}px`,
                                         '--table-control-top': `${control.top}px`,
                                         '--table-control-width': `${tableWidth}px`,
-                                        '--table-pointer-x': `${rowControlLeft}px`,
                                     })}
                                 >
                                     <TableStructureControlButton
@@ -555,22 +484,18 @@ export function EditableTableBlock({
                                         tooltip={control.tooltip}
                                         icon={<IconPlus />}
                                         dataAttr="markdown-notebook-table-add-row"
-                                        onClick={(source) => addTableRowAfter(control.rowIndex, 0, source)}
+                                        onClick={() => addTableRowAfter(control.rowIndex, 0)}
                                     />
                                 </div>
                             ))}
-                            {columnInsertControls.map((control, index) => (
+                            {columnInsertControls.map((control) => (
                                 <div
-                                    className={clsx(
-                                        'MarkdownNotebook__table-add-zone MarkdownNotebook__table-column-add-zone',
-                                        activeColumnInsert === index && 'MarkdownNotebook__table-control-zone--active'
-                                    )}
+                                    className="MarkdownNotebook__table-add-zone MarkdownNotebook__table-column-add-zone"
                                     key={control.key}
                                     style={tableControlStyle({
                                         '--table-control-left': `${control.left}px`,
                                         '--table-control-top': `${tableTop}px`,
                                         '--table-control-height': `${tableHeight}px`,
-                                        '--table-pointer-y': `${columnControlTop}px`,
                                     })}
                                 >
                                     <TableStructureControlButton
@@ -578,7 +503,7 @@ export function EditableTableBlock({
                                         tooltip={control.tooltip}
                                         icon={<IconPlus />}
                                         dataAttr="markdown-notebook-table-add-column"
-                                        onClick={(source) => addTableColumnAfter(control.columnIndex, source)}
+                                        onClick={() => addTableColumnAfter(control.columnIndex)}
                                     />
                                 </div>
                             ))}
@@ -586,14 +511,10 @@ export function EditableTableBlock({
                                 const rowRect = controlLayout?.rowRemoveRects[rowIndex]
                                 return (
                                     <div
-                                        className={clsx(
-                                            'MarkdownNotebook__table-remove-zone MarkdownNotebook__table-row-remove-zone',
-                                            activeRowRemove === rowIndex &&
-                                                'MarkdownNotebook__table-control-zone--active'
-                                        )}
+                                        className="MarkdownNotebook__table-remove-zone MarkdownNotebook__table-row-remove-zone"
                                         key={`remove-row-${rowIndex}`}
                                         style={tableControlStyle({
-                                            '--table-control-left': `${tableLeft + tableWidth}px`,
+                                            '--table-control-left': `${tableLeft}px`,
                                             '--table-control-top': `${rowRect?.top ?? tableTop}px`,
                                             '--table-control-height': `${rowRect?.height ?? 0}px`,
                                         })}
@@ -612,11 +533,7 @@ export function EditableTableBlock({
                                 const columnRect = controlLayout?.columnRemoveRects[columnIndex]
                                 return (
                                     <div
-                                        className={clsx(
-                                            'MarkdownNotebook__table-remove-zone MarkdownNotebook__table-column-remove-zone',
-                                            activeColumnRemove === columnIndex &&
-                                                'MarkdownNotebook__table-control-zone--active'
-                                        )}
+                                        className="MarkdownNotebook__table-remove-zone MarkdownNotebook__table-column-remove-zone"
                                         key={`remove-column-${columnIndex}`}
                                         style={tableControlStyle({
                                             '--table-control-left': `${columnRect?.left ?? tableLeft}px`,
@@ -673,7 +590,7 @@ export function TableStructureControlButton({
     icon: JSX.Element
     dataAttr: string
     disabledReason?: string
-    onClick: (source: 'keyboard' | 'pointer') => void
+    onClick: () => void
 }): JSX.Element {
     return (
         <LemonButton
@@ -685,7 +602,7 @@ export function TableStructureControlButton({
             noPadding
             size="xsmall"
             tooltip={tooltip}
-            onClick={(event) => onClick(event.detail === 0 ? 'keyboard' : 'pointer')}
+            onClick={onClick}
             onMouseDown={(event) => {
                 event.preventDefault()
                 event.stopPropagation()
@@ -839,28 +756,6 @@ export function EditableTableCellContent({
             onMouseDown={startTextSelectionPointer}
             onPointerDown={startTextSelectionPointer}
             onTouchStart={startTextSelectionPointer}
-            onClick={(event) => {
-                if (mode !== 'edit' || event.shiftKey || event.metaKey || event.ctrlKey || event.altKey) {
-                    return
-                }
-                const selection = window.getSelection()
-                if (selection && !selection.isCollapsed && event.detail < 2) {
-                    return
-                }
-                const element = event.currentTarget
-                element.focus()
-                const length = getInlineText(htmlElementToInlineNodes(element)).length
-                restoreSelection(element, event.detail >= 2 ? 0 : length, length)
-                handleSelectionChange()
-            }}
-            onDoubleClick={(event) => {
-                if (mode !== 'edit') {
-                    return
-                }
-                const element = event.currentTarget
-                restoreSelection(element, 0, getInlineText(htmlElementToInlineNodes(element)).length)
-                handleSelectionChange()
-            }}
             onMouseUp={handleSelectionChange}
             onKeyUp={handleSelectionChange}
         />

@@ -94,7 +94,6 @@ export const AnnotationScopeEnumApi = {
 } as const
 
 export interface AnnotationApi {
-    /** Unique ID of the annotation. */
     readonly id: number
     /**
      * Annotation text shown on charts to describe the change, release, or incident.
@@ -122,34 +121,17 @@ export interface AnnotationApi {
      * @nullable
      */
     dashboard_id?: number | null
-    /**
-     * Name of the dashboard in `dashboard_id`, or null when there is none.
-     * @nullable
-     */
+    /** @nullable */
     readonly dashboard_name: string | null
-    /**
-     * Short ID of the insight in `dashboard_item`, or null when there is none.
-     * @nullable
-     */
+    /** @nullable */
     readonly insight_short_id: string | null
-    /**
-     * Name of the insight in `dashboard_item`, or null when it has none.
-     * @nullable
-     */
+    /** @nullable */
     readonly insight_name: string | null
-    /**
-     * Generated name of the insight in `dashboard_item`, shown when the insight has no name.
-     * @nullable
-     */
+    /** @nullable */
     readonly insight_derived_name: string | null
-    /** User who created the annotation. */
     readonly created_by: UserBasicApi
-    /**
-     * When the annotation was created.
-     * @nullable
-     */
+    /** @nullable */
     readonly created_at: string | null
-    /** When the annotation was last changed. */
     readonly updated_at: string
     /** Soft-delete flag. Set to true to hide the annotation, or false to restore it. */
     deleted?: boolean
@@ -184,7 +166,6 @@ export interface PaginatedAnnotationListApi {
 }
 
 export interface PatchedAnnotationApi {
-    /** Unique ID of the annotation. */
     readonly id?: number
     /**
      * Annotation text shown on charts to describe the change, release, or incident.
@@ -212,34 +193,17 @@ export interface PatchedAnnotationApi {
      * @nullable
      */
     dashboard_id?: number | null
-    /**
-     * Name of the dashboard in `dashboard_id`, or null when there is none.
-     * @nullable
-     */
+    /** @nullable */
     readonly dashboard_name?: string | null
-    /**
-     * Short ID of the insight in `dashboard_item`, or null when there is none.
-     * @nullable
-     */
+    /** @nullable */
     readonly insight_short_id?: string | null
-    /**
-     * Name of the insight in `dashboard_item`, or null when it has none.
-     * @nullable
-     */
+    /** @nullable */
     readonly insight_name?: string | null
-    /**
-     * Generated name of the insight in `dashboard_item`, shown when the insight has no name.
-     * @nullable
-     */
+    /** @nullable */
     readonly insight_derived_name?: string | null
-    /** User who created the annotation. */
     readonly created_by?: UserBasicApi
-    /**
-     * When the annotation was created.
-     * @nullable
-     */
+    /** @nullable */
     readonly created_at?: string | null
-    /** When the annotation was last changed. */
     readonly updated_at?: string
     /** Soft-delete flag. Set to true to hide the annotation, or false to restore it. */
     deleted?: boolean

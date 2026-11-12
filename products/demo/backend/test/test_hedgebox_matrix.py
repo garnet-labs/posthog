@@ -13,7 +13,7 @@ from parameterized import parameterized
 from posthog.models.file_system.constants import DEFAULT_SURFACE
 from posthog.models.file_system.file_system_shortcut import FileSystemShortcut
 
-from products.dashboards.backend.facade import api as dashboards_api
+from products.dashboards.backend.models.dashboard import Dashboard
 from products.demo.backend.logic.matrix.matrix import Cluster
 from products.demo.backend.logic.matrix.models import SimEvent
 from products.demo.backend.logic.products.hedgebox.matrix import HedgeboxMatrix
@@ -65,10 +65,9 @@ class TestHedgeboxMatrixInitialViews(BaseTest):
 
         dashboard_id = self.team.primary_dashboard_id
         assert dashboard_id is not None
-        dashboard = dashboards_api.get_dashboard(team_id=self.team.id, dashboard_id=dashboard_id)
-        assert dashboard is not None and dashboard.pinned
+        dashboard = Dashboard.objects.get(team=self.team, pk=dashboard_id, pinned=True)
         expected_refs = {
-            ("dashboard", str(dashboard.id)),
+            ("dashboard", str(dashboard.pk)),
             ("insight", Insight.objects.get(team=self.team, name="Weekly signups", saved=True).short_id),
             (
                 "insight",

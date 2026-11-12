@@ -5,21 +5,21 @@ import structlog
 from rest_framework.exceptions import ValidationError
 
 from posthog.exceptions_capture import capture_exception
-from posthog.integrations.contracts import IntegrationPatch, IntegrationRecord
+from posthog.integrations.contracts import IntegrationRecord
 
-from . import common, row_writes
+from . import common, model
 
 logger = structlog.get_logger(__name__)
 
 
 class ClickUpIntegration:
-    integration: IntegrationRecord
+    integration: model.Integration
 
     def __init__(self, integration: IntegrationRecord) -> None:
         if integration.kind != "clickup":
             raise Exception("ClickUpIntegration init called with Integration with wrong 'kind'")
 
-        self.integration = integration
+        self.integration = model.integration_model(integration)
 
     def _check_auth_error(self, response: requests.Response, context: str) -> None:
         if response.status_code == 401:
@@ -28,9 +28,8 @@ class ClickUpIntegration:
                 status_code=response.status_code,
                 integration_id=self.integration.id,
             )
-            self.integration = row_writes.update_row(
-                self.integration, IntegrationPatch(errors=common.ERROR_TOKEN_REFRESH_FAILED)
-            )
+            self.integration.errors = common.ERROR_TOKEN_REFRESH_FAILED
+            self.integration.save(update_fields=["errors"])
             raise ValidationError(
                 "This integration's authentication is no longer valid. "
                 "Please reconnect or disconnect this integration and connect a different account."

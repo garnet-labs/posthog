@@ -739,11 +739,14 @@ export type SignalReportActionability =
 
 /**
  * One or more `SignalReportStatus` values joined by commas, e.g. `potential` or `potential,candidate,ready`.
- * Check the first status without expanding every possible combination.
+ * This looks horrendous but it's superb, trust me bro.
  */
 export type CommaSeparatedSignalReportStatuses =
   | SignalReportStatus
-  | `${SignalReportStatus},${string}`;
+  | `${SignalReportStatus},${SignalReportStatus}`
+  | `${SignalReportStatus},${SignalReportStatus},${SignalReportStatus}`
+  | `${SignalReportStatus},${SignalReportStatus},${SignalReportStatus},${SignalReportStatus}`
+  | `${SignalReportStatus},${SignalReportStatus},${SignalReportStatus},${SignalReportStatus},${SignalReportStatus}`;
 
 export type SignalReportChartSize = "small" | "medium" | "large";
 

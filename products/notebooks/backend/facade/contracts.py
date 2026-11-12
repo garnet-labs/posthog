@@ -132,7 +132,6 @@ class TeamAccountNote:
     account_id: UUID
     account_name: str
     created_by: NotebookUserInfo | None = None
-    tags: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -197,5 +196,4 @@ class AccountNotebook:
     created_at: datetime
     last_modified_at: datetime
     created_by: NotebookUserInfo | None = None
-    tags: list[str] = field(default_factory=list)
     last_modified_by: NotebookUserInfo | None = None

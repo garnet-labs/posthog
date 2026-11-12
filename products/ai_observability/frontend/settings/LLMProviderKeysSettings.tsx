@@ -125,10 +125,10 @@ function EditKeyModal({
     keyToEdit: LLMProviderKey
     restrictionReason: string | null
 }): JSX.Element {
-    const { providerKeysLoading, preValidationResult, preValidationResultLoading, keyFieldError } =
+    const { providerKeysLoading, preValidationResult, preValidationResultLoading, editKeyFieldError } =
         useValues(llmProviderKeysLogic)
     const { systemOneBaseUrl, systemOneModel } = useValues(llmProviderKeysLogic)
-    const { setEditingKey, updateProviderKey, preValidateKey, clearPreValidation, setKeyFieldError } =
+    const { setEditingKey, updateProviderKey, preValidateKey, clearPreValidation, setEditKeyFieldError } =
         useActions(llmProviderKeysLogic)
     const isAzureEdit = keyToEdit.provider === 'azure_openai'
     const isSystemOne = keyToEdit.provider === 'system_one'
@@ -145,15 +145,15 @@ function EditKeyModal({
     const [baseUrl, setBaseUrl] = useState(keyToEdit.base_url_display ?? '')
 
     const fieldErrorFor = (field: EditKeyField): string | null =>
-        keyFieldError?.field === field ? keyFieldError.message : null
+        editKeyFieldError?.field === field ? editKeyFieldError.message : null
 
     // A rejected field keeps its error until the user edits that field again.
     const withFieldErrorCleared =
         (field: EditKeyField, onChange: (value: string) => void): ((value: string) => void) =>
         (value) => {
             onChange(value)
-            if (keyFieldError?.field === field) {
-                setKeyFieldError(null)
+            if (editKeyFieldError?.field === field) {
+                setEditKeyFieldError(null)
             }
         }
 

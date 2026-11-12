@@ -13,8 +13,6 @@ import { PostgreSQLSetupModalLogicProps, postgreSQLSetupModalLogic } from './pos
 export const PostgreSQLSetupModal = (props: PostgreSQLSetupModalLogicProps): JSX.Element => {
     const { postgreSQLIntegration, isPostgreSQLIntegrationSubmitting } = useValues(postgreSQLSetupModalLogic(props))
     const { submitPostgreSQLIntegration, setPostgreSQLIntegrationValue } = useActions(postgreSQLSetupModalLogic(props))
-    const lockedReason = (field: string): string | undefined =>
-        props.locked && field in props.locked.values ? props.locked.reason : undefined
 
     return (
         <LemonModal
@@ -38,21 +36,15 @@ export const PostgreSQLSetupModal = (props: PostgreSQLSetupModalLogicProps): JSX
                     </LemonField>
 
                     <LemonField name="host" label="Host">
-                        <LemonInput placeholder="my-host" disabledReason={lockedReason('host')} />
+                        <LemonInput placeholder="my-host" />
                     </LemonField>
 
                     <LemonField name="port" label="Port">
-                        <LemonInput
-                            placeholder="5432"
-                            type="number"
-                            min="0"
-                            max="65535"
-                            disabledReason={lockedReason('port')}
-                        />
+                        <LemonInput placeholder="5432" type="number" min="0" max="65535" />
                     </LemonField>
 
                     <LemonField name="user" label="User">
-                        <LemonInput placeholder="postgres" disabledReason={lockedReason('user')} />
+                        <LemonInput placeholder="postgres" />
                     </LemonField>
 
                     <LemonField name="password" label="Password">

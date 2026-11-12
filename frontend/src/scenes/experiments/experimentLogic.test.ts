@@ -28,7 +28,6 @@ import {
 
 import type {
     ExperimentHealthApi,
-    ExperimentHealthCheckResultApi,
     ExperimentHealthFindingApi,
 } from 'products/experiments/frontend/generated/api.schemas'
 import type { ExperimentHealthFinding } from 'products/experiments/frontend/health/experimentHealthFindingEvents'
@@ -142,16 +141,6 @@ describe('experimentLogic', () => {
                 },
                 { code: 'bias_risk_multiple_excluded', subcode: null, severity: 'warning', reason: null, evidence: {} },
             ],
-            health_checks: [
-                { key: 'srm', name: '', status: 'finding', reason: null },
-                {
-                    key: 'multiple_variants_share',
-                    name: '',
-                    status: 'not_checked',
-                    reason: "Couldn't check because the First seen handling doesn't count these users",
-                },
-                { key: 'zero_exposures', name: '', status: 'not_applicable', reason: 'Runs 24 hours after launch' },
-            ],
         }
         const noServerVerdicts = {
             srm_server: null,
@@ -162,7 +151,6 @@ describe('experimentLogic', () => {
             zero_exposures_reason: null,
             bias_risk_server: null,
             exposure_health_findings: null,
-            exposure_health_checks: null,
         }
 
         it.each([
@@ -210,11 +198,6 @@ describe('experimentLogic', () => {
                     exposure_health_findings: [
                         'srm:split_changed:warning:library',
                         'bias_risk_multiple_excluded::warning:',
-                    ],
-                    exposure_health_checks: [
-                        'srm:finding:',
-                        "multiple_variants_share:not_checked:Couldn't check because the First seen handling doesn't count these users",
-                        'zero_exposures:not_applicable:',
                     ],
                 },
             },
@@ -2418,20 +2401,6 @@ describe('experimentLogic', () => {
             check: 'flag_state',
         })
 
-        const healthCheck = (
-            key: ExperimentHealthCheckResultApi['key'],
-            status: ExperimentHealthCheckResultApi['status'],
-            reason: string | null
-        ): ExperimentHealthCheckResultApi => ({
-            key,
-            name: '',
-            description: '',
-            status,
-            reason,
-            values: {},
-            rule: null,
-        })
-
         const flag = (
             active: boolean,
             filters: FeatureFlagFilters,
@@ -2685,20 +2654,7 @@ describe('experimentLogic', () => {
                 overrides: { ...running, ...newEngineMetrics, feature_flag: flag(true, multivariantFilters) },
                 health: {
                     findings: [healthFinding('flag_off_while_running', 'running_but_flag_disabled')],
-                    checks: [
-                        healthCheck('flag_state', 'finding', null),
-                        healthCheck('no_metric', 'passed', null),
-                        healthCheck(
-                            'flag_variants_mismatch',
-                            'not_applicable',
-                            'Runs once the feature flag has variants'
-                        ),
-                        healthCheck(
-                            'metric_event_not_ingested',
-                            'not_checked',
-                            "Couldn't check because PostHog keeps no record of these event names"
-                        ),
-                    ],
+                    checks: [],
                 },
                 expected: {
                     health_ui: 'panel',
@@ -2707,12 +2663,6 @@ describe('experimentLogic', () => {
                     health_finding_subcodes: ['flag_off_while_running:running_but_flag_disabled'],
                     health_findings: ['flag_off_while_running:running_but_flag_disabled:warning:'],
                     health_finding_count: 1,
-                    health_checks: [
-                        'flag_state:finding:',
-                        'no_metric:passed:',
-                        'flag_variants_mismatch:not_applicable:',
-                        "metric_event_not_ingested:not_checked:Couldn't check because PostHog keeps no record of these event names",
-                    ],
                     flag_state_browser: null,
                     flag_state_server: 'running_but_flag_disabled',
                     no_metric_server: false,
@@ -2797,14 +2747,9 @@ describe('experimentLogic', () => {
             }
         )
 
-        it('loads the health with each experiment load and after a changed input, comparing only once and reporting what the edit changed', async () => {
-            const health: ExperimentHealthApi = { findings: [healthFinding('no_metric', null)], checks: [] }
-            const healthAfterEdit: ExperimentHealthApi = {
-                findings: [healthFinding('forced_variant_release_condition', 'some_conditions_pinned')],
-                checks: [],
-            }
-            const answers = [health, healthAfterEdit]
-            useMocks({ get: { [healthUrl]: () => [200, answers.shift()] } })
+        it('loads the health with each experiment load and after a changed input, comparing only once', async () => {
+            const health: ExperimentHealthApi = { findings: [], checks: [] }
+            useMocks({ get: { [healthUrl]: () => [200, health] } })
             const keyedLogic = mountKeyedLogic()
             const captureSpy = jest.spyOn(posthog, 'capture').mockReturnValue(undefined as any)
             const draft = createExperiment({
@@ -2829,15 +2774,6 @@ describe('experimentLogic', () => {
 
             const checkedEvents = captureSpy.mock.calls.filter(([event]) => event === 'experiment health checked')
             expect(checkedEvents).toHaveLength(1)
-            const recheckedEvents = captureSpy.mock.calls.filter(([event]) => event === 'experiment health rechecked')
-            expect(recheckedEvents).toHaveLength(1)
-            expect(recheckedEvents[0][1]).toMatchObject({
-                request_failed: false,
-                changed_inputs: ['feature_flag'],
-                health_findings: ['forced_variant_release_condition:some_conditions_pinned:warning:'],
-                resolved_findings: ['no_metric:'],
-                new_findings: ['forced_variant_release_condition:some_conditions_pinned'],
-            })
         })
 
         it('sends no health request for an experiment the server cannot find', async () => {
@@ -2872,13 +2808,7 @@ describe('experimentLogic', () => {
                 get: {
                     [healthUrl]: async () => {
                         await released
-                        return [
-                            200,
-                            {
-                                findings: [healthFinding('flag_off_while_running', 'running_but_no_rollout')],
-                                checks: [],
-                            },
-                        ]
+                        return [200, { findings: [healthFinding('flag_off_while_running', 'running_but_no_rollout')] }]
                     },
                 },
             })

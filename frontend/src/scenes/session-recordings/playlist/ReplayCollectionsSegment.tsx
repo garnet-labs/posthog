@@ -148,10 +148,7 @@ function CollectionRow({
             {icon}
             <span className="truncate">{playlist.name || playlist.derived_name || 'Unnamed'}</span>
             {counts && (
-                <Badge
-                    variant={counts.unwatched ? 'info' : 'default'}
-                    className="ml-auto group-hover/button:bg-fill-selected"
-                >
+                <Badge variant={counts.unwatched ? 'info' : 'default'} className="ml-auto">
                     {total > 999 ? '999+' : total}
                 </Badge>
             )}

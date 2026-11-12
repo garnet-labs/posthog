@@ -26,7 +26,6 @@ import { AccessControlLevel, AccessControlResourceType } from '~/types'
 
 import { VimrcModal } from 'products/data_warehouse/frontend/shared/components/VimrcModal'
 import { sqlEditorVimLogic } from 'products/data_warehouse/frontend/shared/logics/sqlEditorVimLogic'
-import { viewEngine } from 'products/data_warehouse/frontend/shared/viewEngine'
 import { useAttachedContext, useMcpToolApplyBack } from 'products/posthog_ai/frontend/api/logics'
 
 import { FixErrorButton } from './components/FixErrorButton'
@@ -327,9 +326,7 @@ export function QueryWindow({
                                     size="small"
                                     icon={<IconDatabase />}
                                     onClick={() => openMaterializationModal(editingView)}
-                                    disabledReason={
-                                        viewEngine(editingView).capabilities.materialize.reason ?? undefined
-                                    }
+                                    disabledReason={editingView.engine?.capabilities.materialize.reason ?? undefined}
                                     data-attr="sql-editor-materialization-button"
                                 >
                                     Materialization

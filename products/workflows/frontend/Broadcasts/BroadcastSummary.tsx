@@ -23,12 +23,13 @@ import type { MessageAsset } from '../Workflows/messageAssetsApi'
 import { BroadcastAudienceCohorts } from './audience/BroadcastAudienceCohorts'
 import { broadcastAudienceCohortsLogic } from './audience/broadcastAudienceCohortsLogic'
 import { BroadcastEmailPreview } from './BroadcastEmailPreview'
-import { manageDisabledReason, sendErrorActions, summaryActions } from './broadcastLifecycle'
+import { manageDisabledReason, summaryActions } from './broadcastLifecycle'
 import { BroadcastPerformance } from './BroadcastPerformance'
 import { broadcastPerformanceLogic } from './broadcastPerformanceLogic'
 import { BroadcastPushPerformance } from './BroadcastPushPerformance'
 import { BroadcastPushPreview } from './BroadcastPushPreview'
 import { BroadcastSceneHeader } from './BroadcastSceneHeader'
+import type { BroadcastSendErrorAction } from './BroadcastSendErrorBanner'
 import { broadcastSentLogic } from './broadcastSentLogic'
 import { type BroadcastChannel, type BroadcastRunStatus, getRunStatus } from './broadcastsLogic'
 import { BroadcastStatusTag } from './BroadcastStatusTag'
@@ -322,13 +323,15 @@ export function BroadcastSummary(): JSX.Element {
         })
     }
 
-    const { fixAction, resendAction } = sendErrorActions({
-        userAccessLevel: broadcast?.user_access_level,
-        canMoveToDraft,
-        canEditContent,
-        onMoveToDraft: confirmMoveToDraft,
-        onSendAgain: duplicateBroadcast,
-    })
+    // A sent broadcast can't change, so a fix goes into a copy. A broadcast with sends still scheduled is edited in place.
+    const fixAction: BroadcastSendErrorAction | undefined = canMoveToDraft
+        ? { label: 'Stop and edit', onClick: confirmMoveToDraft }
+        : canEditContent
+          ? { label: 'Fix and send again', onClick: duplicateBroadcast }
+          : undefined
+    const resendAction: BroadcastSendErrorAction | undefined = canEditContent
+        ? { label: 'Send again', onClick: duplicateBroadcast }
+        : undefined
 
     const latestBatchJob = batchJobs[0]
     const latestBatchJobId = latestBatchJob?.id

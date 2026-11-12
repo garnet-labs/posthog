@@ -4,7 +4,6 @@ import { type ReactElement, useEffect, useMemo } from 'react'
 import { Card, CardContent } from '@posthog/quill'
 import { buildYTickFormatter } from '@posthog/quill-charts'
 
-import { FUNNEL_STEPS_BAR_SERIES_KEY } from 'products/product_analytics/frontend/insights/funnels/shared/funnelStepsBarShared'
 import { trendsFilterToYFormatterConfig } from 'products/product_analytics/frontend/insights/trends/shared/trendsAxisFormat'
 import type { ExplainChartData } from 'products/product_analytics/mcp/apps/explainChart/explainChartTypes'
 import { ExplainChartView } from 'products/product_analytics/mcp/apps/explainChart/ExplainChartView'
@@ -12,8 +11,8 @@ import { ExplainChartView } from 'products/product_analytics/mcp/apps/explainCha
 import { capture } from '../analytics/posthog'
 import { useEvidenceCharts } from '../hooks/useEvidenceCharts'
 import { ExplainChartFeedback } from './ExplainChartFeedback'
-import { ExplainChartStoryChart } from './ExplainChartStoryChart'
-import type { TrendsQuery } from './types'
+import { TrendsVisualizer } from './TrendsVisualizer'
+import type { TrendsQuery, TrendsResult } from './types'
 
 // The render-ui dispatch imports the data type from this module.
 export type { ExplainChartData }
@@ -28,6 +27,7 @@ export interface ExplainChartProps {
 }
 
 export function ExplainChart({ data, openLink, app = null }: ExplainChartProps): ReactElement {
+    const query = data.query as unknown as TrendsQuery
     const evidenceCharts = useEvidenceCharts(app, CHART_CLASS_NAME)
 
     useEffect(() => {
@@ -39,15 +39,15 @@ export function ExplainChart({ data, openLink, app = null }: ExplainChartProps):
 
     // A number in a sentence reads better in full, so the chart's axis format is only used when it adds a unit.
     const formatValue = useMemo(() => {
-        if (data.shape !== 'time_series') {
-            return undefined
-        }
-        const trendsFilter = (data.query as unknown as TrendsQuery).trendsFilter
-        const { aggregationAxisFormat: format, aggregationAxisPrefix, aggregationAxisPostfix } = trendsFilter ?? {}
+        const {
+            aggregationAxisFormat: format,
+            aggregationAxisPrefix,
+            aggregationAxisPostfix,
+        } = query.trendsFilter ?? {}
         return (format && format !== 'numeric') || aggregationAxisPrefix || aggregationAxisPostfix
-            ? buildYTickFormatter(trendsFilterToYFormatterConfig(trendsFilter, false))
+            ? buildYTickFormatter(trendsFilterToYFormatterConfig(query.trendsFilter, false))
             : undefined
-    }, [data])
+    }, [query])
 
     return (
         <Card>
@@ -56,11 +56,18 @@ export function ExplainChart({ data, openLink, app = null }: ExplainChartProps):
                     // The host updates `data` in place, so key on the story to start each new one at its summary.
                     key={`${JSON.stringify(data.query)}:${data.headline}`}
                     data={data}
-                    title={data.insightName ?? (data.shape === 'funnel_steps' ? 'Funnel' : 'Trends')}
+                    title={data.insightName ?? 'Trends'}
                     renderChart={(overlay) => (
-                        <ExplainChartStoryChart data={data} overlay={overlay} chartClassName={CHART_CLASS_NAME} />
+                        <TrendsVisualizer
+                            query={query}
+                            results={data.results as TrendsResult}
+                            title={data.insightName ?? 'Trends'}
+                            overlay={overlay}
+                            showControls={false}
+                            chartClassName={CHART_CLASS_NAME}
+                            showTitle={false}
+                        />
                     )}
-                    seriesKey={data.shape === 'funnel_steps' ? FUNNEL_STEPS_BAR_SERIES_KEY : undefined}
                     openLink={openLink}
                     formatValue={formatValue}
                     evidenceCharts={evidenceCharts}

@@ -1,13 +1,10 @@
 import { useActions, useValues } from 'kea'
 
 import { IconX } from '@posthog/icons'
-import { Button, ButtonGroup } from '@posthog/quill'
 
 import { PathItemSelector } from 'lib/components/PropertyFilters/components/PathItemSelector'
-import { useQuillSurface } from 'lib/components/QuillSurface/quillSurfaceContext'
 import { IconFunnelVertical } from 'lib/lemon-ui/icons'
 import { LemonButton } from 'lib/lemon-ui/LemonButton'
-import { LinkPrimitive } from 'lib/lemon-ui/Link'
 import { urls } from 'scenes/urls'
 
 import { FunnelsQuery, InsightVizNode, NodeKind, PathsQuery } from '~/queries/schema/schema-general'
@@ -30,7 +27,6 @@ type PathTargetProps = {
 function PathsTarget({ position, insightProps }: PathTargetProps): JSX.Element {
     const { pathsFilter, funnelPathsFilter, taxonomicGroupTypes } = useValues(pathsDataLogic(insightProps))
     const { updateInsightFilter, updateQuerySource } = useActions(pathsDataLogic(insightProps))
-    const quillSurface = useQuillSurface()
 
     const { startPoint, endPoint, pathGroupings } = pathsFilter || {}
     const { funnelPathType, funnelSource, funnelStep } = funnelPathsFilter || {}
@@ -115,8 +111,6 @@ function PathsTarget({ position, insightProps }: PathTargetProps): JSX.Element {
             pathItem: startPoint,
             closeButtonEnabled: startPoint || overrideStartInput,
             disabled: overrideEndInput && !overrideStartInput,
-            disabledReason: 'Not available when showing paths before a funnel step',
-            clearLabel: 'Clear start point',
             funnelSourceLink: overrideStartInput ? funnelSourceUrl : undefined,
         },
         end: {
@@ -125,8 +119,6 @@ function PathsTarget({ position, insightProps }: PathTargetProps): JSX.Element {
             pathItem: endPoint,
             closeButtonEnabled: endPoint || overrideEndInput,
             disabled: overrideStartInput && !overrideEndInput,
-            disabledReason: 'Not available when showing paths after a funnel step',
-            clearLabel: 'Clear end point',
             funnelSourceLink: overrideEndInput ? funnelSourceUrl : undefined,
         },
     }[position]
@@ -140,62 +132,29 @@ function PathsTarget({ position, insightProps }: PathTargetProps): JSX.Element {
             disabled={overrideInputs}
             wildcardOptions={pathGroupings?.map((name) => ({ name }))}
         >
-            {quillSurface ? (
-                <ButtonGroup className="w-full">
-                    <Button
-                        data-attr={'new-prop-filter-' + positionOptions.index}
-                        variant="outline"
-                        left
-                        className="paths-endpoint-field min-w-0 flex-1"
-                        disabledReason={positionOptions.disabled ? positionOptions.disabledReason : undefined}
-                        render={
-                            positionOptions.funnelSourceLink ? (
-                                <LinkPrimitive to={positionOptions.funnelSourceLink} />
-                            ) : undefined
-                        }
-                    >
-                        {positionOptions.getLabel()}
-                    </Button>
-                    {positionOptions.closeButtonEnabled ? (
-                        <Button
-                            variant="outline"
-                            size="icon"
-                            aria-label={positionOptions.clearLabel}
-                            tooltip={positionOptions.clearLabel}
-                            onClick={(e) => {
-                                onReset()
-                                e.stopPropagation()
-                            }}
-                        >
-                            <IconX />
-                        </Button>
-                    ) : null}
-                </ButtonGroup>
-            ) : (
-                <LemonButton
-                    data-attr={'new-prop-filter-' + positionOptions.index}
-                    fullWidth
-                    className="paths-endpoint-field"
-                    type="secondary"
-                    active={overrideInputs}
-                    disabled={positionOptions.disabled}
-                    to={positionOptions.funnelSourceLink}
-                    sideAction={
-                        positionOptions.closeButtonEnabled
-                            ? {
-                                  icon: <IconX />,
-                                  type: 'tertiary',
-                                  onClick: (e) => {
-                                      onReset()
-                                      e.stopPropagation()
-                                  },
-                              }
-                            : null
-                    }
-                >
-                    {positionOptions.getLabel()}
-                </LemonButton>
-            )}
+            <LemonButton
+                data-attr={'new-prop-filter-' + positionOptions.index}
+                fullWidth
+                className="paths-endpoint-field"
+                type="secondary"
+                active={overrideInputs}
+                disabled={positionOptions.disabled}
+                to={positionOptions.funnelSourceLink}
+                sideAction={
+                    positionOptions.closeButtonEnabled
+                        ? {
+                              icon: <IconX />,
+                              type: 'tertiary',
+                              onClick: (e) => {
+                                  onReset()
+                                  e.stopPropagation()
+                              },
+                          }
+                        : null
+                }
+            >
+                {positionOptions.getLabel()}
+            </LemonButton>
         </PathItemSelector>
     )
 }

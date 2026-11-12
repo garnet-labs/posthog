@@ -55,7 +55,9 @@ def _link_implementation_task(
 def team(db):
     org = Organization.objects.create(name="inbox-notif-org")
     team = Team.objects.create(organization=org, name="inbox-notif-team")
-    return team
+    yield team
+    team.delete()
+    org.delete()
 
 
 @pytest.mark.django_db

@@ -13,7 +13,6 @@ import {
   RadioGroupItem,
   Textarea,
 } from "@posthog/quill";
-import { hasOpenImplementationPr } from "@posthog/shared";
 import {
   RESOLVE_REASON_OPTIONS,
   type ResolveReasonOptionValue,
@@ -49,7 +48,9 @@ export function ResolveReportDialog({
   const [note, setNote] = useState(initialNote);
   const fieldId = useId();
   const title = report.title?.trim() ? report.title : "Untitled report";
-  const hasOpenPr = hasOpenImplementationPr(report);
+  const hasOpenPr =
+    Boolean(report.implementation_pr_url) &&
+    report.implementation_pr_merged !== true;
 
   return (
     <Dialog

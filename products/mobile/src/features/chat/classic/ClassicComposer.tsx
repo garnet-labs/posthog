@@ -61,7 +61,7 @@ export const ClassicComposer = forwardRef<TextInputInstance, ClassicComposerProp
                         style={[styles.send, !canSend && styles.disabled]}
                         testID="chat-send"
                     >
-                        <ArrowUpIcon size={iconSizes.control} color={canSend ? colors.onInk : colors.secondary} />
+                        <ArrowUpIcon size={iconSizes.control} color={colors.white} />
                     </Pressable44>
                 )}
             </View>
@@ -90,6 +90,6 @@ const useStyles = createStyles(({ colors }) => ({
         alignItems: 'center',
         justifyContent: 'center',
     },
-    disabled: { backgroundColor: colors.disabledFill },
+    disabled: { backgroundColor: colors.border },
     stopSquare: { width: 12, height: 12, borderRadius: 2, backgroundColor: colors.surface },
 }))

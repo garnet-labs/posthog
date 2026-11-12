@@ -49,7 +49,6 @@ export interface SessionUserItem {
 }
 
 export interface SessionAssistantItem {
-    traceId?: string
     projectUrl?: string
     kind: 'assistant'
     id: string
@@ -75,8 +74,6 @@ export interface SessionToolItem {
 export interface SessionTurnEndItem {
     kind: 'turn_end'
     id: string
-    traceId?: string
-    runId?: string
 }
 
 export interface SessionErrorItem {

@@ -233,10 +233,6 @@ export interface TrendsVisualizerProps {
 export interface FunnelVisualizerProps {
     query: FunnelsQuery
     results: FunnelResult
-    /** Drawn as a child of the steps chart, so it can read the chart's scales. */
-    overlay?: ReactNode
-    chartClassName?: string
-    showTitle?: boolean
 }
 
 export interface LifecycleVisualizerProps {

@@ -1021,17 +1021,7 @@ describe('taskTrackerSceneLogic', () => {
     // A channel host starts on its own repo instead of the remembered one, files the task in its channel, and
     // keeps the shared last-used repo intact.
     it('creates the task in the host channel from the host repository default', async () => {
-        let finishCreation!: (response: [number, Record<string, unknown>]) => void
-        const creation = new Promise<[number, Record<string, unknown>]>((resolve) => {
-            finishCreation = resolve
-        })
         useMocks({
-            post: {
-                '/api/projects/:team/tasks/': async ({ request }) => {
-                    createBody = (await request.json()) as Record<string, any>
-                    return creation
-                },
-            },
             get: {
                 '/api/projects/:team/integrations/': {
                     results: [{ id: 7, kind: 'github', display_name: 'acme', config: {} }],
@@ -1055,11 +1045,7 @@ describe('taskTrackerSceneLogic', () => {
 
         logic.actions.setNewTaskData({ description: 'ship it' })
         logic.actions.submitNewTask()
-        const nextOnTaskCreated = jest.fn()
-        taskTrackerSceneLogic({ ...logic.props, onTaskCreated: nextOnTaskCreated })
-        await expectLogic(logic, () =>
-            finishCreation([200, { id: 'new-task', latest_run: { id: 'run-1' } }])
-        ).toFinishAllListeners()
+        await expectLogic(logic).toFinishAllListeners()
 
         expect(createBody).toMatchObject({
             channel: 'channel-1',
@@ -1067,7 +1053,6 @@ describe('taskTrackerSceneLogic', () => {
             github_integration: 7,
         })
         expect(onTaskCreated).toHaveBeenCalledWith('new-task')
-        expect(nextOnTaskCreated).not.toHaveBeenCalled()
         expect(logic.values.newTaskData.repositoryConfig.repository).toBe('acme/space-repo')
         expect(logic.values.persistedRepositoryConfig).toEqual({ integrationId: 7, repository: 'acme/remembered' })
     })

@@ -556,27 +556,20 @@ class TestDestination(SimpleTestCase):
                 None,
             ),
             ("unsupported", "oracle_warehouse", {}, None, "PostHog warehouse"),
-            ("not_uploaded", None, {}, None, "did not get this connection's Fivetran destination"),
         ]
     )
     def test_destination(
         self,
         _name: str,
-        service: str | None,
+        service: str,
         connection_overrides: dict[str, Any],
         expected: ProposedDestination | None,
         expected_caveat: str | None,
     ) -> None:
-        destinations = (
-            (
-                VendorDestination(
-                    id="grp_example", name="Warehouse", service=service, region=None, config={"database": "ANALYTICS"}
-                ),
-            )
-            if service
-            else ()
+        destination = VendorDestination(
+            id="grp_example", name="Warehouse", service=service, region=None, config={"database": "ANALYTICS"}
         )
-        item = _plan(_connection(destination_id="grp_example", **connection_overrides), destinations=destinations)
+        item = _plan(_connection(destination_id="grp_example", **connection_overrides), destinations=(destination,))
         assert item.proposal is not None
         assert item.proposal.destination == expected
         if expected_caveat:

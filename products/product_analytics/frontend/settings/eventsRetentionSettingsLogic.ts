@@ -8,7 +8,6 @@ import { teamLogic } from 'scenes/teamLogic'
 import * as api from 'products/product_analytics/frontend/generated/api'
 import type {
     EventsRetentionApi,
-    EventsRetentionMonthsEnumApi,
     OrganizationEventsRetentionApi,
 } from 'products/product_analytics/frontend/generated/api.schemas'
 import { dataRetentionBannerLogic } from 'products/product_analytics/frontend/insights/dataRetention/dataRetentionBannerLogic'
@@ -112,7 +111,7 @@ export const eventsRetentionSettingsLogic = kea<eventsRetentionSettingsLogicType
                         return values.projectRetention
                     }
                     return await api.eventsRetentionUpdate(String(values.currentTeamId), {
-                        retention_months: retentionMonths as EventsRetentionMonthsEnumApi | null,
+                        retention_months: retentionMonths,
                     })
                 },
             },
@@ -131,7 +130,7 @@ export const eventsRetentionSettingsLogic = kea<eventsRetentionSettingsLogicType
                         return values.organizationRetention
                     }
                     return await api.organizationEventsRetentionUpdate(values.currentOrganizationId, {
-                        retention_months: retentionMonths as EventsRetentionMonthsEnumApi | null,
+                        retention_months: retentionMonths,
                     })
                 },
             },

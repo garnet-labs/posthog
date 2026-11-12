@@ -51,7 +51,7 @@ export function MarketingAnalyticsOverview(props: {
 
     const marketingOverviewQueryResponse = response as MarketingAnalyticsAggregatedQueryResponse | undefined
 
-    const { tileColumnSelection, setupEnabled } = useValues(marketingAnalyticsLogic)
+    const { tileColumnSelection } = useValues(marketingAnalyticsLogic)
     const { setTileColumnSelection } = useActions(marketingAnalyticsLogic)
     const samplingRate = marketingOverviewQueryResponse?.samplingRate
 
@@ -86,7 +86,7 @@ export function MarketingAnalyticsOverview(props: {
 
     // Combine validation warnings with any backend warnings (e.g. skipped conversion goals)
     const allWarnings = [
-        ...(setupEnabled ? [] : (validationWarnings ?? [])),
+        ...(validationWarnings ?? []),
         ...(responseError && hasResults ? [{ message: responseError, link: undefined } as const] : []),
     ]
 

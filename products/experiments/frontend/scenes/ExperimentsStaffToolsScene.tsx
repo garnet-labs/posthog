@@ -48,7 +48,6 @@ const METRIC_TYPE_OPTIONS = [
     { value: 'funnel:strict', label: 'Funnel: strict' },
     { value: 'ratio', label: 'Ratio' },
     { value: 'retention', label: 'Retention' },
-    { value: 'quantile', label: 'Percentile' },
 ]
 
 const EXCEPTION_CODE_OPTIONS = [

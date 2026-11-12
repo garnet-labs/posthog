@@ -10,8 +10,7 @@
                 "backend/apps.py",
                 "backend/logic/session.py",
                 "backend/models.py",
-                "backend/migrations/**",
-                "backend/middleware.py"
+                "backend/migrations/**"
             ],
             "outputs": [],
             "cache": true

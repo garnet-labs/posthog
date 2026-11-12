@@ -331,7 +331,7 @@ class MaterializeAcceptor(Acceptor):
                 suggestion.team_id,
                 suggestion.subject_id,
                 user=request.user,
-                frequency_target=interval,
+                sync_frequency_interval=interval,
                 visible_blocker_names=_no_blocker_names,
                 was_impersonated=request.was_impersonated,
                 incremental_config=incremental_config,

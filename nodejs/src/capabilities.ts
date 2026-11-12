@@ -120,10 +120,6 @@ export function getPluginServerCapabilities(
             return {
                 cdpInternalEvents: true,
             }
-        case PluginServerMode.cdp_ses_webhooks:
-            return {
-                cdpSesWebhooks: true,
-            }
         case PluginServerMode.cdp_cyclotron_worker:
             return {
                 cdpCyclotronWorker: true,

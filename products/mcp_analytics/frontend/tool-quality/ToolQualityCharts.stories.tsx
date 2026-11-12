@@ -89,39 +89,6 @@ export const SettledWindow: Story = {
     )),
 }
 
-export const Loading: Story = {
-    parameters: { testOptions: { waitForLoadersToDisappear: false } },
-    render: withTheme((theme) => (
-        <ToolQualityCharts
-            data={buildDailyChartData([], LABELS)}
-            loading
-            theme={theme}
-            timezone="UTC"
-            interval="day"
-            incompleteTail={false}
-            views={DEFAULT_CHART_VIEWS}
-            latencyBoxes={[]}
-            onViewChange={() => {}}
-        />
-    )),
-}
-
-export const EmptyWindow: Story = {
-    render: withTheme((theme) => (
-        <ToolQualityCharts
-            data={buildDailyChartData([], LABELS)}
-            loading={false}
-            theme={theme}
-            timezone="UTC"
-            interval="day"
-            incompleteTail={false}
-            views={DEFAULT_CHART_VIEWS}
-            latencyBoxes={[]}
-            onViewChange={() => {}}
-        />
-    )),
-}
-
 export const InProgressBucket: Story = {
     render: withTheme((theme) => (
         <ToolQualityCharts

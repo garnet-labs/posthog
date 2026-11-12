@@ -602,7 +602,6 @@ async fn process_replay_events_inner(
         timestamp: computed_timestamp,
         is_cookieless_mode,
         historical_migration: context.historical_migration,
-        options: None,
     };
 
     // One `$snapshot_items` event per call.

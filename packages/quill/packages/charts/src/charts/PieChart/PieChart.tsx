@@ -126,7 +126,7 @@ function CenterLabel({ children, cx, cy }: CenterLabelProps): React.ReactElement
 
 export function PieChart<Meta = unknown>({ onError, ...rest }: PieChartProps<Meta>): React.ReactElement {
     return (
-        <ChartErrorBoundary onError={onError} resetKey={rest.series}>
+        <ChartErrorBoundary onError={onError}>
             <PieChartInner {...rest} />
         </ChartErrorBoundary>
     )

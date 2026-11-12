@@ -1,10 +1,7 @@
 import { BindLogic, useActions, useValues } from 'kea'
 
-import { IconPlus, IconPlusSmall } from '@posthog/icons'
+import { IconPlusSmall } from '@posthog/icons'
 import { LemonButton } from '@posthog/lemon-ui'
-import { Button } from '@posthog/quill'
-
-import { useQuillSurface } from 'lib/components/QuillSurface/quillSurfaceContext'
 
 import { AnyPropertyFilter, PropertyFilterType, PropertyOperator, PropertyFilterRow } from '~/types'
 
@@ -33,7 +30,6 @@ export function PathItemFilters({
     const logicProps = { propertyFilters, onChange, pageKey }
     const { filtersWithNew, filterIdsWithNew } = useValues(propertyFilterLogic(logicProps))
     const { setFilter, remove } = useActions(propertyFilterLogic(logicProps))
-    const quillSurface = useQuillSurface()
 
     return (
         <BindLogic logic={propertyFilterLogic} props={logicProps}>
@@ -56,16 +52,7 @@ export function PathItemFilters({
                             taxonomicGroupTypes={taxonomicGroupTypes}
                             wildcardOptions={wildcardOptions}
                         >
-                            {!filter?.value && quillSurface ? (
-                                <Button
-                                    variant="outline"
-                                    className="new-prop-filter"
-                                    data-attr={'new-prop-filter-' + pageKey}
-                                >
-                                    <IconPlus />
-                                    Add exclusion
-                                </Button>
-                            ) : !filter?.value ? (
+                            {!filter?.value ? (
                                 <LemonButton
                                     className="new-prop-filter"
                                     data-attr={'new-prop-filter-' + pageKey}

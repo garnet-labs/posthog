@@ -12,9 +12,7 @@
                 "backend/logic/intake.py",
                 "backend/receivers.py",
                 "backend/settings.py",
-                "backend/migrations/**",
-                "backend/apps.py",
-                "backend/task_profiles.py"
+                "backend/migrations/**"
             ],
             "outputs": [],
             "cache": true

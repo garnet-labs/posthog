@@ -2,7 +2,7 @@ import './BusinessKnowledgePreview.scss'
 
 import { LemonTag } from 'lib/lemon-ui/LemonTag'
 import { cn } from 'lib/utils/css-classes'
-import { inStorybook } from 'lib/utils/dom'
+import { inStorybook, inStorybookTestRunner } from 'lib/utils/dom'
 
 interface PreviewSource {
     id: string
@@ -51,7 +51,7 @@ const SOURCES: PreviewSource[] = [
  * changes the layout's size.
  */
 export function BusinessKnowledgePreview(): JSX.Element {
-    const isStatic = inStorybook()
+    const isStatic = inStorybook() || inStorybookTestRunner()
 
     return (
         <div className={cn('BusinessKnowledgePreview', isStatic && 'BusinessKnowledgePreview--static')}>

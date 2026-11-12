@@ -9,7 +9,6 @@ from typing import Any
 
 from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
-from rest_framework.fields import empty
 
 
 class OptionalBooleanField(serializers.BooleanField):
@@ -20,10 +19,6 @@ class OptionalBooleanField(serializers.BooleanField):
     def __init__(self, **kwargs):
         kwargs.setdefault("allow_null", True)
         super().__init__(**kwargs)
-
-
-class OmittableBooleanField(serializers.BooleanField):
-    default_empty_html = empty
 
 
 @extend_schema_field({"type": "string"})

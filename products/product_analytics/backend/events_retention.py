@@ -54,12 +54,8 @@ from products.product_analytics.backend.facade.contracts import (
     ProjectEventsRetention,
     ScheduledEventsDeletion,
 )
-from products.product_analytics.backend.facade.enums import EventsRetentionMonths
 
-NOT_A_STANDARD_PERIOD_MESSAGE = (
-    f"Events retention has to be {', '.join(map(str, EventsRetentionMonths.values[:-1]))} or "
-    f"{EventsRetentionMonths.values[-1]} months. Contact PostHog support to set another period."
-)
+RETENTION_MONTHS_CHOICES = (1, 3, 12, 24, 36, 60, 84)
 EVENTS_DELETED_QUERY_SECONDS = 10
 EVENTS_DELETED_CACHE_SECONDS = 24 * 60 * 60
 
@@ -134,7 +130,7 @@ def organization_events_retention(organization: Organization) -> OrganizationEve
         plan_months=plan_months,
         min_months=staff_min or 1,
         max_months=min(plan_months, staff_max) if staff_max else plan_months,
-        months_choices=list(EventsRetentionMonths.values),
+        months_choices=list(RETENTION_MONTHS_CHOICES),
         next_cleanup_on=next_cleanup_on(),
     )
 
@@ -234,7 +230,11 @@ def _check_allowed(retention: OrganizationEventsRetention, months: int | None) -
     if months is None:
         return
     if months not in retention.months_choices:
-        raise ValidationError(NOT_A_STANDARD_PERIOD_MESSAGE)
+        *shorter, longest = retention.months_choices
+        raise ValidationError(
+            f"Events retention has to be {', '.join(map(str, shorter))} or {longest} months. "
+            "Contact PostHog support to set another period."
+        )
     if not retention.min_months <= months <= retention.max_months:
         raise ValidationError(
             f"Events retention has to be {describe_months_range(retention.min_months, retention.max_months)}."

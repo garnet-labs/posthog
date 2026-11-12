@@ -35,7 +35,6 @@ from products.batch_exports.backend.tests.temporal.destinations.bigquery.utils i
     TEST_MODELS,
     TEST_TIME,
     assert_clickhouse_records_in_bigquery,
-    key_file_integration,
 )
 from products.batch_exports.backend.tests.temporal.utils.persons import (
     generate_test_person_distinct_id2_in_clickhouse,
@@ -83,8 +82,6 @@ async def _run_activity(
     integration: Integration | None = None,
 ):
     """Helper function to run BigQuery main activity and assert records are exported."""
-    if integration is None:
-        integration = await key_file_integration(team, bigquery_config)
     insert_inputs = BigQueryInsertInputs(
         team_id=team.pk,
         table_id=table_id,
@@ -96,7 +93,8 @@ async def _run_activity(
         use_json_type=use_json_type,
         batch_export_model=batch_export_model,
         batch_export_id=str(uuid.uuid4()),
-        integration_id=integration.id,
+        integration_id=integration.id if integration is not None else None,
+        **bigquery_config,
     )
 
     assert insert_inputs.batch_export_id is not None
@@ -176,7 +174,7 @@ async def _run_activity(
     ],
     indirect=True,
 )
-@pytest.mark.parametrize("integration", ["key_file", "impersonated"], indirect=True)
+@pytest.mark.parametrize("integration", ["key_file", "impersonated", None], indirect=True)
 async def test_insert_into_bigquery_activity_inserts_data_into_bigquery_table(
     clickhouse_client,
     activity_environment,

@@ -35,8 +35,7 @@ export class ChartErrorBoundary extends React.Component<ChartErrorBoundaryProps,
     }
 
     override componentDidUpdate(prevProps: ChartErrorBoundaryProps): void {
-        // `!==` would treat an unchanged NaN key as a change and reset on every update.
-        if (this.state.hasError && !Object.is(prevProps.resetKey, this.props.resetKey)) {
+        if (this.state.hasError && prevProps.resetKey !== this.props.resetKey) {
             this.setState({ hasError: false })
         }
     }

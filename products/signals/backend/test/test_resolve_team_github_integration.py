@@ -18,7 +18,8 @@ from products.signals.backend.task_profiles import REPO_SELECTION_WITHOUT_REPORT
 @pytest.fixture
 def organization():
     org = Organization.objects.create(name="test-cascade-org")
-    return org
+    yield org
+    org.delete()
 
 
 @pytest.fixture

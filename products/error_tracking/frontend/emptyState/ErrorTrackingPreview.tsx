@@ -5,7 +5,7 @@ import { Spinner } from '@posthog/lemon-ui'
 import type { ProductEmptyStateMode } from 'lib/components/ProductEmptyState/types'
 import { LemonTag } from 'lib/lemon-ui/LemonTag'
 import { cn } from 'lib/utils/css-classes'
-import { inStorybook } from 'lib/utils/dom'
+import { inStorybook, inStorybookTestRunner } from 'lib/utils/dom'
 
 // Hand-authored sparkline for the exceptions stat. The "after" series ticks up at the
 // far right, where the newly-thrown exception lands.
@@ -26,7 +26,7 @@ function areaPath(line: string): string {
  * `__swap` grids and crossfaded, so nothing shifts.
  */
 export function ErrorTrackingPreview({ mode }: { mode: ProductEmptyStateMode }): JSX.Element {
-    const isStatic = inStorybook()
+    const isStatic = inStorybook() || inStorybookTestRunner()
 
     return (
         <div className={cn('ErrorPreview', isStatic && 'ErrorPreview--static')}>

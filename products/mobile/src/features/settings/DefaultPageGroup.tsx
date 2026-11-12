@@ -1,9 +1,7 @@
 import type { ComponentType, ReactElement } from 'react'
 
 import { track } from '@/lib/analytics'
-import { GlobeIcon } from '@/ui/icons/GlobeIcon'
 import { HomeIcon } from '@/ui/icons/HomeIcon'
-import { LiveIcon } from '@/ui/icons/LiveIcon'
 import { SpacesIcon } from '@/ui/icons/SpacesIcon'
 import type { IconProps } from '@/ui/icons/types'
 import { ViewsIcon } from '@/ui/icons/ViewsIcon'
@@ -19,13 +17,7 @@ import { SettingsGroup } from './SettingsGroup'
 import { SettingsRadioRow } from './SettingsRadioRow'
 
 // The same glyphs as the bottom bar, so the rows read as the tabs they open.
-const ICONS: Record<DefaultPage, ComponentType<IconProps>> = {
-    inbox: HomeIcon,
-    chats: SpacesIcon,
-    views: ViewsIcon,
-    web_analytics: GlobeIcon,
-    live: LiveIcon,
-}
+const ICONS: Record<DefaultPage, ComponentType<IconProps>> = { inbox: HomeIcon, chats: SpacesIcon, views: ViewsIcon }
 
 export function DefaultPageGroup(): ReactElement {
     const page = useDefaultPageStore((state) => effectiveDefaultPage(state.page))

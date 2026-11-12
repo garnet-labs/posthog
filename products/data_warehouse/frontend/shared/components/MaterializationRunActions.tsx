@@ -16,7 +16,6 @@ import { DataWarehouseSavedQueryOrigin } from '~/queries/schema/schema-general'
 import { AccessControlLevel, AccessControlResourceType } from '~/types'
 
 import { SERVING_ENGINE } from 'products/data_modeling/frontend/suspension'
-import { viewEngine } from 'products/data_warehouse/frontend/shared/viewEngine'
 
 export function MaterializationRunActions({
     viewId,
@@ -136,7 +135,6 @@ export function MaterializationRunActions({
                     loading={materializationActionLoading || materializationRefreshPending || deletingView}
                     disabledReason={
                         accessReason ||
-                        viewEngine(savedQuery).capabilities.materialize.reason ||
                         refreshReason ||
                         (deletingView ? 'Deleting view' : undefined) ||
                         (updatingDataWarehouseSavedQuery ? 'Saving materialization settings' : undefined) ||

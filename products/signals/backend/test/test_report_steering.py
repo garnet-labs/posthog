@@ -22,7 +22,8 @@ SCOUT_SKILL = "signals-scout-error-tracking"
 @pytest.fixture
 def organization():
     org = Organization.objects.create(name="test-report-steering-org")
-    return org
+    yield org
+    org.delete()
 
 
 @pytest.fixture

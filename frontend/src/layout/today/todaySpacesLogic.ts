@@ -29,7 +29,6 @@ import {
     TaskActivityReadMarkerApi,
     TaskListItemApi,
     TasksListExcludeOriginProduct,
-    TasksListParams,
 } from 'products/tasks/frontend/generated/api.schemas'
 import { pullRequestStates, sessionIdsWithPullRequests } from 'products/tasks/frontend/spaces/taskPullRequests'
 
@@ -53,9 +52,7 @@ import {
 } from './todayRecentOrder'
 import {
     TodayWorkItem,
-    appendRecentTasks,
     buildRecentItems,
-    refreshRecentTasks,
     sessionItem,
     sessionReadRequest,
     setActivityUnread,
@@ -65,7 +62,6 @@ import {
 const PINNED_SESSION_LIMIT = 20
 const RECENT_SESSION_LIMIT = 30
 const RECENT_ITEM_LIMIT = 30
-const TASKS_PAGE_LIMIT = 100
 // One page of the requester's newest activity. Unread state older than this does not show on the rail.
 const UNREAD_ACTIVITY_LIMIT = 200
 // The sidebar and a space scene both refresh on mount, so collapse their requests into one.
@@ -74,20 +70,6 @@ const UNREAD_ACTIVITY_DEBOUNCE_MS = 100
 // the tab, and the cooldown holds a flick between tabs to one request.
 const RECENT_REFRESH_INTERVAL_MS = 60_000
 const RECENT_REFRESH_COOLDOWN_MS = 15_000
-
-function recentTasksParams(userId: number): TasksListParams {
-    return {
-        created_by: userId,
-        // Scout runs execute as their author and would fill the capped list.
-        exclude_origin_product: TasksListExcludeOriginProduct.SignalsScout,
-        ordering: '-last_activity_at',
-        basic: true,
-    }
-}
-
-function pageOffsets(total: number, pageSize: number): number[] {
-    return Array.from({ length: Math.ceil(total / pageSize) }, (_, index) => index * pageSize)
-}
 
 export type TodayWorkSectionId = 'pinned' | 'recent'
 
@@ -141,14 +123,11 @@ export interface todaySpacesLogicValues {
     recentGrouping: TodayRecentGrouping
     recentGroups: TodayRecentSection[]
     recentItems: TodayWorkItem[]
-    recentLoadMoreFailed: boolean
     recentLoading: boolean
-    recentLoadingMore: boolean
     recentQuery: string
     recentSort: TodayRecentSort
     recentSourceOptions: string[]
     recentTasks: TaskListItemApi[]
-    recentTasksHasMore: boolean
     recentTasksLoading: boolean
     recentTasksUnavailable: boolean
     sectionHeights: Partial<Record<TodayWorkSectionId, number>>
@@ -195,21 +174,6 @@ export interface todaySpacesLogicActions {
     }
     copySpaceLink: (spaceId: string) => {
         spaceId: string
-    }
-    loadMoreRecentTasks: (_: void) => void
-    loadMoreRecentTasksFailure: (
-        error: string,
-        errorObject?: any
-    ) => {
-        error: string
-        errorObject?: any
-    }
-    loadMoreRecentTasksSuccess: (
-        recentTasks: TaskListItemApi[],
-        payload?: void
-    ) => {
-        recentTasks: TaskListItemApi[]
-        payload?: void
     }
     loadPinnedTasks: () => any
     loadPinnedTasksFailure: (
@@ -309,9 +273,6 @@ export interface todaySpacesLogicActions {
     setRecentSort: (sort: TodayRecentSort) => {
         sort: TodayRecentSort
     }
-    setRecentTasksHasMore: (hasMore: boolean) => {
-        hasMore: boolean
-    }
     setSectionHeights: (heights: Partial<Record<TodayWorkSectionId, number>>) => {
         heights: Partial<Record<TodayWorkSectionId, number>>
     }
@@ -341,8 +302,7 @@ export interface todaySpacesLogicMeta {
         allRecentItems: (
             recentTasks: TaskListItemApi[],
             conversationHistory: ConversationDetail[],
-            pinnedTasks: TaskListItemApi[],
-            recentTasksHasMore: boolean
+            pinnedTasks: TaskListItemApi[]
         ) => TodayWorkItem[]
         recentFilters: (storedRecentFilters: Partial<TodayRecentFilters>) => TodayRecentFilters
         recentSourceOptions: (allRecentItems: TodayWorkItem[], recentFilters: TodayRecentFilters) => string[]
@@ -408,9 +368,8 @@ export const todaySpacesLogic = kea<todaySpacesLogicType>([
         markSessionReadFailed: (activityIds: string[]) => ({ activityIds }),
         loadPullRequestStates: (sessionIds: string[]) => ({ sessionIds }),
         setPullRequestStates: (states: Record<string, PrStateEnumApi>) => ({ states }),
-        setRecentTasksHasMore: (hasMore: boolean) => ({ hasMore }),
     }),
-    loaders(({ actions, values }) => ({
+    loaders(({ values }) => ({
         spaces: [
             [] as ChannelDTOApi[],
             {
@@ -447,49 +406,17 @@ export const todaySpacesLogic = kea<todaySpacesLogicType>([
                     if (!values.currentTeamId || !values.user) {
                         return []
                     }
-                    const teamId = String(values.currentTeamId)
-                    const params = recentTasksParams(values.user.id)
-                    const requested = Math.max(RECENT_SESSION_LIMIT, values.recentTasks.length)
-                    const responses = await Promise.all(
-                        pageOffsets(requested, TASKS_PAGE_LIMIT).map((offset) =>
-                            tasksList(teamId, {
-                                ...params,
-                                limit: Math.min(TASKS_PAGE_LIMIT, requested - offset),
-                                offset,
-                            })
-                        )
-                    )
+                    const response = await tasksList(String(values.currentTeamId), {
+                        created_by: values.user.id,
+                        // Scout runs execute as their author and would fill the capped list.
+                        exclude_origin_product: TasksListExcludeOriginProduct.SignalsScout,
+                        ordering: '-last_activity_at',
+                        basic: true,
+                        limit: RECENT_SESSION_LIMIT,
+                    })
                     // A slower earlier reply must not overwrite what a newer refresh already returned.
                     breakpoint()
-                    const fetched = appendRecentTasks(
-                        [],
-                        responses.flatMap((response) => response.results)
-                    )
-                    const fetchedHasMore = !!responses[responses.length - 1].next
-                    const refreshed = refreshRecentTasks(
-                        fetched,
-                        fetchedHasMore,
-                        values.recentTasks,
-                        values.recentTasksHasMore,
-                        requested
-                    )
-                    actions.setRecentTasksHasMore(refreshed.hasMore)
-                    return refreshed.tasks
-                },
-                loadMoreRecentTasks: async (_: void, breakpoint) => {
-                    if (!values.currentTeamId || !values.user || !values.recentTasksHasMore) {
-                        return values.recentTasks
-                    }
-                    const response = await tasksList(String(values.currentTeamId), {
-                        ...recentTasksParams(values.user.id),
-                        limit: RECENT_SESSION_LIMIT,
-                        offset: values.recentTasks.length,
-                    })
-                    breakpoint()
-                    actions.setRecentTasksHasMore(!!response.next)
-                    actions.loadPullRequestStates(sessionIdsWithPullRequests(response.results))
-                    posthog.capture('today recent more loaded', { offset: values.recentTasks.length })
-                    return appendRecentTasks(values.recentTasks, response.results)
+                    return response.results
                 },
             },
         ],
@@ -570,23 +497,6 @@ export const todaySpacesLogic = kea<todaySpacesLogicType>([
         ],
         spacesUnavailable: [false, { loadSpaces: () => false, loadSpacesFailure: () => true }],
         recentTasksUnavailable: [false, { loadRecentTasks: () => false, loadRecentTasksFailure: () => true }],
-        recentTasksHasMore: [true, { setRecentTasksHasMore: (_, { hasMore }) => hasMore }],
-        recentLoadingMore: [
-            false,
-            {
-                loadMoreRecentTasks: () => true,
-                loadMoreRecentTasksSuccess: () => false,
-                loadMoreRecentTasksFailure: () => false,
-            },
-        ],
-        recentLoadMoreFailed: [
-            false,
-            {
-                loadMoreRecentTasks: () => false,
-                loadRecentTasksSuccess: () => false,
-                loadMoreRecentTasksFailure: () => true,
-            },
-        ],
         taskActivity: {
             markSessionRead: (state, { activityIds }) => setActivityUnread(state, activityIds, false),
             markSessionReadFailed: (state, { activityIds }) => setActivityUnread(state, activityIds, true),
@@ -600,18 +510,17 @@ export const todaySpacesLogic = kea<todaySpacesLogicType>([
                 pinnedTasks.filter((task) => !task.archived).map(sessionItem),
         ],
         allRecentItems: [
-            (s) => [s.recentTasks, s.conversationHistory, s.pinnedTasks, s.recentTasksHasMore],
+            (s) => [s.recentTasks, s.conversationHistory, s.pinnedTasks],
             (
                 recentTasks: TaskListItemApi[],
                 conversationHistory: ConversationDetail[],
-                pinnedTasks: TaskListItemApi[],
-                recentTasksHasMore: boolean
+                pinnedTasks: TaskListItemApi[]
             ): TodayWorkItem[] =>
                 buildRecentItems(
                     recentTasks,
                     conversationHistory,
                     pinnedTasks.map((task) => task.id),
-                    recentTasksHasMore ? Math.max(RECENT_ITEM_LIMIT, recentTasks.length) : Infinity
+                    RECENT_ITEM_LIMIT
                 ),
         ],
         recentFilters: [
@@ -730,17 +639,8 @@ export const todaySpacesLogic = kea<todaySpacesLogicType>([
                 return
             }
             try {
-                const teamId = String(values.currentTeamId)
-                const responses = await Promise.all(
-                    pageOffsets(sessionIds.length, TASKS_PAGE_LIMIT).map((offset) =>
-                        tasksSummariesCreate(
-                            teamId,
-                            { ids: sessionIds.slice(offset, offset + TASKS_PAGE_LIMIT) },
-                            { limit: TASKS_PAGE_LIMIT }
-                        )
-                    )
-                )
-                actions.setPullRequestStates(pullRequestStates(responses.flatMap((response) => response.results)))
+                const response = await tasksSummariesCreate(String(values.currentTeamId), { ids: sessionIds })
+                actions.setPullRequestStates(pullRequestStates(response.results))
             } catch {
                 // A failed lookup only leaves the chips neutral, so it stays quiet.
             }
@@ -763,7 +663,7 @@ export const todaySpacesLogic = kea<todaySpacesLogicType>([
             }
         },
     })),
-    afterMount(({ actions, values, cache }) => {
+    afterMount(({ actions, cache }) => {
         actions.loadSpaces()
         actions.loadPinnedTasks()
         // A disposable rather than a plain afterMount load, so setup runs again on each return to the tab.
@@ -771,11 +671,7 @@ export const todaySpacesLogic = kea<todaySpacesLogicType>([
             if (recentRefreshIsDue(cache.recentTasksLoadedAt)) {
                 actions.loadRecentTasks()
             }
-            const pollTimer = window.setInterval(() => {
-                if (!values.recentTasksLoading) {
-                    actions.loadRecentTasks()
-                }
-            }, RECENT_REFRESH_INTERVAL_MS)
+            const pollTimer = window.setInterval(() => actions.loadRecentTasks(), RECENT_REFRESH_INTERVAL_MS)
             return () => clearInterval(pollTimer)
         }, 'recentTasksPoll')
     }),

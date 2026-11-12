@@ -1,7 +1,7 @@
 import { PropertyFilterType, PropertyOperator } from '~/types'
 
 import {
-    HogFunctionAlertNotification,
+    PendingAlertNotification,
     buildAlertFilterConfig,
     buildHogFunctionPayload,
     getAlertNotificationAddDisabledReason,
@@ -15,14 +15,12 @@ describe('alertUtils', () => {
             ['discord', 'Enter a valid Discord webhook URL'],
             ['microsoft_teams', 'Enter a valid Microsoft Teams workflow URL'],
         ] as const)('rejects an invalid %s URL', (selectedType, expectedReason) => {
-            expect(getAlertNotificationAddDisabledReason(selectedType, false, null, 'not a url', '')).toBe(
-                expectedReason
-            )
+            expect(getAlertNotificationAddDisabledReason(selectedType, false, null, 'not a url')).toBe(expectedReason)
         })
 
         it('accepts a valid webhook URL', () => {
             expect(
-                getAlertNotificationAddDisabledReason('webhook', false, null, 'https://example.com/webhook', '')
+                getAlertNotificationAddDisabledReason('webhook', false, null, 'https://example.com/webhook')
             ).toBeUndefined()
         })
     })
@@ -113,11 +111,7 @@ describe('alertUtils', () => {
         ])(
             'builds correct payload for $name',
             ({ notification, alertName, expectedName, expectedTemplateId, expectedInputKeys }) => {
-                const result = buildHogFunctionPayload(
-                    'alert-456',
-                    alertName,
-                    notification as HogFunctionAlertNotification
-                )
+                const result = buildHogFunctionPayload('alert-456', alertName, notification as PendingAlertNotification)
 
                 expect(result.name).toBe(expectedName)
                 expect(result.template_id).toBe(expectedTemplateId)
@@ -130,7 +124,7 @@ describe('alertUtils', () => {
         )
 
         it('sets correct slack input values', () => {
-            const notification: HogFunctionAlertNotification = {
+            const notification: PendingAlertNotification = {
                 type: 'slack',
                 slackWorkspaceId: 42,
                 slackChannelId: 'C12345',
@@ -144,7 +138,7 @@ describe('alertUtils', () => {
         })
 
         it('sets correct discord input values', () => {
-            const notification: HogFunctionAlertNotification = {
+            const notification: PendingAlertNotification = {
                 type: 'discord',
                 webhookUrl: 'https://discord.com/api/webhooks/123/abc',
             }
@@ -158,7 +152,7 @@ describe('alertUtils', () => {
         })
 
         it('sets correct microsoft teams input values', () => {
-            const notification: HogFunctionAlertNotification = {
+            const notification: PendingAlertNotification = {
                 type: 'microsoft_teams',
                 webhookUrl: 'https://example.webhook.office.com/webhookb2/abc',
             }
@@ -172,7 +166,7 @@ describe('alertUtils', () => {
         })
 
         it('sets correct webhook input values', () => {
-            const notification: HogFunctionAlertNotification = {
+            const notification: PendingAlertNotification = {
                 type: 'webhook',
                 webhookUrl: 'https://example.com/hook',
             }

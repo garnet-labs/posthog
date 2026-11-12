@@ -7,13 +7,10 @@ import { LemonButton, LemonInput, LemonSelect } from '@posthog/lemon-ui'
 
 import { PropertyFilters } from 'lib/components/PropertyFilters/PropertyFilters'
 import {
-    BEHAVIORAL_COUNT_OPERATOR_OPTIONS,
-    BEHAVIORAL_NEGATION_OPTIONS,
-    BEHAVIORAL_TIME_INTERVAL_OPTIONS,
+    BEHAVIORAL_COUNT_OPERATOR_LABELS,
     behavioralEntityLabel,
     formatPropertyLabel,
 } from 'lib/components/PropertyFilters/utils'
-import { useQuillSurface } from 'lib/components/QuillSurface/quillSurfaceContext'
 import { TaxonomicFilterGroupType } from 'lib/components/TaxonomicFilter/types'
 import { TaxonomicPopover } from 'lib/components/TaxonomicPopover/TaxonomicPopover'
 import { IconWithCount } from 'lib/lemon-ui/icons'
@@ -28,7 +25,6 @@ import {
 } from '~/types'
 
 import { PropertyFilterButton } from './PropertyFilterButton'
-import { QuillBehavioralPropertyFilterRow } from './QuillBehavioralPropertyFilterRow'
 
 export interface BehavioralPropertyFilterRowProps {
     filter: BehavioralPropertyFilter
@@ -48,9 +44,22 @@ const EVENT_FILTER_TAXONOMIC_GROUP_TYPES = [
     TaxonomicFilterGroupType.HogQLExpression,
 ]
 
+const COUNT_OPERATOR_OPTIONS = [
+    PropertyOperator.GreaterThanOrEqual,
+    PropertyOperator.LessThanOrEqual,
+    PropertyOperator.Exact,
+].map((value) => ({ value, label: BEHAVIORAL_COUNT_OPERATOR_LABELS[value] || 'exactly' }))
+
 // A cleared number LemonInput reports NaN, which `??` doesn't catch
 const positiveOr = (value: number | undefined, fallback: number): number =>
     typeof value === 'number' && Number.isFinite(value) && value >= 1 ? value : fallback
+
+const TIME_INTERVAL_OPTIONS = [
+    { value: TimeUnitType.Day, label: 'days' },
+    { value: TimeUnitType.Week, label: 'weeks' },
+    { value: TimeUnitType.Month, label: 'months' },
+    { value: TimeUnitType.Year, label: 'years' },
+]
 
 export function withBehavioralCount(
     filter: BehavioralPropertyFilter,
@@ -98,7 +107,6 @@ export function BehavioralPropertyFilterRow({
     const { actionsById } = useValues(actionsModel)
     // Derived (not mount-time state) so a row reused for a different filter after a group deletion doesn't keep a stale open/closed state
     const [userToggledEventFilters, setUserToggledEventFilters] = useState<boolean | null>(null)
-    const quillSurface = useQuillSurface()
     const eventFiltersVisible = userToggledEventFilters ?? !!filter.event_filters?.length
 
     // Filters created via the API with explicit date bounds have no window controls to map onto
@@ -113,91 +121,9 @@ export function BehavioralPropertyFilterRow({
     const countOperator = filter.operator ?? PropertyOperator.GreaterThanOrEqual
     const countValue = filter.operator_value ?? 1
 
-    const setNegation = (negation: boolean): void => {
-        posthog.capture('behavioral filter behavior changed', {
-            behavior: negation ? 'did_not_perform' : 'performed',
-        })
-        onChange(withBehavioralNegation(filter, negation))
-    }
-
     const setCount = (operator: PropertyOperator, operatorValue: number): void => {
         posthog.capture('behavioral filter count changed', { operator, operator_value: operatorValue })
         onChange(withBehavioralCount(filter, operator, operatorValue))
-    }
-
-    const setTimeValue = (timeValue: number | undefined): void => {
-        const nextTimeValue = positiveOr(timeValue, 30)
-        posthog.capture('behavioral filter time period changed', {
-            time_value: nextTimeValue,
-            time_interval: filter.time_interval ?? TimeUnitType.Day,
-        })
-        onChange({ ...filter, time_value: nextTimeValue })
-    }
-
-    const setTimeInterval = (timeInterval: TimeUnitType): void => {
-        posthog.capture('behavioral filter time period changed', {
-            time_value: filter.time_value ?? 30,
-            time_interval: timeInterval,
-        })
-        onChange({ ...filter, time_interval: timeInterval })
-    }
-
-    const toggleEventFilters = (): void => setUserToggledEventFilters(!eventFiltersVisible)
-
-    const eventPicker = (
-        <TaxonomicPopover
-            size={size}
-            groupType={
-                filter.event_type === 'actions' ? TaxonomicFilterGroupType.Actions : TaxonomicFilterGroupType.Events
-            }
-            groupTypes={[TaxonomicFilterGroupType.Events, TaxonomicFilterGroupType.Actions]}
-            value={filter.event_type === 'actions' ? Number(filter.key) : filter.key}
-            onChange={(value, groupType) => {
-                const eventType = groupType === TaxonomicFilterGroupType.Actions ? 'actions' : 'events'
-                posthog.capture('behavioral filter event or action changed', {
-                    event_type: eventType,
-                })
-                onChange({ ...filter, key: String(value), event_type: eventType })
-            }}
-            renderValue={() => <span>{behavioralEntityLabel(filter, actionsById)}</span>}
-            placeholder="Select an event or action"
-            fullWidth
-            truncate
-            data-attr="behavioral-filter-event"
-        />
-    )
-
-    const eventFilters = eventFiltersVisible ? (
-        <div className="w-full min-w-0 pl-2" data-attr="behavioral-filter-event-filters">
-            <PropertyFilters
-                propertyFilters={filter.event_filters ?? []}
-                onChange={(nextEventFilters) => onChange(withBehavioralEventFilters(filter, nextEventFilters))}
-                pageKey={`${pageKey}-event-filters`}
-                taxonomicGroupTypes={EVENT_FILTER_TAXONOMIC_GROUP_TYPES}
-                eventNames={filter.event_type === 'events' && filter.key ? [filter.key] : []}
-                disablePopover
-                buttonSize={size}
-            />
-        </div>
-    ) : null
-
-    if (quillSurface) {
-        return (
-            <QuillBehavioralPropertyFilterRow
-                filter={filter}
-                countOperator={countOperator}
-                countValue={countValue}
-                eventPicker={eventPicker}
-                eventFilters={eventFilters}
-                eventFiltersVisible={eventFiltersVisible}
-                onNegationChange={setNegation}
-                onCountOperatorChange={(operator) => setCount(operator, countValue)}
-                onCountValueChange={(operatorValue) => setCount(countOperator, positiveOr(operatorValue, 1))}
-                onTimeValueChange={setTimeValue}
-                onTimeIntervalChange={setTimeInterval}
-                onToggleEventFilters={toggleEventFilters}
-            />
-        )
     }
 
     return (
@@ -207,18 +133,50 @@ export function BehavioralPropertyFilterRow({
                     <LemonSelect
                         size={size}
                         value={!!filter.negation}
-                        onChange={setNegation}
-                        options={BEHAVIORAL_NEGATION_OPTIONS}
+                        onChange={(negation) => {
+                            posthog.capture('behavioral filter behavior changed', {
+                                behavior: negation ? 'did_not_perform' : 'performed',
+                            })
+                            onChange(withBehavioralNegation(filter, negation))
+                        }}
+                        options={[
+                            { value: false, label: 'Performed' },
+                            { value: true, label: 'Did not perform' },
+                        ]}
                         data-attr="behavioral-filter-negation"
                     />
                     <div className="flex min-w-32 flex-1 items-center gap-2">
-                        <div className="min-w-0 flex-1">{eventPicker}</div>
+                        <div className="min-w-0 flex-1">
+                            <TaxonomicPopover
+                                size={size}
+                                groupType={
+                                    filter.event_type === 'actions'
+                                        ? TaxonomicFilterGroupType.Actions
+                                        : TaxonomicFilterGroupType.Events
+                                }
+                                groupTypes={[TaxonomicFilterGroupType.Events, TaxonomicFilterGroupType.Actions]}
+                                value={filter.event_type === 'actions' ? Number(filter.key) : filter.key}
+                                onChange={(value, groupType) => {
+                                    const eventType =
+                                        groupType === TaxonomicFilterGroupType.Actions ? 'actions' : 'events'
+                                    posthog.capture('behavioral filter event or action changed', {
+                                        event_type: eventType,
+                                    })
+                                    onChange({ ...filter, key: String(value), event_type: eventType })
+                                }}
+                                renderValue={() => <span>{behavioralEntityLabel(filter, actionsById)}</span>}
+                                placeholder="Select an event or action"
+                                fullWidth
+                                truncate
+                                data-attr="behavioral-filter-event"
+                            />
+                        </div>
                         <IconWithCount count={filter.event_filters?.length || 0} showZero={false}>
                             <LemonButton
                                 icon={<IconFilter />}
                                 noPadding
                                 active={eventFiltersVisible}
-                                onClick={toggleEventFilters}
+                                onClick={() => setUserToggledEventFilters(!eventFiltersVisible)}
                                 disabledReason={!filter.key ? 'Please select an event first' : undefined}
                                 tooltip="Show filters"
                                 data-attr="behavioral-filter-show-event-filters"
@@ -226,14 +184,26 @@ export function BehavioralPropertyFilterRow({
                         </IconWithCount>
                     </div>
                 </div>
-                {eventFilters}
+                {eventFiltersVisible && (
+                    <div className="w-full min-w-0 pl-2" data-attr="behavioral-filter-event-filters">
+                        <PropertyFilters
+                            propertyFilters={filter.event_filters ?? []}
+                            onChange={(eventFilters) => onChange(withBehavioralEventFilters(filter, eventFilters))}
+                            pageKey={`${pageKey}-event-filters`}
+                            taxonomicGroupTypes={EVENT_FILTER_TAXONOMIC_GROUP_TYPES}
+                            eventNames={filter.event_type === 'events' && filter.key ? [filter.key] : []}
+                            disablePopover
+                            buttonSize={size}
+                        />
+                    </div>
+                )}
                 {!filter.negation && (
                     <div className="flex min-w-0 flex-wrap items-center gap-2">
                         <LemonSelect
                             size={size}
                             value={countOperator}
                             onChange={(operator) => setCount(operator, countValue)}
-                            options={BEHAVIORAL_COUNT_OPERATOR_OPTIONS}
+                            options={COUNT_OPERATOR_OPTIONS}
                             data-attr="behavioral-filter-count-operator"
                         />
                         <LemonInput
@@ -256,14 +226,27 @@ export function BehavioralPropertyFilterRow({
                         min={1}
                         className="w-14"
                         value={filter.time_value ?? 30}
-                        onChange={setTimeValue}
+                        onChange={(timeValue) => {
+                            const nextTimeValue = positiveOr(timeValue, 30)
+                            posthog.capture('behavioral filter time period changed', {
+                                time_value: nextTimeValue,
+                                time_interval: filter.time_interval ?? TimeUnitType.Day,
+                            })
+                            onChange({ ...filter, time_value: nextTimeValue })
+                        }}
                         data-attr="behavioral-filter-time-value"
                     />
                     <LemonSelect
                         size={size}
                         value={filter.time_interval ?? TimeUnitType.Day}
-                        onChange={setTimeInterval}
-                        options={BEHAVIORAL_TIME_INTERVAL_OPTIONS}
+                        onChange={(timeInterval) => {
+                            posthog.capture('behavioral filter time period changed', {
+                                time_value: filter.time_value ?? 30,
+                                time_interval: timeInterval,
+                            })
+                            onChange({ ...filter, time_interval: timeInterval })
+                        }}
+                        options={TIME_INTERVAL_OPTIONS}
                         data-attr="behavioral-filter-time-interval"
                     />
                 </div>

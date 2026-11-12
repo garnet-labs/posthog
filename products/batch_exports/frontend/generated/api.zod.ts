@@ -188,7 +188,7 @@ export const BatchExportsCreateBody = /* @__PURE__ */ zod
                                 type: zod.enum(['Postgres']),
                             })
                             .describe(
-                                'Typed configuration for a PostgreSQL batch-export destination.\n\nConnection credentials live in the linked Integration, never here. Mirrors the\nnon-credential fields of `PostgresBatchExportInputs` in `products\/batch_exports\/backend\/service.py`.'
+                                'Typed configuration for a PostgreSQL batch-export destination.\n\nConnection credentials may live in a linked Integration (when one is provided) or\ninline in this config (legacy). Mirrors the non-credential fields of\n`PostgresBatchExportInputs` in `products\/batch_exports\/backend\/service.py`.'
                             ),
                     })
                     .describe('Request shape for creating or updating a PostgreSQL batch-export destination.'),
@@ -400,13 +400,33 @@ export const BatchExportsCreateBody = /* @__PURE__ */ zod
                                                 zod
                                                     .string()
                                                     .describe('ARN of an IAM role attached to the Redshift cluster.'),
+                                                zod
+                                                    .object({
+                                                        aws_access_key_id: zod.string(),
+                                                        aws_secret_access_key: zod.string(),
+                                                    })
+                                                    .describe(
+                                                        'Legacy AWS access keys. Updates can keep this block unchanged. New or changed keys are rejected.'
+                                                    ),
                                             ])
                                             .describe(
-                                                'Authorization for Redshift to read staged files during COPY: an IAM role ARN or an AWS S3 integration ID.'
+                                                'Authorization for Redshift to read staged files during COPY: an IAM role ARN or an AWS S3 integration ID. Updates can keep legacy AWS access keys unchanged. New or changed keys are rejected.'
                                             ),
                                         bucket_credentials: zod
-                                            .number()
-                                            .describe('AWS S3 integration ID used to stage files in the S3 bucket.'),
+                                            .union([
+                                                zod.number().describe('ID of an aws-s3-kind Integration.'),
+                                                zod
+                                                    .object({
+                                                        aws_access_key_id: zod.string(),
+                                                        aws_secret_access_key: zod.string(),
+                                                    })
+                                                    .describe(
+                                                        'Legacy AWS access keys. Updates can keep this block unchanged. New or changed keys are rejected.'
+                                                    ),
+                                            ])
+                                            .describe(
+                                                'AWS S3 integration ID used to stage files in the S3 bucket. Updates can keep legacy AWS access keys unchanged. New or changed keys are rejected.'
+                                            ),
                                     })
                                     .describe(
                                         'S3 staging configuration for a Redshift batch export running in COPY mode.'
@@ -416,7 +436,7 @@ export const BatchExportsCreateBody = /* @__PURE__ */ zod
                                 type: zod.enum(['Redshift']),
                             })
                             .describe(
-                                'Typed configuration for a Redshift batch-export destination.\n\nConnection credentials live in the linked Integration, never here. Mirrors the non-credential fields of `RedshiftBatchExportInputs` in\n`products\/batch_exports\/backend\/service.py`.'
+                                'Typed configuration for a Redshift batch-export destination.\n\nConnection credentials may live in a linked Integration (when one is provided) or inline in\nthis config (legacy). Mirrors the non-credential fields of `RedshiftBatchExportInputs` in\n`products\/batch_exports\/backend\/service.py`.'
                             ),
                     })
                     .describe('Request shape for creating or updating a Redshift batch-export destination.'),
@@ -1162,7 +1182,7 @@ export const BatchExportsUpdateBody = /* @__PURE__ */ zod
                                 type: zod.enum(['Postgres']),
                             })
                             .describe(
-                                'Typed configuration for a PostgreSQL batch-export destination.\n\nConnection credentials live in the linked Integration, never here. Mirrors the\nnon-credential fields of `PostgresBatchExportInputs` in `products\/batch_exports\/backend\/service.py`.'
+                                'Typed configuration for a PostgreSQL batch-export destination.\n\nConnection credentials may live in a linked Integration (when one is provided) or\ninline in this config (legacy). Mirrors the non-credential fields of\n`PostgresBatchExportInputs` in `products\/batch_exports\/backend\/service.py`.'
                             ),
                     })
                     .describe('Request shape for creating or updating a PostgreSQL batch-export destination.'),
@@ -1374,13 +1394,33 @@ export const BatchExportsUpdateBody = /* @__PURE__ */ zod
                                                 zod
                                                     .string()
                                                     .describe('ARN of an IAM role attached to the Redshift cluster.'),
+                                                zod
+                                                    .object({
+                                                        aws_access_key_id: zod.string(),
+                                                        aws_secret_access_key: zod.string(),
+                                                    })
+                                                    .describe(
+                                                        'Legacy AWS access keys. Updates can keep this block unchanged. New or changed keys are rejected.'
+                                                    ),
                                             ])
                                             .describe(
-                                                'Authorization for Redshift to read staged files during COPY: an IAM role ARN or an AWS S3 integration ID.'
+                                                'Authorization for Redshift to read staged files during COPY: an IAM role ARN or an AWS S3 integration ID. Updates can keep legacy AWS access keys unchanged. New or changed keys are rejected.'
                                             ),
                                         bucket_credentials: zod
-                                            .number()
-                                            .describe('AWS S3 integration ID used to stage files in the S3 bucket.'),
+                                            .union([
+                                                zod.number().describe('ID of an aws-s3-kind Integration.'),
+                                                zod
+                                                    .object({
+                                                        aws_access_key_id: zod.string(),
+                                                        aws_secret_access_key: zod.string(),
+                                                    })
+                                                    .describe(
+                                                        'Legacy AWS access keys. Updates can keep this block unchanged. New or changed keys are rejected.'
+                                                    ),
+                                            ])
+                                            .describe(
+                                                'AWS S3 integration ID used to stage files in the S3 bucket. Updates can keep legacy AWS access keys unchanged. New or changed keys are rejected.'
+                                            ),
                                     })
                                     .describe(
                                         'S3 staging configuration for a Redshift batch export running in COPY mode.'
@@ -1390,7 +1430,7 @@ export const BatchExportsUpdateBody = /* @__PURE__ */ zod
                                 type: zod.enum(['Redshift']),
                             })
                             .describe(
-                                'Typed configuration for a Redshift batch-export destination.\n\nConnection credentials live in the linked Integration, never here. Mirrors the non-credential fields of `RedshiftBatchExportInputs` in\n`products\/batch_exports\/backend\/service.py`.'
+                                'Typed configuration for a Redshift batch-export destination.\n\nConnection credentials may live in a linked Integration (when one is provided) or inline in\nthis config (legacy). Mirrors the non-credential fields of `RedshiftBatchExportInputs` in\n`products\/batch_exports\/backend\/service.py`.'
                             ),
                     })
                     .describe('Request shape for creating or updating a Redshift batch-export destination.'),
@@ -1891,7 +1931,7 @@ export const BatchExportsPartialUpdateBody = /* @__PURE__ */ zod
                                 type: zod.enum(['Postgres']),
                             })
                             .describe(
-                                'Typed configuration for a PostgreSQL batch-export destination.\n\nConnection credentials live in the linked Integration, never here. Mirrors the\nnon-credential fields of `PostgresBatchExportInputs` in `products\/batch_exports\/backend\/service.py`.'
+                                'Typed configuration for a PostgreSQL batch-export destination.\n\nConnection credentials may live in a linked Integration (when one is provided) or\ninline in this config (legacy). Mirrors the non-credential fields of\n`PostgresBatchExportInputs` in `products\/batch_exports\/backend\/service.py`.'
                             ),
                     })
                     .describe('Request shape for creating or updating a PostgreSQL batch-export destination.'),
@@ -2105,13 +2145,33 @@ export const BatchExportsPartialUpdateBody = /* @__PURE__ */ zod
                                                 zod
                                                     .string()
                                                     .describe('ARN of an IAM role attached to the Redshift cluster.'),
+                                                zod
+                                                    .object({
+                                                        aws_access_key_id: zod.string(),
+                                                        aws_secret_access_key: zod.string(),
+                                                    })
+                                                    .describe(
+                                                        'Legacy AWS access keys. Updates can keep this block unchanged. New or changed keys are rejected.'
+                                                    ),
                                             ])
                                             .describe(
-                                                'Authorization for Redshift to read staged files during COPY: an IAM role ARN or an AWS S3 integration ID.'
+                                                'Authorization for Redshift to read staged files during COPY: an IAM role ARN or an AWS S3 integration ID. Updates can keep legacy AWS access keys unchanged. New or changed keys are rejected.'
                                             ),
                                         bucket_credentials: zod
-                                            .number()
-                                            .describe('AWS S3 integration ID used to stage files in the S3 bucket.'),
+                                            .union([
+                                                zod.number().describe('ID of an aws-s3-kind Integration.'),
+                                                zod
+                                                    .object({
+                                                        aws_access_key_id: zod.string(),
+                                                        aws_secret_access_key: zod.string(),
+                                                    })
+                                                    .describe(
+                                                        'Legacy AWS access keys. Updates can keep this block unchanged. New or changed keys are rejected.'
+                                                    ),
+                                            ])
+                                            .describe(
+                                                'AWS S3 integration ID used to stage files in the S3 bucket. Updates can keep legacy AWS access keys unchanged. New or changed keys are rejected.'
+                                            ),
                                     })
                                     .describe(
                                         'S3 staging configuration for a Redshift batch export running in COPY mode.'
@@ -2121,7 +2181,7 @@ export const BatchExportsPartialUpdateBody = /* @__PURE__ */ zod
                                 type: zod.enum(['Redshift']),
                             })
                             .describe(
-                                'Typed configuration for a Redshift batch-export destination.\n\nConnection credentials live in the linked Integration, never here. Mirrors the non-credential fields of `RedshiftBatchExportInputs` in\n`products\/batch_exports\/backend\/service.py`.'
+                                'Typed configuration for a Redshift batch-export destination.\n\nConnection credentials may live in a linked Integration (when one is provided) or inline in\nthis config (legacy). Mirrors the non-credential fields of `RedshiftBatchExportInputs` in\n`products\/batch_exports\/backend\/service.py`.'
                             ),
                     })
                     .describe('Request shape for creating or updating a Redshift batch-export destination.'),
@@ -2619,7 +2679,7 @@ export const BatchExportsRunTestStepCreateBody = /* @__PURE__ */ zod
                                 type: zod.enum(['Postgres']),
                             })
                             .describe(
-                                'Typed configuration for a PostgreSQL batch-export destination.\n\nConnection credentials live in the linked Integration, never here. Mirrors the\nnon-credential fields of `PostgresBatchExportInputs` in `products\/batch_exports\/backend\/service.py`.'
+                                'Typed configuration for a PostgreSQL batch-export destination.\n\nConnection credentials may live in a linked Integration (when one is provided) or\ninline in this config (legacy). Mirrors the non-credential fields of\n`PostgresBatchExportInputs` in `products\/batch_exports\/backend\/service.py`.'
                             ),
                         zod
                             .object({
@@ -2801,13 +2861,33 @@ export const BatchExportsRunTestStepCreateBody = /* @__PURE__ */ zod
                                                 zod
                                                     .string()
                                                     .describe('ARN of an IAM role attached to the Redshift cluster.'),
+                                                zod
+                                                    .object({
+                                                        aws_access_key_id: zod.string(),
+                                                        aws_secret_access_key: zod.string(),
+                                                    })
+                                                    .describe(
+                                                        'Legacy AWS access keys. Updates can keep this block unchanged. New or changed keys are rejected.'
+                                                    ),
                                             ])
                                             .describe(
-                                                'Authorization for Redshift to read staged files during COPY: an IAM role ARN or an AWS S3 integration ID.'
+                                                'Authorization for Redshift to read staged files during COPY: an IAM role ARN or an AWS S3 integration ID. Updates can keep legacy AWS access keys unchanged. New or changed keys are rejected.'
                                             ),
                                         bucket_credentials: zod
-                                            .number()
-                                            .describe('AWS S3 integration ID used to stage files in the S3 bucket.'),
+                                            .union([
+                                                zod.number().describe('ID of an aws-s3-kind Integration.'),
+                                                zod
+                                                    .object({
+                                                        aws_access_key_id: zod.string(),
+                                                        aws_secret_access_key: zod.string(),
+                                                    })
+                                                    .describe(
+                                                        'Legacy AWS access keys. Updates can keep this block unchanged. New or changed keys are rejected.'
+                                                    ),
+                                            ])
+                                            .describe(
+                                                'AWS S3 integration ID used to stage files in the S3 bucket. Updates can keep legacy AWS access keys unchanged. New or changed keys are rejected.'
+                                            ),
                                     })
                                     .describe(
                                         'S3 staging configuration for a Redshift batch export running in COPY mode.'
@@ -2817,7 +2897,7 @@ export const BatchExportsRunTestStepCreateBody = /* @__PURE__ */ zod
                                 type: zod.enum(['Redshift']),
                             })
                             .describe(
-                                'Typed configuration for a Redshift batch-export destination.\n\nConnection credentials live in the linked Integration, never here. Mirrors the non-credential fields of `RedshiftBatchExportInputs` in\n`products\/batch_exports\/backend\/service.py`.'
+                                'Typed configuration for a Redshift batch-export destination.\n\nConnection credentials may live in a linked Integration (when one is provided) or inline in\nthis config (legacy). Mirrors the non-credential fields of `RedshiftBatchExportInputs` in\n`products\/batch_exports\/backend\/service.py`.'
                             ),
                     ])
                     .describe(
@@ -3350,7 +3430,7 @@ export const BatchExportsRunTestStepNewCreateBody = /* @__PURE__ */ zod
                                 type: zod.enum(['Postgres']),
                             })
                             .describe(
-                                'Typed configuration for a PostgreSQL batch-export destination.\n\nConnection credentials live in the linked Integration, never here. Mirrors the\nnon-credential fields of `PostgresBatchExportInputs` in `products\/batch_exports\/backend\/service.py`.'
+                                'Typed configuration for a PostgreSQL batch-export destination.\n\nConnection credentials may live in a linked Integration (when one is provided) or\ninline in this config (legacy). Mirrors the non-credential fields of\n`PostgresBatchExportInputs` in `products\/batch_exports\/backend\/service.py`.'
                             ),
                         zod
                             .object({
@@ -3538,13 +3618,33 @@ export const BatchExportsRunTestStepNewCreateBody = /* @__PURE__ */ zod
                                                 zod
                                                     .string()
                                                     .describe('ARN of an IAM role attached to the Redshift cluster.'),
+                                                zod
+                                                    .object({
+                                                        aws_access_key_id: zod.string(),
+                                                        aws_secret_access_key: zod.string(),
+                                                    })
+                                                    .describe(
+                                                        'Legacy AWS access keys. Updates can keep this block unchanged. New or changed keys are rejected.'
+                                                    ),
                                             ])
                                             .describe(
-                                                'Authorization for Redshift to read staged files during COPY: an IAM role ARN or an AWS S3 integration ID.'
+                                                'Authorization for Redshift to read staged files during COPY: an IAM role ARN or an AWS S3 integration ID. Updates can keep legacy AWS access keys unchanged. New or changed keys are rejected.'
                                             ),
                                         bucket_credentials: zod
-                                            .number()
-                                            .describe('AWS S3 integration ID used to stage files in the S3 bucket.'),
+                                            .union([
+                                                zod.number().describe('ID of an aws-s3-kind Integration.'),
+                                                zod
+                                                    .object({
+                                                        aws_access_key_id: zod.string(),
+                                                        aws_secret_access_key: zod.string(),
+                                                    })
+                                                    .describe(
+                                                        'Legacy AWS access keys. Updates can keep this block unchanged. New or changed keys are rejected.'
+                                                    ),
+                                            ])
+                                            .describe(
+                                                'AWS S3 integration ID used to stage files in the S3 bucket. Updates can keep legacy AWS access keys unchanged. New or changed keys are rejected.'
+                                            ),
                                     })
                                     .describe(
                                         'S3 staging configuration for a Redshift batch export running in COPY mode.'
@@ -3554,7 +3654,7 @@ export const BatchExportsRunTestStepNewCreateBody = /* @__PURE__ */ zod
                                 type: zod.enum(['Redshift']),
                             })
                             .describe(
-                                'Typed configuration for a Redshift batch-export destination.\n\nConnection credentials live in the linked Integration, never here. Mirrors the non-credential fields of `RedshiftBatchExportInputs` in\n`products\/batch_exports\/backend\/service.py`.'
+                                'Typed configuration for a Redshift batch-export destination.\n\nConnection credentials may live in a linked Integration (when one is provided) or inline in\nthis config (legacy). Mirrors the non-credential fields of `RedshiftBatchExportInputs` in\n`products\/batch_exports\/backend\/service.py`.'
                             ),
                     ])
                     .describe(

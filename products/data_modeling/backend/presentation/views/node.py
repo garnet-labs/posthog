@@ -344,7 +344,14 @@ class NodeSerializer(serializers.ModelSerializer):
         return node.properties.get("user", {}).get("tag")
 
     def get_sync_interval(self, node: Node) -> str | None:
-        return sync_frequency_interval_to_sync_frequency(get_declared_target(node))
+        # The node's freshness target is authoritative on tiered v2 teams (where the saved
+        # query's interval is NULL); the saved-query interval covers v1 teams.
+        target = get_declared_target(node)
+        if target is not None:
+            return sync_frequency_interval_to_sync_frequency(target)
+        if node.saved_query:
+            return sync_frequency_interval_to_sync_frequency(node.saved_query.sync_frequency_interval)
+        return None
 
     def get_effective_sync_interval(self, node: Node) -> str | None:
         # Built once per DAG for the whole response, not once per listed node.

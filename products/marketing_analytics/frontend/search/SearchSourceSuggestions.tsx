@@ -29,7 +29,7 @@ export function SearchSourceSuggestions(): JSX.Element {
                         disabledReason: restrictedReason,
                         to: urls.dataWarehouseSourceNew(
                             source,
-                            `${urls.marketingAnalyticsApp()}?tab=search-performance`,
+                            `${urls.marketingAnalyticsApp()}?tab=ad-performance`,
                             'Marketing analytics',
                             undefined,
                             'marketing_analytics_search_suggestions'

@@ -14,7 +14,6 @@ from posthog.schema import (
     ExperimentBreakdownResult,
     ExperimentFunnelMetric,
     ExperimentMeanMetric,
-    ExperimentQuantileMetric,
     ExperimentQuery,
     ExperimentQueryResponse,
     ExperimentRatioMetric,
@@ -288,11 +287,7 @@ class ExperimentQueryRunner(ExperimentResultsCacheMixin, QueryRunner):
     def _query_builder(self, *, with_metric: bool = True) -> ExperimentQueryBuilder:
         assert isinstance(
             self.metric,
-            ExperimentFunnelMetric
-            | ExperimentMeanMetric
-            | ExperimentRatioMetric
-            | ExperimentRetentionMetric
-            | ExperimentQuantileMetric,
+            ExperimentFunnelMetric | ExperimentMeanMetric | ExperimentRatioMetric | ExperimentRetentionMetric,
         )
 
         exposure_params = get_exposure_config_params_for_builder(

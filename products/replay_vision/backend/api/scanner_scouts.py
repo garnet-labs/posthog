@@ -11,7 +11,6 @@ from posthog.event_usage import report_user_action
 from posthog.models import User
 
 from products.access_control.backend.facade.user_access_control import UserAccessControl
-from products.replay_vision.backend.api.cloud_only import ReplayVisionCloudOnly
 from products.replay_vision.backend.api.scout_permissions import ScoutDataAccessPermission
 from products.replay_vision.backend.models.replay_scanner import ScannerType
 from products.replay_vision.backend.scanner_access import scanner_for_recording_derived_read
@@ -100,7 +99,7 @@ class ScannerScoutViewSet(TeamAndOrgViewSetMixin, viewsets.ViewSet):
     # environment would otherwise read and write another team's rows. Signals' own scout endpoints
     # carry this for the same reason.
     # Appended to the standard stack by `TeamAndOrgViewSetMixin.get_permissions`.
-    permission_classes = [ReplayVisionCloudOnly, ScoutDataAccessPermission]
+    permission_classes = [ScoutDataAccessPermission]
     scope_object = "replay_scanner"
     # Every object this touches: the scanner and the recordings behind it, the skill a scout is,
     # and the scout config itself.

@@ -47,7 +47,6 @@ def finish_test() -> list[str]:
 
 def _subclasses(cls: type) -> set[type]:
     found: set[type] = set()
-    subclass: type
     for subclass in cls.__subclasses__():
         found |= {subclass, *_subclasses(subclass)}
     return found

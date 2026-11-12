@@ -78,7 +78,6 @@ pub fn create_identify_event(
         timestamp,
         is_cookieless_mode: false,
         historical_migration: true,
-        options: None,
     };
 
     Ok(InternallyCapturedEvent {

@@ -28,10 +28,6 @@ function releaseOverflow(): void {
     }
 }
 
-export function getMountedDashboardTileCount(): number {
-    return mounted.size
-}
-
 export function trackMountedDashboardTile(release: () => void): MountedTileHandle {
     const tile: MountedTile = { releasable: false, leftAt: 0, release }
     mounted.add(tile)

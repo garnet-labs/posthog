@@ -45,7 +45,7 @@ class TestStreamedAnswerCodeElements(SimpleTestCase):
         # The final answer goes through the tag rewriter. A tag inside a fence stays literal,
         # so the example arrives as the agent typed it.
         client = mock_get_client.return_value
-        context = {"team_id": 1, "integration_id": 1, "channel": "C001", "thread_ts": "1234.5678"}
+        context = {"integration_id": 1, "channel": "C001", "thread_ts": "1234.5678"}
         answer = f'Before\n\n{fence}xml\n<insight id="1">Example</insight>\n'
         if closed:
             answer += f"{fence}\n\nAfter\n"
@@ -93,12 +93,7 @@ class TestSlackAgentDesignStream(TestCase):
         # The project comes from the thread's integration, so the link opens where the reader is.
         stop_slack_agent_design_stream(
             StopSlackAgentDesignStreamInput(
-                slack_thread_context={
-                    "team_id": self.integration.team_id,
-                    "integration_id": self.integration.id,
-                    "channel": "C1",
-                    "thread_ts": "1.0",
-                },
+                slack_thread_context={"integration_id": self.integration.id, "channel": "C1", "thread_ts": "1.0"},
                 ts="2.0",
                 final_markdown='The <insight id="9pQx3">checkout funnel</insight> dropped.',
             )
@@ -118,12 +113,7 @@ class TestSlackAgentDesignStream(TestCase):
 
         stop_slack_agent_design_stream(
             StopSlackAgentDesignStreamInput(
-                slack_thread_context={
-                    "team_id": self.integration.team_id,
-                    "integration_id": self.integration.id,
-                    "channel": "C1",
-                    "thread_ts": "1.0",
-                },
+                slack_thread_context={"integration_id": self.integration.id, "channel": "C1", "thread_ts": "1.0"},
                 ts="2.0",
                 final_markdown="Done.",
                 trace_id=trace_id,
@@ -150,12 +140,7 @@ class TestSlackAgentDesignStream(TestCase):
 
         stop_slack_agent_design_stream(
             StopSlackAgentDesignStreamInput(
-                slack_thread_context={
-                    "team_id": self.integration.team_id,
-                    "integration_id": self.integration.id,
-                    "channel": "C1",
-                    "thread_ts": "1.0",
-                },
+                slack_thread_context={"integration_id": self.integration.id, "channel": "C1", "thread_ts": "1.0"},
                 ts="2.0",
                 final_markdown="Should I add the index?",
                 run_id=str(self.task_run.id),
@@ -172,12 +157,7 @@ class TestSlackAgentDesignStream(TestCase):
         # The lookup only feeds the buttons, so it must not stop the answer and its attachments.
         stop_slack_agent_design_stream(
             StopSlackAgentDesignStreamInput(
-                slack_thread_context={
-                    "team_id": self.integration.team_id,
-                    "integration_id": self.integration.id,
-                    "channel": "C1",
-                    "thread_ts": "1.0",
-                },
+                slack_thread_context={"integration_id": self.integration.id, "channel": "C1", "thread_ts": "1.0"},
                 ts="2.0",
                 final_markdown="Should I add the index?",
                 run_id=str(self.task_run.id),
@@ -198,12 +178,7 @@ class TestSlackAgentDesignStream(TestCase):
 
         stop_slack_agent_design_stream(
             StopSlackAgentDesignStreamInput(
-                slack_thread_context={
-                    "team_id": self.integration.team_id,
-                    "integration_id": self.integration.id,
-                    "channel": "C1",
-                    "thread_ts": "1.0",
-                },
+                slack_thread_context={"integration_id": self.integration.id, "channel": "C1", "thread_ts": "1.0"},
                 ts="2.0",
                 final_markdown="Signups grew.",
                 run_id=str(self.task_run.id),
@@ -233,7 +208,6 @@ class TestSlackAgentDesignStream(TestCase):
         stream = start_slack_agent_design_stream(
             StartSlackAgentDesignStreamInput(
                 slack_thread_context={
-                    "team_id": self.integration.team_id,
                     "integration_id": self.integration.id,
                     "channel": "C1",
                     "thread_ts": "1.0",
@@ -276,7 +250,6 @@ class TestSlackAgentDesignStream(TestCase):
         client = mock_get_client.return_value
         client.chat_postMessage.return_value = {"ts": "2.0"}
         context = {
-            "team_id": self.integration.team_id,
             "integration_id": self.integration.id,
             "channel": channel,
             "thread_ts": "1.0",
@@ -356,7 +329,6 @@ class TestSlackAgentDesignStream(TestCase):
         result = append_slack_agent_design_steps(
             AppendSlackAgentDesignStepsInput(
                 slack_thread_context={
-                    "team_id": self.integration.team_id,
                     "integration_id": self.integration.id,
                     "channel": "C123",
                     "thread_ts": "123.456",

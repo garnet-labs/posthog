@@ -10,7 +10,6 @@ import {
     overflowRedirectEventsTotal,
     overflowRedirectKeysTotal,
     overflowRedirectRateLimitDecisions,
-    overflowRedirectRateLimiterBuckets,
     overflowRedirectSourceEventsTotal,
 } from './metrics'
 import { OverflowEventGroup, OverflowRedirectService } from './overflow-redirect-service'
@@ -21,12 +20,16 @@ export interface MainLaneOverflowRedirectConfig {
     redisRepository: OverflowRedisRepository
     localCacheTTLSeconds: number
     /** Max entries in the in-memory flagged/not-flagged cache before LRU eviction. */
-    localCacheMaxSize: number
+    localCacheMaxSize?: number
     /** Overflow conditions to enforce; a key is redirected when any strategy's bucket is exhausted. */
     strategies: OverflowStrategyEntry[]
     /** Redis keyspace this service operates on. Fixed per pipeline. */
     overflowType: OverflowType
 }
+
+// Bounds the in-memory cache so a flood of unique partition keys cannot
+// grow it without limit; evicted keys simply re-check Redis on the next lookup.
+const DEFAULT_LOCAL_CACHE_MAX_SIZE = 1_000_000
 
 /**
  * Main lane implementation of overflow redirect.
@@ -49,16 +52,12 @@ export class MainLaneOverflowRedirect implements OverflowRedirectService {
     }[]
     private redisRepository: OverflowRedisRepository
     private overflowType: OverflowType
-    private localCacheTTLMs: number
-    private nextPurgeAt: number
 
     constructor(config: MainLaneOverflowRedirectConfig) {
         this.redisRepository = config.redisRepository
-        this.localCacheTTLMs = config.localCacheTTLSeconds * 1000
-        this.nextPurgeAt = Date.now() + this.localCacheTTLMs
         this.localCache = new LRUCache({
-            max: config.localCacheMaxSize,
-            ttl: this.localCacheTTLMs,
+            max: config.localCacheMaxSize ?? DEFAULT_LOCAL_CACHE_MAX_SIZE,
+            ttl: config.localCacheTTLSeconds * 1000,
         })
         this.strategies = config.strategies.map((entry) => ({
             label: entry.label,
@@ -72,16 +71,8 @@ export class MainLaneOverflowRedirect implements OverflowRedirectService {
         return `${type}:${key}`
     }
 
-    // lru-cache drops expired entries only on read; ttlAutopurge would reset a timer per entry on every write.
-    private purgeExpired(now: number): void {
-        if (now < this.nextPurgeAt) {
-            return
-        }
-        this.nextPurgeAt = now + this.localCacheTTLMs
-        this.localCache.purgeStale()
-    }
-
     // true = flagged in Redis, false = known not in Redis, undefined = cache miss.
+    // TTL expiry and size-bounded LRU eviction are handled by the cache itself.
     private getCachedValue(key: string): boolean | undefined {
         return this.localCache.get(key)
     }
@@ -95,9 +86,6 @@ export class MainLaneOverflowRedirect implements OverflowRedirectService {
         const toRedirect = new Set<string>()
         const redirectSource = new Map<string, 'redis' | 'rate_limiter'>()
         const needsRateLimitCheck: OverflowEventGroup[] = []
-
-        const now = Date.now()
-        this.purgeExpired(now)
 
         // Step 1: Check local cache
         const needsRedisCheck: OverflowEventGroup[] = []
@@ -178,11 +166,6 @@ export class MainLaneOverflowRedirect implements OverflowRedirectService {
                 toRedirect.add(group.key)
                 redirectSource.set(group.key, 'rate_limiter')
             }
-        }
-
-        for (const { label, limiter } of this.strategies) {
-            limiter.removeRefilledBuckets(now)
-            overflowRedirectRateLimiterBuckets.labels(type, label).set(limiter.buckets.size)
         }
 
         // Step 4: Batch flag newly rate-limited keys in Redis

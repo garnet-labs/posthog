@@ -115,7 +115,12 @@ export function Seekbar(): JSX.Element {
 
     return (
         <div className="flex flex-col items-end mx-4 mt-2 h-8" data-attr="rrweb-controller">
-            <PlayerSeekbarTicks seekbarItems={seekbarItems} endTimeMs={endTimeMs} seekToTime={seekToTime} />
+            <PlayerSeekbarTicks
+                seekbarItems={seekbarItems}
+                endTimeMs={endTimeMs}
+                seekToTime={seekToTime}
+                hoverRef={seekBarRef}
+            />
 
             <div
                 className={cn('PlayerSeekbar', {

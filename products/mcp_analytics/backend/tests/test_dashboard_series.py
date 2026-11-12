@@ -212,16 +212,6 @@ class TestMCPToolCallBreakdownQueryRunner(_MCPAnalyticsTeamScopedTestMixin, Clic
         assert [(r.tool, r.calls) for r in results] == [("query_run", 1)]
 
 
-REQUIRED_QUERY_FIELDS: dict[str, dict[str, Any]] = {
-    "MCPDashboardQuery": {
-        "sections": ["toolRows"],
-        "dateRange": {"date_from": "-7d"},
-        "interval": "day",
-        "comparison": {"dateFrom": "2026-07-09T07:00:00.000Z", "currentStartBucket": "2026-07-16 00:00:00"},
-    }
-}
-
-
 class TestMCPDashboardSeriesGate(_MCPAnalyticsTeamScopedTestMixin, ClickhouseTestMixin, APIBaseTest):
     # The runners' access check reads the token owner's RBAC, not the token's granted scopes, so a
     # kind registered on the generic query endpoint without a _QUERY_KIND_SCOPES entry is reachable
@@ -230,7 +220,6 @@ class TestMCPDashboardSeriesGate(_MCPAnalyticsTeamScopedTestMixin, ClickhouseTes
         [
             (kind, scopes, expected_status)
             for kind in (
-                "MCPDashboardQuery",
                 "MCPHarnessBreakdownQuery",
                 "MCPMissingCapabilitiesQuery",
                 "MCPModelBreakdownQuery",
@@ -253,7 +242,7 @@ class TestMCPDashboardSeriesGate(_MCPAnalyticsTeamScopedTestMixin, ClickhouseTes
 
         response = self.client.post(
             f"/api/projects/{self.team.pk}/query/",
-            {"query": {"kind": kind, **REQUIRED_QUERY_FIELDS.get(kind, {})}},
+            {"query": {"kind": kind}},
             HTTP_AUTHORIZATION=f"Bearer {value}",
         )
 

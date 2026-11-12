@@ -5,6 +5,7 @@ import { LemonButton, LemonInput, LemonModal, LemonSkeleton, LemonTag, Tooltip }
 
 import { BillingUpgradeCTA } from 'lib/components/BillingUpgradeCTA'
 import { LemonField } from 'lib/lemon-ui/LemonField'
+import { currencyFormatter } from 'scenes/billing/billing-utils'
 import { billingProductLogic } from 'scenes/billing/billingProductLogic'
 import { paymentEntryLogic } from 'scenes/billing/paymentEntryLogic'
 import { teamLogic } from 'scenes/teamLogic'
@@ -14,7 +15,6 @@ import { BillingProductV2Type } from '~/types'
 
 import { InboxUsageStatus, inboxUsageLogic } from '../../logics/inboxUsageLogic'
 import { selfDrivingTrialLogic } from '../../logics/selfDrivingTrialLogic'
-import { formatCredits, usdToCredits } from '../../utils/credits'
 import { SelfDrivingTrialUsage } from './SelfDrivingTrialUsage'
 
 // Usage-bar fill colour by status. Main-app semantic Tailwind classes (not quill `--*` tokens —
@@ -108,21 +108,20 @@ function EditLimitModal(): JSX.Element {
                 <div className="flex flex-col gap-2 text-xs">
                     {freePrs > 0 && pricePerPrUsd != null && (
                         <span className="text-secondary">
-                            The first {freePrs} PRs each month are free, then{' '}
-                            {formatCredits(usdToCredits(pricePerPrUsd))} per PR.
+                            The first {freePrs} PRs each month are free, then {currencyFormatter(pricePerPrUsd)} per PR.
                         </span>
                     )}
                     {estimatedBudgetUsd != null && pricePerPrUsd != null && (
                         <div className="flex flex-col gap-0.5 rounded bg-surface-secondary px-2 py-1.5">
                             <div className="flex items-center justify-between">
-                                <span className="text-default">Estimated monthly credits</span>
+                                <span className="text-default">Estimated monthly budget</span>
                                 <span className="font-semibold text-default tabular-nums">
-                                    {formatCredits(usdToCredits(estimatedBudgetUsd))}
+                                    {currencyFormatter(estimatedBudgetUsd)}
                                 </span>
                             </div>
                             <span className="text-tertiary">
                                 {billablePrs > 0
-                                    ? `${billablePrs} billable PRs × ${formatCredits(usdToCredits(pricePerPrUsd))}`
+                                    ? `${billablePrs} billable PRs × ${currencyFormatter(pricePerPrUsd)}`
                                     : 'Within the free tier'}
                             </span>
                         </div>
@@ -134,7 +133,7 @@ function EditLimitModal(): JSX.Element {
 }
 
 /**
- * Compact PR-usage meter for the inbox agents rail: a status-coloured usage bar with credits used so far
+ * Compact PR-usage meter for the inbox agents rail: a status-coloured usage bar with USD spent so far
  * alongside it, then `X / Y PRs used across your organization` on the left and `Resets <date>` on
  * the right. That count is org-wide, uncapped, and net of refunds, on the same basis as the quota
  * check. When refunds exist, a line under it names the gross count the billing page shows. On a paid
@@ -149,7 +148,7 @@ export function InboxUsageWidget(): JSX.Element | null {
     const {
         product,
         spendProduct,
-        spendCredits,
+        spendAmountUsd,
         isLoading,
         isSubscribed,
         canAccessBilling,
@@ -182,21 +181,19 @@ export function InboxUsageWidget(): JSX.Element | null {
         return (
             <>
                 {trialEnabled && trial?.enabled && paidContinuation && <SelfDrivingTrialUsage />}
-                <div className="flex flex-col items-start gap-2">
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                        <span className="text-[13px] font-semibold">AI credits used</span>
-                        {quotaLimited && <LemonTag type="warning">Spending limit reached</LemonTag>}
-                    </div>
-                    {spendCredits != null && (
-                        <span className="text-xs tabular-nums" translate="no">
-                            {formatCredits(spendCredits)}
-                        </span>
+                <div className="flex flex-col gap-2">
+                    <span className="text-[13px] font-semibold">Inbox spend</span>
+                    {spendAmountUsd != null && (
+                        <span className="text-xs tabular-nums">{currencyFormatter(spendAmountUsd)}</span>
                     )}
                     {quotaLimited && (
-                        <span className="text-xs text-secondary">
-                            New work is paused. Work already underway will finish.
-                            {!canAccessBilling && ' Ask an organization admin to change the limit.'}
-                        </span>
+                        <>
+                            <LemonTag type="warning">Spending limit reached</LemonTag>
+                            <span className="text-xs text-secondary">
+                                New work is paused. Work already underway will finish.
+                                {!canAccessBilling && ' Ask an organization admin to change the limit.'}
+                            </span>
+                        </>
                     )}
                     {canAccessBilling && (
                         <LemonButton size="small" type="secondary" to={urls.organizationBilling()}>
@@ -239,7 +236,7 @@ export function InboxUsageWidget(): JSX.Element | null {
                     </Tooltip>
                     {spentUsd != null && (
                         <span className="text-xs font-medium text-default tabular-nums">
-                            {formatCredits(usdToCredits(spentUsd))}
+                            {currencyFormatter(spentUsd)}
                         </span>
                     )}
                 </div>

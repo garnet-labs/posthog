@@ -23,9 +23,6 @@ class TestSwarmiaSource:
             ("capex", False),
             ("capex_employees", False),
             ("fte", False),
-            ("code_metrics", True),
-            ("ai_adoption", True),
-            ("teams", False),
         ]
     )
     def test_get_schemas_incremental_support(self, endpoint: str, supports_incremental: bool) -> None:

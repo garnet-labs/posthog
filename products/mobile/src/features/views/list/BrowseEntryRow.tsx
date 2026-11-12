@@ -8,7 +8,6 @@ import { DashboardIcon } from '@/ui/icons/DashboardIcon'
 import { ErrorTriangleIcon } from '@/ui/icons/ErrorTriangleIcon'
 import { GlobeIcon } from '@/ui/icons/GlobeIcon'
 import { LineChartIcon } from '@/ui/icons/LineChartIcon'
-import { LiveIcon } from '@/ui/icons/LiveIcon'
 import { RecordingIcon } from '@/ui/icons/RecordingIcon'
 import { Pressable44 } from '@/ui/Pressable44'
 import { createStyles, useColors } from '@/ui/theme'
@@ -17,38 +16,24 @@ import { radii, type } from '@/ui/tokens'
 import { useMenuTrigger } from './useMenuTrigger'
 import { GroupFrame, type GroupPosition } from './ViewRow'
 
-export type BrowseEntry = 'dashboards' | 'insights' | 'web' | 'live' | 'replay' | 'errors'
+export type BrowseEntry = 'dashboards' | 'insights' | 'web' | 'replay' | 'errors'
 
 const LABELS: Record<BrowseEntry, string> = {
     dashboards: 'Dashboards',
     insights: 'Insights',
     web: 'Web analytics',
-    live: 'Live',
     replay: 'Sessions',
     errors: 'Errors',
 }
 
-export const BROWSE_ENTRIES: readonly BrowseEntry[] = ['dashboards', 'insights', 'web', 'live', 'replay', 'errors']
-
-const PINS: Partial<Record<BrowseEntry, NavPin>> = {
-    web: 'web_analytics',
-    live: 'live',
-    replay: 'replay',
-    errors: 'errors',
-}
+export const BROWSE_ENTRIES: readonly BrowseEntry[] = ['dashboards', 'insights', 'web', 'replay', 'errors']
 
 export function browseEntryLabel(entry: BrowseEntry): string {
     return LABELS[entry]
 }
 
-/** The navigation pin a row's long press offers, or null for a row that cannot sit in the nav pill. */
 export function browseEntryPin(entry: BrowseEntry): NavPin | null {
-    return PINS[entry] ?? null
-}
-
-/** False for Sessions and Errors, which have no demo data. */
-export function browseEntryInDemo(entry: BrowseEntry): boolean {
-    return entry !== 'replay' && entry !== 'errors'
+    return entry === 'errors' || entry === 'replay' ? entry : null
 }
 
 function EntryIcon({ entry }: { entry: BrowseEntry }): ReactElement {
@@ -60,8 +45,6 @@ function EntryIcon({ entry }: { entry: BrowseEntry }): ReactElement {
             return <LineChartIcon size={17} color={colors.muted} />
         case 'web':
             return <GlobeIcon size={17} color={colors.muted} />
-        case 'live':
-            return <LiveIcon size={17} color={colors.muted} />
         case 'replay':
             return <RecordingIcon size={17} color={colors.muted} />
         case 'errors':

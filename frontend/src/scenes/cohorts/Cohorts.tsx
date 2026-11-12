@@ -20,7 +20,7 @@ import { createdAtColumn, createdByColumn } from 'lib/lemon-ui/LemonTable/column
 import { LemonTableLink } from 'lib/lemon-ui/LemonTable/LemonTableLink'
 import { Spinner } from 'lib/lemon-ui/Spinner/Spinner'
 import { getAccessControlDisabledReason } from 'lib/utils/accessControlUtils'
-import { PeopleSceneHeader } from 'scenes/activity/PeopleSceneHeader'
+import { ActivitySceneTabs } from 'scenes/activity/ActivitySceneTabs'
 import { cohortsSceneLogic } from 'scenes/cohorts/cohortsSceneLogic'
 import { openDeleteCohortDialog } from 'scenes/cohorts/DeleteCohortDialog'
 import { sceneConfigurations } from 'scenes/scenes'
@@ -28,6 +28,7 @@ import { Scene, SceneExport } from 'scenes/sceneTypes'
 import { urls } from 'scenes/urls'
 
 import { SceneContent } from '~/layout/scenes/components/SceneContent'
+import { SceneTitleSection } from '~/layout/scenes/components/SceneTitleSection'
 import { ProductKey } from '~/queries/schema/schema-general'
 import {
     AccessControlLevel,
@@ -266,8 +267,9 @@ export function Cohorts(): JSX.Element {
 
     return (
         <SceneContent>
-            <PeopleSceneHeader
-                activeKey="cohorts"
+            <ActivitySceneTabs activeKey="cohorts" />
+
+            <SceneTitleSection
                 name={sceneConfigurations[Scene.Cohorts].name}
                 description={sceneConfigurations[Scene.Cohorts].description}
                 resourceType={{

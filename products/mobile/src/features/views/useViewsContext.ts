@@ -29,7 +29,6 @@ export function useViewsContext(): ViewsContext {
     const mode = useDataMode()
     const offline = useConnectivity((state) => state.status === 'offline') && mode === 'live'
     const account = useAuthStore((state) => `${state.status}|${state.user?.uuid ?? ''}`)
-    const session = useAuthStore(sessionGeneration)
     const projectScope = useProjectScope()
     const client = useQueryClient()
     const access = useViewsAccess()
@@ -38,6 +37,6 @@ export function useViewsContext(): ViewsContext {
     const item = useMemo<ItemContext>(() => ({ client, scope, demo }), [client, scope, demo])
     const ready = demo || (mode === 'live' && scope !== null && access.state === 'ok')
     const dataScope = demo ? 'demo' : scope ? `${scope.host}|${scope.projectId}` : 'none'
-    const identity = `${mode}|${account}|${session}|${dataScope}`
+    const identity = `${mode}|${account}|${sessionGeneration()}|${dataScope}`
     return { identity, mode, offline, scope, dataScope, access, ready, item }
 }

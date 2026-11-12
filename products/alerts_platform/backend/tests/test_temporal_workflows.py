@@ -343,15 +343,11 @@ async def test_delivery_waits_out_a_held_thread_and_fails_when_it_never_frees(
         if frees_after is None or scheduled - attempts[0] < frees_after:
             raise ApplicationError("thread held", type=THREAD_BUSY, non_retryable=True)
 
-    @activity.defn(name="alerts_platform_deliver_routes_activity")
-    async def no_routes(request: AlertDeliveryRequest) -> None:
-        pass
-
     async with Worker(
         environment.client,
         task_queue=settings.ALERTS_PLATFORM_DELIVERY_TASK_QUEUE,
         workflows=DELIVERY_WORKFLOWS,
-        activities=[held_thread, no_routes],
+        activities=[held_thread],
         workflow_runner=UnsandboxedWorkflowRunner(),
     ):
         handle = await environment.client.start_workflow(
@@ -379,7 +375,7 @@ async def test_delivery_waits_out_a_held_thread_and_fails_when_it_never_frees(
 
 
 @pytest.mark.asyncio
-async def test_a_split_delivery_sends_every_part_then_routes_each_even_after_one_fails(
+async def test_a_split_delivery_sends_every_part_in_turn_even_after_one_fails(
     environment: WorkflowEnvironment,
 ) -> None:
     steps: list[str] = []
@@ -394,15 +390,11 @@ async def test_a_split_delivery_sends_every_part_then_routes_each_even_after_one
         if request.part == 0:
             raise ApplicationError("channel refused", non_retryable=True)
 
-    @activity.defn(name="alerts_platform_deliver_routes_activity")
-    async def route(request: AlertDeliveryRequest) -> None:
-        steps.append(f"route {request.part}")
-
     async with Worker(
         environment.client,
         task_queue=settings.ALERTS_PLATFORM_DELIVERY_TASK_QUEUE,
         workflows=DELIVERY_WORKFLOWS,
-        activities=[deliver, emit, route],
+        activities=[deliver, emit],
         workflow_runner=UnsandboxedWorkflowRunner(),
     ):
         handle = await environment.client.start_workflow(
@@ -424,7 +416,7 @@ async def test_a_split_delivery_sends_every_part_then_routes_each_even_after_one
             await handle.result()
 
     assert isinstance(failure.value.cause, ActivityError)
-    assert steps == ["send 0", "send 1", "send 2", "route 0", "route 1", "route 2"]
+    assert steps == ["send 0", "send 1", "send 2"]
 
 
 @pytest.mark.asyncio

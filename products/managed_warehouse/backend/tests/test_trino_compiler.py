@@ -33,7 +33,6 @@ from products.managed_warehouse.backend.trino_compiler import (
     TrinoTargetUnavailable,
     compile_hogql_to_trino_sql,
     get_ready_trino_catalog_name,
-    get_trino_target_readiness,
     prepare_hogql_to_trino_compiler,
 )
 from products.warehouse_sources.backend.facade.models import (
@@ -100,7 +99,6 @@ class TestReadyTrinoCatalogName:
         "body, status_code, expected_log",
         [
             ({"error": "example upstream failure"}, 503, {"reason": "http_error", "log_level": "warning"}),
-            ({"error": "example missing target"}, 404, {"reason": "http_error", "log_level": "warning"}),
             ([], 200, {"reason": "invalid_response", "response_type": "list", "log_level": "warning"}),
             (
                 {"enabled": False},
@@ -197,9 +195,7 @@ class TestReadyTrinoCatalogName:
             ),
             capture_logs() as logs,
         ):
-            readiness = get_trino_target_readiness("org-1")
-        assert readiness.catalog_name is None
-        assert readiness.lookup_failed is (status_code >= 500)
+            assert get_ready_trino_catalog_name("org-1") is None
         assert logs == [
             {
                 "event": "trino_target_not_ready",

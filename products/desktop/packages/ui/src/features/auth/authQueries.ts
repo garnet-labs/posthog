@@ -4,7 +4,6 @@ import {
   HOST_TRPC_CLIENT,
   type HostTrpcClient,
 } from "@posthog/host-router/client";
-import { useIntegrationStore } from "@posthog/ui/features/integrations/store";
 import { clearQuerySnapshots } from "@posthog/ui/hooks/useQuerySnapshot";
 import {
   IMPERATIVE_QUERY_CLIENT,
@@ -36,7 +35,6 @@ export async function refreshAuthStateQuery(): Promise<void> {
 }
 
 export function clearAuthScopedQueries(): void {
-  useIntegrationStore.getState().setIntegrations([], null);
   queryClient().removeQueries({
     predicate: (query) => query.meta?.authScoped === true,
   });

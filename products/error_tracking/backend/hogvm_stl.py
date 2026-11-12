@@ -97,7 +97,6 @@ RUST_HOGVM_STL = [
     "sha1HmacChainHex",
     "sha1HmacChain",
     "sha256HmacBase64Key",
-    "ed25519Verify",
     "base64Encode",
     "base64Decode",
     "tryBase64Decode",

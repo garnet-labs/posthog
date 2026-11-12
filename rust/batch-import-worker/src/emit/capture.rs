@@ -332,7 +332,6 @@ mod tests {
                     .with_timezone(&Utc),
                 is_cookieless_mode: false,
                 historical_migration: true,
-                options: None,
             },
             team_id: 1,
         }

@@ -97,7 +97,8 @@ SCOUT_SKILL = "signals-scout-error-tracking"
 @pytest.fixture
 def organization():
     org = Organization.objects.create(name="test-auto-start-org")
-    return org
+    yield org
+    org.delete()
 
 
 @pytest.fixture

@@ -195,7 +195,7 @@ class MetricEventSamplesQueryRunner:
             query_type="MetricEventSamplesQuery",
             query=query,
             team=self.team,
-            workload=Workload.METRICS,
+            workload=Workload.LOGS,  # metrics share the logs ClickHouse workload pool for now
             settings=_QUERY_SETTINGS,
         )
 

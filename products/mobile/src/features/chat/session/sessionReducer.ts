@@ -620,14 +620,9 @@ class Draft {
 
     // ---- run news ----
 
-    turnEnd(traceId: string | undefined, runId: string): void {
+    turnEnd(): void {
         this.closeOpenBuffers()
-        this.push({
-            kind: 'turn_end',
-            id: `turn-${this.next('turn')}`,
-            ...(traceId ? { traceId } : {}),
-            ...(runId ? { runId } : {}),
-        })
+        this.push({ kind: 'turn_end', id: `turn-${this.next('turn')}` })
         this.pairedSends.clear()
         for (const send of this.waiting) {
             send.turns += 1
@@ -884,7 +879,7 @@ function applyFrame(draft: Draft, frame: unknown, context: FrameContext): void {
             }
             return
         case '_posthog/turn_complete':
-            draft.turnEnd(asText(params.traceId), context.sourceRunId)
+            draft.turnEnd()
             return
         case '_posthog/error':
             draft.error(asText(params.message) ?? notificationError ?? AGENT_ERROR)

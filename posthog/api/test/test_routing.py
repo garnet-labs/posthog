@@ -24,7 +24,7 @@ from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from parameterized import parameterized
-from rest_framework import serializers, viewsets
+from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -38,7 +38,6 @@ from posthog.models.personal_api_key import PersonalAPIKey
 from posthog.models.project import Project
 from posthog.models.scoping import get_current_team_id
 from posthog.models.team.team import Team
-from posthog.models.uploaded_media import UploadedMedia
 from posthog.models.user_facet_settings import UserFacetSettings
 from posthog.models.utils import generate_random_token_personal, hash_key_value
 from posthog.permissions import APIScopePermission
@@ -46,18 +45,14 @@ from posthog.products import product_app_names
 from posthog.queryset_paging import stable_queryset_ordering
 
 from products.access_control.backend.models.access_control import AccessControl
-
-
-class FooSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = UploadedMedia
-        fields = ["id", "file_name", "archived_at"]
+from products.annotations.backend.api.annotation import AnnotationSerializer
+from products.annotations.backend.models.annotation import Annotation
 
 
 class FooViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
     scope_object = "INTERNAL"
-    queryset = UploadedMedia.objects.all()
-    serializer_class = FooSerializer
+    queryset = Annotation.objects.all()
+    serializer_class = AnnotationSerializer
 
     @action(detail=False, methods=["get"])
     def current_scope(self, request, **kwargs):
@@ -69,29 +64,21 @@ class FooViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
         return Response({"products": list(facet_settings.values_list("product", flat=True))})
 
 
-class OrganizationFooViewSet(FooViewSet):
-    filter_rewrite_rules = {"organization_id": "team__organization_id"}
-
-
 class ScopedFooViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
     scope_object = "annotation"
     scope_object_read_actions = ["list", "retrieve", "log_context"]
-    queryset = UploadedMedia.objects.all()
-    serializer_class = FooSerializer
+    queryset = Annotation.objects.all()
+    serializer_class = AnnotationSerializer
 
     @action(detail=False, methods=["get"])
     def log_context(self, request, **kwargs):
         return Response({"team_id": structlog.contextvars.get_contextvars().get("team_id")})
 
 
-class ScopedOrganizationFooViewSet(ScopedFooViewSet):
-    filter_rewrite_rules = {"organization_id": "team__organization_id"}
-
-
 class OrderedFooViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
     scope_object = "INTERNAL"
-    queryset = UploadedMedia.objects.filter(archived_at__isnull=False).order_by("archived_at")
-    serializer_class = FooSerializer
+    queryset = Annotation.objects.filter(date_marker__isnull=False).order_by("date_marker")
+    serializer_class = AnnotationSerializer
 
 
 class TypedPathFooViewSet(TeamAndOrgViewSetMixin, viewsets.GenericViewSet):
@@ -130,27 +117,25 @@ def test_path_parameters_reject_parent_lookups_and_unsupported_types(path_parame
 
 
 def test_stable_queryset_ordering_adds_a_primary_key_tiebreaker() -> None:
-    queryset = stable_queryset_ordering(UploadedMedia.objects.order_by("archived_at"))
+    queryset = stable_queryset_ordering(Annotation.objects.order_by("date_marker"))
 
-    assert queryset.query.order_by == ("archived_at", "pk")
+    assert queryset.query.order_by == ("date_marker", "pk")
 
     expression_queryset = stable_queryset_ordering(FileSystem.objects.order_by(Lower("path")))
 
     assert expression_queryset.query.order_by[-1] == "pk"
 
-    annotated_queryset = stable_queryset_ordering(
-        UploadedMedia.objects.annotate(count=Count("id")).order_by("file_name")
-    )
+    annotated_queryset = stable_queryset_ordering(Annotation.objects.annotate(count=Count("id")).order_by("content"))
 
-    assert annotated_queryset.query.order_by == ("file_name", "pk")
+    assert annotated_queryset.query.order_by == ("content", "pk")
 
 
 def test_stable_queryset_ordering_leaves_sliced_and_values_grouped_querysets_unchanged() -> None:
-    sliced_queryset = UploadedMedia.objects.order_by("archived_at")[:1]
+    sliced_queryset = Annotation.objects.order_by("date_marker")[:1]
 
     assert stable_queryset_ordering(sliced_queryset) is sliced_queryset
 
-    grouped_queryset = UploadedMedia.objects.values("team_id").annotate(count=Count("id")).order_by("team_id")
+    grouped_queryset = Annotation.objects.values("team_id").annotate(count=Count("id")).order_by("team_id")
 
     assert stable_queryset_ordering(grouped_queryset).query.order_by == ("team_id",)
 
@@ -174,7 +159,7 @@ test_typed_foos_router = test_projects_router.register(
 test_typed_foos_router.register(r"bars", TypedPathFooViewSet, "project_typed_foo_bars", ["project_id", "foo_id"])
 
 test_organizations_router = test_router.register(r"organizations", FooViewSet, "organizations")
-test_organizations_router.register(r"foos", OrganizationFooViewSet, "organization_foos", ["organization_id"])
+test_organizations_router.register(r"foos", FooViewSet, "organization_foos", ["organization_id"])
 
 scoped_test_environments_router = test_router.register(r"scoped_environments", ScopedFooViewSet, "scoped_environments")
 scoped_test_environments_router.register(r"scoped_foos", ScopedFooViewSet, "scoped_environment_foos", ["team_id"])
@@ -186,7 +171,7 @@ scoped_test_organizations_router = test_router.register(
     r"scoped_organizations", ScopedFooViewSet, "scoped_organizations"
 )
 scoped_test_organizations_router.register(
-    r"scoped_foos", ScopedOrganizationFooViewSet, "scoped_organization_foos", ["organization_id"]
+    r"scoped_foos", ScopedFooViewSet, "scoped_organization_foos", ["organization_id"]
 )
 
 
@@ -265,40 +250,44 @@ class TestTeamAndOrgViewSetMixinLogContext(APIBaseTest):
 
 @override_settings(ROOT_URLCONF=__name__)  # Use `urlpatterns` from this file and not from `posthog.urls`
 class TestTeamAndOrgViewSetMixin(APIBaseTest):
+    test_annotation: Annotation
+
     def setUp(self):
         super().setUp()
-        _, _, other_org_team = Organization.objects.bootstrap(user=self.user)
-        self.other_org_media = UploadedMedia.objects.create(team=other_org_team)
+        other_org, _, other_org_team = Organization.objects.bootstrap(user=self.user)
+        self.other_org_annotation = Annotation.objects.create(team=other_org_team, organization=other_org)
         _, other_project_team = Project.objects.create_with_team(
             initiating_user=self.user, organization=self.organization
         )
-        self.other_project_media = UploadedMedia.objects.create(team=other_project_team)
+        self.other_project_annotation = Annotation.objects.create(
+            team=other_project_team, organization=self.organization
+        )
         other_team = Team.objects.create(organization=self.organization, project=self.project)
-        self.other_team_media = UploadedMedia.objects.create(team=other_team)
-        self.current_team_media = UploadedMedia.objects.create(team=self.team)
+        self.other_team_annotation = Annotation.objects.create(team=other_team, organization=self.organization)
+        self.current_team_annotation = Annotation.objects.create(team=self.team, organization=self.organization)
 
     def test_team_nested_filtering(self):
         response = self.client.get(f"/api/team_nested/{self.team.id}/foos/")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["count"], 1)  # Just current_team_media
+        self.assertEqual(response.json()["count"], 1)  # Just current_team_annotation
 
     def test_team_nested_pagination_adds_primary_key_tiebreaker(self):
         marker = timezone.now()
-        first = UploadedMedia.objects.create(team=self.team, archived_at=marker)
-        second = UploadedMedia.objects.create(team=self.team, archived_at=marker)
+        first = Annotation.objects.create(team=self.team, organization=self.organization, date_marker=marker)
+        second = Annotation.objects.create(team=self.team, organization=self.organization, date_marker=marker)
 
         first_page = self.client.get(f"/api/team_ordered/{self.team.id}/foos/?limit=1")
         second_page = self.client.get(f"/api/team_ordered/{self.team.id}/foos/?limit=1&offset=1")
 
         self.assertEqual(first_page.status_code, 200)
         self.assertEqual(second_page.status_code, 200)
-        self.assertEqual(first_page.json()["results"][0]["id"], str(first.id))
-        self.assertEqual(second_page.json()["results"][0]["id"], str(second.id))
+        self.assertEqual(first_page.json()["results"][0]["id"], first.id)
+        self.assertEqual(second_page.json()["results"][0]["id"], second.id)
 
     def test_project_nested_filtering(self):
         response = self.client.get(f"/api/projects/{self.team.id}/foos/")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["count"], 2)  # Both current_team_media and other_team_media
+        self.assertEqual(response.json()["count"], 2)  # Both current_team_annotation and other_team_annotation
 
     @parameterized.expand(
         [
@@ -344,7 +333,7 @@ class TestTeamAndOrgViewSetMixin(APIBaseTest):
     def test_organization_nested_filtering(self):
         response = self.client.get(f"/api/organizations/{self.organization.id}/foos/")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["count"], 3)  # All except other_org_media
+        self.assertEqual(response.json()["count"], 3)  # All except other_org_annotation
 
     def test_team_scope_context_set_from_url_team_not_user_current_team(self):
         # User's "current" team is set to self.team, but the URL targets another
@@ -488,7 +477,7 @@ class TestDeactivatedOrganizationBlocksTokens(APIBaseTest):
             secure_value=hash_key_value(self.key_value),
             scopes=["*"],
         )
-        UploadedMedia.objects.create(team=self.team)
+        Annotation.objects.create(team=self.team, organization=self.organization)
 
     def _get_with_key(self):
         return self.client.get(
@@ -577,7 +566,7 @@ class TestOAuthAccessTokenAuthentication(APIBaseTest):
         )
 
     def test_oauth_token_can_access_team_resources(self):
-        media = UploadedMedia.objects.create(team=self.team, file_name="Test note")
+        annotation = Annotation.objects.create(team=self.team, organization=self.organization, content="Test note")
 
         response = self.client.get(
             f"/api/scoped_environments/{self.team.id}/scoped_foos/",
@@ -586,7 +575,7 @@ class TestOAuthAccessTokenAuthentication(APIBaseTest):
 
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["count"], 1)
-        self.assertEqual(response.json()["results"][0]["id"], str(media.id))
+        self.assertEqual(response.json()["results"][0]["id"], annotation.id)
 
     def test_oauth_token_cannot_access_other_team_resources(self):
         """Test that OAuth tokens respect team boundaries"""
@@ -594,8 +583,8 @@ class TestOAuthAccessTokenAuthentication(APIBaseTest):
         from posthog.models import User
 
         other_user = User.objects.create(email="other@example.com")
-        _, _, other_team = Organization.objects.bootstrap(user=other_user)
-        UploadedMedia.objects.create(team=other_team)
+        other_org, _, other_team = Organization.objects.bootstrap(user=other_user)
+        Annotation.objects.create(team=other_team, organization=other_org)
 
         response = self.client.get(
             f"/api/scoped_environments/{other_team.id}/scoped_foos/",
@@ -607,7 +596,7 @@ class TestOAuthAccessTokenAuthentication(APIBaseTest):
 
     def test_oauth_token_can_access_organization_resources(self):
         """Test that OAuth tokens can access organization-scoped resources"""
-        UploadedMedia.objects.create(team=self.team)
+        Annotation.objects.create(team=self.team, organization=self.organization)
 
         response = self.client.get(
             f"/api/scoped_organizations/{self.organization.id}/scoped_foos/",
@@ -637,7 +626,7 @@ class TestOAuthAccessTokenAuthentication(APIBaseTest):
     def test_oauth_token_works_alongside_session_auth(self):
         """Test that OAuth authentication is part of the authentication chain"""
         # First, verify session auth works
-        UploadedMedia.objects.create(team=self.team)
+        Annotation.objects.create(team=self.team, organization=self.organization)
         response = self.client.get(f"/api/scoped_environments/{self.team.id}/scoped_foos/")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["count"], 1)

@@ -1,5 +1,5 @@
-import { type ReactElement, type ReactNode, useState } from 'react'
-import { type AccessibilityActionEvent, type StyleProp, Text, View, type ViewStyle } from 'react-native'
+import { type ReactElement, useState } from 'react'
+import { type AccessibilityActionEvent, Text, View } from 'react-native'
 import { Gesture, GestureDetector } from 'react-native-gesture-handler'
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated'
 
@@ -35,9 +35,6 @@ interface ViewRangeControlProps {
     zoneHint?: string | null
     /** Null leaves the compare row out of the sheet. */
     compare: RangeCompareRow | null
-    /** A control after the range button, in the same row. */
-    trailing?: ReactNode
-    style?: StyleProp<ViewStyle>
 }
 
 function stepContext(resolved: ResolvedRange | null): StepContext {
@@ -52,8 +49,6 @@ export function ViewRangeControl({
     detail,
     compare,
     zoneHint = null,
-    trailing,
-    style,
 }: ViewRangeControlProps): ReactElement {
     const colors = useColors()
     const styles = useStyles()
@@ -123,7 +118,7 @@ export function ViewRangeControl({
     }
 
     return (
-        <View style={[styles.row, style]}>
+        <View style={styles.row}>
             <GestureDetector gesture={Gesture.Race(swipe, tap)}>
                 <Animated.View
                     style={[styles.button, pressed && styles.buttonPressed, buttonStyle]}
@@ -142,7 +137,6 @@ export function ViewRangeControl({
                     <ChevronDownIcon size={14} color={colors.ink} />
                 </Animated.View>
             </GestureDetector>
-            {trailing}
             <RangeSheet
                 visible={open}
                 onClose={() => setOpen(false)}

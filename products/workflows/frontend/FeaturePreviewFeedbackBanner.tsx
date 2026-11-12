@@ -7,10 +7,9 @@ import { LemonBanner, LemonButton, LemonTextArea } from '@posthog/lemon-ui'
 
 import { lemonBannerLogic } from 'lib/lemon-ui/LemonBanner/lemonBannerLogic'
 import { uuid } from 'lib/utils/dom'
+import { getSurveyIdBasedResponseKey, getSurveyResponseKey } from 'scenes/surveys/utils'
 
 import { SurveyEventName, SurveyEventProperties } from '~/types'
-
-import { captureSurveyResponse } from './surveyResponseCapture'
 
 type Rating = 'useful' | 'needs improvement'
 
@@ -85,12 +84,13 @@ export function FeaturePreviewFeedbackBanner({
         setRating(nextRating)
         setSubmissionId(nextSubmissionId)
         setFeedbackOpen(true)
-        captureSurveyResponse({
-            surveyId,
-            submissionId: nextSubmissionId,
-            completed: false,
-            answers: [{ questionIndex: 0, questionId: ratingQuestionId, value: response }],
-            surface,
+        posthog.capture(SurveyEventName.SENT, {
+            [SurveyEventProperties.SURVEY_ID]: surveyId,
+            [SurveyEventProperties.SURVEY_SUBMISSION_ID]: nextSubmissionId,
+            [SurveyEventProperties.SURVEY_COMPLETED]: false,
+            [getSurveyResponseKey(0)]: response,
+            [getSurveyIdBasedResponseKey(ratingQuestionId)]: response,
+            feedback_surface: surface,
         })
     }
 
@@ -100,12 +100,13 @@ export function FeaturePreviewFeedbackBanner({
             return
         }
 
-        captureSurveyResponse({
-            surveyId,
-            submissionId,
-            completed: true,
-            answers: [{ questionIndex: 1, questionId: feedbackQuestionId, value: feedback }],
-            surface,
+        posthog.capture(SurveyEventName.SENT, {
+            [SurveyEventProperties.SURVEY_ID]: surveyId,
+            [SurveyEventProperties.SURVEY_SUBMISSION_ID]: submissionId,
+            [SurveyEventProperties.SURVEY_COMPLETED]: true,
+            [getSurveyResponseKey(1)]: feedback,
+            [getSurveyIdBasedResponseKey(feedbackQuestionId)]: feedback,
+            feedback_surface: surface,
         })
         setFeedbackOpen(false)
         setFeedbackSent(true)

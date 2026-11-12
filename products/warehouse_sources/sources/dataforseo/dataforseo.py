@@ -1,6 +1,5 @@
 import base64
 from collections.abc import Callable, Iterator
-from enum import Enum
 from typing import Any
 
 import requests
@@ -15,7 +14,6 @@ from products.warehouse_sources.sources.dataforseo.settings import (
 from products.warehouse_sources.sources.sdk import (
     ResumableSourceManager,
     SourceResponse,
-    capture_exception,
     frozen,
     make_tracked_session,
     retry_with_deadline,
@@ -484,50 +482,23 @@ def dataforseo_source(
     )
 
 
-class CredentialCheck(Enum):
-    VALID = "valid"
-    REJECTED = "rejected"
-    UNAVAILABLE = "unavailable"
-
-
-# The only body status code DataForSEO documents for bad API login or password.
-_AUTH_BODY_STATUS_CODE = 40100
-
-
-def validate_credentials(api_login: str, api_password: str) -> CredentialCheck:
-    """Confirm the credentials with the free account-info endpoint (never billed).
-
-    Tells a credential rejection apart from a failure to get an answer, so the caller can give
-    the user the right next step.
-    """
+def validate_credentials(api_login: str, api_password: str) -> bool:
+    """Confirm the credentials with the free account-info endpoint (never billed)."""
     if not api_login.strip() or not api_password.strip():
-        return CredentialCheck.REJECTED
+        return False
 
     try:
         session = _make_session(api_login, api_password)
         response = session.get(f"{DATAFORSEO_BASE_URL}/appendix/user_data", timeout=30)
-    except Exception as e:
-        capture_exception(e)
-        return CredentialCheck.UNAVAILABLE
-
-    if response.status_code in (401, 403):
-        return CredentialCheck.REJECTED
+    except Exception:
+        return False
 
     if not response.ok:
-        capture_exception(DataForSEOAPIError(f"DataForSEO credential check failed with HTTP {response.status_code}"))
-        return CredentialCheck.UNAVAILABLE
+        return False
 
     try:
         body = response.json()
-    except ValueError as e:
-        capture_exception(e)
-        return CredentialCheck.UNAVAILABLE
+    except ValueError:
+        return False
 
-    body_status = body.get("status_code") if isinstance(body, dict) else None
-    if body_status == 20000:
-        return CredentialCheck.VALID
-    if body_status == _AUTH_BODY_STATUS_CODE:
-        return CredentialCheck.REJECTED
-
-    capture_exception(DataForSEOAPIError(f"DataForSEO credential check returned unexpected status {body_status}"))
-    return CredentialCheck.UNAVAILABLE
+    return isinstance(body, dict) and body.get("status_code") == 20000

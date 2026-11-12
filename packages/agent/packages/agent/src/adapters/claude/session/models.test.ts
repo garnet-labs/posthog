@@ -128,13 +128,6 @@ describe("model capability flags", () => {
       mcpInjection: true,
     },
     {
-      modelId: "claude-fable-5-2",
-      oneMContext: true,
-      effort: true,
-      xhighEffort: true,
-      mcpInjection: true,
-    },
-    {
       modelId: "claude-haiku-4-5",
       oneMContext: false,
       effort: false,

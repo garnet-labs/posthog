@@ -35,8 +35,7 @@ const PERCENT_TICKS = 9
 const SHARE_WIDTHS = [36, 24, 14, 10, 7, 4, 5]
 const SHARE_LABEL_WIDTHS = [80, 72, 100, 40, 44, 52, 92]
 
-export const SKELETON_COLOR = 'color-mix(in oklab, var(--foreground) 12%, transparent)'
-export const SKELETON_TRACK_COLOR = 'color-mix(in oklab, var(--foreground) 6%, transparent)'
+const skeletonColor = 'color-mix(in oklab, var(--foreground) 12%, transparent)'
 
 function TickLabels({ count, axis, className }: { count: number; axis: 'x' | 'y'; className: string }): JSX.Element {
     return (
@@ -105,7 +104,7 @@ function LineSkeleton(): JSX.Element {
                 <path
                     d={LINE_PATH}
                     fill="none"
-                    stroke={SKELETON_COLOR}
+                    stroke={skeletonColor}
                     strokeWidth={2}
                     vectorEffect="non-scaling-stroke"
                 />

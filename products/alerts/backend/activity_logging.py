@@ -120,9 +120,18 @@ def handle_alert_subscription_change(
 
 @receiver(pre_delete, sender=AlertConfiguration)
 def cleanup_alert_hog_functions(sender, instance: AlertConfiguration, **kwargs) -> None:
-    from products.alerts.backend.logic.destinations import retire_alert_hog_functions
+    from products.cdp.backend.facade.models import HogFunction, HogFunctionType
 
-    retire_alert_hog_functions(team_id=instance.team_id, alert_id=str(instance.id))
+    for hog_function in HogFunction.objects.filter(
+        team_id=instance.team_id,
+        type=HogFunctionType.INTERNAL_DESTINATION,
+        deleted=False,
+        filters__contains={"properties": [{"key": "alert_id", "value": str(instance.id)}]},
+    ):
+        # nosemgrep: insight-alert-state-direct-mutation (writes HogFunction.enabled, not the alert's state)
+        hog_function.enabled = False
+        hog_function.deleted = True
+        hog_function.save()
 
 
 @receiver(pre_delete, sender=AlertConfiguration)

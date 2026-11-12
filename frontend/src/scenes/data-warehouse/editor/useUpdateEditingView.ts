@@ -15,8 +15,7 @@ interface UpdateEditingView {
 
 /** Update state for the view open in the editor. Call it below the SQLEditor bindings. */
 export function useUpdateEditingView(): UpdateEditingView {
-    const { editingView, changesToSave, isSourceQueryLastRun, isMultiQuery, saveAsViewDisabledReason } =
-        useValues(sqlEditorLogic)
+    const { editingView, changesToSave, isSourceQueryLastRun, isMultiQuery } = useValues(sqlEditorLogic)
     const { reviewEditingViewUpdate } = useActions(sqlEditorLogic)
     const { response, responseError, responseLoading } = useValues(dataNodeLogic)
     const { updatingDataWarehouseSavedQuery } = useValues(dataWarehouseViewsLogic)
@@ -26,10 +25,6 @@ export function useUpdateEditingView(): UpdateEditingView {
     const { disabledReason, loading } = useMemo((): { disabledReason: string | undefined; loading: boolean } => {
         if (updatingDataWarehouseSavedQuery) {
             return { disabledReason: 'Saving...', loading: true }
-        }
-
-        if (saveAsViewDisabledReason) {
-            return { disabledReason: saveAsViewDisabledReason, loading: false }
         }
 
         if (isMultiQuery) {
@@ -66,7 +61,6 @@ export function useUpdateEditingView(): UpdateEditingView {
         responseError,
         response,
         isMultiQuery,
-        saveAsViewDisabledReason,
     ])
 
     return { disabledReason, loading, isMaterializedView, update: reviewEditingViewUpdate }

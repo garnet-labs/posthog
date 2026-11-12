@@ -10,12 +10,12 @@ import {
     type TimeSeriesLineChartConfig,
     type TooltipContext,
 } from '@posthog/quill-charts'
+import { Skeleton } from '@posthog/quill-primitives'
 
 import { useChartConfig } from 'lib/charts/hooks'
 import { formatPercentage } from 'lib/utils/numbers'
 
 import { Card, CardState } from '../dashboard/Card'
-import { ChartSkeleton } from '../dashboard/ChartSkeleton'
 import { formatNumber } from '../dashboard/formatters'
 import { type ShareSeries } from './leaderboardShares'
 import { LoadErrorMessage } from './LoadErrorMessage'
@@ -96,8 +96,7 @@ export function ShareOverTimeChart({
             <CardState
                 loading={loading}
                 isEmpty={series.every((s) => s.data.every((value) => value === 0))}
-                className="min-h-[300px]"
-                skeleton={<ChartSkeleton kind="line" />}
+                skeleton={<Skeleton className="min-h-[300px] flex-1" />}
                 empty={failed ? <LoadErrorMessage /> : <NoDataMessage />}
             >
                 <div className="flex min-h-[300px] flex-1 flex-col">

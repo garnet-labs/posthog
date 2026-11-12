@@ -5,10 +5,11 @@ import { slackIntegrationLogic } from 'lib/integrations/slackIntegrationLogic'
 import { urls } from 'scenes/urls'
 
 import {
+    ALERT_PAGERDUTY_REGION_OPTIONS,
+    ALERT_PAGERDUTY_SEVERITY_OPTIONS,
     AlertNotificationDestinationEditor,
     AlertNotificationDestinationView,
     PendingAlertNotificationDestinationView,
-    pagerDutyPendingDetail,
 } from 'products/alerts/frontend/components/AlertNotificationDestinationEditor'
 
 import { LOGS_ALERT_NOTIFICATION_TYPE_OPTIONS, logsAlertNotificationLogic } from './logsAlertNotificationLogic'
@@ -33,7 +34,12 @@ function getPendingNotificationDestination(
         return { title: 'Microsoft Teams', detail: notification.webhookUrl }
     }
     if (notification.type === LOGS_ALERT_NOTIFICATION_TYPE_PAGERDUTY) {
-        return { title: 'PagerDuty', detail: pagerDutyPendingDetail(notification) }
+        const severity = ALERT_PAGERDUTY_SEVERITY_OPTIONS.find((option) => option.value === notification.severity)
+        const region = ALERT_PAGERDUTY_REGION_OPTIONS.find((option) => option.value === notification.region)
+        return {
+            title: 'PagerDuty',
+            detail: `••••${notification.routingKey.slice(-4)} · ${severity?.label ?? notification.severity} · ${region?.label ?? notification.region}`,
+        }
     }
     return { title: 'Webhook', detail: notification.webhookUrl }
 }

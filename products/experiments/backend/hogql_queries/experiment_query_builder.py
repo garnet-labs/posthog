@@ -13,7 +13,6 @@ from posthog.schema import (
     ExperimentExposureCriteria,
     ExperimentFunnelMetric,
     ExperimentMeanMetric,
-    ExperimentQuantileMetric,
     ExperimentRatioMetric,
     ExperimentRetentionMetric,
     ExperimentWarehouseNativeExposureConfig,
@@ -44,7 +43,6 @@ from products.experiments.backend.hogql_queries.experiment_metric_values import 
     get_conversion_window_seconds,
     get_maturity_window_seconds,
 )
-from products.experiments.backend.hogql_queries.experiment_quantile_query_builder import QuantileQueryBuilder
 from products.experiments.backend.hogql_queries.experiment_query_context import (
     ExperimentPrecomputationContext,
     ExperimentQueryContext,
@@ -134,15 +132,11 @@ def get_exposure_config_params_for_builder(
 
 def metric_reads_flag_call(
     team: Team,
-    metric: ExperimentMeanMetric
-    | ExperimentFunnelMetric
-    | ExperimentRatioMetric
-    | ExperimentRetentionMetric
-    | ExperimentQuantileMetric,
+    metric: ExperimentMeanMetric | ExperimentFunnelMetric | ExperimentRatioMetric | ExperimentRetentionMetric,
 ) -> bool:
     """Whether a metric source matches $feature_flag_called, as its event or through an action step."""
     sources: Sequence[object]
-    if isinstance(metric, ExperimentMeanMetric | ExperimentQuantileMetric):
+    if isinstance(metric, ExperimentMeanMetric):
         sources = [metric.source]
     elif isinstance(metric, ExperimentFunnelMetric):
         sources = metric.series
@@ -172,11 +166,7 @@ class ExperimentQueryBuilder:
         date_range_query: QueryDateRange,
         entity_key: str,
         metric: Optional[
-            ExperimentMeanMetric
-            | ExperimentFunnelMetric
-            | ExperimentRatioMetric
-            | ExperimentRetentionMetric
-            | ExperimentQuantileMetric
+            ExperimentMeanMetric | ExperimentFunnelMetric | ExperimentRatioMetric | ExperimentRetentionMetric
         ] = None,
         breakdowns: list[Breakdown] | None = None,
         only_count_matured_users: bool = False,
@@ -261,12 +251,9 @@ class ExperimentQueryBuilder:
                 query = RetentionQueryBuilder(
                     self, exposure, maturity=maturity, metric_events_job_ids=metric_events_job_ids
                 ).build_retention_query()
-            case ExperimentQuantileMetric():
-                # Metric-events precompute does not apply to quantile metrics, so only the exposures can be precomputed.
-                query = QuantileQueryBuilder(self, exposure).build_quantile_query()
             case _:
                 raise NotImplementedError(
-                    f"Only funnel, mean, ratio, retention, and quantile metrics are supported. Got {type(self.metric)}"
+                    f"Only funnel, mean, ratio, and retention metrics are supported. Got {type(self.metric)}"
                 )
 
         query.limit = ast.Constant(value=self.QUERY_RESULT_LIMIT)

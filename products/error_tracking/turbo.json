@@ -17,8 +17,7 @@
                 "backend/data_freshness.py",
                 "backend/models.py",
                 "backend/migrations/**",
-                "backend/scopes.py",
-                "backend/apps.py"
+                "backend/scopes.py"
             ],
             "outputs": [],
             "cache": true

@@ -4,14 +4,12 @@ import clsx from 'clsx'
 import { BindLogic, useActions, useValues } from 'kea'
 import React, { useMemo } from 'react'
 
-import { IconCopy, IconPlus, IconPlusSmall, IconTrash } from '@posthog/icons'
+import { IconCopy, IconPlusSmall, IconTrash } from '@posthog/icons'
 import { LemonButton, LemonDivider } from '@posthog/lemon-ui'
-import { Button, Separator } from '@posthog/quill'
 
 import { AddBehavioralFilterButton } from 'lib/components/PropertyFilters/components/AddBehavioralFilterButton'
 import { PropertyFilters } from 'lib/components/PropertyFilters/PropertyFilters'
 import { inlineEquivalentPropertyGroups, isPropertyGroupFilterLike } from 'lib/components/PropertyFilters/utils'
-import { useQuillSurface } from 'lib/components/QuillSurface/quillSurfaceContext'
 import { TaxonomicFilterGroupType } from 'lib/components/TaxonomicFilter/types'
 import { FEATURE_FLAGS } from 'lib/constants'
 import { keyForInsightLogicProps } from 'lib/insights/sharedUtils'
@@ -54,7 +52,6 @@ export function PropertyGroupFilters({
         setInnerPropertyGroupType,
         setPropertyFilters,
     } = useActions(propertyGroupFilterLogic(logicProps))
-    const quillSurface = useQuillSurface()
 
     const behavioralFiltersEnabled = !!featureFlags[FEATURE_FLAGS.BEHAVIORAL_PROPERTY_FILTER]
     const groupRows = useMemo(
@@ -74,31 +71,17 @@ export function PropertyGroupFilters({
                 <BindLogic logic={propertyGroupFilterLogic} props={logicProps}>
                     <div className="flex flex-col gap-2 @lg:flex-row @lg:items-center">
                         <div className="order-2 @lg:order-none PropertyGroupFilters__add-filter-group-inline-wrapper">
-                            {quillSurface ? (
-                                <div className="PropertyGroupFilters__add-filter-group-inline">
-                                    <Button
-                                        data-attr={`${pageKey}-add-filter-group-inline`}
-                                        variant="outline"
-                                        onClick={addFilterGroup}
-                                        disabledReason={disabledReason}
-                                    >
-                                        <IconPlus />
-                                        Add filter group
-                                    </Button>
-                                </div>
-                            ) : (
-                                <LemonButton
-                                    data-attr={`${pageKey}-add-filter-group-inline`}
-                                    type="secondary"
-                                    onClick={addFilterGroup}
-                                    icon={<IconPlusSmall />}
-                                    sideIcon={null}
-                                    disabledReason={disabledReason}
-                                    className="PropertyGroupFilters__add-filter-group-inline"
-                                >
-                                    Add filter group
-                                </LemonButton>
-                            )}
+                            <LemonButton
+                                data-attr={`${pageKey}-add-filter-group-inline`}
+                                type="secondary"
+                                onClick={addFilterGroup}
+                                icon={<IconPlusSmall />}
+                                sideIcon={null}
+                                disabledReason={disabledReason}
+                                className="PropertyGroupFilters__add-filter-group-inline"
+                            >
+                                Add filter group
+                            </LemonButton>
                         </div>
                         <div className="order-1 @lg:order-none">
                             <InsightTestAccountFilter
@@ -121,7 +104,7 @@ export function PropertyGroupFilters({
                                     />
                                 )}
                             </div>
-                            {quillSurface ? <Separator className="my-4" /> : <LemonDivider className="my-4" />}
+                            <LemonDivider className="my-4" />
                         </>
                     ) : null}
                     {propertyGroupFilter.values?.length ? (
@@ -152,59 +135,25 @@ export function PropertyGroupFilters({
                                                         value={group.type}
                                                         shortSuffix={behavioralFiltersEnabled ? 'in group' : undefined}
                                                     />
-                                                    {!behavioralFiltersEnabled &&
-                                                        (quillSurface ? (
-                                                            <Separator className="mx-2 w-auto flex-1 @max-sm/editor-panel:hidden" />
-                                                        ) : (
-                                                            <LemonDivider className="flex-1 mx-2 @max-[410px]/editor-panel:hidden" />
-                                                        ))}
+                                                    {!behavioralFiltersEnabled && (
+                                                        <LemonDivider className="flex-1 mx-2 @max-[410px]/editor-panel:hidden" />
+                                                    )}
                                                     <div
                                                         className={clsx(
                                                             'flex shrink-0 items-center gap-1',
                                                             behavioralFiltersEnabled && 'ml-auto'
                                                         )}
                                                     >
-                                                        {quillSurface ? (
-                                                            <>
-                                                                <Button
-                                                                    size="icon"
-                                                                    aria-label="Duplicate filter group"
-                                                                    tooltip="Duplicate filter group"
-                                                                    onClick={() =>
-                                                                        duplicateFilterGroup(propertyGroupIndex)
-                                                                    }
-                                                                >
-                                                                    <IconCopy />
-                                                                </Button>
-                                                                <Button
-                                                                    size="icon"
-                                                                    aria-label="Delete filter group"
-                                                                    tooltip="Delete filter group"
-                                                                    onClick={() =>
-                                                                        removeFilterGroup(propertyGroupIndex)
-                                                                    }
-                                                                >
-                                                                    <IconTrash />
-                                                                </Button>
-                                                            </>
-                                                        ) : (
-                                                            <>
-                                                                <LemonButton
-                                                                    icon={<IconCopy />}
-                                                                    onClick={() =>
-                                                                        duplicateFilterGroup(propertyGroupIndex)
-                                                                    }
-                                                                    size="small"
-                                                                />
-                                                                <LemonButton
-                                                                    icon={<IconTrash />}
-                                                                    onClick={() =>
-                                                                        removeFilterGroup(propertyGroupIndex)
-                                                                    }
-                                                                    size="small"
-                                                                />
-                                                            </>
-                                                        )}
+                                                        <LemonButton
+                                                            icon={<IconCopy />}
+                                                            onClick={() => duplicateFilterGroup(propertyGroupIndex)}
+                                                            size="small"
+                                                        />
+                                                        <LemonButton
+                                                            icon={<IconTrash />}
+                                                            onClick={() => removeFilterGroup(propertyGroupIndex)}
+                                                            size="small"
+                                                        />
                                                     </div>
                                                 </div>
                                                 <div
@@ -255,31 +204,17 @@ export function PropertyGroupFilters({
                         </div>
                     ) : null}
 
-                    {quillSurface ? (
-                        <div className="PropertyGroupFilters__add-filter-group-after">
-                            <Button
-                                data-attr={`${pageKey}-add-filter-group`}
-                                variant="outline"
-                                onClick={addFilterGroup}
-                                disabledReason={disabledReason}
-                            >
-                                <IconPlus />
-                                Add filter group
-                            </Button>
-                        </div>
-                    ) : (
-                        <LemonButton
-                            data-attr={`${pageKey}-add-filter-group`}
-                            type="secondary"
-                            onClick={addFilterGroup}
-                            icon={<IconPlusSmall />}
-                            sideIcon={null}
-                            disabledReason={disabledReason}
-                            className="PropertyGroupFilters__add-filter-group-after"
-                        >
-                            Add filter group
-                        </LemonButton>
-                    )}
+                    <LemonButton
+                        data-attr={`${pageKey}-add-filter-group`}
+                        type="secondary"
+                        onClick={addFilterGroup}
+                        icon={<IconPlusSmall />}
+                        sideIcon={null}
+                        disabledReason={disabledReason}
+                        className="PropertyGroupFilters__add-filter-group-after"
+                    >
+                        Add filter group
+                    </LemonButton>
                 </BindLogic>
             )}
         </div>

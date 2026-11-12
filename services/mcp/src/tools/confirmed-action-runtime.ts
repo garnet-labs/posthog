@@ -43,7 +43,6 @@
  */
 
 import { createHash } from 'node:crypto'
-import { z } from 'zod'
 
 import {
     confirmedActionExecutesTotal,
@@ -53,8 +52,10 @@ import {
 import { ToolInputValidationError } from '@/lib/errors'
 import {
     MAX_STASHED_PAYLOAD_BYTES,
+    NonceLedger,
     PAYLOAD_STASH_TTL_MARGIN_SECONDS,
     PayloadStash,
+    SignedStateAlreadyConsumed,
     SignedStateCodec,
     SignedStateError,
     STASH_QUOTA_BYTES_PER_WINDOW,
@@ -88,7 +89,6 @@ export interface PrepareConfirmedActionOptions<P extends Record<string, unknown>
      * so a hash issued for action A can't be used to authorize action B.
      */
     purpose: string
-    inputSchema: z.ZodType
     /** Human-readable label surfaced to the user. */
     actionLabel: string
     /** Prompt template shown to the user. Supports `{paramName}` interpolation from `args`. */
@@ -137,11 +137,6 @@ function isPayloadReference(value: unknown): value is SignedPayloadReference {
 
 function sha256Hex(value: string): string {
     return createHash('sha256').update(value).digest('hex')
-}
-
-function confirmationAudience(purpose: string, inputSchema: z.ZodType): string {
-    const schemaFingerprint = sha256Hex(JSON.stringify(z.toJSONSchema(inputSchema, { io: 'input' })))
-    return `${purpose}@${schemaFingerprint.slice(0, 16)}`
 }
 
 export interface PrepareConfirmedActionResult {
@@ -203,7 +198,7 @@ export async function prepareConfirmedAction<P extends Record<string, unknown>>(
     const reference: SignedPayloadReference = { digest: sha256Hex(serialized) }
     const { token, claims } = await options.codec.encode({
         sub,
-        purpose: confirmationAudience(options.purpose, options.inputSchema),
+        purpose: options.purpose,
         payload: reference,
     })
     await options.stash.put(claims.nonce, serialized, options.codec.ttlSeconds + PAYLOAD_STASH_TTL_MARGIN_SECONDS)
@@ -228,11 +223,11 @@ export interface ExecuteConfirmedActionOptions {
     incomingArgs: { [CONFIRMATION_HASH_ARG]: string; [CONFIRMATION_WORD_ARG]: string }
     /** Same `purpose` value used at prepare time. */
     purpose: string
-    inputSchema: z.ZodType
-    /** Args the prepare step filled from the active project or organization, which `inputSchema` may not type. */
-    resolvedArgs?: readonly string[]
+    /** Codec + stash + ledger; all single instances reused across requests. */
     codec: SignedStateCodec
     stash: PayloadStash
+    /** Single-use guard for inline-payload tokens only; stash-referenced tokens burn via `take()`. */
+    ledger: NonceLedger
     /**
      * Scope resolved from *current* state at execute time. Compared against
      * the scope signed at prepare time; any mismatch refuses. Omit for
@@ -273,7 +268,7 @@ export async function executeConfirmedAction<P extends Record<string, unknown>>(
 
     let claims
     try {
-        claims = await options.codec.decode(hash, sub, confirmationAudience(options.purpose, options.inputSchema))
+        claims = await options.codec.decode(hash, sub, options.purpose)
     } catch (err) {
         if (err instanceof SignedStateError) {
             return refuse(options.purpose, err.kind, `${options.purpose} was not executed: ${reasonFor(err)}.`)
@@ -281,43 +276,74 @@ export async function executeConfirmedAction<P extends Record<string, unknown>>(
         throw err
     }
 
-    if (!isPayloadReference(claims.payload)) {
-        return refuse(
-            options.purpose,
-            'malformed_payload',
-            `${options.purpose} was not executed: confirmation payload is malformed.`
-        )
+    let wrapper: Partial<SignedConfirmedActionPayload>
+    if (isPayloadReference(claims.payload)) {
+        // Stash-referenced token: the burn inside `take()` IS the
+        // single-use enforcement — a second execute (or a lost DEL race)
+        // gets `null` here.
+        const stored = await options.stash.take(claims.nonce)
+        if (stored === null) {
+            return refuse(
+                options.purpose,
+                'replay',
+                `${options.purpose} was not executed: this confirmation has already been used or its prepared payload has expired. Start a new prepare-then-execute cycle if you need to perform the action again.`
+            )
+        }
+        if (sha256Hex(stored) !== claims.payload.digest) {
+            return refuse(
+                options.purpose,
+                'digest_mismatch',
+                `${options.purpose} was not executed: the stored confirmation payload does not match the signed digest. Run the prepare step again.`
+            )
+        }
+        let parsed: unknown
+        try {
+            parsed = JSON.parse(stored)
+        } catch {
+            parsed = null
+        }
+        if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+            return refuse(
+                options.purpose,
+                'malformed_payload',
+                `${options.purpose} was not executed: confirmation payload is malformed.`
+            )
+        }
+        wrapper = parsed as Partial<SignedConfirmedActionPayload>
+    } else {
+        // Inline-payload token — args signed directly into the claim
+        // instead of stashed. Minted by servers on the older token format;
+        // honored so a confirmation spanning a mixed-version deploy still
+        // executes. Here the ledger supplies the single-use guarantee that
+        // `take()` gives the stash path, with its TTL bound to the token's
+        // remaining life (per the codec's clock, not the wall clock — drift
+        // between signer and consumer could otherwise shrink the ledger TTL
+        // enough to re-allow replay).
+        try {
+            await options.ledger.consume(claims.nonce, options.codec.secondsUntilExpiry(claims))
+        } catch (err) {
+            if (err instanceof SignedStateAlreadyConsumed) {
+                return refuse(
+                    options.purpose,
+                    'replay',
+                    `${options.purpose} was not executed: this confirmation has already been used. Start a new prepare-then-execute cycle if you need to perform the action again.`
+                )
+            }
+            throw err
+        }
+        const verified = claims.payload
+        if (verified === null || typeof verified !== 'object' || Array.isArray(verified)) {
+            return refuse(
+                options.purpose,
+                'malformed_payload',
+                `${options.purpose} was not executed: confirmation payload is malformed.`
+            )
+        }
+        wrapper = verified as Partial<SignedConfirmedActionPayload>
     }
-    const stored = await options.stash.take(claims.nonce)
-    if (stored === null) {
-        return refuse(
-            options.purpose,
-            'replay',
-            `${options.purpose} was not executed: this confirmation has already been used or its prepared payload has expired. Start a new prepare-then-execute cycle if you need to perform the action again.`
-        )
-    }
-    if (sha256Hex(stored) !== claims.payload.digest) {
-        return refuse(
-            options.purpose,
-            'digest_mismatch',
-            `${options.purpose} was not executed: the stored confirmation payload does not match the signed digest. Run the prepare step again.`
-        )
-    }
-    let parsed: unknown
-    try {
-        parsed = JSON.parse(stored)
-    } catch {
-        parsed = null
-    }
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        return refuse(
-            options.purpose,
-            'malformed_payload',
-            `${options.purpose} was not executed: confirmation payload is malformed.`
-        )
-    }
-    const wrapper = parsed as Partial<SignedConfirmedActionPayload>
 
+    // Whichever path produced the wrapper, treat it as untrusted JSON and
+    // shape-check the args object it carries before returning.
     const args = wrapper.args
     if (args === null || typeof args !== 'object' || Array.isArray(args)) {
         return refuse(
@@ -336,17 +362,6 @@ export async function executeConfirmedAction<P extends Record<string, unknown>>(
             options.purpose,
             'scope_mismatch',
             `${options.purpose} was not executed: the confirmation was issued for a different project or organization than the one currently active. Switch back to the project the action was prepared in, or run the prepare step again in the current one.`
-        )
-    }
-
-    const declaredArgs = Object.fromEntries(
-        Object.entries(args).filter(([key]) => !options.resolvedArgs?.includes(key))
-    )
-    if (!options.inputSchema.safeParse(declaredArgs).success) {
-        return refuse(
-            options.purpose,
-            'purpose_mismatch',
-            `${options.purpose} was not executed: ${DIFFERENT_ACTION_OR_VERSION}.`
         )
     }
 
@@ -425,9 +440,6 @@ function interpolate(template: string, args: Record<string, unknown>): string {
     })
 }
 
-const DIFFERENT_ACTION_OR_VERSION =
-    'the confirmation was issued for a different action, or by a different version of this tool. Run the prepare step again'
-
 function reasonFor(err: SignedStateError): string {
     switch (err.kind) {
         case 'expired':
@@ -435,7 +447,7 @@ function reasonFor(err: SignedStateError): string {
         case 'user_mismatch':
             return 'the confirmation was issued for a different user'
         case 'purpose_mismatch':
-            return DIFFERENT_ACTION_OR_VERSION
+            return 'the confirmation was issued for a different action'
         case 'bad_signature':
             return 'the confirmation signature is invalid'
         case 'malformed':

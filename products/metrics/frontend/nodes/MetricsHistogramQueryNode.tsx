@@ -1,5 +1,5 @@
 import { BuiltLogic, LogicWrapper, useActions, useValues } from 'kea'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import { SpinnerOverlay } from '@posthog/lemon-ui'
 
@@ -12,7 +12,8 @@ import { AnyResponseType, MetricsHistogramQuery, MetricsHistogramQueryResponse }
 import { QueryContext } from '~/queries/types'
 
 import { HeatmapPanel } from '../panels/HeatmapPanel'
-import { metricsDataNodeKey } from './dataNodeKey'
+
+let uniqueNode = 0
 
 /** Reloads the heatmap, bypassing the cache, each time `refreshCount` changes after the first render. */
 function useReloadOnRefresh(logic: BuiltLogic<dataNodeLogicType>, refreshCount: number | undefined): void {
@@ -43,7 +44,7 @@ export function MetricsHistogramQueryNode(props: {
     refreshCount?: number
 }): JSX.Element | null {
     const { onData, loadPriority, dataNodeCollectionId } = props.context.insightProps ?? {}
-    const key = metricsDataNodeKey('MetricsHistogramQueryNode', props.query, props.context.insightProps)
+    const [key] = useState(() => `MetricsHistogramQueryNode.${uniqueNode++}`)
     // A dashboard tile passes its saved insight, whose `result` cannot hold a heatmap. Then the node loads the query.
     const cachedHistogram =
         typeof props.cachedResults === 'object' && props.cachedResults !== null && 'times' in props.cachedResults

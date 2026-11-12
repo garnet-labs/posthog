@@ -5,7 +5,6 @@ import { Link } from '@posthog/lemon-ui'
 import { useOnMountEffect } from 'lib/hooks/useOnMountEffect'
 
 import { TRACING_DOCS_URL } from '../../traceLinks'
-import type { TraceViewSurface } from '../TraceView/traceViewLogic'
 import { CopyableId } from './SpanSummaryHeader'
 
 // Other products link here by trace ID alone, so an empty result must not read as "this request never ran".
@@ -16,7 +15,7 @@ export function TraceUnavailableNotice({
 }: {
     traceId: string
     filtersActive: boolean
-    surface: TraceViewSurface
+    surface: 'drawer' | 'trace_dialog'
 }): JSX.Element {
     // Captured on show, not on the span lookup, because AI events can still fill or fail the trace after that.
     useOnMountEffect(() => {

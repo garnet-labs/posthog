@@ -9,12 +9,13 @@ import { groupsAccessLogic } from 'lib/introductions/groupsAccessLogic'
 import { LemonButton } from 'lib/lemon-ui/LemonButton'
 import { Link } from 'lib/lemon-ui/Link'
 import { capitalizeFirstLetter } from 'lib/utils/strings'
-import { PeopleSceneHeader } from 'scenes/activity/PeopleSceneHeader'
+import { ActivitySceneTabs } from 'scenes/activity/ActivitySceneTabs'
 import { SceneExport } from 'scenes/sceneTypes'
 import { teamLogic } from 'scenes/teamLogic'
 import { urls } from 'scenes/urls'
 
 import { SceneContent } from '~/layout/scenes/components/SceneContent'
+import { SceneTitleSection } from '~/layout/scenes/components/SceneTitleSection'
 import { useTodayPeopleTitle } from '~/layout/today/todayPeopleRows'
 import { groupsModel } from '~/models/groupsModel'
 import { Query } from '~/queries/Query/Query'
@@ -54,8 +55,8 @@ export function GroupsScene(): JSX.Element {
     if (shouldShowGroupsIntroduction) {
         return (
             <SceneContent>
-                <PeopleSceneHeader
-                    activeKey={`groups-${groupTypeIndex}`}
+                <ActivitySceneTabs activeKey={`groups-${groupTypeIndex}`} />
+                <SceneTitleSection
                     name="Groups"
                     description="Associate events with a group or entity - such as a company, community, or project. Analyze these events as if they were sent by that entity itself. Great for B2B, marketplaces, and more."
                     resourceType={{
@@ -76,8 +77,9 @@ export function GroupsScene(): JSX.Element {
 
     return (
         <SceneContent>
-            <PeopleSceneHeader
-                activeKey={`groups-${groupTypeIndex}`}
+            <ActivitySceneTabs activeKey={`groups-${groupTypeIndex}`} />
+
+            <SceneTitleSection
                 name={capitalizeFirstLetter(groupTypeNamePlural)}
                 description={`A catalog of all ${groupTypeNamePlural} for this project`}
                 resourceType={groupTitle?.resourceType ?? { type: 'cohort' }}

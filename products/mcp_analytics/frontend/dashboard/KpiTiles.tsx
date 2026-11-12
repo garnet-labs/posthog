@@ -23,8 +23,6 @@ interface TileSpec {
     failed?: boolean
     onRetry?: () => void
     summaryLabel: string
-    // A loading metric has no sparkline data yet, so this says whether the placeholder should reserve one.
-    trend: boolean
     // Overrides the summary caption — used to flag a tile whose value isn't
     // scoped by the dashboard filters.
     subtitle?: string
@@ -93,7 +91,7 @@ function KPITile({
                 }
                 hoverChangeFromPreviousPoint
                 restingSubtitle={tile.subtitle ?? tile.summaryLabel}
-                sparklineHeight={tile.trend ? 50 : undefined}
+                sparklineHeight={50}
                 sparklineDashedFromIndex={dashedFromIndex}
             />
         </Link>
@@ -151,7 +149,6 @@ export function KpiTiles({
             failed: usersFailed,
             onRetry: onRetryUsers,
             summaryLabel: 'Total',
-            trend: false,
         },
         {
             label: 'Sessions',
@@ -163,7 +160,6 @@ export function KpiTiles({
             failed: kpisFailed,
             onRetry: onRetryKpis,
             summaryLabel: 'Total',
-            trend: true,
         },
         {
             label: 'Tool calls',
@@ -175,7 +171,6 @@ export function KpiTiles({
             failed: kpisFailed,
             onRetry: onRetryKpis,
             summaryLabel: 'Total',
-            trend: true,
         },
         {
             label: 'Error rate',
@@ -187,7 +182,6 @@ export function KpiTiles({
             failed: kpisFailed,
             onRetry: onRetryKpis,
             summaryLabel: 'Overall',
-            trend: true,
         },
         {
             label: 'p95 latency',
@@ -203,7 +197,6 @@ export function KpiTiles({
                     { failed: usersFailed, retry: onRetryUsers },
                 ]),
             summaryLabel: 'Overall',
-            trend: true,
         },
         ...(showIntentClusters
             ? [
@@ -215,7 +208,6 @@ export function KpiTiles({
                       color: theme.colors[6],
                       loading: false,
                       summaryLabel: 'Total',
-                      trend: false,
                       // Clusters come from the latest clustering snapshot across all sessions, so
                       // unlike the other tiles this count isn't scoped by the date or test-account
                       // filters. Label it so the grid doesn't read as a single consistent scope.

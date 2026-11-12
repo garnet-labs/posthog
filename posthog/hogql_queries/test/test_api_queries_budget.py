@@ -23,8 +23,6 @@ from posthog.hogql_queries.query_runner import (
 )
 from posthog.models.team.team_event_volume import TeamEventVolume
 
-from ee.billing.quota_limiting import QuotaLimitingCaches, QuotaResource, add_limited_team_tokens
-
 
 @override_settings(API_QUERIES_BUDGET_FREE_BYTES_PER_HOUR=3600, API_QUERIES_BUDGET_CAPACITY_HOURS=1)
 class TestApiQueriesBudgetEnforcement(BaseTest):
@@ -209,10 +207,8 @@ class TestApiQueriesBudgetEnforcement(BaseTest):
         # get_api_queries_concurrency_limit reads the plain `posthog.settings` module
         # (not django.conf.settings), so @override_settings on the class doesn't reach it.
         runner = self._runner()
-        add_limited_team_tokens(
-            QuotaResource.API_QUERIES,
-            {self.team.api_token: int(timezone.now().timestamp()) + 3600},
-            QuotaLimitingCaches.QUOTA_LIMITER_CACHE_KEY,
-        )
-        with patch("posthog.hogql_queries.query_runner.settings.API_QUERIES_ENABLED", True):
+        with (
+            patch("posthog.hogql_queries.query_runner.settings.API_QUERIES_ENABLED", True),
+            patch("ee.billing.quota_limiting.list_limited_team_attributes", return_value=[self.team.api_token]),
+        ):
             assert runner.get_api_queries_concurrency_limit() != 0

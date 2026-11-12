@@ -238,7 +238,6 @@ class MCPSessionViewSet(TeamAndOrgViewSetMixin, viewsets.GenericViewSet):
             limit=params["limit"],
             offset=params["offset"],
             date_from=params.get("date_from"),
-            date_to=params.get("date_to"),
             properties=params["properties"],
             filter_test_accounts=params["filter_test_accounts"],
             user=cast(User, request.user),

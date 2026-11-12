@@ -58,9 +58,8 @@ class CloudflareR2Source(ObjectStorageSource[CloudflareR2SourceConfig]):
     def self_managed_connection_inputs(
         self, location: SelfManagedLocation, credential: SelfManagedCredential
     ) -> dict[str, Any]:
-        jurisdiction = f".{location.jurisdiction}" if location.jurisdiction else ""
         return {
-            "url_pattern": f"https://{location.account or ''}{jurisdiction}.r2.cloudflarestorage.com/{location.bucket}/",
+            "url_pattern": f"https://{location.account or ''}.r2.cloudflarestorage.com/{location.bucket}/",
             "access_key_id": credential.access_key,
             "secret_access_key": credential.access_secret,
         }
@@ -74,7 +73,7 @@ class CloudflareR2Source(ObjectStorageSource[CloudflareR2SourceConfig]):
             label="Cloudflare R2",
             caption=source_caption("a Cloudflare R2 bucket"),
             iconPath="/static/services/cloudflare.png",
-            releaseStatus=ReleaseStatus.GA,
+            releaseStatus=ReleaseStatus.ALPHA,
             fields=cast(
                 list[FieldType],
                 [

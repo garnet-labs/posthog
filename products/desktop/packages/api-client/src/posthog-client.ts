@@ -5443,37 +5443,23 @@ export class PostHogAPIClient {
 
   async getGithubRepositories(
     integrationId: string | number,
-    signal?: AbortSignal,
   ): Promise<string[]> {
     const repositories: string[] = [];
     let offset = 0;
 
     while (true) {
-      const controller = new AbortController();
-      const requestSignal = signal
-        ? AbortSignal.any([signal, controller.signal])
-        : controller.signal;
-      const timeout = setTimeout(() => controller.abort(), 15_000);
+      const page = await this.getGithubRepositoriesPage(
+        integrationId,
+        offset,
+        500,
+      );
+      repositories.push(...page.repositories);
 
-      try {
-        requestSignal.throwIfAborted();
-        const page = await this.getGithubRepositoriesPage(
-          integrationId,
-          offset,
-          500,
-          undefined,
-          requestSignal,
-        );
-        repositories.push(...page.repositories);
-
-        if (!page.hasMore) {
-          return repositories;
-        }
-
-        offset += page.repositories.length;
-      } finally {
-        clearTimeout(timeout);
+      if (!page.hasMore) {
+        return repositories;
       }
+
+      offset += page.repositories.length;
     }
   }
 
@@ -5482,7 +5468,6 @@ export class PostHogAPIClient {
     offset: number,
     limit: number,
     search?: string,
-    signal?: AbortSignal,
   ): Promise<{
     repositories: string[];
     hasMore: boolean;
@@ -5501,7 +5486,6 @@ export class PostHogAPIClient {
       method: "get",
       url,
       path: `/api/environments/${teamId}/integrations/${integrationId}/github_repos/`,
-      overrides: { signal },
     });
 
     if (!response.ok) {
@@ -5585,38 +5569,25 @@ export class PostHogAPIClient {
 
   async refreshGithubRepositories(
     integrationId: string | number,
-    signal?: AbortSignal,
   ): Promise<string[]> {
     const teamId = await this.getTeamId();
     const url = new URL(
       `${this.api.baseUrl}/api/environments/${teamId}/integrations/${integrationId}/github_repos/refresh/`,
     );
-    const controller = new AbortController();
-    const requestSignal = signal
-      ? AbortSignal.any([signal, controller.signal])
-      : controller.signal;
-    const timeout = setTimeout(() => controller.abort(), 60_000);
+    const response = await this.api.fetcher.fetch({
+      method: "post",
+      url,
+      path: `/api/environments/${teamId}/integrations/${integrationId}/github_repos/refresh/`,
+    });
 
-    try {
-      requestSignal.throwIfAborted();
-      const response = await this.api.fetcher.fetch({
-        method: "post",
-        url,
-        path: `/api/environments/${teamId}/integrations/${integrationId}/github_repos/refresh/`,
-        overrides: { signal: requestSignal },
-      });
-
-      if (!response.ok) {
-        throw new Error(
-          `Failed to refresh GitHub repositories: ${response.statusText}`,
-        );
-      }
-
-      const data: unknown = await response.json();
-      return this.normalizeGithubRepositories(data);
-    } finally {
-      clearTimeout(timeout);
+    if (!response.ok) {
+      throw new Error(
+        `Failed to refresh GitHub repositories: ${response.statusText}`,
+      );
     }
+
+    const data: unknown = await response.json();
+    return this.normalizeGithubRepositories(data);
   }
 
   async refreshGithubUserRepositories(

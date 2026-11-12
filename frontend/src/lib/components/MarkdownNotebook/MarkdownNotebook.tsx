@@ -1,7 +1,6 @@
 import './MarkdownNotebook.scss'
 
 import clsx from 'clsx'
-import posthog from 'posthog-js'
 import {
     ClipboardEvent as ReactClipboardEvent,
     Component,
@@ -2186,65 +2185,55 @@ function MarkdownNotebookEditor({
         [commitDocument]
     )
 
-    const insertTableRowAtCurrentSelection = useCallback(
-        (source: 'enter' | 'tab' = 'enter'): boolean => {
-            const element = getSelectedInlineEditableElementOfType(
-                notebookRef.current,
-                'MarkdownNotebook__table-cell-content'
-            )
-            const position = element ? getTableCellPositionFromElement(element) : null
-            const nodeId = element?.dataset.markdownNotebookNodeId
-            if (!element || !position || !nodeId) {
-                return false
-            }
+    const insertTableRowAtCurrentSelection = useCallback((): boolean => {
+        const element = getSelectedInlineEditableElementOfType(
+            notebookRef.current,
+            'MarkdownNotebook__table-cell-content'
+        )
+        const position = element ? getTableCellPositionFromElement(element) : null
+        const nodeId = element?.dataset.markdownNotebookNodeId
+        if (!element || !position || !nodeId) {
+            return false
+        }
 
-            const currentDocument = documentRef.current
-            const nodes = currentDocument.nodes.length ? currentDocument.nodes : [emptyNodeRef.current]
-            const node = nodes.find((currentNode) => currentNode.id === nodeId)
-            if (!node || node.type !== 'table') {
-                return false
-            }
+        const currentDocument = documentRef.current
+        const nodes = currentDocument.nodes.length ? currentDocument.nodes : [emptyNodeRef.current]
+        const node = nodes.find((currentNode) => currentNode.id === nodeId)
+        if (!node || node.type !== 'table') {
+            return false
+        }
 
-            if (position.section === 'header' && node.rows.length) {
-                const targetPosition: TableCellPosition = {
-                    section: 'body',
-                    rowIndex: 0,
-                    columnIndex: position.columnIndex,
-                }
-                const cellElement = tableCellRefs.current[getTableCellRefKey(node.id, targetPosition)]
-                if (cellElement) {
-                    cellElement.focus()
-                    restoreSelection(cellElement, 0, 0)
-                }
-                return true
+        if (position.section === 'header' && node.rows.length) {
+            const targetPosition: TableCellPosition = {
+                section: 'body',
+                rowIndex: 0,
+                columnIndex: position.columnIndex,
             }
-
-            const columnCount = getTableColumnCount(node)
-            const insertIndex =
-                position.section === 'header' ? 0 : Math.max(0, Math.min(position.rowIndex + 1, node.rows.length))
-            const nextRows = node.rows.map((row) => normalizeTableRow(row, columnCount))
-            nextRows.splice(insertIndex, 0, makeEmptyTableRow(columnCount))
-            restoreSelectionRef.current = {
-                nodeId: node.id,
-                tableCell: {
-                    section: 'body',
-                    rowIndex: insertIndex,
-                    columnIndex: source === 'tab' ? 0 : position.columnIndex,
-                },
-                start: 0,
-                end: 0,
+            const cellElement = tableCellRefs.current[getTableCellRefKey(node.id, targetPosition)]
+            if (cellElement) {
+                cellElement.focus()
+                restoreSelection(cellElement, 0, 0)
             }
-            commitDocument({
-                ...currentDocument,
-                nodes: nodes.map((currentNode) =>
-                    currentNode.id === node.id ? { ...node, rows: nextRows } : currentNode
-                ),
-            })
-            posthog.capture('notebook table structure changed', { action: 'add', dimension: 'row', source })
             return true
-        },
-        [commitDocument]
-    )
+        }
+
+        const columnCount = getTableColumnCount(node)
+        const insertIndex =
+            position.section === 'header' ? 0 : Math.max(0, Math.min(position.rowIndex + 1, node.rows.length))
+        const nextRows = node.rows.map((row) => normalizeTableRow(row, columnCount))
+        nextRows.splice(insertIndex, 0, makeEmptyTableRow(columnCount))
+        restoreSelectionRef.current = {
+            nodeId: node.id,
+            tableCell: { section: 'body', rowIndex: insertIndex, columnIndex: position.columnIndex },
+            start: 0,
+            end: 0,
+        }
+        commitDocument({
+            ...currentDocument,
+            nodes: nodes.map((currentNode) => (currentNode.id === node.id ? { ...node, rows: nextRows } : currentNode)),
+        })
+        return true
+    }, [commitDocument])
 
     const startInsertMenuAtCurrentTextSelection = useCallback(
         (query: string = ''): boolean => {
@@ -4942,9 +4931,7 @@ function MarkdownNotebookEditor({
 
             const nextPosition = positions[currentIndex + (direction === 'next' ? 1 : -1)]
             if (!nextPosition) {
-                return direction === 'next'
-                    ? insertTableRowAtCurrentSelection('tab')
-                    : moveFocusToAdjacentNode(nodeId, direction, offset)
+                return moveFocusToAdjacentNode(nodeId, direction, offset)
             }
 
             const element = tableCellRefs.current[getTableCellRefKey(nodeId, nextPosition)]
@@ -4960,7 +4947,7 @@ function MarkdownNotebookEditor({
             restoreSelection(element, targetOffset, targetOffset)
             return true
         },
-        [moveFocusToAdjacentNode, insertTableRowAtCurrentSelection]
+        [moveFocusToAdjacentNode]
     )
 
     const moveTableCellFocusAtCurrentSelection = useCallback(

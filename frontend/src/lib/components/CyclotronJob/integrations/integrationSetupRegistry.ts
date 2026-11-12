@@ -15,19 +15,10 @@ export type IntegrationSetupContext = {
     uploadKey: (kind: string) => void
 }
 
-// Setup form values the user may not change. The form starts with them, shows them read-only, and saves them as
-// they are. The modal reads them once, when it mounts.
-export type LockedSetupValues = {
-    values: Record<string, any>
-    // Shown on each read-only field.
-    reason: string
-}
-
 type IntegrationSetupModalProps = {
     isOpen: boolean
     kind: string
     integration?: any
-    locked?: LockedSetupValues
     onComplete: (id?: number) => void
     onClose: () => void
 }
@@ -36,8 +27,6 @@ export type IntegrationSetupDefinition = {
     kind: string | string[]
     menuItem: (ctx: IntegrationSetupContext) => IntegrationSetupMenuItem
     SetupModal?: React.ComponentType<IntegrationSetupModalProps>
-    // Setup form field -> key in a migrated destination's vendor config, for the non-secret fields only.
-    vendorConfigKeys?: Record<string, string>
 }
 
 const registeredSetups = new Map<string, IntegrationSetupDefinition>()

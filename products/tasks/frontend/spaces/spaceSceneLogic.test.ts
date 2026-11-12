@@ -591,7 +591,7 @@ describe('spaceSceneLogic', () => {
         logic.mount()
         spaceSceneLogic({ id: 'space-b' }).mount()
 
-        logic.actions.applySuggestion('Fix the flaky test', 'fix-bug', 6)
+        logic.actions.applySuggestion('Fix the flaky test')
         await expectLogic(logic).toFinishAllListeners()
 
         expect(composerSeedLogic({ panelId: spaceComposerPanelId('space-a') }).values.seed).toEqual({

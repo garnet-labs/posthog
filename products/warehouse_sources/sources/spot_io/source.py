@@ -60,9 +60,7 @@ class SpotIoSource(ResumableSource[SpotIoSourceConfig, SpotIoResumeConfig]):
         force_refresh: bool = False,
         api_version: str | None = None,
     ) -> list[SourceSchema]:
-        # fromDate is a calendar date, so each incremental run re-reads the watermark day.
-        # Merge dedupes those rows on event_key; append would duplicate them.
-        return build_endpoint_schemas(ENDPOINTS, INCREMENTAL_FIELDS, names, merge_only=("elastigroup_events",))
+        return build_endpoint_schemas(ENDPOINTS, INCREMENTAL_FIELDS, names)
 
     def validate_credentials(
         self,

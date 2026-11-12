@@ -14,7 +14,7 @@ from posthog.admin.filters import DeletedFilter
 from posthog.models.activity_logging.activity_log import Detail, LogActivityEntry, bulk_log_activity
 from posthog.models.user import User
 
-from products.dashboards.backend.facade import api as dashboards_api
+from products.dashboards.backend.models.dashboard_tile import DashboardTile
 from products.product_analytics.backend.models.insight import Insight
 
 
@@ -127,7 +127,11 @@ class InsightAdmin(admin.ModelAdmin):
             if insights:
                 # Re-activate tiles on live dashboards, and log manually since Insight has no
                 # ModelActivityMixin. Unnamed insights are skipped in the log, matching the API.
-                dashboards_api.restore_tiles_for_insights_without_access_check([insight.id for insight in insights])
+                DashboardTile.objects_including_soft_deleted.filter(
+                    insight_id__in=[insight.id for insight in insights],
+                    deleted=True,
+                    dashboard__deleted=False,
+                ).update(deleted=False)
                 bulk_log_activity(
                     [
                         LogActivityEntry(

@@ -14,6 +14,7 @@ export {
     STASH_QUOTA_BYTES_PER_WINDOW,
 } from './constants'
 export {
+    SignedStateAlreadyConsumed,
     SignedStateError,
     SignedStateExpired,
     SignedStateMalformed,
@@ -23,5 +24,7 @@ export {
 } from './errors'
 export { loadSigningKeyFromEnv, SignedStateCodec } from './codec'
 export type { SignedStateClaims, SignedStateCodecOptions } from './codec'
+export { NonceLedger } from './nonce-ledger'
+export type { NonceLedgerRedis } from './nonce-ledger'
 export { PayloadStash } from './payload-stash'
 export type { PayloadStashRedis } from './payload-stash'

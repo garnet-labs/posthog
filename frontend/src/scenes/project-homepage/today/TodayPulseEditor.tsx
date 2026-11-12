@@ -1,7 +1,7 @@
 import { useActions, useValues } from 'kea'
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 
-import { IconChevronDown, IconChevronRight, IconHide, IconSearch } from '@posthog/icons'
+import { IconSearch } from '@posthog/icons'
 import {
     Button,
     Combobox,
@@ -18,50 +18,17 @@ import {
     Text,
 } from '@posthog/quill'
 
-import type { HiddenPulseNumberApi, PulsePinApi } from 'products/today/frontend/generated/api.schemas'
+import type { PulsePinApi } from 'products/today/frontend/generated/api.schemas'
 
 import { PULSE_TILES, pulsePinLimitReason, todayHighlightsLogic } from './todayHighlightsLogic'
 import {
     EditorGroup,
-    IGNORED_TOGGLE,
     changedKey,
     editorNotes,
     editorRows,
     suggestionsOnHome,
     withoutKeys,
 } from './todayPulseEditorRows'
-
-function IgnoredToggleItem({ count, open }: { count: number; open: boolean }): JSX.Element {
-    const Chevron = open ? IconChevronDown : IconChevronRight
-    return (
-        <ComboboxItem
-            value={IGNORED_TOGGLE}
-            action
-            aria-expanded={open}
-            className="pe-8 text-muted-foreground"
-            data-attr="today-pulse-ignored-toggle"
-        >
-            <IconHide className="size-3.5 shrink-0" />
-            <span className="min-w-0 truncate">Ignored</span>
-            <span className="text-xs tabular-nums">{count}</span>
-            <Chevron className="pointer-events-none absolute end-2 size-3.5" />
-        </ComboboxItem>
-    )
-}
-
-function IgnoredItem({ value, row }: { value: string; row: HiddenPulseNumberApi }): JSX.Element {
-    return (
-        <ComboboxItem
-            value={value}
-            tooltip="It can be suggested again"
-            className="pe-16 text-muted-foreground"
-            data-attr="today-pulse-restore"
-        >
-            <span className="min-w-0 truncate">{row.name}</span>
-            <span className="pointer-events-none absolute end-2.5 text-xs">Restore</span>
-        </ComboboxItem>
-    )
-}
 
 export function TodayPulseEditor(): JSX.Element {
     const {
@@ -75,29 +42,19 @@ export function TodayPulseEditor(): JSX.Element {
         pulseInsightResultsLoading,
         pulseInsightSearchFailed,
         pulsePinsUnavailableReason,
-        pulseHidden,
     } = useValues(todayHighlightsLogic)
-    const { togglePulsePin, loadPulseInsightResults, pulseEditorOpened, restoreHiddenPulseNumber } =
-        useActions(todayHighlightsLogic)
+    const { togglePulsePin, loadPulseInsightResults, pulseEditorOpened } = useActions(todayHighlightsLogic)
     const triggerRef = useRef<HTMLButtonElement>(null)
-    const listRef = useRef<HTMLDivElement>(null)
     const [open, setOpen] = useState(false)
     const [search, setSearch] = useState('')
-    const [ignoredOpen, setIgnoredOpen] = useState(false)
     const [pinnedOnOpen, setPinnedOnOpen] = useState<PulsePinApi[]>([])
     const [othersOnOpen, setOthersOnOpen] = useState<PulsePinApi[]>([])
     const [pinnedThisTime, setPinnedThisTime] = useState<PulsePinApi[]>([])
 
-    useEffect(() => {
-        if (ignoredOpen) {
-            listRef.current?.scrollTo({ top: listRef.current.scrollHeight, behavior: 'smooth' })
-        }
-    }, [ignoredOpen])
-
     const searching = search.trim().length > 0
     const pinnedKeys = new Set(pulsePins.map((pin) => pin.key))
     const searchFailedOrLoading = pulseInsightResultsLoading || pulseInsightSearchFailed
-    const { groups, rowByKey, ignoredByValue, shownKeys, rowCount } = editorRows({
+    const { groups, rowByKey, shownKeys, rowCount } = editorRows({
         search,
         pulsePins,
         pinnedOnOpen,
@@ -105,8 +62,6 @@ export function TodayPulseEditor(): JSX.Element {
         pinnedThisTime,
         recentInsights: pulseRecentInsights,
         searchInsights: searchFailedOrLoading ? [] : pulseInsightResults,
-        ignored: pulseHidden,
-        ignoredOpen,
     })
     const { statusNote, emptyNote } = searching
         ? editorNotes(true, rowCount, pulseInsightResultsLoading, pulseInsightSearchFailed)
@@ -121,9 +76,7 @@ export function TodayPulseEditor(): JSX.Element {
             inputValue={search}
             open={open}
             highlightItemOnHover
-            itemToStringLabel={(key: string) =>
-                key === IGNORED_TOGGLE ? 'Ignored' : ((ignoredByValue.get(key) ?? rowByKey.get(key))?.name ?? '')
-            }
+            itemToStringLabel={(key: string) => rowByKey.get(key)?.name ?? ''}
             onInputValueChange={(value: string) => {
                 setSearch(value)
                 if (value.trim()) {
@@ -143,21 +96,10 @@ export function TodayPulseEditor(): JSX.Element {
                     setPinnedThisTime([])
                 } else {
                     setSearch('')
-                    setIgnoredOpen(false)
                 }
             }}
             onValueChange={(next: string[]) => {
-                const key = changedKey(pinnedKeys, new Set(next)) ?? ''
-                const ignored = ignoredByValue.get(key)
-                if (key === IGNORED_TOGGLE) {
-                    setIgnoredOpen((value) => !value)
-                    return
-                }
-                if (ignored) {
-                    restoreHiddenPulseNumber(ignored)
-                    return
-                }
-                const row = rowByKey.get(key)
+                const row = rowByKey.get(changedKey(pinnedKeys, new Set(next)) ?? '')
                 if (!row) {
                     return
                 }
@@ -197,25 +139,13 @@ export function TodayPulseEditor(): JSX.Element {
                         <IconSearch className="size-3" />
                     </InputGroupAddon>
                 </ComboboxInput>
-                <ComboboxList ref={listRef}>
+                <ComboboxList>
                     {(group: EditorGroup) => (
-                        <ComboboxGroup key={group.kind} items={group.items}>
-                            {group.kind !== groups[0]?.kind ? <ComboboxSeparator /> : null}
+                        <ComboboxGroup key={group.pinned ? 'pinned' : 'others'} items={group.items}>
+                            {!group.pinned && groups.length > 1 ? <ComboboxSeparator /> : null}
                             <ComboboxCollection>
                                 {(key: string) => {
-                                    const ignored = ignoredByValue.get(key)
-                                    if (key === IGNORED_TOGGLE) {
-                                        return (
-                                            <IgnoredToggleItem
-                                                key={key}
-                                                count={pulseHidden.length}
-                                                open={ignoredOpen}
-                                            />
-                                        )
-                                    }
-                                    if (ignored) {
-                                        return <IgnoredItem key={key} value={key} row={ignored} />
-                                    }
+                                    const row = rowByKey.get(key)
                                     const pinned = pinnedKeys.has(key)
                                     return (
                                         <ComboboxItem
@@ -227,7 +157,7 @@ export function TodayPulseEditor(): JSX.Element {
                                             }
                                             data-attr="today-pulse-pin"
                                         >
-                                            <span className="min-w-0 truncate">{rowByKey.get(key)?.name}</span>
+                                            <span className="min-w-0 truncate">{row?.name}</span>
                                         </ComboboxItem>
                                     )
                                 }}

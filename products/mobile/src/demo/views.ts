@@ -4,6 +4,7 @@ import type { ActorsAtPointInput, ActorsResponseApi } from '@/api/actors'
 import type { DashboardApi, DashboardBasicApi, DashboardTileApi } from '@/api/dashboards'
 import type { InsightApi, InsightBasicApi } from '@/api/insights'
 import type { FileSystemShortcutApi, ShortcutInput } from '@/api/shortcuts'
+import type { WebOverviewResponseApi } from '@/api/webAnalytics'
 import { asRecord } from '@/lib/records'
 import type { DeviceRecentEntry, PinDisplay } from '@/model/views'
 
@@ -14,8 +15,8 @@ import { DEMO_SQL_INSIGHTS } from './sqlCharts'
 // the same adapters, refresh rules and status line as live mode. Ids are stable because the Argent flow selects by them.
 
 const MINUTE = 60_000
-export const HOUR = 60 * MINUTE
-export const DAY = 24 * HOUR
+const HOUR = 60 * MINUTE
+const DAY = 24 * HOUR
 
 /** How old the demo numbers are when the demo starts: "Updated 42 min ago". */
 const DEMO_DATA_AGE_MS = 42 * MINUTE
@@ -66,7 +67,7 @@ interface DemoInsightDef {
     breakdown?: { value: string; share: number }[]
 }
 
-export function noise(day: number, salt: number): number {
+function noise(day: number, salt: number): number {
     const value = Math.sin((day + 1) * 12.9898 + salt * 78.233) * 43_758.5453
     return value - Math.floor(value)
 }
@@ -499,19 +500,19 @@ function dashboardDef(ref: string): DemoDashboardDef | undefined {
     return DEMO_DASHBOARDS.find((dashboard) => dashboard.ref === ref)
 }
 
-export function startOfDay(date: Date): Date {
+function startOfDay(date: Date): Date {
     return new Date(date.getFullYear(), date.getMonth(), date.getDate())
 }
 
-export function addDays(date: Date, days: number): Date {
+function addDays(date: Date, days: number): Date {
     return new Date(date.getFullYear(), date.getMonth(), date.getDate() + days)
 }
 
-export function isoDay(date: Date): string {
+function isoDay(date: Date): string {
     return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 
-export function offsetSuffix(date: Date): string {
+function offsetSuffix(date: Date): string {
     const minutes = -date.getTimezoneOffset()
     const sign = minutes >= 0 ? '+' : '-'
     const absolute = Math.abs(minutes)
@@ -523,13 +524,13 @@ function parseDay(value: string): Date | null {
     return match ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3])) : null
 }
 
-export interface DemoWindow {
+interface DemoWindow {
     start: Date
     end: Date
 }
 
 /** The days a range covers in the demo, like the server resolves them: "Last 7 days" is 8 days ending today. */
-export function demoWindow(dateFrom: string | null, dateTo: string | null, anchor: Date): DemoWindow {
+function demoWindow(dateFrom: string | null, dateTo: string | null, anchor: Date): DemoWindow {
     const today = startOfDay(anchor)
     const weekStart = addDays(today, -((today.getDay() + 6) % 7))
     const window = ((): DemoWindow => {
@@ -573,7 +574,7 @@ export function demoWindow(dateFrom: string | null, dateTo: string | null, ancho
     return { start: window.start > end ? end : window.start, end }
 }
 
-export function windowDays(window: DemoWindow): Date[] {
+function windowDays(window: DemoWindow): Date[] {
     const days: Date[] = []
     for (let day = window.start; day <= window.end; day = addDays(day, 1)) {
         days.push(day)
@@ -701,7 +702,7 @@ function demoResult(def: DemoInsightDef, window: DemoWindow, anchor: Date, compa
     return [trendsEntry(def, window, anchor, 'current'), trendsEntry(def, previousWindow(window), anchor, 'previous')]
 }
 
-export interface DemoFreshness {
+interface DemoFreshness {
     last_refresh: string
     cache_target_age: string
     next_allowed_client_refresh: string
@@ -709,7 +710,7 @@ export interface DemoFreshness {
 }
 
 /** Before a demo refresh the numbers are 42 minutes old and may be forced; after one, the next force waits 3 minutes. */
-export function demoFreshness(anchor: number, refreshedAt: number | undefined): DemoFreshness {
+function demoFreshness(anchor: number, refreshedAt: number | undefined): DemoFreshness {
     const lastRefresh = refreshedAt ?? anchor - DEMO_DATA_AGE_MS
     const window = refreshedAt ? 3 * MINUTE : 15 * MINUTE
     return {
@@ -720,7 +721,7 @@ export function demoFreshness(anchor: number, refreshedAt: number | undefined): 
     }
 }
 
-export function resolvedRange(window: DemoWindow): { date_from: string; date_to: string } {
+function resolvedRange(window: DemoWindow): { date_from: string; date_to: string } {
     const suffix = offsetSuffix(window.end)
     return {
         date_from: `${isoDay(window.start)}T00:00:00${suffix}`,
@@ -897,6 +898,47 @@ export function demoInsightRows(): InsightBasicApi[] {
         description: insight.description,
         last_modified_at: null,
     }))
+}
+
+const WEB_METRICS: { key: string; kind: string; perWeek: number; previous: number; isIncreaseBad?: boolean }[] = [
+    { key: 'visitors', kind: 'unit', perWeek: 8412, previous: 7930 },
+    { key: 'views', kind: 'unit', perWeek: 31_207, previous: 30_118 },
+    { key: 'sessions', kind: 'unit', perWeek: 10_906, previous: 10_450 },
+    { key: 'session duration', kind: 'duration_s', perWeek: 194, previous: 188 },
+    { key: 'bounce rate', kind: 'percentage', perWeek: 41.6, previous: 43.2, isIncreaseBad: true },
+]
+
+/** A demo web analytics overview for the query's range. Counts scale with the window; durations and rates do not. */
+export function demoWebOverviewResponse(
+    query: JsonRecord,
+    anchor: number,
+    refreshedAt?: number
+): WebOverviewResponseApi {
+    const range = (query.dateRange as JsonRecord | undefined) ?? {}
+    const window = demoWindow(
+        (range.date_from as string | null) ?? null,
+        (range.date_to as string | null) ?? null,
+        new Date(anchor)
+    )
+    const scale = windowDays(window).length / 8
+    return {
+        results: WEB_METRICS.map((metric) => {
+            const counts = metric.kind === 'unit'
+            const value = counts ? Math.round(metric.perWeek * scale) : metric.perWeek
+            const previous = counts ? Math.round(metric.previous * scale) : metric.previous
+            return {
+                key: metric.key,
+                kind: metric.kind,
+                value,
+                previous,
+                changeFromPreviousPct: Math.round(((value - previous) / previous) * 1000) / 10,
+                isIncreaseBad: metric.isIncreaseBad ?? false,
+            }
+        }),
+        ...demoFreshness(anchor, refreshedAt),
+        timezone: 'UTC',
+        resolved_date_range: resolvedRange(window),
+    }
 }
 
 const DEMO_ACTORS: { id: string; email: string; recordings: string[] }[] = [

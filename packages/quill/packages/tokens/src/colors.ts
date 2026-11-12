@@ -271,44 +271,11 @@ function assertThemeDerivedSyncedWithColors(colors: Record<string, ColorTuple>):
 
 assertThemeDerivedSyncedWithColors(semanticColors)
 
-function resolveDarkSelectors(raw?: string | string[]): string[] {
-    const defaults = ['.dark', '[theme="dark"]', '[data-theme="dark"]']
-    return raw === undefined ? defaults : typeof raw === 'string' ? [raw] : raw
-}
-
 /** Normalize darkSelector option into a single CSS selector string. */
 function resolveDarkSelector(raw?: string | string[]): string {
-    const selectors = resolveDarkSelectors(raw)
+    const defaults = ['.dark', '[theme="dark"]', '[data-theme="dark"]']
+    const selectors = raw === undefined ? defaults : typeof raw === 'string' ? [raw] : raw
     return selectors.length === 1 ? selectors[0] : `:is(${selectors.join(', ')})`
-}
-
-/**
- * Join selectors into a flat selector list for the color-system rules.
- *
- * Do not wrap these rules in `:is()`. Many of them end in `*`, so the browser
- * tests them against every element on every style recalc. Chrome cannot use
- * its rule buckets or its ancestor filter for arguments inside `:is()`, so a
- * wrapped rule does a full ancestor walk per element even when nothing
- * matches. Every selector in each list has the same specificity, so the
- * cascade is the same as with `:is()`.
- */
-function selectorList(selectors: string[]): string {
-    return selectors.join(',\n')
-}
-
-/**
- * Compound two selectors that must match the same element, such as a scope
- * and a dark selector. A type selector (`html.dark`) is only valid at the
- * start of a compound, so it goes first. A flat selector list drops the whole
- * rule when one entry is invalid, unlike `:is()`, which skips the bad entry.
- */
-function sameElement(base: string, dark: string): string {
-    return /^[a-zA-Z*]/.test(dark) ? `${dark}${base}` : `${base}${dark}`
-}
-
-/** Expand a selector pattern once for each dark selector. */
-function forEachDark(darkSelectors: string[], pattern: (dark: string) => string[]): string[] {
-    return darkSelectors.flatMap(pattern)
 }
 
 const INVERTED_SURFACE = '[data-quill-inverted]'
@@ -317,20 +284,13 @@ type ModeVars = { staticVars: Record<string, string>; dynamicVars: Record<string
 
 /** Generate the rules that give an inverted surface subtree the other mode's tokens */
 function generateInvertedSurfaceCSS(
-    darkSelectors: string[],
+    darkSelector: string,
     light: ModeVars,
     dark: ModeVars,
     dataViz: { light: string; dark: string }
 ): string {
-    const inLightMode = selectorList([INVERTED_SURFACE, `${INVERTED_SURFACE} *`])
-    const inDarkMode = selectorList(
-        forEachDark(darkSelectors, (d) => [
-            `${d} ${INVERTED_SURFACE}`,
-            sameElement(INVERTED_SURFACE, d),
-            `${d} ${INVERTED_SURFACE} *`,
-            `${sameElement(INVERTED_SURFACE, d)} *`,
-        ])
-    )
+    const inLightMode = `:is(${INVERTED_SURFACE}, ${INVERTED_SURFACE} *)`
+    const inDarkMode = `:is(${darkSelector} ${INVERTED_SURFACE}, ${INVERTED_SURFACE}${darkSelector}, ${darkSelector} ${INVERTED_SURFACE} *, ${INVERTED_SURFACE}${darkSelector} *)`
 
     return `${inLightMode} {
   color-scheme: dark;
@@ -354,7 +314,7 @@ export function generateColorSystemCSS(
     opts: Pick<StylesConfig, 'scope' | 'darkSelector'> = {}
 ): string {
     const { scope } = opts
-    const darkSelectors = resolveDarkSelectors(opts.darkSelector)
+    const darkSelector = resolveDarkSelector(opts.darkSelector)
 
     const themeKnobs = (indent = '  '): string =>
         [
@@ -386,27 +346,17 @@ export function generateColorSystemCSS(
     // Data-viz tokens (categorical palette + graph chrome) are static like the
     // semantic static vars — they live with them on :root / the scope selector.
     const dataViz = generateDataVizVars()
-    const invertedSurface = generateInvertedSurfaceCSS(darkSelectors, light, dark, dataViz)
+    const invertedSurface = generateInvertedSurfaceCSS(darkSelector, light, dark, dataViz)
 
     // ── Scoped mode ─────────────────────────────────────
     // All vars gated behind the scope selector to avoid clashing
     // with the consumer's existing CSS custom properties.
     if (scope) {
-        const scopeSel = selectorList([scope, `${scope} *`, INVERTED_SURFACE, `${INVERTED_SURFACE} *`])
+        const scopeSel = `:is(${scope}, ${scope} *, ${INVERTED_SURFACE}, ${INVERTED_SURFACE} *)`
         // Handle both ancestor-dark (`.dark [data-quill]`) and same-element
         // dark (`[data-quill].dark`) so dark mode works regardless of where
         // the dark selector lives relative to the scope element.
-        const darkScopeSel = selectorList(
-            forEachDark(darkSelectors, (d) => [
-                `${d} ${scope}`,
-                sameElement(scope, d),
-                `${d} ${scope} *`,
-                `${sameElement(scope, d)} *`,
-            ])
-        )
-        const darkScopeRootSel = selectorList(
-            forEachDark(darkSelectors, (d) => [`${d} ${scope}`, sameElement(scope, d)])
-        )
+        const darkScopeSel = `:is(${darkSelector} ${scope}, ${scope}${darkSelector}, ${darkSelector} ${scope} *, ${scope}${darkSelector} *)`
 
         return `/* Auto-generated by @posthog/quill-tokens — do not edit manually */
 
@@ -424,7 +374,7 @@ ${scope} {
   color-scheme: light;
 }
 
-${darkScopeRootSel} {
+:is(${darkSelector} ${scope}, ${scope}${darkSelector}) {
   color-scheme: dark;
 }
 
@@ -458,7 +408,7 @@ ${invertedSurface}`
   color-scheme: light;
 }
 
-${selectorList(darkSelectors)} {
+${darkSelector} {
   color-scheme: dark;
 }
 
@@ -475,7 +425,7 @@ ${cssVarsFlat(light.staticVars)}
 ${dataViz.light}
 }
 
-${selectorList(darkSelectors)} {
+${darkSelector} {
 ${cssVarsFlat(dark.staticVars)}
 ${dataViz.dark}
 }
@@ -489,7 +439,7 @@ ${dataViz.dark}
 ${cssVarsFlat(light.dynamicVars)}
 }
 
-${selectorList(forEachDark(darkSelectors, (d) => [d, `${d} *`]))} {
+:is(${darkSelector}, ${darkSelector} *) {
 ${cssVarsFlat(dark.dynamicVars)}
 }
 

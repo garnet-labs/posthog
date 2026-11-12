@@ -539,7 +539,9 @@ class DataWarehouseSavedQueryViewSet(TeamAndOrgViewSetMixin, AccessControlViewSe
                 self.team_id,
                 saved_query.id,
                 user=cast(User, request.user),
-                frequency_target=sync_frequency_to_sync_frequency_interval(params.validated_data["sync_frequency"]),
+                sync_frequency_interval=sync_frequency_to_sync_frequency_interval(
+                    params.validated_data["sync_frequency"]
+                ),
                 visible_blocker_names=lambda bounds: sync_cadence.visible_blocker_names(
                     bounds, self.user_access_control, team_id=self.team_id
                 ),

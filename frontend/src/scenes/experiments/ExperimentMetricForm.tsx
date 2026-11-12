@@ -34,7 +34,6 @@ import {
     isExperimentExposureNode,
     isExperimentFunnelMetric,
     isExperimentMeanMetric,
-    isExperimentQuantileMetric,
     isExperimentRatioMetric,
     isExperimentRetentionMetric,
 } from '~/queries/schema/schema-general'
@@ -45,7 +44,6 @@ import {
     FunnelConversionWindowTimeUnit,
 } from '~/types'
 
-import { ExperimentQuantileMetricFields } from 'products/experiments/frontend/components/ExperimentQuantileMetricFields'
 import { WarehouseNativeMetricFields } from 'products/experiments/frontend/warehouseNative/WarehouseNativeMetricFields'
 import {
     EMPTY_WAREHOUSE_NATIVE_BINDING,
@@ -63,7 +61,7 @@ import {
 } from './ExperimentMetricOutlierHandling'
 import { ExperimentMetricThreshold, isThresholdAvailableForMath } from './ExperimentMetricThreshold'
 import { EXPOSURE_DEFAULT_EVENT, getActivationConfig, isDefaultExposureConfig } from './exposureContract'
-import { metricSourcesToSeries, seriesToMetricConfig, seriesToMetricSource, toQuantileSource } from './metricQueryUtils'
+import { metricSourcesToSeries, seriesToMetricConfig, seriesToMetricSource } from './metricQueryUtils'
 import { commonActionFilterProps } from './Metrics/Selectors'
 import {
     getAllowedMathTypes,
@@ -149,24 +147,6 @@ const isPickerSource = (source: ExperimentMetricSource | undefined): source is E
         source.kind === NodeKind.ActionsNode ||
         source.kind === NodeKind.ExperimentDataWarehouseNode)
 
-const getMetricSources = (metric: ExperimentMetric): ExperimentMetricSource[] => {
-    if (isExperimentMeanMetric(metric) || isExperimentQuantileMetric(metric)) {
-        return [metric.source]
-    }
-    if (isExperimentFunnelMetric(metric)) {
-        return metric.series
-    }
-    if (isExperimentRatioMetric(metric)) {
-        return metric.denominator ? [metric.numerator, metric.denominator] : [metric.numerator]
-    }
-    if (isExperimentRetentionMetric(metric)) {
-        // An exposure-anchored start has no literal event to carry over
-        const startSources = isExperimentExposureNode(metric.start_event) ? [] : [metric.start_event]
-        return metric.completion_event ? [...startSources, metric.completion_event] : startSources
-    }
-    return []
-}
-
 export function ExperimentMetricForm({
     metric,
     isSharedMetric = false,
@@ -195,9 +175,6 @@ export function ExperimentMetricForm({
     const usesWarehouseNative = metricUsesWarehouseNativeSource(metric)
     // Keep an existing warehouse-native metric editable even if the team is no longer flagged in
     const showDataSource = warehouseNativeEnabled || usesWarehouseNative || !!warehouseExposure
-    const quantileMetricsEnabled = useFeatureFlag('EXPERIMENTS_QUANTILE_METRICS')
-    // A percentile metric that exists already must keep its type in the picker when the team is not flagged in
-    const showQuantileOption = quantileMetricsEnabled || isExperimentQuantileMetric(metric)
     const [eventCount, setEventCount] = useState<number | null>(null)
     const [isLoading, setIsLoading] = useState(false)
     // holds the custom start configuration while the exposure sentinel is selected, so switching back restores it
@@ -209,7 +186,7 @@ export function ExperimentMetricForm({
     } | null>(null)
 
     const getEventTypeLabel = (): string => {
-        if (isExperimentMeanMetric(metric) || isExperimentQuantileMetric(metric)) {
+        if (isExperimentMeanMetric(metric)) {
             return metric.source.kind === NodeKind.ActionsNode ? 'actions' : 'events'
         } else if (isExperimentFunnelMetric(metric)) {
             const lastStep = metric.series[metric.series.length - 1]
@@ -237,7 +214,27 @@ export function ExperimentMetricForm({
     }
 
     const handleMetricTypeChange = (newMetricType: ExperimentMetricType): void => {
-        const sources = getMetricSources(metric)
+        // Extract current sources from the existing metric to preserve selections
+        let sources: ExperimentMetricSource[] = []
+
+        if (isExperimentMeanMetric(metric)) {
+            sources = [metric.source]
+        } else if (isExperimentFunnelMetric(metric)) {
+            sources = metric.series
+        } else if (isExperimentRatioMetric(metric)) {
+            sources = [metric.numerator]
+            if (metric.denominator) {
+                sources.push(metric.denominator)
+            }
+        } else if (isExperimentRetentionMetric(metric)) {
+            // An exposure-anchored start has no literal event to carry over
+            if (!isExperimentExposureNode(metric.start_event)) {
+                sources = [metric.start_event]
+            }
+            if (metric.completion_event) {
+                sources.push(metric.completion_event)
+            }
+        }
 
         const newMetric = getDefaultExperimentMetric(newMetricType)
 
@@ -256,8 +253,6 @@ export function ExperimentMetricForm({
                 if (isPickerSource(sources[1])) {
                     newMetric.completion_event = sources[1]
                 }
-            } else if (newMetricType === ExperimentMetricType.QUANTILE && isExperimentQuantileMetric(newMetric)) {
-                newMetric.source = toQuantileSource(sources[0]) ?? newMetric.source
             }
         }
 
@@ -327,22 +322,10 @@ export function ExperimentMetricForm({
             description:
                 'Calculates the retention rate of users exposed to the experiment. Useful for measuring the percentage of users who return to the app after a certain period of time.',
         },
-        ...(showQuantileOption
-            ? [
-                  {
-                      value: ExperimentMetricType.QUANTILE,
-                      label: 'Percentile',
-                      'data-attr': 'experiment-metric-type-quantile',
-                      disabledReason: warehouseNativeTypeReason,
-                      description:
-                          'Calculates a percentile of a numeric property across all events, such as p90 page load time. Useful for measuring latency and other durations.',
-                  },
-              ]
-            : []),
     ]
 
     // dependencies for the loadEventCount useEffect call
-    const singleSource = isExperimentMeanMetric(metric) || isExperimentQuantileMetric(metric) ? metric.source : null
+    const meanSource = isExperimentMeanMetric(metric) ? metric.source : null
     const funnelSeries = isExperimentFunnelMetric(metric) ? metric.series : null
     const ratioNumerator = isExperimentRatioMetric(metric) ? metric.numerator : null
     const ratioDenominator = isExperimentRatioMetric(metric) ? metric.denominator : null
@@ -354,7 +337,7 @@ export function ExperimentMetricForm({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [
         metric.metric_type,
-        singleSource,
+        meanSource,
         funnelSeries,
         ratioNumerator,
         ratioDenominator,
@@ -530,10 +513,6 @@ export function ExperimentMetricForm({
                             }
                         />
                     </>
-                )}
-
-                {isExperimentQuantileMetric(metric) && (
-                    <ExperimentQuantileMetricFields metric={metric} handleSetMetric={handleSetMetric} />
                 )}
 
                 {isExperimentFunnelMetric(metric) && (

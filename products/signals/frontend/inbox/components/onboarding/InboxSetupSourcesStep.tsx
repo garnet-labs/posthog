@@ -40,11 +40,7 @@ export function InboxSetupSourcesStep(): JSX.Element {
                                                   item.enabled
                                           )
                                 return (
-                                    // A label so clicking the name or description toggles the switch too.
-                                    <label
-                                        key={source.definition.source}
-                                        className="flex items-center gap-3 py-4 cursor-pointer"
-                                    >
+                                    <div key={source.definition.source} className="flex items-center gap-3 py-4">
                                         {Icon && <Icon className="text-xl shrink-0" />}
                                         <div className="flex-1 min-w-0">
                                             <h3 className="m-0 text-sm font-semibold">{source.definition.label}</h3>
@@ -57,7 +53,7 @@ export function InboxSetupSourcesStep(): JSX.Element {
                                             aria-label={`Enable ${source.definition.label}`}
                                             data-attr={`inbox-setup-source-${source.definition.source}`}
                                         />
-                                    </label>
+                                    </div>
                                 )
                             })}
                     </div>
@@ -88,12 +84,11 @@ export function InboxSetupSourcesStep(): JSX.Element {
                                                         size="small"
                                                         loading={enablingProduct === product.enablement}
                                                         disabledReason={
-                                                            product.enableDisabledReason ??
-                                                            (saving ||
+                                                            saving ||
                                                             (enablingProduct !== null &&
                                                                 enablingProduct !== product.enablement)
                                                                 ? 'Finishing setup changes'
-                                                                : undefined)
+                                                                : undefined
                                                         }
                                                         onClick={() => enableSourceProduct(product.enablement!)}
                                                     >

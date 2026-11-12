@@ -12,7 +12,8 @@ from django.utils import timezone
 
 from parameterized import parameterized
 
-from products.dashboards.backend.facade.testing import create_dashboard, create_insight_tile
+from products.dashboards.backend.models.dashboard import Dashboard
+from products.dashboards.backend.models.dashboard_tile import DashboardTile
 from products.dashboards.evals.scorers import (
     SavedDashboardContents,
     SavedWidgetState,
@@ -153,12 +154,12 @@ class TestSQLTilesFollowDashboardDateRange(ClickhouseTestMixin, APIBaseTest):
                 timestamp=timezone.now() - timedelta(days=days_ago),
             )
         flush_persons_and_events()
-        dashboard_id = create_dashboard(team_id=self.team.id, name="SQL dashboard")
+        dashboard = Dashboard.objects.create(team=self.team, name="SQL dashboard")
         insight = Insight.objects.create(
             team=self.team,
             query={"kind": "DataVisualizationNode", "source": {"kind": "HogQLQuery", "query": sql}},
         )
-        create_insight_tile(dashboard_id=dashboard_id, insight_id=insight.id, filters_overrides=filters_overrides)
+        DashboardTile.objects.create(dashboard=dashboard, insight=insight, filters_overrides=filters_overrides)
 
         state = SQLTilesFollowDashboardDateRange._read_state(self.team.id, "SQL dashboard")
         with patch.object(SQLTilesFollowDashboardDateRange, "_read_state", return_value=state):

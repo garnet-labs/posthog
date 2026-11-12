@@ -37,11 +37,9 @@ from products.slack_app.backend.services.slack_messages import SlackThreadMessag
 from products.slack_app.backend.services.slack_user_info import find_addressed_bot_user_id
 from products.slack_app.backend.services.workspace_integrations import (
     WorkspaceIntegration,
-    get_integration,
     require_workspace_integration,
     workspace_integrations,
 )
-from products.slack_app.backend.temporal.activities.repo_selection import capture_repository_resolved
 from products.slack_app.backend.temporal.types import (
     PostHogCodeSlackMentionWorkflowInputs,
     SlackAppModelOverride,
@@ -309,23 +307,13 @@ def classify_posthog_code_task_needs_repo_activity(
     connected = {repo.lower() for repo in _get_full_repo_names(integration, user_id=inputs.user_id)}
     routing_rules = team_routing_rule_lines(integration.team_id, candidate_repos=connected or None)
     thread_ts = inputs.event.get("thread_ts") or inputs.event.get("ts")
-    needs_repo = classify_task_needs_repo(
+    return classify_task_needs_repo(
         event_text,
         thread_messages,
         routing_rules=routing_rules,
         trace_id=_thread_trace_id(inputs.slack_team_id, thread_ts),
         team_id=integration.team_id,
     )
-    # A positive answer hands off to the discovery agent, which records the final outcome.
-    capture_repository_resolved(
-        integration,
-        inputs,
-        "classifier_needs_repo" if needs_repo else "classifier_no_repo",
-        has_repository=False,
-        is_final=not needs_repo,
-        connected_repo_count=len(connected),
-    )
-    return needs_repo
 
 
 def _agent_directed_response_format() -> ResponseFormatJSONSchema:
@@ -429,7 +417,7 @@ def classify_untagged_followup_activity(
     from products.slack_app.backend.services.slack_messages import cached_collect_thread_messages
 
     try:
-        mapping = SlackThreadTaskMapping.objects.select_related("task").get(
+        mapping = SlackThreadTaskMapping.objects.select_related("task", "integration").get(
             integration_id=inputs.integration_id,
             channel=channel,
             thread_ts=thread_ts,
@@ -443,15 +431,7 @@ def classify_untagged_followup_activity(
         )
         return False
 
-    integration = get_integration(mapping.team_id, mapping.integration_id)
-    if integration is None:
-        logger.info(
-            "posthog_code_thread_message_mapping_gone",
-            integration_id=inputs.integration_id,
-            channel=channel,
-            thread_ts=thread_ts,
-        )
-        return False
+    integration = mapping.integration
     slack = SlackIntegration(integration)
 
     # Asked before the history fetch and the model call, because reading the reply cannot

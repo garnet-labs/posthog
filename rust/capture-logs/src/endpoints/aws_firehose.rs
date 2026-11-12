@@ -12,9 +12,7 @@ use crate::log_record::{
     apply_timestamp_override, convert_severity_text_to_number, datetime_from_millis,
     severity_alias, try_extract_severity, KafkaLogRow,
 };
-use crate::service::{
-    attributes_bytes, expansion_rejection, gunzip_if_magic, Service, ROW_OVERHEAD_BYTES,
-};
+use crate::service::{gunzip_if_magic, Service};
 use axum::{
     extract::{Request, State},
     http::{header::CONTENT_TYPE, HeaderMap, StatusCode},
@@ -426,32 +424,6 @@ pub fn decode_record(
         })
 }
 
-/// Every row copies the record template, which holds the common attributes, so this is charged
-/// before the rows are built.
-fn expanded_bytes(decoded: &DecodedRecord, ctx: &FirehoseContext) -> usize {
-    let (template, rows, content) = match decoded {
-        DecodedRecord::CloudWatch(env) if env.message_type == "CONTROL_MESSAGE" => return 0,
-        DecodedRecord::CloudWatch(env) => (
-            ctx.template(Some(env)),
-            env.log_events.len(),
-            env.log_events
-                .iter()
-                .map(|e| e.message.len() + e.id.len())
-                .sum(),
-        ),
-        DecodedRecord::Raw(text) => (
-            ctx.template(None),
-            text.lines().filter(|line| !line.trim().is_empty()).count(),
-            text.len(),
-        ),
-    };
-    let per_row = ROW_OVERHEAD_BYTES
-        + template.service_name.len()
-        + attributes_bytes(&template.resource_attributes)
-        + attributes_bytes(&template.attributes);
-    rows.saturating_mul(per_row).saturating_add(content)
-}
-
 fn decoded_record_to_rows(decoded: DecodedRecord, ctx: &FirehoseContext) -> Option<DecodedRows> {
     match decoded {
         DecodedRecord::CloudWatch(envelope) if envelope.message_type == "CONTROL_MESSAGE" => {
@@ -599,7 +571,6 @@ pub async fn export_aws_firehose_logs_http(
 
     let decoded_budget = body_cap.saturating_mul(DECODED_BUDGET_FACTOR);
     let mut decoded_total: usize = 0;
-    let mut expanded_total: usize = 0;
     let mut invalid_records: usize = 0;
     let mut total_events: u64 = 0;
     let mut batches = BatchBuilder::new(
@@ -637,17 +608,6 @@ pub async fn export_aws_firehose_logs_http(
                 &format!(
                     "decoded records exceed {decoded_budget} bytes; lower the Firehose buffer size"
                 ),
-            ));
-        }
-
-        expanded_total = expanded_total.saturating_add(expanded_bytes(&decoded, &ctx));
-        if expanded_total > service.max_expanded_request_bytes {
-            writes.abort_all();
-            let (status, _) = expansion_rejection(service.max_expanded_request_bytes);
-            return Err(rejection(
-                status,
-                &request_id,
-                "records expand to too many rows; lower the Firehose buffer size",
             ));
         }
 
@@ -1028,31 +988,6 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("buffer size"));
-    }
-
-    #[test]
-    fn expanded_bytes_charge_the_template_once_per_line() {
-        let ctx = FirehoseContext {
-            common_attributes: HashMap::from([("big".to_string(), json!("x".repeat(10_000)))]),
-            ..FirehoseContext::default()
-        };
-
-        let bytes = expanded_bytes(&DecodedRecord::Raw("a\n".repeat(100)), &ctx);
-
-        assert!(bytes > 100 * 10_000);
-    }
-
-    #[test]
-    fn expanded_bytes_skip_blank_lines() {
-        let ctx = FirehoseContext {
-            common_attributes: HashMap::from([("big".to_string(), json!("x".repeat(10_000)))]),
-            ..FirehoseContext::default()
-        };
-        let text = format!("a{}", "\n".repeat(100_000));
-
-        let bytes = expanded_bytes(&DecodedRecord::Raw(text.clone()), &ctx);
-
-        assert!(bytes < text.len() + 2 * 10_000);
     }
 
     #[test]

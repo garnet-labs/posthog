@@ -5,16 +5,16 @@ import { List } from 'react-window'
 import { IconChevronDown } from '@posthog/icons'
 import { LemonButton, LemonDropdown, LemonInput, Spinner } from '@posthog/lemon-ui'
 
-import { type MetricNameItem, customMetricName, metricNamePickerLogic } from './metricNamePickerLogic'
+import { customMetricName, metricNamePickerLogic } from './metricNamePickerLogic'
 
 const ROW_HEIGHT = 32
 const MAX_DROPDOWN_HEIGHT = 320
 const DROPDOWN_WIDTH = 320
 
 interface OptionRowData {
-    items: MetricNameItem[]
+    items: { name: string }[]
     selected: string
-    onPick: (item: MetricNameItem) => void
+    onPick: (name: string) => void
 }
 
 function MetricOptionRow({
@@ -36,7 +36,7 @@ function MetricOptionRow({
                 type={isSelected ? 'primary' : 'tertiary'}
                 size="small"
                 fullWidth
-                onClick={() => onPick(item)}
+                onClick={() => onPick(item.name)}
                 data-attr={`metrics-name-option-${item.name}`}
             >
                 <span className="truncate">{item.name}</span>
@@ -48,8 +48,7 @@ function MetricOptionRow({
 export interface MetricNameFilterProps {
     /** Currently selected metric name (empty string when nothing is picked). */
     value: string
-    /** Gets the metric type too when the user picks a listed metric. A typed name or a cleared pick has none. */
-    onChange: (name: string, metricType?: string) => void
+    onChange: (name: string) => void
     /** Placeholder shown on the trigger when no metric is picked. */
     placeholder?: string
     disabled?: boolean
@@ -89,7 +88,7 @@ function MetricNameFilterInner({
     allowCustomName,
 }: {
     value: string
-    onChange: (name: string, metricType?: string) => void
+    onChange: (name: string) => void
     placeholder: string
     disabled?: boolean
     disabledReason?: string | null
@@ -100,14 +99,10 @@ function MetricNameFilterInner({
     const { setSearch, openPicker } = useActions(metricNamePickerLogic)
 
     const onPick = useCallback(
-        (item: MetricNameItem) => {
+        (name: string) => {
             // Single-select: replace on pick. Comparing several metrics is done with
             // clause rows (MetricsClauseRow), each holding its own picker.
-            if (value === item.name) {
-                onChange('')
-            } else {
-                onChange(item.name, item.metric_type)
-            }
+            onChange(value === name ? '' : name)
         },
         [value, onChange]
     )

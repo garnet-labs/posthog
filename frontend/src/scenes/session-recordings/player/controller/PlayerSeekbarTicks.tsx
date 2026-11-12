@@ -1,7 +1,7 @@
 import clsx from 'clsx'
 import { useActions, useValues } from 'kea'
 import posthog from 'posthog-js'
-import React, { memo, useEffect, useMemo } from 'react'
+import React, { MutableRefObject, memo, useEffect, useMemo } from 'react'
 import useResizeObserver from 'use-resize-observer'
 
 import { IconComment } from '@posthog/icons'
@@ -26,6 +26,7 @@ import { isSingleEmoji } from 'scenes/session-recordings/utils'
 import { primaryEventPropertiesModel } from '~/models/primaryEventPropertiesModel'
 
 import { SeekbarGlyph, resolveOverlappingGlyphs } from './seekbarTickOffsets'
+import { UserActivity } from './UserActivity'
 
 // keep in sync with --emoji-width / --comment-width in Seekbar.scss
 const EMOJI_TICK_WIDTH_PX = 16
@@ -176,6 +177,7 @@ const MemoisedPlayerSeekbarTicks = memo(
         seekbarItems,
         endTimeMs,
         seekToTime,
+        hoverRef,
         primaryProperties,
         ticksRef,
         containerWidth,
@@ -189,6 +191,7 @@ const MemoisedPlayerSeekbarTicks = memo(
         )[]
         endTimeMs: number
         seekToTime: (timeInMilliseconds: number) => void
+        hoverRef: MutableRefObject<HTMLDivElement | null>
         primaryProperties: Record<string, string>
         ticksRef: (node: HTMLDivElement | null) => void
         containerWidth: number
@@ -214,6 +217,7 @@ const MemoisedPlayerSeekbarTicks = memo(
 
         return (
             <div className="PlayerSeekbarTicks" ref={ticksRef}>
+                <UserActivity hoverRef={hoverRef} />
                 {seekbarItems.map((item, i) => {
                     return (
                         <PlayerSeekbarTick
@@ -252,6 +256,7 @@ export function PlayerSeekbarTicks({
     seekbarItems,
     endTimeMs,
     seekToTime,
+    hoverRef,
 }: {
     seekbarItems: (
         | InspectorListItemEvent
@@ -262,6 +267,7 @@ export function PlayerSeekbarTicks({
     )[]
     endTimeMs: number
     seekToTime: (timeInMilliseconds: number) => void
+    hoverRef: MutableRefObject<HTMLDivElement | null>
 }): JSX.Element {
     const { primaryProperties } = useValues(primaryEventPropertiesModel)
     const { ensureLoadedForEvents } = useActions(primaryEventPropertiesModel)
@@ -279,6 +285,7 @@ export function PlayerSeekbarTicks({
             seekbarItems={seekbarItems}
             endTimeMs={endTimeMs}
             seekToTime={seekToTime}
+            hoverRef={hoverRef}
             primaryProperties={primaryProperties}
             ticksRef={ticksRef}
             containerWidth={containerWidth ?? 0}

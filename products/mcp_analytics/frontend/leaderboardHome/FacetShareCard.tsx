@@ -1,11 +1,11 @@
 import { useMemo } from 'react'
 
 import { type ChartTheme, type TooltipContext } from '@posthog/quill-charts'
+import { Skeleton } from '@posthog/quill-primitives'
 
 import { formatPercentage } from 'lib/utils/numbers'
 
 import { Card, CardState } from '../dashboard/Card'
-import { ChartSkeleton } from '../dashboard/ChartSkeleton'
 import { ChartTooltip } from '../dashboard/ChartTooltip'
 import { formatNumber } from '../dashboard/formatters'
 import { ShareBarChart, type ShareBarRow } from '../dashboard/ShareBarChart'
@@ -70,8 +70,7 @@ export function FacetShareCard({
             <CardState
                 loading={loading}
                 isEmpty={rows.length === 0}
-                className="min-h-48"
-                skeleton={<ChartSkeleton kind="shares" />}
+                skeleton={<Skeleton className="h-48 w-full" />}
                 empty={failed ? <LoadErrorMessage /> : <NoDataMessage />}
             >
                 <ShareBarChart rows={chartRows} totalCalls={totalCalls} theme={theme} tooltip={renderTooltip} />

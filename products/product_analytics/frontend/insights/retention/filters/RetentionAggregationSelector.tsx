@@ -4,7 +4,6 @@ import { useEffect, useState } from 'react'
 import { LemonSelect, LemonSelectOption } from '@posthog/lemon-ui'
 
 import { PropertyKeyInfo } from 'lib/components/PropertyKeyInfo'
-import { useQuillSurface } from 'lib/components/QuillSurface/quillSurfaceContext'
 import { TaxonomicFilterGroupType } from 'lib/components/TaxonomicFilter/types'
 import { TaxonomicStringPopover } from 'lib/components/TaxonomicPopover/TaxonomicPopover'
 import { Tooltip } from 'lib/lemon-ui/Tooltip'
@@ -15,7 +14,6 @@ import { insightVizDataLogic } from 'scenes/insights/insightVizDataLogic'
 import { DatabaseSchemaField, RetentionFilter } from '~/queries/schema/schema-general'
 import { PropertyMathType } from '~/types'
 
-import { QuillEditorSelect } from 'products/product_analytics/frontend/insights/editor/QuillEditorSelect'
 import { PROPERTY_MATH_DEFINITIONS } from 'products/product_analytics/frontend/insights/trends/mathsLogic'
 
 const aggregationTypeToTaxonomicType = {
@@ -36,7 +34,6 @@ export function RetentionAggregationSelector(): JSX.Element {
     const { retentionFilter } = useValues(insightVizDataLogic(insightProps))
     const { updateInsightFilter } = useActions(insightVizDataLogic(insightProps))
     const { allTablesMap } = useValues(databaseTableListLogic)
-    const quillSurface = useQuillSurface()
 
     const aggregationType = retentionFilter?.aggregationType || 'count'
     const aggregationProperty = retentionFilter?.aggregationProperty
@@ -75,17 +72,6 @@ export function RetentionAggregationSelector(): JSX.Element {
         }
     }, [aggregationType])
 
-    const selectPropertyMathType = (newType: PropertyMathType.Average | PropertyMathType.Sum): void => {
-        setPropertyMathTypeShown(newType)
-        // Map PropertyMathType to aggregationType
-        const aggregationType = newType === PropertyMathType.Sum ? 'sum' : 'avg'
-        updateInsightFilter({ aggregationType })
-    }
-
-    const selectRetentionRate = (): void => {
-        updateInsightFilter({ aggregationType: 'count', aggregationProperty: undefined })
-    }
-
     const options: LemonSelectOption<string>[] = [
         {
             value: 'count',
@@ -102,9 +88,13 @@ export function RetentionAggregationSelector(): JSX.Element {
                     <span>Property value</span>
                     <LemonSelect
                         value={propertyMathTypeShown}
-                        onSelect={(value) =>
-                            selectPropertyMathType(value as PropertyMathType.Average | PropertyMathType.Sum)
-                        }
+                        onSelect={(value) => {
+                            const newType = value as PropertyMathType.Average | PropertyMathType.Sum
+                            setPropertyMathTypeShown(newType)
+                            // Map PropertyMathType to aggregationType
+                            const aggregationType = newType === PropertyMathType.Sum ? 'sum' : 'avg'
+                            updateInsightFilter({ aggregationType })
+                        }}
                         options={[
                             {
                                 value: PropertyMathType.Average,
@@ -127,51 +117,25 @@ export function RetentionAggregationSelector(): JSX.Element {
         },
     ]
 
-    const quillOptions = [
-        {
-            value: 'count',
-            label: 'Retention rate',
-            tooltip: 'The percentage of users who return in the specific interval.',
-        },
-        ...[PropertyMathType.Average, PropertyMathType.Sum].map((mathType) => ({
-            value: mathType,
-            label: `Property value ${PROPERTY_MATH_DEFINITIONS[mathType].shortName}`,
-            tooltip: PROPERTY_MATH_DEFINITIONS[mathType].description,
-        })),
-    ]
-
     return (
         <div className="flex flex-col items-start gap-2">
-            {quillSurface ? (
-                <QuillEditorSelect
-                    value={aggregationType === 'count' ? 'count' : propertyMathTypeShown}
-                    onChange={(val) =>
-                        val === 'count'
-                            ? selectRetentionRate()
-                            : selectPropertyMathType(val as PropertyMathType.Average | PropertyMathType.Sum)
+            <LemonSelect
+                value={aggregationType === 'count' ? 'count' : propertyMathTypeShown}
+                onChange={(val) => {
+                    if (val === 'count') {
+                        updateInsightFilter({ aggregationType: 'count', aggregationProperty: undefined })
+                    } else {
+                        // If switching to property value, use the currently "shown" type (avg or sum)
+                        const aggregationType = propertyMathTypeShown === PropertyMathType.Sum ? 'sum' : 'avg'
+                        updateInsightFilter({ aggregationType })
                     }
-                    options={quillOptions}
-                    data-attr="retention-aggregation-type-selector"
-                />
-            ) : (
-                <LemonSelect
-                    value={aggregationType === 'count' ? 'count' : propertyMathTypeShown}
-                    onChange={(val) => {
-                        if (val === 'count') {
-                            selectRetentionRate()
-                        } else {
-                            // If switching to property value, use the currently "shown" type (avg or sum)
-                            const aggregationType = propertyMathTypeShown === PropertyMathType.Sum ? 'sum' : 'avg'
-                            updateInsightFilter({ aggregationType })
-                        }
-                    }}
-                    options={options}
-                    size="small"
-                    dropdownMatchSelectWidth={false}
-                    optionTooltipPlacement="right"
-                    data-attr="retention-aggregation-type-selector"
-                />
-            )}
+                }}
+                options={options}
+                size="small"
+                dropdownMatchSelectWidth={false}
+                optionTooltipPlacement="right"
+                data-attr="retention-aggregation-type-selector"
+            />
 
             {isPropertyValueAggregation && (
                 <TaxonomicStringPopover

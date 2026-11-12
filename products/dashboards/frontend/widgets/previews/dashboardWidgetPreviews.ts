@@ -2,7 +2,6 @@ import { NotebookWidgetPreview } from 'products/notebooks/frontend/NotebookDashb
 
 import type { DashboardWidgetCatalogKey } from '../../widget_types/catalog'
 import { ActivityEventsWidgetPreview } from './ActivityEventsWidgetPreview'
-import { CanvasAppWidgetPreview } from './CanvasAppWidgetPreview'
 import { ConversationsWidgetPreview } from './ConversationsWidgetPreview'
 import { ErrorTrackingWidgetPreview } from './ErrorTrackingWidgetPreview'
 import { ExperimentResultsWidgetPreview, ExperimentsListWidgetPreview } from './ExperimentsWidgetPreviews'
@@ -27,5 +26,4 @@ export const DASHBOARD_WIDGET_PREVIEWS: Record<DashboardWidgetCatalogKey, () => 
     survey_results: SurveyResultsWidgetPreview,
     logs_list: LogsWidgetPreview,
     metrics_table: MetricsTableWidgetPreview,
-    canvas_app: CanvasAppWidgetPreview,
 }

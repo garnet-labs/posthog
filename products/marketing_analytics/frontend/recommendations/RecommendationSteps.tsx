@@ -1,24 +1,15 @@
 import { CopyToClipboardInline } from 'lib/components/CopyToClipboard'
 
-import {
-    MarketingAnalyticsRecommendationRule,
-    MarketingAnalyticsRecommendationStep,
-} from '~/queries/schema/schema-general'
+import { MarketingAnalyticsRecommendationStep } from '~/queries/schema/schema-general'
 
 import { RecommendationStepText } from './RecommendationStepText'
 
-export function RecommendationSteps({
-    steps,
-    rule,
-}: {
-    steps: MarketingAnalyticsRecommendationStep[]
-    rule: MarketingAnalyticsRecommendationRule
-}): JSX.Element {
+export function RecommendationSteps({ steps }: { steps: MarketingAnalyticsRecommendationStep[] }): JSX.Element {
     return (
         <ol className="m-0 flex list-decimal flex-col gap-2 py-2 pl-5">
             {steps.map((step, index) => (
                 <li key={index}>
-                    <RecommendationStepText step={step} rule={rule} />
+                    <RecommendationStepText step={step} />
                     {step.copyValue && (
                         <div className="mt-1">
                             <CopyToClipboardInline

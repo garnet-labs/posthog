@@ -28,11 +28,9 @@ from posthog.clickhouse.query_tagging import Feature, Product, tag_queries
 from posthog.hogql_queries.utils.query_date_range import QueryDateRange
 from posthog.models import Team
 
-from products.alerts_platform.backend.facade.ingestion_checkpoint import fetch_ingestion_checkpoint
-from products.alerts_platform.backend.facade.rolling_checks import CheckWindow, rolling_check_ranges
 from products.logs.backend.alert_group_columns import GROUP_COLUMNS
 from products.logs.backend.alert_utils import MAX_BYTES_TO_READ
-from products.logs.backend.logs_query_runner import LogsFilterBuilder
+from products.logs.backend.logs_query_runner import LIVE_LOGS_CHECKPOINT_QUERY, LogsFilterBuilder
 
 
 class AlertQuerySubject(Protocol):
@@ -86,14 +84,31 @@ def _build_logs_query(alert: AlertQuerySubject, date_range: DateRange) -> LogsQu
     )
 
 
-def _period_ranges(date_from: dt.datetime, period_minutes: int, period_count: int) -> list[CheckWindow]:
+def _period_ranges(
+    date_from: dt.datetime, period_minutes: int, period_count: int
+) -> list[tuple[dt.datetime, dt.datetime]]:
     return [
-        CheckWindow(
-            start=date_from + dt.timedelta(minutes=i * period_minutes),
-            end=date_from + dt.timedelta(minutes=(i + 1) * period_minutes),
+        (
+            date_from + dt.timedelta(minutes=i * period_minutes),
+            date_from + dt.timedelta(minutes=(i + 1) * period_minutes),
         )
         for i in range(period_count)
     ]
+
+
+def _rolling_check_ranges(
+    nca: dt.datetime,
+    window_minutes: int,
+    cadence_minutes: int,
+    period_count: int,
+) -> list[tuple[dt.datetime, dt.datetime]]:
+    """M cadence-stepped rolling windows ending at NCA, oldest-first."""
+    ranges: list[tuple[dt.datetime, dt.datetime]] = []
+    for k in range(period_count - 1, -1, -1):
+        end = nca - dt.timedelta(minutes=k * cadence_minutes)
+        start = end - dt.timedelta(minutes=window_minutes)
+        ranges.append((start, end))
+    return ranges
 
 
 def _timestamp_in_range(start: dt.datetime, end: dt.datetime) -> ast.Expr:
@@ -106,13 +121,11 @@ def _timestamp_in_range(start: dt.datetime, end: dt.datetime) -> ast.Expr:
     )
 
 
-def _period_count_columns(ranges: list[CheckWindow]) -> list[ast.Expr]:
+def _period_count_columns(ranges: list[tuple[dt.datetime, dt.datetime]]) -> list[ast.Expr]:
     """One `period_<i>` count per range, oldest first."""
     return [
-        ast.Alias(
-            alias=f"period_{i}", expr=ast.Call(name="countIf", args=[_timestamp_in_range(window.start, window.end)])
-        )
-        for i, window in enumerate(ranges)
+        ast.Alias(alias=f"period_{i}", expr=ast.Call(name="countIf", args=[_timestamp_in_range(start, end)]))
+        for i, (start, end) in enumerate(ranges)
     ]
 
 
@@ -324,10 +337,10 @@ class AlertCheckQuery:
     ) -> list[BucketedCount]:
         """Per-check counts for M cadence-stepped rolling windows ending at NCA, oldest-first."""
         self._tag()
-        ranges = rolling_check_ranges(nca, window_minutes, cadence_minutes, period_count)
+        ranges = _rolling_check_ranges(nca, window_minutes, cadence_minutes, period_count)
         return self._execute_count_per_range(ranges)
 
-    def _execute_count_per_range(self, ranges: list[CheckWindow]) -> list[BucketedCount]:
+    def _execute_count_per_range(self, ranges: list[tuple[dt.datetime, dt.datetime]]) -> list[BucketedCount]:
         query = ast.SelectQuery(
             select=_period_count_columns(ranges),
             select_from=ast.JoinExpr(table=ast.Field(chain=["logs"])),
@@ -335,7 +348,7 @@ class AlertCheckQuery:
         )
         response = self._run_query(query)
         row = response.results[0] if response.results else [0] * len(ranges)
-        return [BucketedCount(timestamp=window.start, count=count) for window, count in zip(ranges, row)]
+        return [BucketedCount(timestamp=start, count=count) for (start, _), count in zip(ranges, row)]
 
     def _run_query(self, query: ast.SelectQuery | ast.SelectSetQuery) -> HogQLQueryResponse:
         if not isinstance(query, ast.SelectQuery):
@@ -491,10 +504,10 @@ class BatchedAlertCheckQuery:
     ) -> BatchedBucketedResult:
         """Per-alert per-check counts for M cadence-stepped rolling windows ending at NCA."""
         self._tag()
-        ranges = rolling_check_ranges(nca, window_minutes, cadence_minutes, period_count)
+        ranges = _rolling_check_ranges(nca, window_minutes, cadence_minutes, period_count)
         return self._execute_count_per_range(ranges)
 
-    def _execute_count_per_range(self, ranges: list[CheckWindow]) -> BatchedBucketedResult:
+    def _execute_count_per_range(self, ranges: list[tuple[dt.datetime, dt.datetime]]) -> BatchedBucketedResult:
         query = self._build_count_per_range_query(ranges)
 
         start_ms = time.monotonic_ns() // 1_000_000
@@ -508,8 +521,8 @@ class BatchedAlertCheckQuery:
         for alert_i, alert in enumerate(self.alerts):
             offset = alert_i * len(ranges)
             per_alert[str(alert.id)] = [
-                BucketedCount(timestamp=window.start, count=row[offset + period_i])
-                for period_i, window in enumerate(ranges)
+                BucketedCount(timestamp=start, count=row[offset + period_i])
+                for period_i, (start, _) in enumerate(ranges)
             ]
         return BatchedBucketedResult(per_alert=per_alert, query_duration_ms=duration_ms)
 
@@ -546,17 +559,17 @@ class BatchedAlertCheckQuery:
             limit=ast.Constant(value=limit),
         )
 
-    def _build_count_per_range_query(self, ranges: list[CheckWindow]) -> ast.SelectQuery:
+    def _build_count_per_range_query(self, ranges: list[tuple[dt.datetime, dt.datetime]]) -> ast.SelectQuery:
         select_columns: list[ast.Expr] = [
             ast.Alias(
                 alias=f"alert_{alert_i}_period_{period_i}",
                 expr=ast.Call(
                     name="countIf",
-                    args=[ast.And(exprs=[alert_expr, _timestamp_in_range(window.start, window.end)])],
+                    args=[ast.And(exprs=[alert_expr, _timestamp_in_range(start, end)])],
                 ),
             )
             for alert_i, alert_expr in enumerate(self._alert_where_exprs)
-            for period_i, window in enumerate(ranges)
+            for period_i, (start, end) in enumerate(ranges)
         ]
 
         return ast.SelectQuery(
@@ -648,7 +661,7 @@ class GroupedAlertCheckQuery:
         self, nca: dt.datetime, window_minutes: int, cadence_minutes: int, period_count: int
     ) -> GroupedRollingResult:
         _tag_alert_query(team=self.team, alert_config_id=str(self.alert.id), source="logs_alert_grouped")
-        ranges = rolling_check_ranges(nca, window_minutes, cadence_minutes, period_count)
+        ranges = _rolling_check_ranges(nca, window_minutes, cadence_minutes, period_count)
         query = self._build_query(ranges)
 
         start_ms = time.monotonic_ns() // 1_000_000
@@ -659,20 +672,18 @@ class GroupedAlertCheckQuery:
         groups = [
             GroupCounts(
                 labels={column: str(value) for column, value in zip(self.group_by, row[:width])},
-                counts=[
-                    BucketedCount(timestamp=window.start, count=count) for window, count in zip(ranges, row[width:])
-                ],
+                counts=[BucketedCount(timestamp=start, count=count) for (start, _), count in zip(ranges, row[width:])],
             )
             for row in response.results
         ]
         return GroupedRollingResult(
             groups=groups,
-            period_starts=[window.start for window in ranges],
+            period_starts=[start for start, _ in ranges],
             query_duration_ms=duration_ms,
             truncated=len(groups) > self.limit,
         )
 
-    def _build_query(self, ranges: list[CheckWindow]) -> ast.SelectQuery:
+    def _build_query(self, ranges: list[tuple[dt.datetime, dt.datetime]]) -> ast.SelectQuery:
         columns: list[ast.Expr] = [ast.Field(chain=[column]) for column in self.group_by]
         periods = _period_count_columns(ranges)
         breach_op = ast.CompareOperationOp.Gt if self.worst_is_highest else ast.CompareOperationOp.Lt
@@ -726,17 +737,51 @@ class GroupedAlertCheckQuery:
         )
 
 
+# Fall back to `now` when the checkpoint is older than this — a quiet partition
+# can pin `min(...)` hours behind while other partitions have fresh data.
+CHECKPOINT_MAX_STALENESS = dt.timedelta(minutes=5)
+
+
 def fetch_live_logs_checkpoint(
     team: Team, *, ch_user: ClickHouseUser = ClickHouseUser.DEFAULT, max_execution_time: int | None = None
 ) -> dt.datetime | None:
-    return fetch_ingestion_checkpoint(
-        team,
-        consumption_table=("logs_kafka_metrics",),
+    tag_queries(
         product=Product.LOGS,
+        feature=Feature.ALERTING,
         source="logs_alert",
-        ch_user=ch_user,
-        max_execution_time=max_execution_time,
+        team_id=str(team.id),
     )
+    response = execute_hogql_query(
+        query_type="alert_check_checkpoint",
+        query=LIVE_LOGS_CHECKPOINT_QUERY,
+        team=team,
+        workload=Workload.LOGS,
+        ch_user=ch_user,
+        modifiers=HogQLQueryModifiers(convertToProjectTimezone=False),
+        settings=None
+        if max_execution_time is None
+        else HogQLGlobalSettings(max_execution_time=max_execution_time, timeout_overflow_mode="throw"),
+    )
+    if not response.results or response.results[0][0] is None:
+        return None
+    checkpoint = response.results[0][0]
+    if checkpoint.tzinfo is None:
+        checkpoint = checkpoint.replace(tzinfo=ZoneInfo("UTC"))
+    return checkpoint
+
+
+def resolve_alert_date_to(nca: dt.datetime, checkpoint: dt.datetime | None) -> dt.datetime:
+    """Anchor `date_to` on the alert's scheduled `next_check_at`, clamped to the
+    ingestion checkpoint when the checkpoint is fresh enough.
+
+    Anchoring on `next_check_at` (not wall-clock-now) is what makes the query
+    window deterministic across retries and immune to scheduler lag — two evals
+    of the same alert at different actual eval times produce the same `date_to`
+    and thus the same query.
+    """
+    if checkpoint is None or (nca - checkpoint) > CHECKPOINT_MAX_STALENESS:
+        return nca
+    return min(nca, checkpoint)
 
 
 def is_projection_eligible(filters: dict) -> bool:

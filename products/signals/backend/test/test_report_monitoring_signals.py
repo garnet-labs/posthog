@@ -3,7 +3,7 @@ from datetime import timedelta
 from uuid import uuid4
 
 import time_machine
-from posthog.test.base import NonAtomicBaseTest
+from posthog.test.base import BaseTest
 from unittest.mock import AsyncMock, patch
 
 from django.utils import timezone
@@ -32,9 +32,7 @@ from products.signals.backend.tasks import sweep_monitoring_research_requests
 from products.signals.backend.temporal.emitter import SignalEmitterInput
 
 
-class TestMonitoringSignals(NonAtomicBaseTest):
-    CLASS_DATA_LEVEL_SETUP = False
-
+class TestMonitoringSignals(BaseTest):
     def setUp(self) -> None:
         super().setUp()
         self.now = timezone.now()

@@ -59,7 +59,6 @@ type DashboardWidgetItemProps = {
     loading: boolean
     error?: string | null
     lastFetchedAt?: number
-    dashboardFilters?: DashboardWidgetComponentProps['dashboardFilters']
     onRefresh: () => void
     onRefreshWidgetData?: (tileId: number) => void
     onApplyWidgetIssueMetadataChange?: (
@@ -150,7 +149,6 @@ function DashboardWidgetItemContent({
     loading,
     error,
     lastFetchedAt,
-    dashboardFilters,
     onRefresh,
     onRefreshWidgetData,
     onApplyWidgetIssueMetadataChange,
@@ -195,7 +193,6 @@ function DashboardWidgetItemContent({
         result,
         loading,
         error,
-        dashboardFilters,
         onRefresh,
         onRefreshData: onRefreshWidgetData ? () => onRefreshWidgetData(tile.id) : undefined,
         onApplyIssueMetadataChange: onApplyWidgetIssueMetadataChange
@@ -405,7 +402,6 @@ export const DashboardWidgetItem = React.forwardRef<HTMLDivElement, DashboardWid
             loading,
             error,
             lastFetchedAt,
-            dashboardFilters,
             onRefresh,
             onRefreshWidgetData,
             onApplyWidgetIssueMetadataChange,
@@ -500,7 +496,6 @@ export const DashboardWidgetItem = React.forwardRef<HTMLDivElement, DashboardWid
                     loading={loading}
                     error={error}
                     lastFetchedAt={lastFetchedAt}
-                    dashboardFilters={dashboardFilters}
                     onRefresh={onRefresh}
                     onRefreshWidgetData={onRefreshWidgetData}
                     onApplyWidgetIssueMetadataChange={onApplyWidgetIssueMetadataChange}

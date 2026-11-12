@@ -584,7 +584,6 @@ fn build_kafka_event(
         timestamp: computed_timestamp,
         is_cookieless_mode: false,
         historical_migration: false,
-        options: None,
     };
 
     // Create metadata

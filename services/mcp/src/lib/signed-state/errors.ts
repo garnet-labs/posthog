@@ -27,3 +27,6 @@ export class SignedStateUserMismatch extends SignedStateError {
 export class SignedStatePurposeMismatch extends SignedStateError {
     readonly kind = 'purpose_mismatch'
 }
+export class SignedStateAlreadyConsumed extends SignedStateError {
+    readonly kind = 'already_consumed'
+}

@@ -278,7 +278,7 @@ def _discover_candidate_keys(
             "limit": ast.Constant(value=MAX_CANDIDATE_KEYS),
         },
     )
-    response = execute_hogql_query(query_type="MetricQuery", query=query, team=team, workload=Workload.METRICS)
+    response = execute_hogql_query(query_type="MetricQuery", query=query, team=team, workload=Workload.LOGS)
     keys: list[str] = []
     for row in response.results:
         key = "service_name" if row[0] == "service.name" else row[0]

@@ -98,17 +98,6 @@ def _harness_labels_agg(custom_rules: Sequence[CustomHarnessRule]) -> str:
 _RAW_ERROR_TYPE = "substring(coalesce(nullIf(toString(properties.$mcp_error_type), ''), 'unknown'), 1, 200)"
 _RAW_ERROR_STATUS = "substring(coalesce(toString(properties.$mcp_error_status), ''), 1, 20)"
 _COMPOSED_FAILURE_LABEL = "concat(error_type, if(empty(error_status), '', concat(' (HTTP ', error_status, ')')))"
-# Mirrors the capture-side MAX_ERROR_MESSAGE_LENGTH (services/mcp); event-supplied, so
-# re-capped here in case a non-PostHog server emits an unbounded value.
-_ERROR_MESSAGE = "substringUTF8(coalesce(toString(properties.$mcp_error_message), ''), 1, 2048)"
-# Ids and numbers vary per call (`questions.0.link`, `/projects/97205/`), so masking them lets
-# one cause collect all its calls instead of scattering across rows.
-_FAILURE_CAUSE = (
-    "substringUTF8(replaceRegexpAll(replaceRegexpAll("
-    f"{_ERROR_MESSAGE}, "
-    "'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|\\\\b(?:[0-9]+[a-fA-F]|[a-fA-F]+[0-9])[0-9a-fA-F]*\\\\b', '<id>'), "
-    "'[0-9]+', 'N'), 1, 300)"
-)
 
 
 # Takes the whole query, not a tool name, so a table added here cannot accept the shared filters
@@ -209,7 +198,6 @@ class MCPToolTopUsersQueryRunner(HarnessLabelQueryRunner[MCPToolTopUsersQueryRes
             response = execute_hogql_query(
                 query=self.to_query(),
                 team=self.team,
-                user=self.user,
                 query_type="mcp_tool_top_users_query",
                 timings=self.timings,
                 modifiers=self.modifiers,
@@ -270,27 +258,21 @@ class MCPToolFailuresQueryRunner(HarnessLabelQueryRunner[MCPToolFailuresQueryRes
                 error_status,
                 count() AS occurrences,
                 max(timestamp) AS last_seen,
-                {_HARNESS_LABELS_AGG} AS harnesses,
-                cause,
-                argMax(error_message, timestamp) AS sample_message
+                {_HARNESS_LABELS_AGG} AS harnesses
             FROM (
                 SELECT
                     {_RAW_ERROR_TYPE} AS error_type,
                     {_RAW_ERROR_STATUS} AS error_status,
-                    {_FAILURE_CAUSE} AS cause,
-                    {_ERROR_MESSAGE} AS error_message,
                     timestamp,
                     {token} AS h
                 FROM events
                 WHERE {where}
             )
-            GROUP BY error_type, error_status, cause
+            GROUP BY error_type, error_status
             ORDER BY occurrences DESC
-            LIMIT 50
+            LIMIT 20
             """,
             placeholders={
-                "_FAILURE_CAUSE": parse_expr(_FAILURE_CAUSE),
-                "_ERROR_MESSAGE": parse_expr(_ERROR_MESSAGE),
                 "_HARNESS_LABELS_AGG": parse_expr(_harness_labels_agg(custom_harness_rules(self.team))),
                 "_COMPOSED_FAILURE_LABEL": parse_expr(_COMPOSED_FAILURE_LABEL),
                 "_RAW_ERROR_TYPE": parse_expr(_RAW_ERROR_TYPE),
@@ -310,7 +292,6 @@ class MCPToolFailuresQueryRunner(HarnessLabelQueryRunner[MCPToolFailuresQueryRes
             response = execute_hogql_query(
                 query=self.to_query(),
                 team=self.team,
-                user=self.user,
                 query_type="mcp_tool_failures_query",
                 timings=self.timings,
                 modifiers=self.modifiers,
@@ -325,8 +306,6 @@ class MCPToolFailuresQueryRunner(HarnessLabelQueryRunner[MCPToolFailuresQueryRes
                 occurrences=int(row[3] or 0),
                 last_seen=str(row[4] or ""),
                 harnesses=[str(h) for h in (row[5] or [])],
-                cause=str(row[6] or ""),
-                sample_message=str(row[7] or ""),
             )
             for row in (response.results or [])
         ]
@@ -336,6 +315,11 @@ class MCPToolFailuresQueryRunner(HarnessLabelQueryRunner[MCPToolFailuresQueryRes
             hogql=response.hogql,
             modifiers=self.modifiers,
         )
+
+
+# Mirrors the capture-side MAX_ERROR_MESSAGE_LENGTH (services/mcp); event-supplied, so
+# re-capped here in case a non-PostHog server emits an unbounded value.
+_ERROR_MESSAGE = "substring(coalesce(toString(properties.$mcp_error_message), ''), 1, 2048)"
 
 
 class MCPToolFailureOccurrencesQueryRunner(HarnessLabelQueryRunner[MCPToolFailureOccurrencesQueryResponse]):
@@ -375,16 +359,6 @@ class MCPToolFailureOccurrencesQueryRunner(HarnessLabelQueryRunner[MCPToolFailur
             )
         else:
             extra.append(parse_expr("empty({raw_status})", placeholders={"raw_status": parse_expr(_RAW_ERROR_STATUS)}))
-        if self.query.cause is not None:
-            extra.append(
-                parse_expr(
-                    "{raw_cause} = {cause}",
-                    placeholders={
-                        "raw_cause": parse_expr(_FAILURE_CAUSE),
-                        "cause": ast.Constant(value=self.query.cause),
-                    },
-                )
-            )
         return _tool_call_where(self.query, self.query_date_range, self.team, extra=extra)
 
     def to_query(self) -> ast.SelectQuery | ast.SelectSetQuery:
@@ -523,7 +497,6 @@ class MCPToolStatsQueryRunner(AnalyticsQueryRunner[MCPToolStatsQueryResponse]):
             response = execute_hogql_query(
                 query=self.to_query(),
                 team=self.team,
-                user=self.user,
                 query_type="mcp_tool_stats_query",
                 timings=self.timings,
                 modifiers=self.modifiers,
@@ -612,7 +585,6 @@ class MCPToolDailyStatsQueryRunner(AnalyticsQueryRunner[MCPToolDailyStatsQueryRe
             response = execute_hogql_query(
                 query=self.to_query(),
                 team=self.team,
-                user=self.user,
                 query_type="mcp_tool_daily_stats_query",
                 timings=self.timings,
                 modifiers=self.modifiers,
@@ -683,7 +655,6 @@ class MCPToolDescriptionsQueryRunner(AnalyticsQueryRunner[MCPToolDescriptionsQue
             response = execute_hogql_query(
                 query=self.to_query(),
                 team=self.team,
-                user=self.user,
                 query_type="mcp_tool_descriptions_query",
                 timings=self.timings,
                 modifiers=self.modifiers,
@@ -759,7 +730,6 @@ class MCPToolSampleIntentsQueryRunner(HarnessLabelQueryRunner[MCPToolSampleInten
             response = execute_hogql_query(
                 query=self.to_query(),
                 team=self.team,
-                user=self.user,
                 query_type="mcp_tool_sample_intents_query",
                 timings=self.timings,
                 modifiers=self.modifiers,
@@ -854,7 +824,6 @@ class MCPToolNeighborsQueryRunner(AnalyticsQueryRunner[MCPToolNeighborsQueryResp
             response = execute_hogql_query(
                 query=self.to_query(),
                 team=self.team,
-                user=self.user,
                 query_type="mcp_tool_neighbors_query",
                 timings=self.timings,
                 modifiers=self.modifiers,

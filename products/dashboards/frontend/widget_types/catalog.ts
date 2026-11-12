@@ -20,7 +20,6 @@ import { ActivityTab } from '~/types'
 
 import {
     activityEventsWidgetConfigSchema,
-    canvasAppWidgetConfigSchema,
     conversationsRecentTicketsWidgetConfigSchema,
     errorTrackingWidgetConfigSchema,
     experimentResultsWidgetConfigSchema,
@@ -371,21 +370,6 @@ export const DASHBOARD_WIDGET_CATALOG = {
         sharedPlaceholder: {
             title: 'Metrics table',
             message: 'Log in to PostHog to see the metrics in this table.',
-        },
-    },
-    canvas_app: {
-        groupId: 'canvas',
-        featureFlag: FEATURE_FLAGS.SMALL_SOFTWARE_APPS,
-        label: 'Canvas app',
-        description: "A published canvas app, rendered with each viewer's own permissions.",
-        headerTitle: 'Canvas app',
-        // An app owns its own controls; there is no configured date range to surface.
-        headerMeta: { showDateRange: false },
-        defaultConfig: canvasAppWidgetConfigSchema.parse({}),
-        defaultLayout: { w: 6, h: 6, minW: 3, minH: 3 },
-        sharedPlaceholder: {
-            title: 'Canvas app',
-            message: 'Log in to PostHog with access to this canvas to use it from this dashboard.',
         },
     },
 } as const satisfies Record<string, DashboardWidgetCatalogEntry>

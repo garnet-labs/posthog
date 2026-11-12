@@ -569,8 +569,6 @@ class DeletionRequestWorkflowPanel(Panel):
         return operations
 
     def _submit(self, obj: DataDeletionRequest) -> Operation:
-        # Staff usually explain the request in its notes, so the reason starts from them.
-        form_initial: dict[str, object] | None = {"reason": obj.notes} if obj.notes.strip() else None
         if obj.request_type == RequestType.EVENT_REMOVAL:
             return Operation(
                 key="submit",
@@ -579,7 +577,6 @@ class DeletionRequestWorkflowPanel(Panel):
                 # Unless staff tick the opt-out, the auto-approval job can approve it with no other human step.
                 danger=True,
                 form_class=AutoApprovableSubmitForm,
-                form_initial=form_initial,
                 undo_hint=(
                     "Until the deletion job picks it up, move the request back to draft. Data that a run already "
                     "deleted cannot be restored."
@@ -596,7 +593,6 @@ class DeletionRequestWorkflowPanel(Panel):
             label="Submit for approval",
             handler=submit,
             form_class=ReasonForm,
-            form_initial=form_initial,
             description=(
                 "Moves the request to pending. Only event removals are approved automatically, so this one waits "
                 "for the ClickHouse Team."

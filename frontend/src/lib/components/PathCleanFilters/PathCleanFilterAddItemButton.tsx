@@ -1,9 +1,7 @@
 import { useState } from 'react'
 
 import { IconPlus } from '@posthog/icons'
-import { Button } from '@posthog/quill'
 
-import { useQuillSurface } from 'lib/components/QuillSurface/quillSurfaceContext'
 import { TeamMembershipLevel } from 'lib/constants'
 import { LemonButton } from 'lib/lemon-ui/LemonButton'
 
@@ -22,7 +20,6 @@ export function PathCleanFilterAddItemButton({ onAdd }: PathCleanFilterAddItemBu
         scope: RestrictionScope.Project,
         minimumAccessLevel: TeamMembershipLevel.Admin,
     })
-    const quillSurface = useQuillSurface()
 
     return (
         <>
@@ -35,23 +32,16 @@ export function PathCleanFilterAddItemButton({ onAdd }: PathCleanFilterAddItemBu
                 }}
             />
 
-            {quillSurface ? (
-                <Button variant="outline" onClick={() => setVisible(true)} disabledReason={restrictedReason}>
-                    <IconPlus />
-                    Add rule
-                </Button>
-            ) : (
-                <LemonButton
-                    onClick={() => setVisible(true)}
-                    type="secondary"
-                    size="small"
-                    icon={<IconPlus />}
-                    sideIcon={null}
-                    disabledReason={restrictedReason}
-                >
-                    Add rule
-                </LemonButton>
-            )}
+            <LemonButton
+                onClick={() => setVisible(true)}
+                type="secondary"
+                size="small"
+                icon={<IconPlus />}
+                sideIcon={null}
+                disabledReason={restrictedReason}
+            >
+                Add rule
+            </LemonButton>
         </>
     )
 }

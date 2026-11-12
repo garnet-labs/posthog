@@ -1,6 +1,5 @@
 import type { ReactElement } from 'react'
-import { Text, View } from 'react-native'
-import { openPostHogUrl } from '@/lib/sessionHandoff'
+import { Linking, Text, View } from 'react-native'
 
 import { safeHttpsUrl } from '@/lib/urls'
 import { ExternalLinkIcon } from '@/ui/icons/ExternalLinkIcon'
@@ -32,7 +31,7 @@ export function OpensOnWeb({ shortId, reason }: { shortId: string | null; reason
                         return
                     }
                     trackViewOpenedInWeb({ viewType: 'insight', reason: 'web_only' })
-                    openPostHogUrl(safe).catch(() => undefined)
+                    Linking.openURL(safe).catch(() => undefined)
                 }}
                 disabled={!safe}
                 style={styles.webButton}

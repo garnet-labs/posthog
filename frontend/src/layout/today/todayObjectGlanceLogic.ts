@@ -31,11 +31,9 @@ export interface todayObjectGlanceLogicActions {
     }
     showGlance: (
         type: string | undefined,
-        ref: string,
-        surface: string
+        ref: string
     ) => {
         ref: string
-        surface: string
         type: string | undefined
     }
 }
@@ -62,7 +60,7 @@ export const todayObjectGlanceLogic = kea<todayObjectGlanceLogicType>([
         values: [teamLogic, ['baseCurrency', 'currentProjectId'], groupsModel, ['aggregationLabel']],
     })),
     actions({
-        showGlance: (type: string | undefined, ref: string, surface: string) => ({ type, ref, surface }),
+        showGlance: (type: string | undefined, ref: string) => ({ type, ref }),
         setGlance: (key: string, glance: TodayObjectGlance | null) => ({ key, glance }),
     }),
     reducers({
@@ -80,9 +78,8 @@ export const todayObjectGlanceLogic = kea<todayObjectGlanceLogicType>([
         ],
     }),
     listeners(({ actions, values, cache }) => ({
-        showGlance: async ({ type, ref, surface }) => {
-            // pinned: analytics event name and properties. Renaming them breaks dashboards.
-            posthog.capture('today object preview shown', { object_type: baseObjectType(type), surface })
+        showGlance: async ({ type, ref }) => {
+            posthog.capture('today object preview shown', { object_type: baseObjectType(type) })
             const key = glanceKey(type, ref)
             cache.pending ??= new Set<string>()
             cache.failed ??= new Set<string>()

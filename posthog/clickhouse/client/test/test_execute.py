@@ -51,7 +51,6 @@ def llm_analytics_slots():
         (Workload.DEFAULT, AccessMethod.PERSONAL_API_KEY, Workload.OFFLINE, ClickHouseUser.API),
         (Workload.ONLINE, AccessMethod.PROJECT_SECRET_API_KEY, Workload.OFFLINE, ClickHouseUser.API),
         (Workload.LOGS, AccessMethod.PERSONAL_API_KEY, Workload.LOGS, ClickHouseUser.API),
-        (Workload.METRICS, None, Workload.METRICS, ClickHouseUser.APP),
     ],
 )
 def test_process_query_task_workload_routing(
@@ -59,7 +58,7 @@ def test_process_query_task_workload_routing(
 ):
     # The async query worker forces app traffic onto the online cluster while API-key traffic
     # keeps the offline routing it gets when run synchronously. Neither may override
-    # cluster-pinned workloads: logs and metrics tables only exist on their own clusters.
+    # cluster-pinned workloads: LOGS-workload tables only exist on the logs cluster.
     with tags_context(kind="celery", id="posthog.tasks.tasks.process_query_task", access_method=access_method):
         sync_execute("SELECT 1", workload=workload, flush=False)
 
@@ -87,12 +86,11 @@ def test_celery_cache_warming_workload_routing(client_from_pool, access_method, 
     [
         (Workload.DEFAULT, Workload.ENDPOINTS),
         (Workload.LOGS, Workload.LOGS),
-        (Workload.METRICS, Workload.METRICS),
     ],
 )
 def test_endpoints_tag_workload_routing(client_from_pool, workload, expected_workload):
     # The ENDPOINTS tag reroutes queries to the endpoints cluster, but must not override
-    # a logs or metrics cluster pin either.
+    # the LOGS cluster pin either.
     with tags_context(kind="request", id="api/endpoint", workload=Workload.ENDPOINTS):
         sync_execute("SELECT 1", workload=workload, flush=False)
 

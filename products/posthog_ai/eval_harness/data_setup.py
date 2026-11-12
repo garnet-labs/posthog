@@ -19,8 +19,7 @@ from posthog.models.group.sql import COPY_GROUPS_BETWEEN_TEAMS
 from posthog.models.person.sql import COPY_PERSON_DISTINCT_ID2S_BETWEEN_TEAMS, COPY_PERSONS_BETWEEN_TEAMS
 from posthog.persons_db import persons_db_connection
 
-from products.dashboards.backend.facade.contracts import DashboardRef
-from products.dashboards.backend.facade.testing import create_dashboard, create_insight_tile
+from products.dashboards.backend.models import Dashboard, DashboardTile
 from products.demo.backend.facade.api import HedgeboxMatrix, MatrixManager, infer_taxonomy_for_team
 from products.posthog_ai.backend.models.assistant import CoreMemory
 from products.product_analytics.backend.facade.models import Insight
@@ -310,7 +309,7 @@ class DashboardWithInsightsFixture:
 
     def __init__(
         self,
-        dashboard: DashboardRef,
+        dashboard: Dashboard,
         insight_dau: Insight,
         insight_funnel: Insight,
         insight_retention: Insight,
@@ -423,30 +422,27 @@ def create_dashboard_with_insights(
     )
 
     # Create the dashboard
-    dashboard = DashboardRef(
-        id=create_dashboard(
-            team_id=team.id,
-            name="Growth Dashboard",
-            description="Dashboard for tracking growth metrics",
-            created_by_id=user.id,
-        ),
+    dashboard = Dashboard.objects.create(
+        team=team,
         name="Growth Dashboard",
+        description="Dashboard for tracking growth metrics",
+        created_by=user,
     )
 
     # Add tiles to dashboard
-    create_insight_tile(
-        dashboard_id=dashboard.id,
-        insight_id=insight_dau.id,
+    DashboardTile.objects.create(
+        dashboard=dashboard,
+        insight=insight_dau,
         layouts={"lg": {"x": 0, "y": 0, "w": 6, "h": 4}},
     )
-    create_insight_tile(
-        dashboard_id=dashboard.id,
-        insight_id=insight_funnel.id,
+    DashboardTile.objects.create(
+        dashboard=dashboard,
+        insight=insight_funnel,
         layouts={"lg": {"x": 6, "y": 0, "w": 6, "h": 4}},
     )
-    create_insight_tile(
-        dashboard_id=dashboard.id,
-        insight_id=insight_retention.id,
+    DashboardTile.objects.create(
+        dashboard=dashboard,
+        insight=insight_retention,
         layouts={"lg": {"x": 0, "y": 4, "w": 6, "h": 4}},
     )
 

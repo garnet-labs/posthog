@@ -3,7 +3,6 @@ import { LemonTable, LemonTableColumns } from '@posthog/lemon-ui'
 import {
     ExperimentMetric,
     isExperimentMeanMetric,
-    isExperimentQuantileMetric,
     isExperimentRatioMetric,
     NewExperimentQueryResponse,
 } from '~/queries/schema/schema-general'
@@ -13,7 +12,6 @@ import {
     formatChanceToWinForGoal,
     formatDeltaPercent,
     formatMetricValue,
-    formatQuantileLevel,
     isBayesianResult,
 } from '~/scenes/experiments/MetricsView/shared/utils'
 
@@ -35,13 +33,7 @@ export function NotebookCompactTable({ result, metric }: NotebookCompactTablePro
         },
         {
             key: 'value',
-            title: isExperimentMeanMetric(metric)
-                ? 'Mean'
-                : isExperimentRatioMetric(metric)
-                  ? 'Ratio'
-                  : isExperimentQuantileMetric(metric)
-                    ? formatQuantileLevel(metric.quantile)
-                    : 'Conversion',
+            title: isExperimentMeanMetric(metric) ? 'Mean' : isExperimentRatioMetric(metric) ? 'Ratio' : 'Conversion',
             render: (_, item) => {
                 const value = formatMetricValue(item, metric)
                 const delta = item.isBaseline ? null : formatDeltaPercent(item)

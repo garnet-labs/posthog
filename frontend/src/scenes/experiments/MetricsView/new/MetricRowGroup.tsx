@@ -45,7 +45,6 @@ import {
     formatPValue,
     getDelta,
     getMetricSubtitleValues,
-    metricSupportsTimeseries,
     getNiceTickValues,
     isBayesianResult,
     isDeltaPositive,
@@ -981,7 +980,7 @@ export function MetricRowGroup({
                             }
                         }}
                         onClick={
-                            tooltipState.variantResult && metricSupportsTimeseries(metric)
+                            tooltipState.variantResult
                                 ? () => handleTimeseriesClick(tooltipState.variantResult!)
                                 : undefined
                         }
@@ -1239,9 +1238,7 @@ export function MetricRowGroup({
                             isAlternatingRow={isAlternatingRow}
                             isLastRow={isLastRow}
                             isSecondary={isSecondary}
-                            onTimeseriesClick={
-                                metricSupportsTimeseries(metric) ? () => handleTimeseriesClick(variant) : undefined
-                            }
+                            onTimeseriesClick={() => handleTimeseriesClick(variant)}
                             highlightBackgroundColor={rowBackgroundColor}
                         />
                     </tr>

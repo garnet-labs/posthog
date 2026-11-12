@@ -50,8 +50,6 @@ export interface TodayObjectPreview {
     folder: string[]
     href: string | null
     lastViewedAt: string | null
-    /** Which part of the UI hosts the trigger, sent with the preview-shown event. */
-    surface: string
 }
 
 export interface TodayProductPreview extends SidebarProductMeta {
@@ -114,7 +112,7 @@ export function sessionPreview(
     }
 }
 
-export function objectPreview(entry: FileSystemEntry, surface: string): TodayObjectPreview {
+export function objectPreview(entry: FileSystemEntry): TodayObjectPreview {
     return {
         kind: 'object',
         name: libraryObjectName(entry),
@@ -124,7 +122,6 @@ export function objectPreview(entry: FileSystemEntry, surface: string): TodayObj
         folder: splitPath(entry.path).slice(0, -1),
         href: libraryObjectHref(entry),
         lastViewedAt: entry.last_viewed_at ?? null,
-        surface,
     }
 }
 

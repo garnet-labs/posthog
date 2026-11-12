@@ -7,9 +7,8 @@ import { FilterSearchSubMenu } from './filter-menu'
 describe('FilterSearchSubMenu', () => {
     afterEach(cleanup)
 
-    it('keeps the selection and reports the close when Escape dismisses the submenu', async () => {
+    it('keeps the selection when Escape dismisses the submenu', async () => {
         const onChange = jest.fn()
-        const onClose = jest.fn()
         render(
             <DropdownMenu defaultOpen>
                 <DropdownMenuTrigger>Filters</DropdownMenuTrigger>
@@ -24,7 +23,6 @@ describe('FilterSearchSubMenu', () => {
                         ]}
                         selected={['growth']}
                         onChange={onChange}
-                        onClose={onClose}
                         searchPlaceholder="Search tags"
                         emptyText="No tag matches"
                     />
@@ -37,12 +35,9 @@ describe('FilterSearchSubMenu', () => {
         })
         const input = await screen.findByLabelText('Search tags')
 
-        await act(async () => {
-            fireEvent.keyDown(input, { key: 'Escape' })
-        })
+        fireEvent.keyDown(input, { key: 'Escape' })
 
         expect(onChange).not.toHaveBeenCalled()
-        await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1))
     })
 
     it('calls onOpen when the submenu opens', async () => {

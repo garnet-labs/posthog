@@ -1,9 +1,10 @@
-import { deriveHeadline } from "@posthog/core/inbox/reportPresentation";
 import {
-  formatRelativeTimeLong,
-  type ReportRunVariant,
-  resolveReportRunVariant,
-} from "@posthog/shared";
+  isFinishedRunReport,
+  isLiveRunReport,
+  isQueuedRunReport,
+} from "@posthog/core/inbox/reportMembership";
+import { deriveHeadline } from "@posthog/core/inbox/reportPresentation";
+import { formatRelativeTimeLong } from "@posthog/shared";
 import type { SignalReport } from "@posthog/shared/types";
 import {
   InboxMetaRow,
@@ -15,7 +16,19 @@ import { InboxBadge } from "@posthog/ui/features/inbox/components/utils/InboxBad
 import { hasKnownSourceProduct } from "@posthog/ui/features/inbox/components/utils/source-product-icons";
 import { useNavigate } from "@tanstack/react-router";
 
-export const RUN_VARIANT_TIMESTAMP_LABEL: Record<ReportRunVariant, string> = {
+export type RunVariant = "queued" | "live" | "completed" | "failed";
+
+/** Single source of truth for the four-bucket lifecycle of a run-shaped report. */
+export function resolveRunVariant(report: SignalReport): RunVariant {
+  if (isQueuedRunReport(report)) return "queued";
+  if (isLiveRunReport(report)) return "live";
+  if (isFinishedRunReport(report)) {
+    return report.status === "failed" ? "failed" : "completed";
+  }
+  return "live";
+}
+
+export const RUN_VARIANT_TIMESTAMP_LABEL: Record<RunVariant, string> = {
   queued: "Queued",
   live: "Started",
   completed: "Finished",
@@ -30,7 +43,7 @@ export interface VariantMeta {
   ariaLabel: string;
 }
 
-export const VARIANT_META: Record<ReportRunVariant, VariantMeta> = {
+export const VARIANT_META: Record<RunVariant, VariantMeta> = {
   queued: {
     label: "Queued",
     badgeTone: "default",
@@ -61,10 +74,7 @@ export const VARIANT_META: Record<ReportRunVariant, VariantMeta> = {
   },
 };
 
-function pickTimestamp(
-  report: SignalReport,
-  variant: ReportRunVariant,
-): string {
+function pickTimestamp(report: SignalReport, variant: RunVariant): string {
   if (variant === "live") return report.created_at;
   return report.updated_at ?? report.created_at;
 }
@@ -91,7 +101,7 @@ export function AgentRunCard({ report }: AgentRunCardProps) {
   const navigate = useNavigate();
   const hasSource = hasKnownSourceProduct(report.source_products);
   const runId = `…-${report.id.split("-").pop() ?? report.id}`;
-  const variant = resolveReportRunVariant(report.status);
+  const variant = resolveRunVariant(report);
   const meta = VARIANT_META[variant];
   const timestampSource = pickTimestamp(report, variant);
   const headline = deriveHeadline(report.summary);

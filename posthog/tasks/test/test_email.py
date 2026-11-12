@@ -68,12 +68,7 @@ from products.batch_exports.backend.facade.enums import BatchExportDestinationTy
 from products.cdp.backend.models.hog_functions.hog_function import HogFunction
 from products.cdp.backend.models.plugin import Plugin, PluginConfig
 from products.data_modeling.backend.facade.api import mark_node_suspended, set_declared_target, sync_saved_query_to_dag
-from products.data_modeling.backend.facade.models import (
-    DataModelingJob,
-    DataModelingJobEngine,
-    DataWarehouseSavedQuery,
-    Node,
-)
+from products.data_modeling.backend.facade.models import DataModelingJob, DataModelingJobEngine, DataWarehouseSavedQuery
 from products.warehouse_sources.backend.facade.models import DataWarehouseTable
 
 
@@ -127,12 +122,6 @@ class TestEmail(APIBaseTest, ClickhouseTestMixin):
             ingested_event=True,
         )
         create_org_team_and_user("2022-01-03 00:00:00", "too_early_user@posthog.com")
-
-    def _schedule(self, saved_query: DataWarehouseSavedQuery, target: dt.timedelta) -> Node:
-        node = sync_saved_query_to_dag(saved_query)
-        assert node is not None
-        set_declared_target(node, target)
-        return node
 
     def test_send_invite(self, MockEmailMessage: MagicMock) -> None:
         mocked_email_messages = mock_email_messages(MockEmailMessage)
@@ -2522,13 +2511,14 @@ class TestEmail(APIBaseTest, ClickhouseTestMixin):
         [
             (
                 "scheduled_failed_view_is_included",
-                {},
+                {"sync_frequency_interval": dt.timedelta(hours=1)},
                 [("FAILED", dt.timedelta(hours=1), "Some error")],
                 True,
             ),
             (
                 "unscheduled_failing_view_is_included",
                 {
+                    "sync_frequency_interval": None,
                     "latest_error": "Query exceeded timeout - we limit queries to a 10-minute timeout.",
                 },
                 [("FAILED", dt.timedelta(hours=1), "Query exceeded timeout")],
@@ -2537,6 +2527,7 @@ class TestEmail(APIBaseTest, ClickhouseTestMixin):
             (
                 "unscheduled_view_with_old_failure_is_skipped",
                 {
+                    "sync_frequency_interval": None,
                     "latest_error": "Query exceeded timeout - we limit queries to a 10-minute timeout.",
                 },
                 [("FAILED", dt.timedelta(days=3), "Query exceeded timeout")],
@@ -2554,6 +2545,7 @@ class TestEmail(APIBaseTest, ClickhouseTestMixin):
             (
                 "v2_view_with_stale_error_and_completed_run_is_skipped",
                 {
+                    "sync_frequency_interval": None,
                     "latest_error": "Query exceeded timeout - we limit queries to a 10-minute timeout.",
                 },
                 [
@@ -2564,20 +2556,20 @@ class TestEmail(APIBaseTest, ClickhouseTestMixin):
             ),
             (
                 "v2_failing_view_null_latest_error",
-                {},
+                {"sync_frequency_interval": None},
                 [("FAILED", dt.timedelta(hours=1), "Some error")],
                 True,
             ),
             (
                 "never_deleted_view_has_null_flag",
-                {"deleted": None},
+                {"deleted": None, "sync_frequency_interval": dt.timedelta(hours=1)},
                 [("FAILED", dt.timedelta(hours=1), "Some error")],
                 True,
             ),
             (
                 # the broken parent is the one reported; mailing every descendant would bury it
                 "view_blocked_by_a_broken_parent",
-                {},
+                {"sync_frequency_interval": None},
                 [
                     ("FAILED", dt.timedelta(hours=3), "Some error"),
                     ("SKIPPED", dt.timedelta(hours=1), "Skipped because upstream view orders_daily is failing."),
@@ -2635,6 +2627,7 @@ class TestEmail(APIBaseTest, ClickhouseTestMixin):
             team=self.team,
             name="healthy_view_with_failing_shadow",
             query={"query": "SELECT 1"},
+            sync_frequency_interval=dt.timedelta(hours=1),
         )
         DataModelingJob.objects.create(
             team=self.team,
@@ -2668,6 +2661,7 @@ class TestEmail(APIBaseTest, ClickhouseTestMixin):
             team=self.team,
             name="failing_view",
             query={"query": "SELECT 1"},
+            sync_frequency_interval=dt.timedelta(hours=1),
         )
         DataModelingJob.objects.create(
             team=self.team,
@@ -2700,6 +2694,7 @@ class TestEmail(APIBaseTest, ClickhouseTestMixin):
             team=self.team,
             name="test_materialized_view",
             query={"query": "SELECT 1"},
+            sync_frequency_interval=dt.timedelta(hours=1),
         )
         DataModelingJob.objects.create(
             team=self.team,
@@ -2739,9 +2734,9 @@ class TestEmail(APIBaseTest, ClickhouseTestMixin):
                 team=self.team,
                 name=name,
                 query={"query": "SELECT 1"},
+                sync_frequency_interval=dt.timedelta(hours=1),
                 is_materialized=True,
             )
-            self._schedule(sq, dt.timedelta(hours=1))
             DataModelingJob.objects.create(
                 team=self.team,
                 saved_query=sq,
@@ -2759,6 +2754,7 @@ class TestEmail(APIBaseTest, ClickhouseTestMixin):
                 team=self.team,
                 name=name,
                 query={"query": "SELECT 1"},
+                sync_frequency_interval=None,
                 latest_error=error,
                 is_materialized=False,
             )
@@ -2770,23 +2766,26 @@ class TestEmail(APIBaseTest, ClickhouseTestMixin):
                 last_run_at=timezone.now() - dt.timedelta(hours=1),
             )
 
-        # Pausing keeps `is_materialized` and the table but clears the node target, so it can't retry.
-        # The legacy column can still hold a cadence, and the digest must not read it as scheduled.
+        # Pausing keeps `is_materialized` and the table but clears the cadence, so it can't retry.
         paused = DataWarehouseSavedQuery.objects.create(
             team=self.team,
             name="paused_orders_rollup",
             query={"query": "SELECT 1"},
-            sync_frequency_interval=dt.timedelta(hours=1),
+            sync_frequency_interval=None,
             is_materialized=True,
             table=DataWarehouseTable.objects.create(team=self.team, name="paused_orders_rollup", format="Delta"),
         )
+        # Tiered views keep their cadence on the node only, with the column empty.
         tiered = DataWarehouseSavedQuery.objects.create(
             team=self.team,
             name="tiered_daily_active_users",
             query={"query": "SELECT 1"},
+            sync_frequency_interval=None,
             is_materialized=True,
         )
-        tiered_node = self._schedule(tiered, dt.timedelta(hours=1))
+        tiered_node = sync_saved_query_to_dag(tiered)
+        assert tiered_node is not None
+        set_declared_target(tiered_node, dt.timedelta(hours=1))
         for sq in (paused, tiered):
             DataModelingJob.objects.create(
                 team=self.team,
@@ -2801,9 +2800,9 @@ class TestEmail(APIBaseTest, ClickhouseTestMixin):
             team=self.team,
             name="nightly_revenue_rollup",
             query={"query": "SELECT 1"},
+            sync_frequency_interval=dt.timedelta(days=1),
             is_materialized=True,
         )
-        self._schedule(ongoing, dt.timedelta(days=1))
         streak_started_at = timezone.now() - dt.timedelta(days=3)
         for status, run_at in [
             ("FAILED", timezone.now() - dt.timedelta(days=9)),
@@ -2867,6 +2866,7 @@ class TestEmail(APIBaseTest, ClickhouseTestMixin):
             team=self.team,
             name="long_error_view",
             query={"query": "SELECT 1"},
+            sync_frequency_interval=dt.timedelta(hours=1),
         )
         DataModelingJob.objects.create(
             team=self.team,
@@ -2958,6 +2958,7 @@ class TestEmail(APIBaseTest, ClickhouseTestMixin):
                 team=self.team,
                 name=name,
                 query={"query": "SELECT 1", "kind": "HogQLQuery"},
+                sync_frequency_interval=dt.timedelta(hours=1),
             )
             DataModelingJob.objects.create(
                 team=self.team,
@@ -3003,6 +3004,7 @@ class TestEmail(APIBaseTest, ClickhouseTestMixin):
             team=self.team,
             name="broken_view",
             query={"query": "SELECT 1", "kind": "HogQLQuery"},
+            sync_frequency_interval=dt.timedelta(hours=1),
             is_materialized=True,
         )
 
@@ -3056,6 +3058,7 @@ class TestEmail(APIBaseTest, ClickhouseTestMixin):
             team=self.team,
             name="suspended_view",
             query={"query": "SELECT 1", "kind": "HogQLQuery"},
+            sync_frequency_interval=dt.timedelta(hours=1),
             is_materialized=True,
         )
         DataModelingJob.objects.create(
@@ -3069,7 +3072,8 @@ class TestEmail(APIBaseTest, ClickhouseTestMixin):
             ),
             last_run_at=timezone.now() - dt.timedelta(days=4),
         )
-        node = self._schedule(suspended, dt.timedelta(hours=1))
+        node = sync_saved_query_to_dag(suspended)
+        assert node is not None
         mark_node_suspended(
             node,
             engine=marker_engine,
@@ -3085,9 +3089,9 @@ class TestEmail(APIBaseTest, ClickhouseTestMixin):
             team=self.team,
             name="retrying_view",
             query={"query": "SELECT 1", "kind": "HogQLQuery"},
+            sync_frequency_interval=dt.timedelta(hours=1),
             is_materialized=True,
         )
-        self._schedule(retrying, dt.timedelta(hours=1))
         DataModelingJob.objects.create(
             team=self.team,
             saved_query=retrying,
@@ -3124,6 +3128,7 @@ class TestEmail(APIBaseTest, ClickhouseTestMixin):
                 team=self.team,
                 name=f"failing_view_{index}",
                 query={"query": "SELECT 1"},
+                sync_frequency_interval=dt.timedelta(hours=1),
             )
             DataModelingJob.objects.create(
                 team=self.team,
@@ -3296,6 +3301,7 @@ class TestEmail(APIBaseTest, ClickhouseTestMixin):
             team=self.team,
             name="failing_view",
             query={"query": "SELECT 1"},
+            sync_frequency_interval=dt.timedelta(hours=1),
         )
         DataModelingJob.objects.create(
             team=self.team,

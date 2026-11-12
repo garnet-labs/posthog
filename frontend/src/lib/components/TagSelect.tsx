@@ -1,12 +1,16 @@
-import { cloneElement, MouseEvent, useId, useRef } from 'react'
+import { useActions, useValues } from 'kea'
+import { cloneElement, MouseEvent, useCallback, useEffect, useId, useRef } from 'react'
 
 import { LemonButton, LemonButtonProps, LemonDropdown, LemonDropdownProps } from '@posthog/lemon-ui'
 
+import api, { PaginatedResponse } from 'lib/api'
 import { useScrollObserver } from 'lib/hooks/useScrollObserver'
+import { teamLogic } from 'scenes/teamLogic'
 
-import { LoadTags, TagOption } from './tagSelectLogic'
+import { LoadTags, TagOption, tagSelectLogic } from './tagSelectLogic'
 import { TagSelectMenu } from './TagSelectMenu'
-import { useTagPages, useTagSource } from './useTagPages'
+
+const TAGS_PER_PAGE = 50
 
 export type TagSelectProps = {
     defaultLabel?: string
@@ -18,6 +22,35 @@ export type TagSelectProps = {
     options?: TagOption[]
     loadTags?: LoadTags
     borderless?: boolean
+}
+
+function useTagSource(options: TagOption[] | undefined, customLoadTags: LoadTags | undefined): LoadTags {
+    const { currentTeamId } = useValues(teamLogic)
+    return useCallback<LoadTags>(
+        async (query, offset) => {
+            if (options) {
+                const matches = options.filter((option) => option.tag.toLowerCase().includes(query.toLowerCase()))
+                return {
+                    results: matches.slice(offset, offset + TAGS_PER_PAGE),
+                    hasMore: offset + TAGS_PER_PAGE < matches.length,
+                }
+            }
+            if (customLoadTags) {
+                return customLoadTags(query, offset)
+            }
+            if (currentTeamId == null) {
+                return { results: [], hasMore: false }
+            }
+            const params = new URLSearchParams({ search: query, limit: String(TAGS_PER_PAGE), offset: String(offset) })
+            // nosemgrep: prefer-codegen-api -- Legacy raw API call with a hand-written URL and an unchecked response type. No generated function covers this endpoint yet. Find out why the generated client skips it (no schema, no product tag, or excluded from the spec) and fix that first.
+            const page: PaginatedResponse<string> = await api.get(`api/projects/${currentTeamId}/tags?${params}`)
+            return {
+                results: page.results.map((tag) => ({ tag })),
+                hasMore: page.next != null,
+            }
+        },
+        [options, customLoadTags, currentTeamId]
+    )
 }
 
 export function TagSelect({
@@ -34,19 +67,31 @@ export function TagSelect({
 }: TagSelectProps & Pick<LemonButtonProps, 'type' | 'size' | 'aria-label'>): JSX.Element {
     const fallbackKey = useId()
     const triggerRef = useRef<HTMLElement | null>(null)
-    const source = useTagSource(options, customLoadTags)
+    const logic = tagSelectLogic({ logicKey: logicKey ?? fallbackKey })
     const {
-        tags: tagResults,
-        search,
-        open: showPopover,
         awaitingFirstPage,
-        pageLoading: tagPageLoading,
-        error: tagPageError,
-        setOpen: setShowPopover,
-        setSearch,
-        loadMore,
-        retry,
-    } = useTagPages(logicKey ?? fallbackKey, source)
+        hasMoreTags,
+        requestEpoch,
+        search,
+        showPopover,
+        tagPageError,
+        tagPageLoading,
+        tagResults,
+    } = useValues(logic)
+    const { loadTagPage, setSearch, setShowPopover } = useActions(logic)
+    const source = useTagSource(options, customLoadTags)
+
+    useEffect(() => {
+        if (showPopover) {
+            loadTagPage({ search, offset: 0, loadTags: source, requestEpoch })
+        }
+    }, [showPopover, search, source, loadTagPage, requestEpoch])
+
+    const loadMore = (): void => {
+        if (hasMoreTags && !awaitingFirstPage && !tagPageLoading && !tagPageError) {
+            loadTagPage({ search, offset: tagResults.length, loadTags: source, requestEpoch })
+        }
+    }
     const scrollRef = useScrollObserver({ onScrollBottom: loadMore })
     const displayedTags: TagOption[] = search
         ? tagResults
@@ -96,7 +141,7 @@ export function TagSelect({
                     listDataAttr={listDataAttr}
                     scrollRef={scrollRef}
                     onToggle={handleToggle}
-                    onRetry={retry}
+                    onRetry={() => loadTagPage({ search, offset: tagResults.length, loadTags: source, requestEpoch })}
                     onClear={() => {
                         onChange([])
                         setShowPopover(false)

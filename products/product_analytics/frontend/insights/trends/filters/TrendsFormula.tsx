@@ -1,11 +1,9 @@
 import { useActions, useValues } from 'kea'
 import { useEffect, useState } from 'react'
 
-import { IconPlus, IconPlusSmall, IconTrash } from '@posthog/icons'
+import { IconPlusSmall, IconTrash } from '@posthog/icons'
 import { LemonButton, LemonInput } from '@posthog/lemon-ui'
-import { Button, Input } from '@posthog/quill'
 
-import { useQuillSurface } from 'lib/components/QuillSurface/quillSurfaceContext'
 import { objectsEqual } from 'lib/utils/objects'
 import { insightVizDataLogic } from 'scenes/insights/insightVizDataLogic'
 
@@ -20,7 +18,6 @@ export function TrendsFormula({ insightProps }: EditorFilterProps): JSX.Element 
     const { updateInsightFilter, removeFormulaNode } = useActions(insightVizDataLogic(insightProps))
 
     const [localValues, setLocalValues] = useState<TrendsFormulaNode[]>(formulaNodes)
-    const quillSurface = useQuillSurface()
 
     useEffect(() => {
         // Don't clear the formulas so that the values are still there after toggling the formula switch.
@@ -121,67 +118,7 @@ export function TrendsFormula({ insightProps }: EditorFilterProps): JSX.Element 
         removeFormulaNode(newValues)
     }
 
-    const removeFormulaLabel = localValues.length === 1 ? 'Remove formula and disable formula mode' : 'Remove formula'
-
-    const onEnter = (e: React.KeyboardEvent<HTMLInputElement>): void => {
-        if (e.key === 'Enter') {
-            handleFormulaEnter()
-        }
-    }
-
-    if (!hasFormula) {
-        return null
-    }
-
-    if (quillSurface) {
-        return (
-            <div className="mt-2 flex flex-col gap-2">
-                {localValues.map((value, index) => (
-                    <div key={index} className="flex flex-wrap items-center gap-2">
-                        <Input
-                            size="sm"
-                            className="min-w-32 flex-1"
-                            placeholder="Example: (A + B) / 100"
-                            aria-label="Formula"
-                            autoFocus={index === localValues.length - 1}
-                            value={value.formula}
-                            onChange={(e) => handleFormulaChange(index, e.target.value)}
-                            onBlur={handleFormulaBlur}
-                            onKeyDown={onEnter}
-                        />
-                        <div className="flex min-w-32 flex-1 items-center gap-2">
-                            <Input
-                                size="sm"
-                                className="min-w-0 flex-1"
-                                placeholder="Name (optional)"
-                                aria-label="Formula name"
-                                value={value.custom_name || ''}
-                                onChange={(e) => handleCustomNameChange(index, e.target.value)}
-                                onBlur={handleCustomNameBlur}
-                                onKeyDown={onEnter}
-                            />
-                            <Button
-                                size="icon"
-                                aria-label={removeFormulaLabel}
-                                tooltip={removeFormulaLabel}
-                                onClick={() => removeFormula(index)}
-                            >
-                                <IconTrash />
-                            </Button>
-                        </div>
-                    </div>
-                ))}
-                <div>
-                    <Button onClick={addFormula}>
-                        <IconPlus />
-                        Add formula
-                    </Button>
-                </div>
-            </div>
-        )
-    }
-
-    return (
+    return hasFormula ? (
         <div className="deprecated-space-y-2">
             {localValues.map((value, index) => (
                 <div key={index} className="space-y-1">
@@ -209,7 +146,9 @@ export function TrendsFormula({ insightProps }: EditorFilterProps): JSX.Element 
                             icon={<IconTrash />}
                             status="alt"
                             onClick={() => removeFormula(index)}
-                            title={removeFormulaLabel}
+                            title={
+                                localValues.length === 1 ? 'Remove formula and disable formula mode' : 'Remove formula'
+                            }
                         />
                     </div>
                 </div>
@@ -220,5 +159,5 @@ export function TrendsFormula({ insightProps }: EditorFilterProps): JSX.Element 
                 </LemonButton>
             </div>
         </div>
-    )
+    ) : null
 }

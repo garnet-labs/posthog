@@ -15,8 +15,6 @@ export interface ExperimentVariantStats {
     chance_to_win?: number | null
     credible_interval?: number[] | null
     step_counts?: number[] | null
-    // Percentile metrics only: the percentile value comes first, then the bounds the stats use
-    quantile_grid?: number[] | null
 }
 
 export interface ExperimentMetricResult {
@@ -33,7 +31,7 @@ export interface ExperimentMetricRun {
 
 export interface ExperimentMetricResultRow {
     index: number
-    metric?: { uuid?: string | null; name?: string | null; goal?: string | null } | null
+    metric?: { uuid?: string | null; name?: string | null } | null
     // null when the metric query failed
     data?: ExperimentMetricResult | null
 }
@@ -113,19 +111,14 @@ function ChanceToWinBar({ value }: { value: number }): ReactElement {
     )
 }
 
-// Matches the web app: a decrease goal means the variant wins when its value is lower
-function chanceToWinForGoal(chanceToWin: number, goal: string | null): number {
-    return goal === 'decrease' ? 1 - chanceToWin : chanceToWin
-}
-
-function significanceCell(row: VariantRow, goal: string | null): ReactElement | string {
+function significanceCell(row: VariantRow): ReactElement | string {
     if (row.isBaseline || !row.stats) {
         return '—'
     }
     const stats = row.stats
     const parts: ReactElement[] = []
     if (stats.method === 'bayesian' && stats.chance_to_win != null) {
-        parts.push(<ChanceToWinBar key="ctw" value={chanceToWinForGoal(stats.chance_to_win, goal)} />)
+        parts.push(<ChanceToWinBar key="ctw" value={stats.chance_to_win} />)
         if (stats.significant) {
             parts.push(
                 <Badge key="sig" variant="success">
@@ -160,20 +153,13 @@ function significanceCell(row: VariantRow, goal: string | null): ReactElement | 
 function buildRows(result: ExperimentMetricResult): VariantRow[] {
     const baseline = result.baseline
     const variants = result.variant_results ?? []
-    // A percentile metric's `sum` is a count of events at or below the percentile, not a total to average
-    const variantValue = (stats: ExperimentVariantStats): number | null =>
-        stats.quantile_grid != null
-            ? (stats.quantile_grid[0] ?? null)
-            : stats.number_of_samples > 0
-              ? stats.sum / stats.number_of_samples
-              : null
-    const baselineValue = baseline ? variantValue(baseline) : null
+    const baselineMean = baseline && baseline.number_of_samples > 0 ? baseline.sum / baseline.number_of_samples : null
 
     const toRow = (stats: ExperimentVariantStats, isBaseline: boolean): VariantRow => {
-        const perUser = variantValue(stats)
+        const perUser = stats.number_of_samples > 0 ? stats.sum / stats.number_of_samples : null
         const lift =
-            !isBaseline && perUser != null && baselineValue != null && baselineValue !== 0
-                ? perUser / baselineValue - 1
+            !isBaseline && perUser != null && baselineMean != null && baselineMean !== 0
+                ? perUser / baselineMean - 1
                 : null
         return {
             variant: stats.key,
@@ -201,8 +187,6 @@ interface MetricEntry {
     result: ExperimentMetricResult | null
     failed: boolean
     errorMessage: string | null
-    // Unknown for the recalculation tool, which returns no metric definitions
-    goal: string | null
 }
 
 interface MetricSection {
@@ -217,7 +201,6 @@ function entriesFromResultRows(rows: ExperimentMetricResultRow[]): MetricEntry[]
         result: row.data ?? null,
         failed: row.data == null,
         errorMessage: null,
-        goal: row.metric?.goal ?? null,
     }))
 }
 
@@ -235,7 +218,6 @@ function metricSections(data: ExperimentResultsData): MetricSection[] {
         result: run.result ?? null,
         failed: Boolean(run.error_message),
         errorMessage: run.error_message ?? null,
-        goal: null,
     }))
     return entries.length > 0 ? [{ label: null, entries }] : []
 }
@@ -245,8 +227,6 @@ function MetricCard({ entry }: { entry: MetricEntry }): ReactElement {
     const rows = result ? buildRows(result) : []
     const isFunnel =
         result?.baseline?.step_counts != null || (result?.variant_results ?? []).some((v) => v.step_counts != null)
-    const isQuantile =
-        result?.baseline?.quantile_grid != null || (result?.variant_results ?? []).some((v) => v.quantile_grid != null)
 
     const columns: DataTableColumn<VariantRow>[] = [
         {
@@ -262,7 +242,7 @@ function MetricCard({ entry }: { entry: MetricEntry }): ReactElement {
         { key: 'exposures', header: 'Exposures', align: 'right', render: (row) => formatCount(row.exposures) },
         {
             key: 'perUser',
-            header: isFunnel ? 'Conversion' : isQuantile ? 'Percentile' : 'Mean',
+            header: isFunnel ? 'Conversion' : 'Mean',
             align: 'right',
             render: (row) => (row.perUser != null ? formatPerUser(row.perUser, isFunnel) : '—'),
         },
@@ -276,7 +256,7 @@ function MetricCard({ entry }: { entry: MetricEntry }): ReactElement {
             key: 'stats',
             header: 'Significance',
             align: 'right',
-            render: (row) => significanceCell(row, entry.goal),
+            render: significanceCell,
         },
     ]
 

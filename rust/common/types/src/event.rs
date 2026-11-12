@@ -124,8 +124,6 @@ pub struct CapturedEventHeaders {
     pub dlq_step: Option<String>,
     pub dlq_timestamp: Option<String>,
     pub content_encoding: Option<String>,
-    /// Node labels its v1 `options` metrics with it, so re-producers must keep it.
-    pub legacy_property_splice: Option<bool>,
 }
 
 impl CapturedEventHeaders {
@@ -230,13 +228,6 @@ impl From<CapturedEventHeaders> for OwnedHeaders {
                 value: Some(encoding.as_str()),
             });
         }
-        if let Some(legacy_property_splice) = headers.legacy_property_splice {
-            let val = legacy_property_splice.to_string();
-            owned = owned.insert(Header {
-                key: "legacy_property_splice",
-                value: Some(val.as_str()),
-            });
-        }
 
         owned
     }
@@ -274,9 +265,6 @@ impl From<OwnedHeaders> for CapturedEventHeaders {
             dlq_step: headers_map.get("dlq_step").cloned(),
             dlq_timestamp: headers_map.get("dlq_timestamp").cloned(),
             content_encoding: headers_map.get("content-encoding").cloned(),
-            legacy_property_splice: headers_map
-                .get("legacy_property_splice")
-                .and_then(|v| v.parse::<bool>().ok()),
         }
     }
 }
@@ -305,9 +293,6 @@ pub struct CapturedEvent {
     pub is_cookieless_mode: bool,
     #[serde(skip_serializing_if = "<&bool>::not", default)]
     pub historical_migration: bool,
-    /// Only capture v1 sets it. Omitted when `None`, so other producers keep their payload unchanged.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub options: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
 // Used when we want to bypass token checks when emitting events from rust
@@ -341,7 +326,6 @@ impl CapturedEvent {
             dlq_step: None,
             dlq_timestamp: None,
             content_encoding: None,
-            legacy_property_splice: None,
         }
     }
 
@@ -671,7 +655,6 @@ mod tests {
                 .with_timezone(&Utc),
             is_cookieless_mode: false,
             historical_migration: true,
-            options: None,
         };
 
         let serialized = serde_json::to_string(&event).expect("Failed to serialize");
@@ -700,13 +683,11 @@ mod tests {
                 .with_timezone(&Utc),
             is_cookieless_mode: false,
             historical_migration: false,
-            options: None,
         };
 
         let serialized = serde_json::to_string(&event).expect("Failed to serialize");
         // Should not be in JSON when false (skip_serializing_if)
         assert!(!serialized.contains("historical_migration"));
-        assert!(!serialized.contains("\"options\""));
 
         // Deserialize and verify - should default to false
         let deserialized: CapturedEvent =
@@ -732,7 +713,6 @@ mod tests {
             serde_json::from_str(json).expect("Failed to deserialize");
         // Should default to false when not present
         assert!(!deserialized.historical_migration);
-        assert!(deserialized.options.is_none());
     }
 
     #[test]
@@ -752,7 +732,6 @@ mod tests {
                 .with_timezone(&Utc),
             is_cookieless_mode: false,
             historical_migration: false,
-            options: None,
         };
 
         let headers = event_with_session.to_headers();
@@ -773,7 +752,6 @@ mod tests {
                 .with_timezone(&Utc),
             is_cookieless_mode: false,
             historical_migration: false,
-            options: None,
         };
 
         let headers = event_without_session.to_headers();
@@ -797,7 +775,6 @@ mod tests {
                 .with_timezone(&Utc),
             is_cookieless_mode: false,
             historical_migration: false,
-            options: None,
         };
 
         let headers = event.to_headers();
@@ -823,7 +800,6 @@ mod tests {
                 .with_timezone(&Utc),
             is_cookieless_mode: false,
             historical_migration: false,
-            options: None,
         };
 
         let mut headers = event.to_headers();
@@ -856,7 +832,6 @@ mod tests {
                 .with_timezone(&Utc),
             is_cookieless_mode: false,
             historical_migration: false,
-            options: None,
         };
 
         let mut headers = event.to_headers();
@@ -885,42 +860,6 @@ mod tests {
     }
 
     #[test]
-    fn test_legacy_property_splice_round_trips_through_owned_headers() {
-        let event = CapturedEvent {
-            uuid: Uuid::nil(),
-            distinct_id: "test_user".to_string(),
-            session_id: None,
-            ip: "127.0.0.1".to_string(),
-            data: r#"{"event":"test_event"}"#.to_string(),
-            now: "2023-01-02T10:00:00Z".to_string(),
-            sent_at: None,
-            token: "test_token".to_string(),
-            event: "test_event".to_string(),
-            timestamp: DateTime::parse_from_rfc3339("2023-01-01T12:00:00Z")
-                .unwrap()
-                .with_timezone(&Utc),
-            is_cookieless_mode: false,
-            historical_migration: false,
-            options: None,
-        };
-
-        let owned: OwnedHeaders = event.to_headers().into();
-        assert!(!owned.iter().any(|h| h.key == "legacy_property_splice"));
-
-        let mut headers = event.to_headers();
-        headers.legacy_property_splice = Some(true);
-        let owned: OwnedHeaders = headers.into();
-        let raw = owned
-            .iter()
-            .find(|h| h.key == "legacy_property_splice")
-            .and_then(|h| h.value);
-        assert_eq!(raw, Some(b"true".as_slice()));
-
-        let recovered: CapturedEventHeaders = owned.into();
-        assert_eq!(recovered.legacy_property_splice, Some(true));
-    }
-
-    #[test]
     fn test_dlq_fields_absent_in_owned_headers_round_trip() {
         let event = CapturedEvent {
             uuid: Uuid::nil(),
@@ -937,7 +876,6 @@ mod tests {
                 .with_timezone(&Utc),
             is_cookieless_mode: false,
             historical_migration: false,
-            options: None,
         };
 
         // DLQ fields are None by default from to_headers()

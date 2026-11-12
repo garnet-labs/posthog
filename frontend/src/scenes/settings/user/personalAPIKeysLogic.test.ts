@@ -198,19 +198,14 @@ describe('personalAPIKeysLogic', () => {
         expect(capturedCreatePayload.scopes).toEqual(['*'])
     })
 
-    it('opens a new key with the preset scopes for a ?preset= link, all available to a project scoped key', () => {
+    it('opens a new key with the preset scopes for a ?preset= link', () => {
         router.actions.push(urls.settings('user-api-keys'), { preset: 'source_map_upload' })
 
         expect(logic.values.editingKeyId).toBe('new')
         expect(logic.values.editingKey).toMatchObject({
             preset: 'source_map_upload',
-            scopes: ['error_tracking:write'],
+            scopes: ['organization:read', 'error_tracking:write'],
         })
-
-        logic.actions.setEditingKeyValues({ access_type: 'teams' })
-        expect(logic.values.scopeRows.filter((row) => row.value !== 'none' && row.muted).map((row) => row.key)).toEqual(
-            []
-        )
     })
 
     it.each(['survey', 'early_access_feature'])(

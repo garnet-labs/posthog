@@ -45,13 +45,10 @@ export function derivePrState(
         return prState
     }
     if (
-        (!prState || prState === 'unknown') &&
-        [
-            SignalReportStatus.FAILED,
-            SignalReportStatus.SUPPRESSED,
-            SignalReportStatus.RESOLVED,
-            SignalReportStatus.CLOSED,
-        ].includes(status as SignalReportStatus)
+        !prState &&
+        [SignalReportStatus.FAILED, SignalReportStatus.SUPPRESSED, SignalReportStatus.RESOLVED].includes(
+            status as SignalReportStatus
+        )
     ) {
         return 'closed'
     }

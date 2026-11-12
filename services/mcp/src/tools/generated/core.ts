@@ -75,7 +75,6 @@ const identityProviderConfigsCreatePrepare = (): ToolBase<
         return await prepareConfirmedAction(context, {
             args: params,
             purpose: 'identity-provider-configs-create',
-            inputSchema: IdentityProviderConfigsCreateSchema(),
             actionLabel: 'create identity provider configuration',
             messageTemplate:
                 "Create an identity provider configuration using the supplied protocol, settings, and domain coverage. Review those values and reply 'confirm' to proceed.\n",
@@ -103,8 +102,8 @@ const identityProviderConfigsCreateExecute = (): ToolBase<
             {
                 incomingArgs: confirmationParams,
                 purpose: 'identity-provider-configs-create',
-                inputSchema: IdentityProviderConfigsCreateSchema(),
                 codec: __runtime.codec,
+                ledger: __runtime.ledger,
                 stash: __runtime.stash,
                 expectedScope: { orgId: String(__scopeOrgId) },
             }
@@ -190,7 +189,6 @@ const identityProviderConfigsDestroyPrepare = (): ToolBase<
         return await prepareConfirmedAction(context, {
             args: params,
             purpose: 'identity-provider-configs-destroy',
-            inputSchema: IdentityProviderConfigsDestroySchema(),
             actionLabel: 'delete identity provider configuration',
             messageTemplate:
                 "Permanently delete identity provider configuration {id}, including its linked domains and authentication settings. Reply 'confirm' to proceed.\n",
@@ -218,8 +216,8 @@ const identityProviderConfigsDestroyExecute = (): ToolBase<
             {
                 incomingArgs: confirmationParams,
                 purpose: 'identity-provider-configs-destroy',
-                inputSchema: IdentityProviderConfigsDestroySchema(),
                 codec: __runtime.codec,
+                ledger: __runtime.ledger,
                 stash: __runtime.stash,
                 expectedScope: { orgId: String(__scopeOrgId) },
             }
@@ -292,7 +290,6 @@ const identityProviderConfigsPartialUpdatePrepare = (): ToolBase<
         return await prepareConfirmedAction(context, {
             args: params,
             purpose: 'identity-provider-configs-partial-update',
-            inputSchema: IdentityProviderConfigsPartialUpdateSchema(),
             actionLabel: 'update identity provider configuration',
             messageTemplate:
                 "Update identity provider configuration {id}. Review the requested settings and domain coverage, then reply 'confirm' to proceed.\n",
@@ -320,8 +317,8 @@ const identityProviderConfigsPartialUpdateExecute = (): ToolBase<
         >(context, {
             incomingArgs: confirmationParams,
             purpose: 'identity-provider-configs-partial-update',
-            inputSchema: IdentityProviderConfigsPartialUpdateSchema(),
             codec: __runtime.codec,
+            ledger: __runtime.ledger,
             stash: __runtime.stash,
             expectedScope: { orgId: String(__scopeOrgId) },
         })
@@ -430,7 +427,6 @@ const identityProviderConfigsScimTokenCreatePrepare = (): ToolBase<
         return await prepareConfirmedAction(context, {
             args: params,
             purpose: 'identity-provider-configs-scim-token-create',
-            inputSchema: IdentityProviderConfigsScimTokenCreateSchema(),
             actionLabel: 'regenerate SCIM bearer token',
             messageTemplate:
                 "Regenerate the SCIM bearer token for identity provider configuration {id}. Existing SCIM clients will stop working until updated. Reply 'confirm' to proceed.\n",
@@ -458,8 +454,8 @@ const identityProviderConfigsScimTokenCreateExecute = (): ToolBase<
         >(context, {
             incomingArgs: confirmationParams,
             purpose: 'identity-provider-configs-scim-token-create',
-            inputSchema: IdentityProviderConfigsScimTokenCreateSchema(),
             codec: __runtime.codec,
+            ledger: __runtime.ledger,
             stash: __runtime.stash,
             expectedScope: { orgId: String(__scopeOrgId) },
         })

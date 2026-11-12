@@ -2,7 +2,7 @@ import { useActions, useValues } from 'kea'
 
 import { LemonCheckbox, LemonLabel } from '@posthog/lemon-ui'
 
-import { useQuillSurface } from 'lib/components/QuillSurface/quillSurfaceContext'
+import { useFeatureFlag } from 'lib/hooks/useFeatureFlag'
 import { capitalizeFirstLetter } from 'lib/utils/strings'
 import { insightVizDataLogic } from 'scenes/insights/insightVizDataLogic'
 
@@ -67,7 +67,7 @@ export function LifecycleToggles({ insightProps }: EditorFilterProps): JSX.Eleme
     const { insightFilter, aggregationGroupTypeIndex, querySource } = useValues(insightVizDataLogic(insightProps))
     const { updateInsightFilter } = useActions(insightVizDataLogic(insightProps))
     const { aggregationLabel } = useValues(groupsModel)
-    const quillSurface = useQuillSurface()
+    const todayRailNav = useFeatureFlag('TODAY_RAIL_NAV')
 
     const toggledLifecycles = (insightFilter as LifecycleFilter)?.toggledLifecycles || DEFAULT_LIFECYCLE_TOGGLES
     const customAggregationTarget = (querySource as LifecycleQuery | null)?.customAggregationTarget === true
@@ -84,7 +84,7 @@ export function LifecycleToggles({ insightProps }: EditorFilterProps): JSX.Eleme
         }
     }
 
-    if (quillSurface) {
+    if (todayRailNav) {
         return (
             <QuillLifecycleToggles
                 rows={lifecycles.map(({ name, color }) => ({

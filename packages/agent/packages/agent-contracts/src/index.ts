@@ -288,14 +288,6 @@ export {
   type UserShellExecuteParams,
   type UserShellExecuteResult,
 } from "./session-events";
-export type { ReportRunVariant } from "./signal-report-state";
-export {
-  canResolveReport,
-  hasOpenImplementationPr,
-  isTerminalReport,
-  REPORT_STATUS_BEHAVIOR,
-  resolveReportRunVariant,
-} from "./signal-report-state";
 export type {
   ExportedSkill,
   SkillFileEntry,

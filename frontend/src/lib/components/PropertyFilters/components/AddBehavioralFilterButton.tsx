@@ -1,7 +1,6 @@
-import { IconPlus, IconPlusSmall } from '@posthog/icons'
+import { IconPlusSmall } from '@posthog/icons'
 
 import { newBehavioralFilter } from 'lib/components/PropertyFilters/utils'
-import { useQuillSurface } from 'lib/components/QuillSurface/quillSurfaceContext'
 import { TaxonomicFilterGroupType } from 'lib/components/TaxonomicFilter/types'
 import { TaxonomicPopover } from 'lib/components/TaxonomicPopover/TaxonomicPopover'
 
@@ -16,8 +15,6 @@ export function AddBehavioralFilterButton({
     onAdd,
     'data-attr': dataAttr,
 }: AddBehavioralFilterButtonProps): JSX.Element {
-    const quillSurface = useQuillSurface()
-
     return (
         <TaxonomicPopover
             groupType={TaxonomicFilterGroupType.Events}
@@ -34,7 +31,7 @@ export function AddBehavioralFilterButton({
             placeholder="Performed"
             tooltip="Filter for users who performed an event or action"
             placeholderClass=""
-            icon={quillSurface ? <IconPlus /> : <IconPlusSmall />}
+            icon={<IconPlusSmall />}
             sideIcon={null}
             data-attr={dataAttr}
         />

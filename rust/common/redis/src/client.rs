@@ -654,22 +654,6 @@ impl Client for RedisClient {
         Ok(results)
     }
 
-    async fn get_multiple(
-        &self,
-        keys: Vec<String>,
-    ) -> Result<Vec<Option<Vec<u8>>>, CustomRedisError> {
-        if keys.is_empty() {
-            return Ok(vec![]);
-        }
-        let mut pipe = redis::pipe();
-        for k in &keys {
-            pipe.get(k);
-        }
-        let mut conn = self.conn();
-        let results: Vec<Option<Vec<u8>>> = pipe.query_async(&mut conn).await?;
-        Ok(results)
-    }
-
     async fn scard_multiple(&self, keys: Vec<String>) -> Result<Vec<u64>, CustomRedisError> {
         if keys.is_empty() {
             return Ok(vec![]);
@@ -725,12 +709,11 @@ impl Client for RedisClient {
         if keys.is_empty() {
             return Ok(());
         }
-        let mut pipe = redis::pipe();
-        for k in &keys {
-            pipe.del(k).ignore();
-        }
         let mut conn = self.conn();
-        pipe.query_async::<()>(&mut conn).await?;
+        redis::cmd("DEL")
+            .arg(&keys)
+            .query_async::<()>(&mut conn)
+            .await?;
         Ok(())
     }
 

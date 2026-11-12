@@ -26,7 +26,8 @@ from products.signals.backend.temporal.agentic import (
 @pytest.fixture
 def organization():
     org = Organization.objects.create(name="test-resolve-user-org")
-    return org
+    yield org
+    org.delete()
 
 
 @pytest.fixture

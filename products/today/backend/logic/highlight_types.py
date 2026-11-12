@@ -52,18 +52,6 @@ def ignore_pulse(_found: HighlightFindings, _slots: list[PulseSlot]) -> None:
     return None
 
 
-def allows(access: UserAccessControl, scopes: frozenset[str] | None, *required: str) -> bool:
-    covered = scopes is None or "*" in scopes or not scopes_not_covered(scopes, required)
-    return covered and all(_can_view(access, scope.split(":")[0]) for scope in required)
-
-
-def _can_view(access: UserAccessControl, resource: str) -> bool:
-    governed = RESOURCE_INHERITANCE_MAP.get(cast(APIScopeObject, resource), resource)
-    if governed not in ACCESS_CONTROL_RESOURCES:
-        return True
-    return access.check_access_level_for_resource(cast(APIScopeObject, resource), "viewer")
-
-
 class Context:
     """Today's `HighlightContext`. A source sees only the protocol, so these internals stay private."""
 
@@ -75,14 +63,12 @@ class Context:
         scopes: frozenset[str] | None = None,
         pinned: frozenset[str] = frozenset(),
         publish_pulse: Callable[[HighlightFindings, list[PulseSlot]], None] | None = None,
-        hidden: frozenset[str] = frozenset(),
     ) -> None:
         self.team = team
         self.user = user
         self.today = today
         self.scopes = scopes
         self.pinned = pinned
-        self.hidden = hidden
         self.publish_pulse = publish_pulse or ignore_pulse
         self.failures: list[str] = []
         self.access = UserAccessControl(user=user, team=team)
@@ -93,7 +79,14 @@ class Context:
         return property_restrictions(self.team, self.user)
 
     def allows(self, *required: str) -> bool:
-        return allows(self.access, self.scopes, *required)
+        covered = self.scopes is None or "*" in self.scopes or not scopes_not_covered(self.scopes, required)
+        return covered and all(self._can_view(scope.split(":")[0]) for scope in required)
+
+    def _can_view(self, resource: str) -> bool:
+        governed = RESOURCE_INHERITANCE_MAP.get(cast(APIScopeObject, resource), resource)
+        if governed not in ACCESS_CONTROL_RESOURCES:
+            return True
+        return self.access.check_access_level_for_resource(cast(APIScopeObject, resource), "viewer")
 
     def daily(self, name: str, compute: Callable[[], T]) -> T:
         key = f"today_highlights:daily:v1:{self.team.id}:{self.restrictions}:{self.today.isoformat()}:{name}"

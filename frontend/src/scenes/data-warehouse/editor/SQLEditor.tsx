@@ -538,7 +538,6 @@ function SQLEditorSceneTitle(): JSX.Element | null {
         isSourceQueryLastRun,
         selectedConnectionId,
         hasEditorChanges,
-        saveAsViewDisabledReason,
     } = useValues(sqlEditorLogic)
     const { convertToNotebook, openHistoryModal, openSaveAsMenu, selectSaveAsTarget } = useActions(editorSceneLogic)
     const {
@@ -652,7 +651,7 @@ function SQLEditorSceneTitle(): JSX.Element | null {
             return saveAsInsightDisabledReason
         }
         if (target === 'view') {
-            return saveAsViewDisabledReason ?? saveAsDisabledReason ?? saveAsViewAccessDisabledReason
+            return saveAsDisabledReason ?? saveAsViewAccessDisabledReason
         }
         if (target === 'endpoint') {
             return saveAsEndpointQueryDisabledReason ?? saveAsEndpointDisabledReason

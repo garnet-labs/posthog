@@ -29,7 +29,8 @@ _COLLECT_PATCH_TARGET = "products.signals.backend.report_generation.repo_activit
 @pytest.fixture
 def organization():
     org = Organization.objects.create(name="test-repo-activity-org")
-    return org
+    yield org
+    org.delete()
 
 
 @pytest.fixture

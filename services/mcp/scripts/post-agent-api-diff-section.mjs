@@ -32,14 +32,9 @@ if (!markdown) {
 }
 
 const overLimit = markdown.includes('**Input schema now at or over')
-const staleDocs = markdown.includes('**posthog.com docs that still mention a removed tool')
-const warnings = [
-    overLimit ? 'tool input schema over the Claude limit' : '',
-    staleDocs ? 'docs mention a removed tool' : '',
-].filter(Boolean)
 await postSection({
     id: SECTION_ID,
-    status: warnings.length > 0 ? 'warn' : 'info',
-    summary: warnings.join(', ') || 'agent-facing tool changes',
+    status: overLimit ? 'warn' : 'info',
+    summary: overLimit ? 'tool input schema over the Claude limit' : 'agent-facing tool changes',
     body: `What this PR changes for agents, from the tool schema snapshots and tool definitions.\n\n${markdown}`,
 })

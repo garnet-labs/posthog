@@ -424,7 +424,6 @@ function Expansion({
                                         type="secondary"
                                         size="xsmall"
                                         loading={enablingProduct}
-                                        disabledReason={product.enableDisabledReason}
                                         onClick={() => onEnableProduct(product)}
                                     >
                                         Turn it on

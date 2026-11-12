@@ -11,9 +11,6 @@ import { iconSizes, type } from '@/ui/tokens'
 import { ChatErrorBubble } from '../ChatErrorBubble'
 import { ChatMarkdown } from '../ChatMarkdown'
 import { ChatProgressLine } from '../ChatProgressLine'
-import { CopyMessageButton } from '../CopyMessageButton'
-import { type ChatFeedbackContext, type ChatReplyActions, chatReplyActions } from '../chatFeedback'
-import { MessageFeedbackActions } from '../MessageFeedbackActions'
 import { UserBubble } from '../UserBubble'
 import { ActivityGroupRow } from './ActivityGroupRow'
 import { NoticeRow } from './NoticeRow'
@@ -39,41 +36,16 @@ interface SessionThreadProps {
     session: SessionThreadState
     onRetryHistory: () => void
     topInset?: number
-    feedbackContext?: ChatFeedbackContext
 }
 
-const AssistantRow = memo(
-    function AssistantRow({ item, actions }: { item: SessionAssistantItem; actions?: ChatReplyActions }): ReactElement {
-        const styles = useStyles()
-        const feedback = actions?.feedback
-        return (
-            <View style={actions ? undefined : styles.assistantWithoutActions} testID="session-assistant">
-                <ChatMarkdown text={item.text} streaming={!item.complete} projectUrl={item.projectUrl} />
-                {actions ? (
-                    <View style={styles.actions}>
-                        <CopyMessageButton text={item.text} messageRole="assistant" />
-                        {feedback ? (
-                            <MessageFeedbackActions
-                                key={`${feedback.sessionId}:${feedback.traceId ?? feedback.turnIndex}`}
-                                target={feedback}
-                            />
-                        ) : null}
-                    </View>
-                ) : null}
-            </View>
-        )
-    },
-    (previous, next) =>
-        previous.item.text === next.item.text &&
-        previous.item.complete === next.item.complete &&
-        previous.item.projectUrl === next.item.projectUrl &&
-        Boolean(previous.actions) === Boolean(next.actions) &&
-        previous.actions?.feedback?.sessionId === next.actions?.feedback?.sessionId &&
-        previous.actions?.feedback?.runtime === next.actions?.feedback?.runtime &&
-        previous.actions?.feedback?.traceId === next.actions?.feedback?.traceId &&
-        previous.actions?.feedback?.runId === next.actions?.feedback?.runId &&
-        previous.actions?.feedback?.turnIndex === next.actions?.feedback?.turnIndex
-)
+const AssistantRow = memo(function AssistantRow({ item }: { item: SessionAssistantItem }): ReactElement {
+    const styles = useStyles()
+    return (
+        <View style={styles.assistant} testID="session-assistant">
+            <ChatMarkdown text={item.text} streaming={!item.complete} projectUrl={item.projectUrl} />
+        </View>
+    )
+})
 
 const ErrorRow = memo(function ErrorRow({ item }: { item: SessionErrorItem }): ReactElement {
     return <ChatErrorBubble text={errorItemText(item)} />
@@ -94,22 +66,13 @@ function statusLine(session: SessionThreadState): string | null {
     }
 }
 
-export function SessionThread({
-    session,
-    onRetryHistory,
-    topInset = 0,
-    feedbackContext,
-}: SessionThreadProps): ReactElement {
+export function SessionThread({ session, onRetryHistory, topInset = 0 }: SessionThreadProps): ReactElement {
     const colors = useColors()
     const styles = useStyles()
     const scroll = useRef<ScrollViewInstance>(null)
     const positioned = useRef(false)
     const following = useRef(true)
     const displayItems = useMemo(() => groupSessionItems(session.items), [session.items])
-    const replyActions = useMemo(
-        () => chatReplyActions(session.items, feedbackContext, session.phase),
-        [session.items, feedbackContext, session.phase]
-    )
     const pauseFollowing = useCallback((): void => {
         following.current = false
     }, [])
@@ -147,7 +110,7 @@ export function SessionThread({
             case 'user':
                 return <UserBubble key={item.id} text={item.text} attachments={item.attachments} />
             case 'assistant':
-                return <AssistantRow key={item.id} item={item} actions={replyActions.get(item.id)} />
+                return <AssistantRow key={item.id} item={item} />
             case 'activity':
                 return (
                     <ActivityGroupRow
@@ -213,11 +176,10 @@ const useStyles = createStyles(({ colors }) => ({
         paddingVertical: 12,
         gap: 14,
     },
-    assistantWithoutActions: {
+    assistant: {
         // Markdown blocks end with a 10pt bottom margin; this keeps the thread gap even.
         marginBottom: -10,
     },
-    actions: { flexDirection: 'row', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 },
     turnEnd: {
         height: 8,
     },

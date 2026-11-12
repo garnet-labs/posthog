@@ -31,7 +31,7 @@ export function Library(): JSX.Element {
 function LibraryContent(): JSX.Element {
     const { objectType, objectTypeByValue, visibleObjects, objectsLoading, loadFailed, search, hasMore } =
         useValues(libraryLogic)
-    const { setSearch, loadObjects, loadMoreObjects, objectOpened } = useActions(libraryLogic)
+    const { setSearch, loadObjects, loadMoreObjects } = useActions(libraryLogic)
     const selectedType = objectType ? objectTypeByValue[objectType] : undefined
     const title = selectedType?.pluralLabel ?? 'All objects'
 
@@ -39,22 +39,14 @@ function LibraryContent(): JSX.Element {
         {
             title: 'Name',
             key: 'name',
-            render: (_, entry, recordIndex) => {
+            render: (_, entry) => {
                 const href = libraryObjectHref(entry)
                 const name = libraryObjectName(entry)
                 return (
                     <span className="flex items-center gap-2 min-w-0">
                         <span className="shrink-0 flex">{iconForType(entry.type as FileSystemIconType)}</span>
                         {href ? (
-                            <Link
-                                to={href}
-                                className="truncate font-semibold"
-                                data-attr="library-object"
-                                // Capture-phase, so Cmd/Ctrl-clicks count too: Link's own handler returns
-                                // for those before it calls onClick. Middle-clicks only fire auxclick.
-                                onClickCapture={() => objectOpened(entry, recordIndex)}
-                                onAuxClick={(event) => event.button === 1 && objectOpened(entry, recordIndex)}
-                            >
+                            <Link to={href} className="truncate font-semibold" data-attr="library-object">
                                 {name}
                             </Link>
                         ) : (

@@ -1,18 +1,8 @@
 export const integrationKeys = {
   all: ["integrations"] as const,
-  list: (scope?: string | null) =>
-    scope === undefined
-      ? ([...integrationKeys.all, "list"] as const)
-      : ([...integrationKeys.all, "list", scope] as const),
-  repositories: (integrationId?: number, scope?: string | null) =>
-    scope === undefined
-      ? ([...integrationKeys.all, "repositories", integrationId] as const)
-      : ([
-          ...integrationKeys.all,
-          "repositories",
-          integrationId,
-          scope,
-        ] as const),
+  list: () => [...integrationKeys.all, "list"] as const,
+  repositories: (integrationId?: number) =>
+    [...integrationKeys.all, "repositories", integrationId] as const,
   repositoryPicker: (integrationId?: number, search?: string, limit?: number) =>
     [
       ...integrationKeys.all,
@@ -89,7 +79,7 @@ export function teamRepositoryRefreshKeys(
 ): RepositoryRefetchKey[] {
   const keys: RepositoryRefetchKey[] = integrationIds.map((integrationId) => ({
     queryKey: integrationKeys.repositories(integrationId),
-    exact: false,
+    exact: true,
   }));
   keys.push({
     queryKey: [...integrationKeys.all, "repository-picker"],

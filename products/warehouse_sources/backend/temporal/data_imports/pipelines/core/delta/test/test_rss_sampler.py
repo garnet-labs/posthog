@@ -7,8 +7,6 @@ from unittest.mock import mock_open, patch
 
 from parameterized import parameterized
 
-from posthog.test.waiting import wait_until
-
 from products.warehouse_sources.backend.temporal.data_imports.pipelines.core.delta import rss_sampler
 from products.warehouse_sources.backend.temporal.data_imports.pipelines.core.delta.rss_sampler import (
     MB,
@@ -38,6 +36,13 @@ def _raise_oserror() -> float | None:
     raise OSError("gone")
 
 
+def _wait_for(condition, timeout_s: float = 5.0) -> None:
+    deadline = time.monotonic() + timeout_s
+    while not condition():
+        assert time.monotonic() < deadline, "timed out"
+        time.sleep(0.001)
+
+
 def _sampler_threads() -> list[threading.Thread]:
     return [t for t in threading.enumerate() if t.name == _THREAD_NAME]
 
@@ -53,7 +58,7 @@ class TestRssPeakSampler:
         readings = _Readings(100.0, 300.0, 200.0, 150.0)
         sampler = RssPeakSampler(0.001, read_rss_mb=readings)
         with sampler.window() as window:
-            wait_until(lambda: readings.reads >= 4)
+            _wait_for(lambda: readings.reads >= 4)
         assert (window.start_mb, window.peak_mb, window.delta_mb) == (100.0, 300.0, 200.0)
         assert window.samples >= 4
 
@@ -135,16 +140,10 @@ class TestRssPeakSampler:
         ]
     )
     def test_failed_reads_are_missing_samples(self, _name, reader):
-        attempts: list[None] = []
-
-        def counted_reader() -> float | None:
-            attempts.append(None)
-            return reader()
-
-        sampler = RssPeakSampler(0.001, read_rss_mb=counted_reader)
+        sampler = RssPeakSampler(0.001, read_rss_mb=reader)
         with sampler.window() as window:
             thread = sampler.thread()
-            wait_until(lambda: len(attempts) >= 3)
+            time.sleep(0.01)
         assert (window.start_mb, window.peak_mb, window.delta_mb, window.samples) == (None, None, None, 0)
         assert _stopped(sampler, thread)
 

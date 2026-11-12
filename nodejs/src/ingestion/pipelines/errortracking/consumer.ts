@@ -39,7 +39,6 @@ export type ErrorTrackingLaneConfig = CommonIngestionConsumerConfig &
         | 'ERROR_TRACKING_OVERFLOW_BUCKET_REPLENISH_RATE'
         | 'ERROR_TRACKING_STATEFUL_OVERFLOW_REDIS_TTL_SECONDS'
         | 'ERROR_TRACKING_STATEFUL_OVERFLOW_LOCAL_CACHE_TTL_SECONDS'
-        | 'ERROR_TRACKING_STATEFUL_OVERFLOW_LOCAL_CACHE_MAX_SIZE'
         | 'ERROR_TRACKING_OVERFLOW_PRESERVE_PARTITION_LOCALITY'
         | 'INGESTION_OVERFLOW_MODE'
     > &
@@ -93,7 +92,6 @@ export function createErrorTrackingConsumer(config: ErrorTrackingLaneConfig, sha
                     ? new MainLaneOverflowRedirectComponent({
                           redisRepository: container.overflowRedisRepository,
                           localCacheTTLSeconds: config.ERROR_TRACKING_STATEFUL_OVERFLOW_LOCAL_CACHE_TTL_SECONDS,
-                          localCacheMaxSize: config.ERROR_TRACKING_STATEFUL_OVERFLOW_LOCAL_CACHE_MAX_SIZE,
                           strategies: [
                               {
                                   ...eventRateStrategy(),

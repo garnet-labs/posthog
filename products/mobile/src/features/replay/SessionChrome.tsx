@@ -4,7 +4,6 @@ import { Platform, View } from 'react-native'
 import { ExternalLinkIcon } from '@/ui/icons/ExternalLinkIcon'
 import { MoreIcon } from '@/ui/icons/MoreIcon'
 import { nativeIcons } from '@/ui/icons/nativeIcons'
-import { PlayIcon } from '@/ui/icons/PlayIcon'
 import { PillControl } from '@/ui/PillControl'
 import { Pressable44 } from '@/ui/Pressable44'
 import { ScreenChrome } from '@/ui/ScreenChrome'
@@ -18,22 +17,12 @@ interface SessionChromeProps {
     onBack: () => void
     /** "Open full replay". Absent on a list, and disabled in the demo. */
     onOpenFull?: (() => void) | null
-    /** The full-replay button plays the video in the app instead of opening the web player. */
-    watchInApp?: boolean
     onMore?: (() => void) | null
 }
 
-export function SessionChrome({
-    onBack,
-    onOpenFull,
-    watchInApp = false,
-    onMore,
-    title,
-}: SessionChromeProps): ReactElement {
+export function SessionChrome({ onBack, onOpenFull, onMore, title }: SessionChromeProps): ReactElement {
     const colors = useColors()
     const styles = useStyles()
-    const openLabel = watchInApp ? 'Watch replay' : 'Open full replay'
-    const OpenIcon = watchInApp ? PlayIcon : ExternalLinkIcon
     return (
         <ScreenChrome
             onBack={onBack}
@@ -45,8 +34,8 @@ export function SessionChrome({
                         {onOpenFull !== undefined ? (
                             <Stack.Toolbar.Button
                                 iconRenderingMode="template"
-                                icon={watchInApp ? nativeIcons.play : nativeIcons.external}
-                                accessibilityLabel={openLabel}
+                                icon={nativeIcons.external}
+                                accessibilityLabel="Open full replay"
                                 disabled={!onOpenFull}
                                 onPress={() => onOpenFull?.()}
                             />
@@ -68,13 +57,16 @@ export function SessionChrome({
                             <Pressable44
                                 onPress={() => onOpenFull?.()}
                                 disabled={!onOpenFull}
-                                accessibilityRole={watchInApp ? 'button' : 'link'}
-                                accessibilityLabel={openLabel}
+                                accessibilityRole="link"
+                                accessibilityLabel="Open full replay"
                                 pressedBackground={colors.background}
                                 style={styles.full}
                                 testID="session-open-full"
                             >
-                                <OpenIcon size={iconSizes.control} color={onOpenFull ? colors.ink : colors.disabled} />
+                                <ExternalLinkIcon
+                                    size={iconSizes.control}
+                                    color={onOpenFull ? colors.ink : colors.disabled}
+                                />
                             </Pressable44>
                             <View style={styles.divider} />
                         </>

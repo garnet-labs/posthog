@@ -89,7 +89,6 @@ import {
     captureExperimentHealthFindingActedOn,
     captureExperimentHealthFindingOpened,
     captureExperimentHealthFindingShown,
-    captureExperimentHealthRechecked,
     experimentHealthUi,
     experimentWarningFromHealth,
     exposureHealthEventProperties,
@@ -238,13 +237,6 @@ const HEALTH_CHECK_INPUTS = [
 
 function healthCheckInputs(experiment: Experiment): Partial<Experiment> {
     return Object.fromEntries(HEALTH_CHECK_INPUTS.map((field) => [field, experiment[field]]))
-}
-
-function changedHealthCheckInputs(
-    before: Partial<Experiment> | undefined,
-    after: Partial<Experiment>
-): string[] | null {
-    return before ? HEALTH_CHECK_INPUTS.filter((field) => !objectsEqual(before[field], after[field])) : null
 }
 
 type ExperimentHealthLoadTrigger = 'experiment_load' | 'experiment_update'
@@ -2361,11 +2353,6 @@ export const experimentLogic = kea<experimentLogicType>([
 
                     for (const query of metrics) {
                         const insightQuery = queryBuilder(query)
-                        // Ratio, retention and percentile metrics have no insight equivalent, and the API
-                        // rejects an insight without a query
-                        if (!insightQuery) {
-                            continue
-                        }
 
                         await insightsApi.create({ name: query.name || undefined, query: insightQuery }, [dashboard.id])
                     }
@@ -2591,12 +2578,7 @@ export const experimentLogic = kea<experimentLogicType>([
                         // as metrics do because the server recomputes their fingerprints.
                         await breakpoint(300)
                     }
-                    const inputs = healthCheckInputs(values.experiment)
-                    cache.healthCheckInputs = inputs
-                    // The loader keeps the previous answer until this request succeeds, so this is the health
-                    // before the edit, and `cache.answeredHealthCheckInputs` holds the inputs it answered.
-                    const healthBefore = values.experimentHealth
-                    const inputsBefore = cache.answeredHealthCheckInputs
+                    cache.healthCheckInputs = healthCheckInputs(values.experiment)
                     // Timed here rather than in the success listener, which would have to read a start time off
                     // `cache` that a superseded request can overwrite.
                     const startedAt = performance.now()
@@ -2608,7 +2590,6 @@ export const experimentLogic = kea<experimentLogicType>([
                     }
                     // Kept outside the `try`: a superseded request throws here and is not a failure.
                     breakpoint()
-                    cache.answeredHealthCheckInputs = inputs
                     // One comparison per experiment load. A reload after a write would compare unsaved edits in the
                     // page with the saved experiment on the server.
                     if (trigger === 'experiment_load') {
@@ -2619,14 +2600,6 @@ export const experimentLogic = kea<experimentLogicType>([
                             values.browserExperimentWarning,
                             values.browserNoMetricsWarning,
                             Math.round(performance.now() - startedAt)
-                        )
-                    } else {
-                        captureExperimentHealthRechecked(
-                            values.experiment,
-                            healthBefore,
-                            health,
-                            values.healthUi,
-                            changedHealthCheckInputs(inputsBefore, inputs)
                         )
                     }
                     return health

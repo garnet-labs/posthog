@@ -43,12 +43,7 @@ function renderTooltip(rows: FunnelStepsBarRow[]) {
     }
 }
 
-export function FunnelVisualizer({
-    results,
-    overlay,
-    chartClassName = 'h-72',
-    showTitle = true,
-}: FunnelVisualizerProps): ReactElement {
+export function FunnelVisualizer({ results }: FunnelVisualizerProps): ReactElement {
     const theme = useMcpChartTheme()
     const steps = normalizeFunnelSteps(results)
     const { series, labels, rows, overall } = buildSingleSeriesFunnelStepsBars(steps, { color: FUNNEL_COLOR })
@@ -76,8 +71,8 @@ export function FunnelVisualizer({
 
     return (
         <div data-attr="funnel-steps-bar" className="w-full">
-            {showTitle && <ChartHeader title={TITLE} />}
-            <div className={`flex flex-col w-full ${chartClassName}`}>
+            <ChartHeader title={TITLE} />
+            <div className="flex flex-col h-72 w-full">
                 <BarChart
                     series={series}
                     labels={labels}
@@ -85,9 +80,7 @@ export function FunnelVisualizer({
                     config={config}
                     tooltip={renderTooltip(rows)}
                     onError={NOOP}
-                >
-                    {overlay}
-                </BarChart>
+                />
             </div>
 
             {steps.length >= 2 && (

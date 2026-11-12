@@ -1,19 +1,9 @@
 import type { insightLogicValues } from 'scenes/insights/insightLogic'
 
-import type {
-    ExplainChartData,
-    FunnelStepsExplainChartData,
-    TimeSeriesExplainChartData,
-} from 'products/product_analytics/mcp/apps/explainChart/explainChartTypes'
+import type { ExplainChartData } from 'products/product_analytics/mcp/apps/explainChart/explainChartTypes'
 import { followedSeriesIndex } from 'products/product_analytics/mcp/apps/explainChart/storySeries'
 
-import {
-    explainChartStoryFor,
-    followedFunnelBarIndex,
-    funnelStoryOnChart,
-    storyOnChart,
-    withEvidenceLinks,
-} from './explainChartStory'
+import { explainChartStoryFor, storyOnChart, withEvidenceLinks } from './explainChartStory'
 
 const INSIGHT = { id: 42, short_id: 'aBc12345' } as insightLogicValues['insight']
 const STORY = {
@@ -24,19 +14,6 @@ const STORY = {
     insightName: 'Pageviews',
     lastPointInProgress: false,
     headline: 'A peak on **October 2**.',
-    chapters: [],
-}
-const FUNNEL_STORY = {
-    shape: 'funnel_steps',
-    query: { kind: 'FunnelsQuery' },
-    steps: [
-        { name: 'Pageview', count: 100 },
-        { name: 'Signed up', count: 20 },
-    ],
-    breakdowns: [],
-    seriesIndex: 0,
-    insightName: 'Signups',
-    headline: 'Most people leave before **Signed up**.',
     chapters: [],
 }
 
@@ -53,11 +30,10 @@ describe('explainChartStory', () => {
             { ...STORY, shape: undefined },
             STORY,
         ],
-        ['a funnel story', { insightId: 'aBc12345' }, FUNNEL_STORY, FUNNEL_STORY],
         [
             'a story of a shape this page cannot draw',
             { insightId: 'aBc12345' },
-            { ...STORY, shape: 'retention_grid' },
+            { ...STORY, shape: 'funnel_steps' },
             null,
         ],
     ])('takes a story for %s only when it explains this insight', (_, input, output, expected) => {
@@ -114,52 +90,12 @@ describe('explainChartStory', () => {
                 { title: 'A peak', range: [1, 1] },
                 { title: 'A dip', range: [2, 2] },
             ],
-        } as unknown as TimeSeriesExplainChartData
+        } as unknown as ExplainChartData
 
         const shown = storyOnChart(story, chart, followedSeriesIndex(story, chart), false)
 
         expect(shown.seriesIndex).toBe(expectedIndex)
         expect(shown.chapters.map((chapter) => chapter.range)).toEqual(expected)
-    })
-
-    test.each([
-        [
-            'the chart draws a baseline before the breakdown values',
-            ['Baseline', ['Desktop'], ['Mobile']],
-            'Mobile',
-            2,
-            [50, 5],
-        ],
-        ['the chart hides the followed breakdown value', ['Baseline', ['Desktop']], 'Mobile', null, [40, 4]],
-        ['the followed breakdown value has no text', ['Baseline', [''], ['Mobile']], 'None', 1, [30, 3]],
-    ])('follows a funnel breakdown value by its name when %s', (_, drawn, followed, expectedBar, expectedCounts) => {
-        const counts: Record<string, number[]> = {
-            Baseline: [150, 25],
-            Desktop: [100, 20],
-            Mobile: [50, 5],
-            '': [30, 3],
-        }
-        const chart = [0, 1].map((step) => ({
-            count: counts.Baseline[step],
-            nested_breakdown: drawn.map((value) => ({ breakdown_value: value, count: counts[String(value)][step] })),
-        }))
-        const story = {
-            ...FUNNEL_STORY,
-            steps: [
-                { name: 'Pageview', count: 40 },
-                { name: 'Signed up', count: 4 },
-            ],
-            breakdowns: ['Another value', followed],
-            seriesIndex: 1,
-            chapters: [{ title: 'The drop to signing up', range: [0, 1] }],
-        } as unknown as FunnelStepsExplainChartData
-
-        const bar = followedFunnelBarIndex(story, chart)
-        const shown = funnelStoryOnChart(story, chart, bar)
-
-        expect(bar).toBe(expectedBar)
-        expect(shown.steps.map((step) => step.count)).toEqual(expectedCounts)
-        expect(shown.chapters.map((chapter) => chapter.range)).toEqual([expectedBar === null ? null : [0, 1]])
     })
 
     it('links saved evidence to its query, its insight or its GitHub change', () => {

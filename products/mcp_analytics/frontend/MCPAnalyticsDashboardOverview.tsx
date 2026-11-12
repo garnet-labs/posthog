@@ -9,8 +9,6 @@ import { featureFlagLogic } from 'lib/logic/featureFlagLogic'
 import { cn } from 'lib/utils/css-classes'
 import { teamLogic } from 'scenes/teamLogic'
 
-import { MCPDashboardSection } from '~/queries/schema/schema-general'
-
 import { McpDateFilter } from './components/McpDateFilter'
 import { McpSharedFilters } from './components/McpSharedFilters'
 import { ActivityChart } from './dashboard/ActivityChart'
@@ -32,31 +30,49 @@ import { mcpDashboardOverviewLogic, rankedToolsEmptyMessage, rankToolsByErrorRat
 
 export function MCPAnalyticsDashboardOverview(): JSX.Element {
     const {
-        dashboardLoading,
         headlineKpis,
+        kpisLoading,
         periodTotals,
+        periodTotalsLoading,
         intentClusterCount,
         notableSessions,
+        sessionRowsLoading,
         harnessRows,
+        harnessRowsLoading,
         modelRows,
+        modelRowsLoading,
         hasModelData,
         protocolVersionRows,
+        protocolVersionRowsLoading,
         hasProtocolVersionData,
         dailyActivity,
+        activityRowsLoading,
         activityIncompleteTail,
         kpiIncompleteTail,
         toolDailySeries,
+        toolDailyRowsLoading,
         toolRows,
+        toolRowsLoading,
         dateFilter,
         interval,
         queryFilters,
         canShowFeedback,
         feedbackContextKey,
         failedLoads,
-        loadingSections,
     } = useValues(mcpDashboardOverviewLogic)
-    const { setDateFilter, reloadAll, markFilterInteraction, openToolReport, loadSections } =
-        useActions(mcpDashboardOverviewLogic)
+    const {
+        setDateFilter,
+        reloadAll,
+        markFilterInteraction,
+        openToolReport,
+        loadKPIs,
+        loadPeriodTotals,
+        loadActivityRows,
+        loadToolDailyRows,
+        loadHarnessRows,
+        loadToolRows,
+        loadSessionRows,
+    } = useActions(mcpDashboardOverviewLogic)
     const { hiddenCards, isCardVisible } = useValues(mcpDashboardCardsLogic)
     const { showAllCards } = useActions(mcpDashboardCardsLogic)
     const { timezone } = useValues(teamLogic)
@@ -83,7 +99,17 @@ export function MCPAnalyticsDashboardOverview(): JSX.Element {
                 pageKey="mcp-dashboard-overview"
                 dataAttrPrefix="mcp-dashboard"
                 onRefresh={reloadAll}
-                refreshing={dashboardLoading}
+                refreshing={
+                    kpisLoading ||
+                    periodTotalsLoading ||
+                    sessionRowsLoading ||
+                    harnessRowsLoading ||
+                    modelRowsLoading ||
+                    protocolVersionRowsLoading ||
+                    activityRowsLoading ||
+                    toolDailyRowsLoading ||
+                    toolRowsLoading
+                }
             >
                 <McpDateFilter
                     dateFrom={dateFilter.dateFrom}
@@ -132,12 +158,12 @@ export function MCPAnalyticsDashboardOverview(): JSX.Element {
                         kpis={headlineKpis}
                         users={periodTotals.users}
                         intentClusterCount={intentClusterCount}
-                        kpisLoading={!!loadingSections.kpis}
-                        usersLoading={!!loadingSections.periodTotals}
+                        kpisLoading={kpisLoading}
+                        usersLoading={periodTotalsLoading}
                         kpisFailed={failedLoads.kpis}
                         usersFailed={failedLoads.periodTotals}
-                        onRetryKpis={() => loadSections([MCPDashboardSection.Kpis])}
-                        onRetryUsers={() => loadSections([MCPDashboardSection.PeriodTotals])}
+                        onRetryKpis={loadKPIs}
+                        onRetryUsers={loadPeriodTotals}
                         showIntentClusters={!!featureFlags[FEATURE_FLAGS.MCP_ANALYTICS_INTENT_ROUTING]}
                         theme={theme}
                         interval={interval}
@@ -153,9 +179,9 @@ export function MCPAnalyticsDashboardOverview(): JSX.Element {
                             {showActivity && (
                                 <ActivityChart
                                     daily={dailyActivity}
-                                    loading={!!loadingSections.activityRows}
+                                    loading={activityRowsLoading}
                                     failed={failedLoads.activityRows}
-                                    onRetry={() => loadSections([MCPDashboardSection.ActivityRows])}
+                                    onRetry={loadActivityRows}
                                     theme={theme}
                                     timezone={timezone}
                                     interval={interval}
@@ -165,9 +191,9 @@ export function MCPAnalyticsDashboardOverview(): JSX.Element {
                             {showToolUsage && (
                                 <ToolUsageChart
                                     data={toolDailySeries}
-                                    loading={!!loadingSections.toolDailyRows}
+                                    loading={toolDailyRowsLoading}
                                     failed={failedLoads.toolDailyRows}
-                                    onRetry={() => loadSections([MCPDashboardSection.ToolDailyRows])}
+                                    onRetry={loadToolDailyRows}
                                     theme={theme}
                                     timezone={timezone}
                                     interval={interval}
@@ -178,9 +204,9 @@ export function MCPAnalyticsDashboardOverview(): JSX.Element {
                             {showHarness && (
                                 <HarnessBarChart
                                     rows={harnessRows}
-                                    loading={!!loadingSections.harnessRows}
+                                    loading={harnessRowsLoading}
                                     failed={failedLoads.harnessRows}
-                                    onRetry={() => loadSections([MCPDashboardSection.HarnessRows])}
+                                    onRetry={loadHarnessRows}
                                     theme={theme}
                                 />
                             )}
@@ -198,9 +224,9 @@ export function MCPAnalyticsDashboardOverview(): JSX.Element {
                             <ToolErrorRateChart
                                 rows={rankToolsByErrorRate(toolRows)}
                                 emptyMessage={rankedToolsEmptyMessage(toolRows)}
-                                loading={!!loadingSections.toolRows}
+                                loading={toolRowsLoading}
                                 failed={failedLoads.toolRows}
-                                onRetry={() => loadSections([MCPDashboardSection.ToolRows])}
+                                onRetry={loadToolRows}
                                 theme={theme}
                                 onToolClick={openToolReport}
                             />
@@ -208,9 +234,9 @@ export function MCPAnalyticsDashboardOverview(): JSX.Element {
                         {showNotableSessions && (
                             <NotableSessionsTable
                                 sessions={notableSessions}
-                                loading={!!loadingSections.sessionRows}
+                                loading={sessionRowsLoading}
                                 failed={failedLoads.sessionRows}
-                                onRetry={() => loadSections([MCPDashboardSection.SessionRows])}
+                                onRetry={loadSessionRows}
                             />
                         )}
                     </CardRow>

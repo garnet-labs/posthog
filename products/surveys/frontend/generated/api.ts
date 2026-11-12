@@ -16,7 +16,6 @@ import type {
     GenerateSurveyTranslationsResponseApi,
     PaginatedSurveyListApi,
     PatchedSurveySerializerCreateUpdateOnlySchemaApi,
-    SiteSnapshotApi,
     SurveyApi,
     SurveyGlobalStatsResponseApi,
     SurveyQuestionLabelsResponseApi,
@@ -29,7 +28,6 @@ import type {
     SurveysGlobalStatsRetrieveParams,
     SurveysListParams,
     SurveysResponsesListParams,
-    SurveysSiteSnapshotRetrieveParams,
     SurveysStatsRetrieveParams,
     SurveysSummarizeResponsesCreateParams,
 } from './api.schemas'
@@ -463,42 +461,6 @@ export const surveysResponsesUnarchiveCreate = async (
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...options?.headers },
         body: JSON.stringify(surveySerializerCreateUpdateOnlyApi),
-    })
-}
-
-export const getSurveysSiteSnapshotRetrieveUrl = (
-    projectId: string,
-    id: string,
-    params: SurveysSiteSnapshotRetrieveParams
-) => {
-    const normalizedParams = new URLSearchParams()
-
-    Object.entries(params || {}).forEach(([key, value]) => {
-        if (value !== undefined) {
-            normalizedParams.append(key, value === null ? 'null' : String(value))
-        }
-    })
-
-    const stringifiedParams = normalizedParams.toString()
-
-    return stringifiedParams.length > 0
-        ? `/api/projects/${projectId}/surveys/${id}/site_snapshot/?${stringifiedParams}`
-        : `/api/projects/${projectId}/surveys/${id}/site_snapshot/`
-}
-
-/**
- * Get an image of the customer's own site for the survey preview. The image is a frame from a recent session recording of a page that matches the survey's URL condition. The first call starts rendering it, so poll until the status is `ready` or `unavailable`.
- * @summary Get a site snapshot for the draft preview
- */
-export const surveysSiteSnapshotRetrieve = async (
-    projectId: string,
-    id: string,
-    params: SurveysSiteSnapshotRetrieveParams,
-    options?: RequestInit
-): Promise<SiteSnapshotApi> => {
-    return apiMutator<SiteSnapshotApi>(getSurveysSiteSnapshotRetrieveUrl(projectId, id, params), {
-        ...options,
-        method: 'GET',
     })
 }
 

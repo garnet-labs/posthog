@@ -7,7 +7,6 @@ from posthog.schema import (
     ExperimentFunnelMetric,
     ExperimentMeanMetric,
     ExperimentMetricMathType,
-    ExperimentQuantileMetric,
     ExperimentRatioMetric,
     ExperimentRetentionMetric,
 )
@@ -30,13 +29,7 @@ from products.experiments.backend.hogql_queries.hogql_aggregation_utils import (
     extract_aggregation_and_inner_expr,
 )
 
-ExperimentMetric = Union[
-    ExperimentMeanMetric,
-    ExperimentFunnelMetric,
-    ExperimentRatioMetric,
-    ExperimentRetentionMetric,
-    ExperimentQuantileMetric,
-]
+ExperimentMetric = Union[ExperimentMeanMetric, ExperimentFunnelMetric, ExperimentRatioMetric, ExperimentRetentionMetric]
 MetricSource = Union[EventsNode, ActionsNode, ExperimentDataWarehouseNode]
 
 

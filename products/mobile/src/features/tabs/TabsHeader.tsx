@@ -41,8 +41,6 @@ const TITLES: Record<TabKey, string> = {
     views: 'Views',
     errors: 'Errors',
     replay: 'Sessions',
-    web_analytics: 'Web analytics',
-    live: 'Live',
 }
 
 interface TabsHeaderProps {

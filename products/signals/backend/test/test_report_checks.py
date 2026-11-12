@@ -3,7 +3,7 @@ import time
 from datetime import UTC, datetime, timedelta
 
 import time_machine
-from posthog.test.base import APIBaseTest, NonAtomicAPIBaseTest
+from posthog.test.base import APIBaseTest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from django.db import connection
@@ -2995,10 +2995,8 @@ class TestPendingChecks(APIBaseTest):
             )
 
 
-class TestFailedCheckResurfaces(NonAtomicAPIBaseTest):
+class TestFailedCheckResurfaces(APIBaseTest):
     """What happens when a deterministic check breaches on a report nobody is looking at any more."""
-
-    CLASS_DATA_LEVEL_SETUP = False
 
     def setUp(self) -> None:
         super().setUp()
@@ -3022,11 +3020,12 @@ class TestFailedCheckResurfaces(NonAtomicAPIBaseTest):
         return SignalReportCheck.objects.for_team(self.team.id).create(**fields)
 
     def _run_and_capture(self, check: SignalReportCheck, *, value: float):
-        with (
-            patch(_EMIT_SIGNAL, new=AsyncMock(return_value=None)) as emit,
-            patch(_MEASURE, return_value=MetricMeasurement(value=value, measured_at=timezone.now(), series=None)),
-        ):
-            record_check_verdict(check, measure_check(check, deadline=time.monotonic() + 30))
+        with patch(_EMIT_SIGNAL, new=AsyncMock(return_value=None)) as emit:
+            with self.captureOnCommitCallbacks(execute=True):
+                with patch(
+                    _MEASURE, return_value=MetricMeasurement(value=value, measured_at=timezone.now(), series=None)
+                ):
+                    record_check_verdict(check, measure_check(check, deadline=time.monotonic() + 30))
         return emit
 
     def test_a_breach_on_a_resolved_report_emits_one_signal_naming_the_origin(self) -> None:
@@ -3055,6 +3054,7 @@ class TestFailedCheckResurfaces(NonAtomicAPIBaseTest):
         with (
             patch(_ASYNC_CONNECT, return_value=client),
             patch(_MEASURE, return_value=MetricMeasurement(value=42.0, measured_at=timezone.now(), series=None)),
+            self.captureOnCommitCallbacks(execute=True),
         ):
             record_check_verdict(check, measure_check(check, deadline=time.monotonic() + 30))
 
@@ -3092,7 +3092,8 @@ class TestFailedCheckResurfaces(NonAtomicAPIBaseTest):
         )
 
         with patch(_EMIT_SIGNAL, new=AsyncMock(return_value=None)) as emit:
-            record_check_verdict(check, CheckVerdict(outcome="failed", explanation="Still firing."))
+            with self.captureOnCommitCallbacks(execute=True):
+                record_check_verdict(check, CheckVerdict(outcome="failed", explanation="Still firing."))
 
         assert emit.call_count == 0
 

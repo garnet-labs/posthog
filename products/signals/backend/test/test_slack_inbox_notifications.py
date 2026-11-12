@@ -28,7 +28,6 @@ from products.signals.backend.models import (
     SignalReportTask,
     SignalScoutConfig,
     SignalScoutRun,
-    SignalTeamConfig,
     SignalUserAutonomyConfig,
 )
 from products.signals.backend.report_generation.research import ActionabilityChoice
@@ -361,7 +360,9 @@ def test_resolve_reviewer_mentions_caps_at_five() -> None:
 def org_and_team():
     org = Organization.objects.create(name="slack-notif-org")
     team = Team.objects.create(organization=org, name="slack-notif-team")
-    return org, team
+    yield org, team
+    team.delete()
+    org.delete()
 
 
 def _set_team_channel(team: Team, channel: str, integration: Integration | None = None) -> None:
@@ -563,8 +564,7 @@ def test_dispatch_skips_report_authored_by_scout_kept_out_of_inbox(org_and_team)
 
 @pytest.mark.django_db
 @pytest.mark.parametrize("ai_approved", [True, False])
-@pytest.mark.parametrize(("min_priority", "expected_sent"), [(None, 1), ("P1", 0), ("P2", 1), ("P4", 1)])
-def test_dispatch_posts_to_team_channel_without_per_user_config(org_and_team, ai_approved, min_priority, expected_sent):
+def test_dispatch_posts_to_team_channel_without_per_user_config(org_and_team, ai_approved):
     org, team = org_and_team
     if not ai_approved:
         org.is_ai_data_processing_approved = False
@@ -572,9 +572,6 @@ def test_dispatch_posts_to_team_channel_without_per_user_config(org_and_team, ai
     reviewer = _make_reviewer_user(org, "team-reviewer@example.com", "team-bot")
     _make_slack_integration(team, reviewer)
     _set_team_channel(team, "CTEAM|#posthog-signals")
-    config = SignalTeamConfig.objects.get(team=team)
-    config.default_slack_notification_min_priority = min_priority
-    config.save()
     report = _make_ready_report(team, priority=AutonomyPriority.P2, suggested_logins=["team-bot"])
 
     fake_client = MagicMock()
@@ -588,10 +585,7 @@ def test_dispatch_posts_to_team_channel_without_per_user_config(org_and_team, ai
         slack_cls.return_value.client = fake_client
         sent = dispatch_inbox_item_notifications(str(report.id), team.id)
 
-    assert sent == expected_sent
-    assert fake_client.chat_postMessage.call_count == expected_sent
-    if not expected_sent:
-        return
+    assert sent == 1
     call_kwargs = fake_client.chat_postMessage.call_args.kwargs
     assert call_kwargs["channel"] == "CTEAM"
     assert "<@U_TEAM>" in call_kwargs["blocks"][2]["elements"][0]["text"]
@@ -665,15 +659,11 @@ def test_dispatch_records_the_notification_thread_for_the_report(org_and_team, t
 
 
 @pytest.mark.django_db
-@pytest.mark.parametrize(("min_priority", "expected_sent"), [(None, 1), ("P1", 0), ("P2", 1)])
-def test_dispatch_falls_back_to_team_channel_without_suggested_reviewers(org_and_team, min_priority, expected_sent):
+def test_dispatch_falls_back_to_team_channel_without_suggested_reviewers(org_and_team):
     org, team = org_and_team
     creator = _make_reviewer_user(org, "creator@example.com", "creator-bot")
     _make_slack_integration(team, creator)
     _set_team_channel(team, "CTEAM|#posthog-signals")
-    config = SignalTeamConfig.objects.get(team=team)
-    config.default_slack_notification_min_priority = min_priority
-    config.save()
     report = _make_ready_report(team, priority=AutonomyPriority.P2)  # no suggested reviewers
 
     fake_client = MagicMock()
@@ -681,10 +671,9 @@ def test_dispatch_falls_back_to_team_channel_without_suggested_reviewers(org_and
         slack_cls.return_value.client = fake_client
         sent = dispatch_inbox_item_notifications(str(report.id), team.id)
 
-    assert sent == expected_sent
-    assert fake_client.chat_postMessage.call_count == expected_sent
-    if not expected_sent:
-        return
+    # No suggested reviewer, but a channel is configured → still delivered, with no reviewers section.
+    assert sent == 1
+    assert fake_client.chat_postMessage.call_count == 1
     assert fake_client.chat_postMessage.call_args.kwargs["channel"] == "CTEAM"
     assert "Suggested owner" not in json.dumps(fake_client.chat_postMessage.call_args.kwargs["blocks"])
 
@@ -859,15 +848,12 @@ def test_dispatch_does_not_offer_implement_for_a_plan_parent(org_and_team, trigg
 
 
 @pytest.mark.django_db
-@pytest.mark.parametrize(("min_priority", "expected_sent"), [(None, 1), ("", 1), ("P2", 0), ("P4", 0)])
-def test_dispatch_notifies_requires_human_input_report_without_priority(org_and_team, min_priority, expected_sent):
+def test_dispatch_notifies_requires_human_input_report_without_priority(org_and_team):
     org, team = org_and_team
     reviewer = _make_reviewer_user(org, "rhi@example.com", "rhi-bot")
     _make_slack_integration(team, reviewer)
     _set_team_channel(team, "CTEAM|#posthog-signals")
-    config = SignalTeamConfig.objects.get(team=team)
-    config.default_slack_notification_min_priority = min_priority
-    config.save()
+    # Actionable (requires_human_input) with no priority but a resolvable reviewer → still notifies.
     report = _make_ready_report(
         team, actionability=ActionabilityChoice.REQUIRES_HUMAN_INPUT, priority=None, suggested_logins=["rhi-bot"]
     )
@@ -880,10 +866,8 @@ def test_dispatch_notifies_requires_human_input_report_without_priority(org_and_
         slack_cls.return_value.client = fake_client
         sent = dispatch_inbox_item_notifications(str(report.id), team.id)
 
-    assert sent == expected_sent
-    assert fake_client.chat_postMessage.call_count == expected_sent
-    if expected_sent:
-        assert fake_client.chat_postMessage.call_args.kwargs["channel"] == "CTEAM"
+    assert sent == 1
+    assert fake_client.chat_postMessage.call_args.kwargs["channel"] == "CTEAM"
 
 
 @pytest.mark.django_db
@@ -955,8 +939,7 @@ def test_dispatch_groups_own_and_fallback_reviewers_sharing_a_channel(org_and_te
 
 
 @pytest.mark.django_db
-@pytest.mark.parametrize(("min_priority", "expected_sent"), [(None, 2), ("P1", 1), ("P2", 2)])
-def test_dispatch_posts_team_channel_when_reviewer_has_own_channel(org_and_team, min_priority, expected_sent):
+def test_dispatch_posts_team_channel_when_reviewer_has_own_channel(org_and_team):
     org, team = org_and_team
     user = _make_reviewer_user(org, "own-only@example.com", "own-only-bot")
     integration = _make_slack_integration(team, user)
@@ -966,9 +949,6 @@ def test_dispatch_posts_team_channel_when_reviewer_has_own_channel(org_and_team,
         slack_notification_channel="CUSER|#me",
     )
     _set_team_channel(team, "CTEAM|#posthog-signals")
-    config = SignalTeamConfig.objects.get(team=team)
-    config.default_slack_notification_min_priority = min_priority
-    config.save()
     report = _make_ready_report(team, priority=AutonomyPriority.P2, suggested_logins=["own-only-bot"])
 
     fake_client = MagicMock()
@@ -982,12 +962,11 @@ def test_dispatch_posts_team_channel_when_reviewer_has_own_channel(org_and_team,
         slack_cls.return_value.client = fake_client
         sent = dispatch_inbox_item_notifications(str(report.id), team.id)
 
-    assert sent == expected_sent
+    assert sent == 2
     posts = {c.kwargs["channel"]: c.kwargs["blocks"] for c in fake_client.chat_postMessage.call_args_list}
-    assert set(posts) == ({"CUSER", "CTEAM"} if expected_sent == 2 else {"CUSER"})
+    assert set(posts) == {"CUSER", "CTEAM"}
     assert posts["CUSER"][2]["elements"][0]["text"] == "🟡 *P2* · 👤 Suggested owner: <@U_OWN>"
-    if expected_sent == 2:
-        assert posts["CTEAM"][2]["elements"][0]["text"] == "🟡 *P2* · 👤 Suggested owner: Reviewer Bot"
+    assert posts["CTEAM"][2]["elements"][0]["text"] == "🟡 *P2* · 👤 Suggested owner: Reviewer Bot"
 
 
 @pytest.mark.django_db

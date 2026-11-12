@@ -48,14 +48,10 @@ def create_copy_batch_export(
 
 @pytest.mark.parametrize("field_name", ["authorization", "bucket_credentials"])
 @pytest.mark.parametrize(
-    "patch_kind, expected_status",
-    [
-        ("omit", status.HTTP_400_BAD_REQUEST),
-        ("unchanged", status.HTTP_400_BAD_REQUEST),
-        ("integration", status.HTTP_200_OK),
-    ],
+    "patch_kind",
+    ["omit", "bucket", "empty_copy_inputs", "empty_credentials", "unchanged", "integration"],
 )
-def test_patching_redshift_batch_export_with_stored_inline_copy_credentials(
+def test_can_patch_redshift_batch_export_with_legacy_copy_credentials(
     client: HttpClient,
     team: Team,
     user: User,
@@ -63,7 +59,6 @@ def test_patching_redshift_batch_export_with_stored_inline_copy_credentials(
     aws_redshift_integration: IntegrationRecord,
     field_name: str,
     patch_kind: str,
-    expected_status: int,
 ) -> None:
     batch_export = create_copy_batch_export(
         client,
@@ -81,13 +76,19 @@ def test_patching_redshift_batch_export_with_stored_inline_copy_credentials(
     destination = (
         BatchExport.objects.select_related("destination").get(id=batch_export["id"], team_id=team.id).destination
     )
-    stored_credentials = {"aws_access_key_id": "test-access-key", "aws_secret_access_key": "test-secret-key"}
-    destination.config["copy_inputs"][field_name] = stored_credentials
+    legacy_credentials = {"aws_access_key_id": "test-access-key", "aws_secret_access_key": "test-secret-key"}
+    destination.config["copy_inputs"][field_name] = legacy_credentials
     destination.save()
 
     config: dict[str, Any] = {"table_name": "updated_events"}
-    if patch_kind == "unchanged":
-        config["copy_inputs"] = {field_name: stored_credentials}
+    if patch_kind == "bucket":
+        config["copy_inputs"] = {"s3_bucket": "updated-test-bucket"}
+    elif patch_kind == "empty_copy_inputs":
+        config["copy_inputs"] = {}
+    elif patch_kind == "empty_credentials":
+        config["copy_inputs"] = {field_name: {}}
+    elif patch_kind == "unchanged":
+        config["copy_inputs"] = {field_name: legacy_credentials}
     elif patch_kind == "integration":
         config["copy_inputs"] = {field_name: aws_s3_integration.id}
 
@@ -97,17 +98,18 @@ def test_patching_redshift_batch_export_with_stored_inline_copy_credentials(
         batch_export["id"],
         {"destination": {"type": "Redshift", "config": config, "integration": destination.integration_id}},
     )
-    assert response.status_code == expected_status, response.json()
+    assert response.status_code == status.HTTP_200_OK, response.json()
 
     destination.refresh_from_db()
-    if expected_status == status.HTTP_200_OK:
-        assert destination.config["table_name"] == "updated_events"
+    assert destination.config["table_name"] == "updated_events"
+    if patch_kind == "bucket":
+        assert destination.config["copy_inputs"]["s3_bucket"] == "updated-test-bucket"
+    if patch_kind == "integration":
         assert int(destination.config["copy_inputs"][field_name]) == aws_s3_integration.id
+        batch_export = get_batch_export_ok(client, team.pk, batch_export["id"])
+        assert batch_export["destination"]["config"]["copy_inputs"][field_name] == aws_s3_integration.id
     else:
-        detail = response.json()["detail"]
-        assert "Inline AWS access keys are no longer accepted" in detail
-        assert all(value not in detail for value in stored_credentials.values())
-        assert destination.config["copy_inputs"][field_name] == stored_credentials
+        assert destination.config["copy_inputs"][field_name] == legacy_credentials
 
 
 @pytest.mark.parametrize(
@@ -377,4 +379,4 @@ def test_updating_redshift_batch_export_keeps_its_integration(
     if expected_status == status.HTTP_200_OK:
         assert response.json()["destination"]["integration"] == aws_redshift_integration.id
     else:
-        assert response.json()["detail"] == "Integration is required for Redshift batch exports"
+        assert response.json()["detail"].startswith("Cannot remove the integration from a Redshift batch export")

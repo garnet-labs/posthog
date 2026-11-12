@@ -305,7 +305,6 @@ mod tests {
                 timestamp: chrono::Utc::now(),
                 is_cookieless_mode: false,
                 historical_migration: false,
-                options: None,
             }),
             timestamp: std::time::SystemTime::now(),
             original_headers: Some(headers), // stub orig headers for testing

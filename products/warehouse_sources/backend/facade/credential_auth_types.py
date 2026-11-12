@@ -579,7 +579,6 @@ CREDENTIAL_AUTH_TYPES: Mapping[str, str] = {
     "gorgias": "credentials",
     "grafana": "credentials",
     "grafana-irm": "credentials",
-    "grain": "credentials",
     "granola": "token",
     "greenhouse": "credentials",
     "greyt-hr": "credentials",

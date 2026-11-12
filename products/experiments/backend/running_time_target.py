@@ -18,7 +18,6 @@ from pydantic import ValidationError
 from posthog.schema import (
     ExperimentFunnelMetric,
     ExperimentMeanMetric,
-    ExperimentQuantileMetric,
     ExperimentQueryResponse,
     ExperimentStatsBaseValidated,
 )
@@ -50,7 +49,6 @@ from products.experiments.backend.setup_context import PRODUCT_DEFAULT_MINIMUM_D
 from products.experiments.stats.shared.cuped import cuped_adjust
 from products.experiments.stats.shared.statistics import (
     ProportionStatistic,
-    QuantileStatistic,
     RatioStatistic,
     SampleMeanStatistic,
     StatisticError,
@@ -315,9 +313,6 @@ def project_outlook(
 def _sizing(
     metric: ExperimentMetric, response: ExperimentQueryResponse, split: Split, confidence_level: float
 ) -> _Sizing | None:
-    # A quantile variance is per event while the sizing counts users, so the two cannot be combined.
-    if isinstance(metric, ExperimentQuantileMetric):
-        return None
     baseline = response.baseline
     if baseline is None or baseline.number_of_samples < 2:
         return None
@@ -383,7 +378,7 @@ def _running_time_calculation(experiment: Experiment) -> dict:
 
 def _comparison_variance(
     metric: ExperimentMetric,
-    control: SampleMeanStatistic | ProportionStatistic | RatioStatistic | QuantileStatistic,
+    control: SampleMeanStatistic | ProportionStatistic | RatioStatistic,
     baseline: ExperimentStatsBaseValidated,
     variant: ExperimentStatsBaseValidated,
 ) -> ComparisonVariance:
@@ -425,8 +420,8 @@ def _traffic_shares(split: Split, control_key: str, variant_keys: list[str]) -> 
     return {key: percentage / total for key, percentage in served.items()}
 
 
-def _value(statistic: SampleMeanStatistic | ProportionStatistic | RatioStatistic | QuantileStatistic) -> float:
-    if isinstance(statistic, SampleMeanStatistic | QuantileStatistic):
+def _value(statistic: SampleMeanStatistic | ProportionStatistic | RatioStatistic) -> float:
+    if isinstance(statistic, SampleMeanStatistic):
         return statistic.mean
     if isinstance(statistic, ProportionStatistic):
         return statistic.proportion

@@ -4367,7 +4367,6 @@ def _to_account_notebook_view(notebook: "notebook_contracts.AccountNotebook") ->
         created_by=_notebook_user_to_basic_info(notebook.created_by),
         last_modified_at=notebook.last_modified_at,
         last_modified_by=_notebook_user_to_basic_info(notebook.last_modified_by),
-        tags=list(notebook.tags),
     )
 
 
@@ -4979,38 +4978,15 @@ def list_account_notebooks(
     *,
     search: str | None = None,
     order: str | None = None,
-    tags: list[str] | None = None,
-    created_by_ids: list[int] | None = None,
 ) -> list[contracts.AccountNotebookView] | None:
     """Internal notebooks linked to an accessible account. Optionally full-text filtered by
-    ``search`` (title + content), narrowed to notes carrying any of ``tags`` or written by any of
-    ``created_by_ids``, and sorted by ``order``; defaults to newest first. None when the parent
-    account isn't accessible (→ 404)."""
+    ``search`` (title + content) and sorted by ``order`` (creation date or author); defaults to
+    newest first. None when the parent account isn't accessible (→ 404)."""
     if get_accessible_account_id(team_id, account_id, user_access_control) is None:
         return None
     return [
-        _to_account_notebook_view(n)
-        for n in notebooks.list_account_notebooks(
-            account_id, search=search, order=order, tags=tags, created_by_ids=created_by_ids
-        )
+        _to_account_notebook_view(n) for n in notebooks.list_account_notebooks(account_id, search=search, order=order)
     ]
-
-
-def update_account_notebook(
-    *,
-    team_id: int,
-    account_id: str,
-    short_id: str,
-    input: contracts.UpdateAccountNotebookInput,
-    user: "User",
-    user_access_control: "UserAccessControl",
-) -> contracts.AccountNotebookView | None:
-    """Replace the tags of an internal notebook linked to an accessible account. None when the
-    account isn't accessible or no such notebook exists (→ 404)."""
-    if get_accessible_account_id(team_id, account_id, user_access_control) is None:
-        return None
-    updated = notebooks.update_account_notebook(account_id, short_id, tags=input.tags)
-    return _to_account_notebook_view(updated) if updated is not None else None
 
 
 def list_account_notes_for_view(
@@ -5022,14 +4998,12 @@ def list_account_notes_for_view(
     account_id: UUID | str | None = None,
     created_by_ids: list[int] | None = None,
     assigned_to_ids: list[int] | None = None,
-    tags: list[str] | None = None,
-    order: str | None = None,
 ) -> Page[contracts.AccountNoteView]:
     """Team-wide account notes (internal notebooks linked to accounts), newest-modified first,
     restricted to accounts the caller can read. ``search`` matches note title/content (full-text)
     and account name (substring). ``account_id`` narrows to one account, ``created_by_ids`` to
     notes authored by the given users, ``assigned_to_ids`` to notes on accounts where one of the
-    given users actively holds a relationship, ``tags`` to notes carrying any of the tags."""
+    given users actively holds a relationship."""
     accounts = _accounts_queryset(team_id, user_access_control)
     if assigned_to_ids:
         # "Assigned to" means any active relationship, matching the accounts list HogQL
@@ -5046,8 +5020,6 @@ def list_account_notes_for_view(
         account_id=account_id,
         created_by_ids=created_by_ids,
         search=search,
-        tags=tags,
-        order=order,
         offset=page.offset,
         limit=page.limit,
     )
@@ -5060,7 +5032,6 @@ def list_account_notes_for_view(
             account_id=note.account_id,
             account_name=note.account_name,
             created_by=_notebook_user_to_basic_info(note.created_by),
-            tags=list(note.tags),
         )
         for note in notes
     ]
@@ -5093,21 +5064,15 @@ def create_account_notebook(
     if get_accessible_account_id(team_id, account_id, user_access_control) is None:
         return None
     content = input.synthesized_content if input.synthesized_content is not None else input.content
-    with transaction.atomic():
-        created = notebooks.create_account_notebook(
-            team_id,
-            account_id,
-            title=input.title,
-            content=content,
-            text_content=input.text_content,
-            created_by_id=user.id,
-            last_modified_by_id=user.id,
-        )
-        tags: list[str] = []
-        if input.tags:
-            updated = notebooks.update_account_notebook(account_id, created.short_id, tags=input.tags)
-            if updated is not None:
-                tags = list(updated.tags)
+    created = notebooks.create_account_notebook(
+        team_id,
+        account_id,
+        title=input.title,
+        content=content,
+        text_content=input.text_content,
+        created_by_id=user.id,
+        last_modified_by_id=user.id,
+    )
     # The creator is also the (only) modifier of a just-created notebook, so the user the
     # caller already holds is both `created_by` and `last_modified_by` — no extra fetch.
     author = _to_user_basic_info(user)
@@ -5121,7 +5086,6 @@ def create_account_notebook(
         created_by=author,
         last_modified_at=created.last_modified_at,
         last_modified_by=author,
-        tags=tags,
     )
 
 

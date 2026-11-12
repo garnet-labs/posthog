@@ -1,6 +1,7 @@
+import time
 import uuid
-from datetime import UTC, datetime
 
+import pytest
 from posthog.test.base import APIBaseTest, ClickhouseTestMixin, snapshot_clickhouse_queries
 
 from posthog.schema import VectorSearchQuery
@@ -123,6 +124,7 @@ class TestVectorSearchQueryRunner(ClickhouseTestMixin, APIBaseTest):
         self.assertEqual(len(response.results), 1)
         self.assertEqual(response.results[0].id, id2)
 
+    @pytest.mark.flaky(reruns=2)
     def test_vector_search_selects_max_version(self):
         query = VectorSearchQuery(embedding=[2, 4])
         id = str(uuid.uuid4())
@@ -134,7 +136,6 @@ class TestVectorSearchQueryRunner(ClickhouseTestMixin, APIBaseTest):
                 id=id,
                 vector=[1, 1],
                 text="example text",
-                timestamp=datetime(2026, 1, 1, tzinfo=UTC),
             ),
         ]
         bulk_create_pg_embeddings(vectors)
@@ -142,6 +143,10 @@ class TestVectorSearchQueryRunner(ClickhouseTestMixin, APIBaseTest):
         response = VectorSearchQueryRunner(query, self.team).calculate()
         self.assertEqual(len(response.results), 1)
         self.assertEqual(response.results[0].id, id)
+
+        # pg_embeddings.timestamp defaults to NOW() with second precision, and the runner picks the latest
+        # version by argMax(vector, timestamp); a version written in the same second can tie with version 1.
+        time.sleep(1.1)
 
         # Version 2
         vectors = [
@@ -151,7 +156,6 @@ class TestVectorSearchQueryRunner(ClickhouseTestMixin, APIBaseTest):
                 id=id,
                 vector=[4, 2],
                 text="example text 2",
-                timestamp=datetime(2026, 1, 1, 0, 1, tzinfo=UTC),
             ),
         ]
         bulk_create_pg_embeddings(vectors)

@@ -6,10 +6,9 @@ import { useAuthStore } from '@/auth/authStore'
 import { setSessionTokens } from '@/auth/tokens'
 import { insightSnapshot } from '@/model/adapters/insightSnapshot'
 import { webOverviewSnapshot } from '@/model/adapters/webOverview'
-import { dashboardQueryKey, insightQueryKey, webQueryKey } from './items'
+import { dashboardQueryKey, insightQueryKey, webOverviewQueryKey } from './items'
 import { viewsQueue } from './refreshQueue'
-import { useDashboardScreen, useInsightScreen } from './viewHooks'
-import { useWebAnalyticsScreen } from './webAnalytics/hooks'
+import { useDashboardScreen, useInsightScreen, useWebAnalyticsScreen } from './viewHooks'
 
 let mockScope = { host: 'https://example.com', projectId: 1 }
 jest.mock('expo-router', () => ({ useFocusEffect: () => {}, useIsFocused: () => false }))
@@ -76,7 +75,7 @@ describe('retained chart identity', () => {
             })
             const webQuery = webOverviewQuery({ dateFrom: '-7d', dateTo: null, compare: true })
             client.setQueryData(
-                webQueryKey(mockScope, webQuery),
+                webOverviewQueryKey(mockScope, webQuery),
                 webOverviewSnapshot({ results: [{ key: 'visitors', kind: 'unit', value: 42 }] }, undefined, Date.now())
             )
             const { result, rerender, unmount } = renderHook(

@@ -99,7 +99,7 @@ class PersonPropertyRowSink:
                 endpoint_override=settings.OBJECT_STORAGE_ENDPOINT,
             )
         else:
-            self._fs_cache = pa_fs.S3FileSystem(region=settings.DATA_WAREHOUSE_S3_REGION)
+            self._fs_cache = pa_fs.S3FileSystem()
 
         return self._fs_cache
 

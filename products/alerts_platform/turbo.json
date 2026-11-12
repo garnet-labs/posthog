@@ -8,9 +8,7 @@
                 "backend/routes.py",
                 "backend/models/**",
                 "backend/temporal/**",
-                "backend/migrations/**",
-                "backend/activity_logging.py",
-                "backend/apps.py"
+                "backend/migrations/**"
             ],
             "outputs": [],
             "cache": true

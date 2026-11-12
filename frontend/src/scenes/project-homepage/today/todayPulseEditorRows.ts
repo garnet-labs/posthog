@@ -1,10 +1,7 @@
-import type { HiddenPulseNumberApi, PulsePinApi, PulseSlotApi } from 'products/today/frontend/generated/api.schemas'
-
-export const IGNORED_TOGGLE = 'today-pulse-editor:ignored'
-const IGNORED_PREFIX = 'today-pulse-editor:ignored:'
+import type { PulsePinApi, PulseSlotApi } from 'products/today/frontend/generated/api.schemas'
 
 export interface EditorGroup {
-    kind: 'pinned' | 'others' | 'ignored'
+    pinned: boolean
     items: string[]
 }
 
@@ -56,7 +53,6 @@ export function editorNotes(
 interface EditorRows {
     groups: EditorGroup[]
     rowByKey: Map<string, PulsePinApi>
-    ignoredByValue: Map<string, HiddenPulseNumberApi>
     shownKeys: Set<string>
     rowCount: number
 }
@@ -69,8 +65,6 @@ export function editorRows({
     pinnedThisTime,
     recentInsights,
     searchInsights,
-    ignored,
-    ignoredOpen,
 }: {
     search: string
     pulsePins: PulsePinApi[]
@@ -79,42 +73,29 @@ export function editorRows({
     pinnedThisTime: PulsePinApi[]
     recentInsights: PulsePinApi[]
     searchInsights: PulsePinApi[]
-    ignored: HiddenPulseNumberApi[]
-    ignoredOpen: boolean
 }): EditorRows {
-    const ignoredKeys = new Set(ignored.map((row) => row.key))
-    const others = withoutKeys(othersOnOpen, ignoredKeys)
-    const baseKeys = new Set([...pinnedOnOpen, ...others].map((row) => row.key))
-    const recent = withoutKeys(
-        recentInsights,
-        new Set([...baseKeys, ...ignoredKeys, ...pinnedThisTime.map((row) => row.key)])
-    )
+    const baseKeys = new Set([...pinnedOnOpen, ...othersOnOpen].map((row) => row.key))
+    const recent = withoutKeys(recentInsights, new Set([...baseKeys, ...pinnedThisTime.map((row) => row.key)]))
     const shownKeys = new Set([...baseKeys, ...recent.map((row) => row.key)])
     const extraPinned = withoutKeys(uniqueRows([...pinnedThisTime, ...pulsePins]), shownKeys)
     const pinnedRows = [...pinnedOnOpen, ...extraPinned]
-    const results = searchResults(search, [...pinnedRows, ...others, ...recent], searchInsights)
+    const results = searchResults(search, [...pinnedRows, ...othersOnOpen, ...recent], searchInsights)
     const rowByKey = new Map(
-        [...pulsePins, ...pinnedRows, ...others, ...recent, ...results].map((row) => [row.key, row])
+        [...pulsePins, ...pinnedRows, ...othersOnOpen, ...recent, ...results].map((row) => [row.key, row])
     )
-    const ignoredByValue = new Map(ignored.map((row) => [`${IGNORED_PREFIX}${row.key}`, row]))
     const groups: EditorGroup[] = (
         search.trim()
-            ? [{ kind: 'others' as const, items: results.map((row) => row.key) }]
+            ? [{ pinned: false, items: results.map((row) => row.key) }]
             : [
-                  { kind: 'pinned' as const, items: pinnedRows.map((row) => row.key) },
-                  { kind: 'others' as const, items: [...others, ...recent].map((row) => row.key) },
-                  {
-                      kind: 'ignored' as const,
-                      items: ignored.length ? [IGNORED_TOGGLE, ...(ignoredOpen ? [...ignoredByValue.keys()] : [])] : [],
-                  },
+                  { pinned: true, items: pinnedRows.map((row) => row.key) },
+                  { pinned: false, items: [...othersOnOpen, ...recent].map((row) => row.key) },
               ]
     ).filter((group) => group.items.length > 0)
     return {
         groups,
         rowByKey,
-        ignoredByValue,
         shownKeys: new Set([...shownKeys, ...pinnedRows.map((row) => row.key)]),
-        rowCount: groups.reduce((count, group) => count + (group.kind === 'ignored' ? 0 : group.items.length), 0),
+        rowCount: groups.reduce((count, group) => count + group.items.length, 0),
     }
 }
 

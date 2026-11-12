@@ -39,9 +39,6 @@ export interface contentAutopilotPromptsOverviewLogicActions {
     setWorkspaceTab: (workspaceTab: ContentAutopilotWorkspaceTab) => {
         workspaceTab: ContentAutopilotWorkspaceTab
     } // contentAutopilotLogic
-    openPromptDetail: (promptId: string) => {
-        promptId: string
-    } // contentAutopilotPromptDetailLogic
     savePromptEditSuccess: (prompt: import('products/web_analytics/frontend/generated/api.schemas').AEOPromptApi) => {
         prompt: import('products/web_analytics/frontend/generated/api.schemas').AEOPromptApi
     } // contentAutopilotPromptDetailLogic
@@ -82,9 +79,6 @@ export interface contentAutopilotPromptsOverviewLogicActions {
             value: true
         }
     }
-    openOverviewSearchPrompt: (promptId: string) => {
-        promptId: string
-    }
     selectOverviewTopic: (topic: string) => {
         topic: string
     }
@@ -116,7 +110,7 @@ export const contentAutopilotPromptsOverviewLogic = kea<contentAutopilotPromptsO
             contentAutopilotPromptsLogic,
             ['setPromptsTopic', 'setPromptActiveSuccess', 'addPromptsSuccess'],
             contentAutopilotPromptDetailLogic,
-            ['setPromptArchivedSuccess', 'savePromptEditSuccess', 'openPromptDetail'],
+            ['setPromptArchivedSuccess', 'savePromptEditSuccess'],
             contentAutopilotLogic,
             ['setWorkspaceTab'],
         ],
@@ -124,7 +118,6 @@ export const contentAutopilotPromptsOverviewLogic = kea<contentAutopilotPromptsO
     actions({
         loadPromptSetOverview: true,
         selectOverviewTopic: (topic: string) => ({ topic }),
-        openOverviewSearchPrompt: (promptId: string) => ({ promptId }),
     }),
     loaders(({ values }) => ({
         overview: [
@@ -188,12 +181,6 @@ export const contentAutopilotPromptsOverviewLogic = kea<contentAutopilotPromptsO
             posthog.capture('web analytics content autopilot prompts overview topic selected')
             actions.setPromptsTopic(topic)
             actions.setWorkspaceTab('prompts')
-        },
-        openOverviewSearchPrompt: ({ promptId }) => {
-            // pinned: analytics event name, renaming it breaks dashboards
-            posthog.capture('web analytics content autopilot prompts overview search prompt opened')
-            actions.setWorkspaceTab('prompts')
-            actions.openPromptDetail(promptId)
         },
         // Adding, editing, turning on or off, or archiving a prompt changes the counts.
         setPromptActiveSuccess: () => actions.loadPromptSetOverview(),

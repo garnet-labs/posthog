@@ -1,4 +1,3 @@
-from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from posthog.schema import (
@@ -72,7 +71,7 @@ class TraceSpansAttributeBreakdownQueryRunner(
         # a value collapses the facet to one row), while all other filters still apply.
         key = self.query.breakdownKey
         if self.query.breakdownType == TraceSpanBreakdownType.SPAN:
-            self.filters = replace(self.filters, span=tuple(f for f in self.filters.span if f.key != key))
+            self.span_filters = [f for f in self.span_filters if f.key != key]
             if key == "service_name":
                 # The dedicated service filter targets the same column as the breakdown. Swap in a
                 # copy rather than mutating in place — the caller's query object must keep
@@ -81,13 +80,9 @@ class TraceSpansAttributeBreakdownQueryRunner(
         elif self.query.breakdownType == TraceSpanBreakdownType.SPAN_ATTRIBUTE:
             # Extraction suffixed the keys with their physical-map type (`__str` / `__float`).
             suffixed = {f"{key}__str", f"{key}__float"}
-            self.filters = replace(
-                self.filters, span_attribute=tuple(f for f in self.filters.span_attribute if f.key not in suffixed)
-            )
+            self.span_attribute_filters = [f for f in self.span_attribute_filters if f.key not in suffixed]
         else:
-            self.filters = replace(
-                self.filters, resource_attribute=tuple(f for f in self.filters.resource_attribute if f.key != key)
-            )
+            self.resource_attribute_filters = [f for f in self.resource_attribute_filters if f.key != key]
 
     def _calculate(self) -> TraceSpansAttributeBreakdownQueryResponse:
         current_rows, previous_rows = self._run_with_compare()

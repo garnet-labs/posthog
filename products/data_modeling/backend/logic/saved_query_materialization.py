@@ -29,7 +29,6 @@ from products.data_modeling.backend.logic.incremental_eligibility import (
 )
 from products.data_modeling.backend.logic.node_frequency import (
     SavedQueryFrequencyBounds,
-    declared_targets_by_saved_query,
     declared_targets_from_nodes,
     saved_query_target_bounds,
 )
@@ -74,7 +73,7 @@ def enable_saved_query_materialization(
     saved_query_id: UUID | str,
     *,
     user: User,
-    frequency_target: timedelta | None,
+    sync_frequency_interval: timedelta | None,
     visible_blocker_names: VisibleBlockerNames,
     was_impersonated: bool,
     incremental_config: IncrementalConfigUpdate = KEEP_INCREMENTAL_CONFIG,
@@ -85,7 +84,7 @@ def enable_saved_query_materialization(
     _enable_materialization(
         saved_query,
         user=user,
-        frequency_target=frequency_target,
+        sync_frequency_interval=sync_frequency_interval,
         visible_blocker_names=visible_blocker_names,
         was_impersonated=was_impersonated,
         incremental_config=incremental_config,
@@ -161,7 +160,7 @@ def _enable_materialization(
     saved_query: DataWarehouseSavedQuery,
     *,
     user: User,
-    frequency_target: timedelta | None,
+    sync_frequency_interval: timedelta | None,
     visible_blocker_names: VisibleBlockerNames,
     was_impersonated: bool,
     incremental_config: IncrementalConfigUpdate,
@@ -173,29 +172,29 @@ def _enable_materialization(
     _require_edit_access(saved_query, user)
     assert_user_can_read_query(saved_query.query, saved_query.team_id, user)
 
-    if frequency_target is not None:
+    if sync_frequency_interval is not None:
         # Ask before writing, so the ordinary refusal never has to be undone below. Names only
         # what this caller may read, matching the bounds payload — otherwise one rejected
         # materialize reads back a node they were never shown.
-        _refuse_a_cadence_the_lineage_forbids(saved_query, frequency_target, visible_blocker_names)
+        _refuse_a_cadence_the_lineage_forbids(saved_query, sync_frequency_interval, visible_blocker_names)
 
-    previous_target = declared_targets_by_saved_query(saved_query.team_id, [saved_query.pk]).get(str(saved_query.pk))
+    previous_interval = saved_query.sync_frequency_interval
     previously_materialized = saved_query.is_materialized
     previous_incremental_config = saved_query.incremental_config
     if incremental_config is not KEEP_INCREMENTAL_CONFIG:
         _store_incremental_config(saved_query, incremental_config, user)
-    _save_materialization(saved_query, is_materialized=True)
+    _save_materialization(saved_query, is_materialized=True, sync_frequency_interval=sync_frequency_interval)
 
     def restore_previous_state() -> None:
-        _save_materialization(saved_query, is_materialized=previously_materialized)
+        _save_materialization(
+            saved_query, is_materialized=previously_materialized, sync_frequency_interval=previous_interval
+        )
         if incremental_config is not KEEP_INCREMENTAL_CONFIG:
             _restore_incremental_config(saved_query, previous_incremental_config)
 
     # If this fails, it will set is_materialized = False
     try:
-        saved_query.schedule_materialization(
-            frequency_target=frequency_target, trigger_immediate_run=True, triggered_by_id=user.pk
-        )
+        saved_query.schedule_materialization(trigger_immediate_run=True, triggered_by_id=user.pk)
     except (UnsatisfiableFrequencyError, UnsupportedFrequencyTargetError) as error:
         # The check above already refused every cadence the lineage forbids, so reaching here
         # means the lineage moved mid-request. Say so plainly rather than forwarding a message
@@ -221,8 +220,8 @@ def _enable_materialization(
         saved_query,
         user=user,
         was_impersonated=was_impersonated,
-        previous_target=previous_target,
-        frequency_target=frequency_target,
+        previous_interval=previous_interval,
+        sync_frequency_interval=sync_frequency_interval,
         trigger=trigger,
     )
 
@@ -235,14 +234,14 @@ def _require_edit_access(saved_query: DataWarehouseSavedQuery, user: User) -> No
 
 def _refuse_a_cadence_the_lineage_forbids(
     saved_query: DataWarehouseSavedQuery,
-    frequency_target: timedelta,
+    sync_frequency_interval: timedelta,
     visible_blocker_names: VisibleBlockerNames,
 ) -> None:
     bounds = saved_query_target_bounds(saved_query.team_id, saved_query.pk)
     try:
         check_saved_query_frequency_target(
             saved_query,
-            frequency_target,
+            sync_frequency_interval,
             visible_names=visible_blocker_names(bounds) if bounds else {},
         )
     except (UnsatisfiableFrequencyError, UnsupportedFrequencyTargetError) as error:
@@ -293,9 +292,12 @@ def _stored_incremental_config(incremental_config: IncrementalConfig) -> dict[st
     }
 
 
-def _save_materialization(saved_query: DataWarehouseSavedQuery, *, is_materialized: bool | None) -> None:
+def _save_materialization(
+    saved_query: DataWarehouseSavedQuery, *, is_materialized: bool | None, sync_frequency_interval: timedelta | None
+) -> None:
+    saved_query.sync_frequency_interval = sync_frequency_interval
     saved_query.is_materialized = is_materialized
-    saved_query.save(update_fields=["is_materialized"])
+    saved_query.save(update_fields=["sync_frequency_interval", "is_materialized"])
 
 
 def _mark_nodes_materialized(saved_query: DataWarehouseSavedQuery) -> None:
@@ -312,8 +314,8 @@ def _log_materialization_enabled(
     *,
     user: User,
     was_impersonated: bool,
-    previous_target: timedelta | None,
-    frequency_target: timedelta | None,
+    previous_interval: timedelta | None,
+    sync_frequency_interval: timedelta | None,
     trigger: Trigger | None,
 ) -> None:
     log_activity(
@@ -328,12 +330,11 @@ def _log_materialization_enabled(
             name=saved_query.name,
             changes=[
                 Change(
-                    # The activity describer in the frontend keys cadence changes on this field name.
                     field="sync_frequency_interval",
                     action="changed",
                     type=SAVED_QUERY_ACTIVITY_SCOPE,
-                    before=str(previous_target) if previous_target else None,
-                    after=str(frequency_target),
+                    before=str(previous_interval) if previous_interval else None,
+                    after=str(sync_frequency_interval),
                 ),
             ],
             trigger=trigger,
