@@ -9,7 +9,7 @@ name: Garnet Runtime Visibility
 # connection with the execution chain that reached it, bound to the head
 # commit, compared with the last recorded master run.
 #
-# The last job is the dependency proof. It reads the finalized record for this
+# The last job is the Garnet install proof. It reads the finalized record for this
 # head from the Garnet App's own PR comment (author `garnet-runtime-review[bot]`,
 # `garnet:commit` equal to the head) through the GitHub API and, only when the
 # App declares nothing new against master, lists the dependency files whose own
@@ -256,7 +256,7 @@ jobs:
                   .venv/bin/python -m pip install -r tools/infra-scripts/clitools/requirements.txt
 
     dependency-proof:
-        name: Dependency proof
+        name: Garnet install proof
         # The record finalizes in the sensor's post step, after each install job's
         # last step, so the proof reads it from a job of its own. No checkout: the
         # only files this job trusts are this workflow and the record.
