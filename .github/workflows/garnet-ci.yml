@@ -80,7 +80,7 @@ jobs:
         # to authenticate with. Skip the whole job there: an unrecorded install
         # is not a cheaper version of this job, it is the absence of it.
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-        runs-on: ubuntu-latest
+        runs-on: ubuntu-24.04
         timeout-minutes: 30
         steps:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -113,7 +113,7 @@ jobs:
     py-install:
         name: Python dependency install (recorded)
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-        runs-on: ubuntu-latest
+        runs-on: ubuntu-24.04
         timeout-minutes: 30
         steps:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -146,7 +146,7 @@ jobs:
     desktop-install:
         name: Desktop dependency install (recorded)
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-        runs-on: ubuntu-latest
+        runs-on: ubuntu-24.04
         timeout-minutes: 30
         defaults:
             run:
@@ -178,7 +178,7 @@ jobs:
     gateway-install:
         name: LLM gateway dependency install (recorded)
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-        runs-on: ubuntu-latest
+        runs-on: ubuntu-24.04
         timeout-minutes: 30
         defaults:
             run:
@@ -208,7 +208,7 @@ jobs:
     acceptance-requirements-install:
         name: Acceptance tests requirements install (recorded)
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-        runs-on: ubuntu-latest
+        runs-on: ubuntu-24.04
         timeout-minutes: 30
         steps:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -233,7 +233,7 @@ jobs:
     clitools-requirements-install:
         name: CLI tools requirements install (recorded)
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-        runs-on: ubuntu-latest
+        runs-on: ubuntu-24.04
         timeout-minutes: 30
         steps:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -264,7 +264,7 @@ jobs:
         # Runs after a failed install too: the record then finalizes as changed or
         # incomplete and the log says why nothing was attested.
         if: ${{ !cancelled() && github.event_name == 'pull_request' }}
-        runs-on: ubuntu-latest
+        runs-on: ubuntu-24.04
         timeout-minutes: 30
         permissions:
             contents: read
