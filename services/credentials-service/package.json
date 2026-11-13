@@ -20,7 +20,7 @@
     },
     "dependencies": {
         "@hono/node-server": "^2.0.2",
-        "hono": "^4.12.18",
+        "hono": "^4.13.16",
         "jose": "^6.0.10",
         "pino": "^8.6.0",
         "prom-client": "^14.2.0"
