@@ -6069,13 +6069,13 @@ importers:
     dependencies:
       '@hono/node-server':
         specifier: ^2.0.2
-        version: 2.0.2(hono@4.12.24)
+        version: 2.0.2(hono@4.13.16)
       esbuild:
         specifier: ^0.25.11
         version: 0.25.12
       hono:
-        specifier: ^4.12.18
-        version: 4.12.24
+        specifier: ^4.13.16
+        version: 4.13.16
       ioredis:
         specifier: ^4.28.5
         version: 4.28.5(supports-color@10.2.2)
@@ -6118,10 +6118,10 @@ importers:
     dependencies:
       '@hono/node-server':
         specifier: ^2.0.2
-        version: 2.0.2(hono@4.12.24)
+        version: 2.0.2(hono@4.13.16)
       hono:
-        specifier: ^4.12.18
-        version: 4.12.24
+        specifier: ^4.13.16
+        version: 4.13.16
       jose:
         specifier: ^6.0.10
         version: 6.2.3
@@ -6164,7 +6164,7 @@ importers:
     dependencies:
       '@hono/node-server':
         specifier: ^2.0.2
-        version: 2.0.2(hono@4.12.24)
+        version: 2.0.2(hono@4.13.16)
       '@modelcontextprotocol/ext-apps':
         specifier: ^1.5.0
         version: 1.6.0(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.3.6))(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(zod@4.3.6)
@@ -6199,8 +6199,8 @@ importers:
         specifier: ^0.8.2
         version: 0.8.2
       hono:
-        specifier: ^4.12.21
-        version: 4.12.24
+        specifier: ^4.13.16
+        version: 4.13.16
       ioredis:
         specifier: ^4.28.5
         version: 4.28.5(supports-color@10.2.2)
@@ -17751,8 +17751,8 @@ packages:
     resolution: {integrity: sha512-eSmmWE5bZTK2Nou4g0AI3zZ9rswp7GRKoKXS1BLUkvPviOqs4YTN1djQIqrXy9k5gEtdLPy86JjRwsNM9tnDcA==}
     engines: {node: '>=0.10.0'}
 
-  hono@4.12.24:
-    resolution: {integrity: sha512-I36D1s+HgQc55KbhEr4iybfxv/9o1zdpw+XEM6dJa91LqQD0HCoSGdxpRJCZE+aavs87j4V3Ls2OJzq8C/U4iw==}
+  hono@4.13.16:
+    resolution: {integrity: sha512-AOLOEhvrV+iH92xXCnFr/5+3KjPKcI3xP63XJtX5spAnkznPdHijlIsUTpi7/9EhWqrTCekw5c5zh1K+YsVw7A==}
     engines: {node: '>=16.9.0'}
 
   hosted-git-info@2.8.9:
@@ -23616,8 +23616,8 @@ packages:
     resolution: {integrity: sha512-gptHNQghINnc/vTGIk0SOFGFNXw7JVrlRUtConJRlvaw6DuX0wO5Jeko9sWrMBhh+PsYAZ7oXAiOnf/UKogyiw==}
     engines: {node: '>= 10.0.0'}
 
-  unlayer-types@1.532.0:
-    resolution: {integrity: sha512-P17NO2e+ieutWsoush94w7eXURH7myHJsyLP3M76uMTbCV22UOsYqs6C46mqWTMtUyjiPV5rf/RecktVOcg0mA==}
+  unlayer-types@1.537.0:
+    resolution: {integrity: sha512-50B9H7Pk0O9HZPyv8PsYxU+1dyNMJ5sWq271zAgUlRQ5ND+j4E6WytseO2EeXqJdEhSCwVTEX7OTDoCMQjakfw==}
 
   unpipe@1.0.0:
     resolution: {integrity: sha512-pjy2bYhSsufwWlKwPc+l3cN7+wuJlK6uz0YdJEOlQDbl6jo/YlPi4mb8agUkVC8BF7V8NuzeyPNqRksA3hztKQ==}
@@ -27798,13 +27798,13 @@ snapshots:
     dependencies:
       '@hapi/hoek': 9.3.0
 
-  '@hono/node-server@1.19.14(hono@4.12.24)':
+  '@hono/node-server@1.19.14(hono@4.13.16)':
     dependencies:
-      hono: 4.12.24
+      hono: 4.13.16
 
-  '@hono/node-server@2.0.2(hono@4.12.24)':
+  '@hono/node-server@2.0.2(hono@4.13.16)':
     dependencies:
-      hono: 4.12.24
+      hono: 4.13.16
 
   '@humanwhocodes/config-array@0.11.14(supports-color@10.2.2)':
     dependencies:
@@ -28915,7 +28915,7 @@ snapshots:
 
   '@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.3.6)':
     dependencies:
-      '@hono/node-server': 1.19.14(hono@4.12.24)
+      '@hono/node-server': 1.19.14(hono@4.13.16)
       ajv: 8.20.0
       ajv-formats: 3.0.1(ajv@8.20.0)
       content-type: 1.0.5
@@ -28925,7 +28925,7 @@ snapshots:
       eventsource-parser: 3.0.6
       express: 5.2.1(supports-color@10.2.2)
       express-rate-limit: 8.5.2(express@5.2.1(supports-color@10.2.2))
-      hono: 4.12.24
+      hono: 4.13.16
       jose: 6.2.3
       json-schema-typed: 8.0.2
       pkce-challenge: 5.0.0
@@ -38341,7 +38341,7 @@ snapshots:
     dependencies:
       parse-passwd: 1.0.0
 
-  hono@4.12.24: {}
+  hono@4.13.16: {}
 
   hosted-git-info@2.8.9: {}
 
@@ -43819,7 +43819,7 @@ snapshots:
   react-email-editor@1.7.11(react@18.3.1):
     dependencies:
       react: 18.3.1
-      unlayer-types: 1.532.0
+      unlayer-types: 1.537.0
 
   react-grid-layout@2.3.0(react-dom@18.3.1(react@18.3.1))(react@18.3.1):
     dependencies:
@@ -46118,7 +46118,7 @@ snapshots:
 
   universalify@2.0.1: {}
 
-  unlayer-types@1.532.0: {}
+  unlayer-types@1.537.0: {}
 
   unpipe@1.0.0: {}
 
