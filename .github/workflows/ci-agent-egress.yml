@@ -59,6 +59,9 @@ jobs:
 
     images:
         runs-on: ubuntu-24.04
+        permissions:
+          contents: read
+          id-token: write
         timeout-minutes: 15
         defaults:
             run:
@@ -70,6 +73,7 @@ jobs:
                   persist-credentials: false
                   sparse-checkout: products/tasks/services/egress-proxy
                   sparse-checkout-cone-mode: false
+            - uses: garnet-org/action@673a06d87748bec49e4d8df22d371b2a3420aba4 # v2.5.2
             - name: Build runtime images
               run: |
                   docker build --build-arg COMMIT_HASH="$GITHUB_SHA" -t agent-egress-proxy .
