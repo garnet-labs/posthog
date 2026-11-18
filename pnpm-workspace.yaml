@@ -161,6 +161,7 @@ allowBuilds:
     node-gyp: true
     node-rdkafka: true
     protobufjs: true
+    puppeteer: true
     re2: true
     sharp: true
     ssh2: true
@@ -172,7 +173,6 @@ allowBuilds:
     free-email-domains: false
     # Optional dependency of code-inspector-plugin, used only by its AI terminal, which we do not enable.
     node-pty: false
-    puppeteer: false
 
 catalog:
     # Kea ecosystem - state management
