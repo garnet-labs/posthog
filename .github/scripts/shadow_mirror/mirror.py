@@ -179,10 +179,14 @@ class Mirror:
         if count != 1:
             raise ValueError('Unexpected push.branches configuration')
         self.mirrors = {}
+        self.history = {}
         for pr in api.pages(FORK, 'pulls?state=all'):
             marker = MARKER.search(pr.get('body') or '')
             if marker:
-                self.mirrors[int(marker[1])] = pr
+                number = int(marker[1])
+                self.history.setdefault(number, []).append(pr)
+                if number not in self.mirrors or pr['number'] > self.mirrors[number]['number']:
+                    self.mirrors[number] = pr
 
     def tree(self, sha):
         api = self.api
@@ -203,6 +207,18 @@ class Mirror:
     def merge_base(self, pr):
         comparison = self.api.call(SOURCE, f'compare/{pr["base"]["sha"]}...{pr["head"]["sha"]}')
         return comparison['merge_base_commit']['sha']
+
+    def branches(self, number, existing):
+        if existing and existing['state'] == 'open':
+            return existing['base']['ref'], existing['head']['ref']
+        history = getattr(self, 'history', {}).get(number, [existing] if existing else [])
+        revision = 1
+        for pr in history:
+            match = re.fullmatch(rf'shadow/pr/{number}(?:-r(\d+))?', pr['head']['ref'])
+            if match:
+                revision = max(revision, int(match[1] or 1) + 1)
+        suffix = f'-r{revision}' if revision > 1 else ''
+        return f'shadow/base/{number}{suffix}', f'shadow/pr/{number}{suffix}'
 
     def ref(self, name, sha, force=False):
         if force:
@@ -245,6 +261,9 @@ class Mirror:
             return {'status': 'closed' if existing else 'skipped'}
         if pr['draft'] or pr['base']['ref'] != 'master':
             return {'status': 'skipped'}
+        base_branch, head_branch = self.branches(number, existing)
+        if existing and existing['state'] != 'open':
+            existing = None
         upstream_base = self.merge_base(pr)
         if existing and not self.no_open_pr and MARKER.search(existing['body']).groups()[1:] == (pr['head']['sha'], upstream_base):
             return {'status': 'unchanged', 'url': existing['html_url']}
@@ -262,7 +281,6 @@ class Mirror:
             if not section:
                 raise ValueError('Missing workspace packages list')
             workspace = [m.strip().strip("'\"") for m in re.findall(r'(?m)^\s+-\s+([^\n]+)', section[1])]
-        base_branch, head_branch = f'shadow/base/{number}', f'shadow/pr/{number}'
         if existing:
             baseline = existing['base']['sha']
             parent = api.call(FORK, f'git/ref/heads/{head_branch}')['object']['sha']
@@ -311,6 +329,7 @@ class Mirror:
             title_path.write_text(title + '\n', encoding='utf-8')
             body_path.write_text(data['body'] + '\n', encoding='utf-8')
             return {'status': 'ready', 'base': baseline, 'head': head,
+                    'base_ref': base_branch, 'head_ref': head_branch,
                     'title_file': str(title_path), 'body_file': str(body_path)}
         if existing:
             result = api.write(f'pulls/{existing["number"]}', data, 'PATCH')

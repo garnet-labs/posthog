@@ -112,10 +112,33 @@ class DeferredPRTest(unittest.TestCase):
 
     def test_existing_pr_no_open_exports_marker_without_updating_pr(self):
         mirror = self.make_mirror()
-        mirror.mirrors[1] = {'state': 'open', 'base': {'sha': 'baseline'}}
+        mirror.mirrors[1] = {'state': 'open', 'base': {'sha': 'baseline', 'ref': 'shadow/base/1'}, 'head': {'ref': 'shadow/pr/1'}}
         with TemporaryDirectory() as directory, patch('mirror.Path', return_value=Path(directory)):
             result = mirror.sync(1)
             self.assertIn('upstream_base=source-merge-base', Path(result['body_file']).read_text())
+        mirror.api.write.assert_not_called()
+
+    def test_closed_mirror_uses_next_revision_and_reuses_prepared_refs(self):
+        mirror = self.make_mirror()
+        closed = {'state': 'closed', 'base': {'ref': 'shadow/base/1'}, 'head': {'ref': 'shadow/pr/1'}}
+        mirror.mirrors[1] = closed
+        with TemporaryDirectory() as directory, patch('mirror.Path', return_value=Path(directory)):
+            result = mirror.sync(1)
+            repeated = mirror.sync(1)
+        self.assertEqual(result['base_ref'], 'shadow/base/1-r2')
+        self.assertEqual(result['head_ref'], 'shadow/pr/1-r2')
+        self.assertEqual(result, repeated)
+        mirror.commit.assert_not_called()
+        mirror.ref.assert_not_called()
+        closed['head']['ref'] = 'shadow/pr/1-r2'
+        self.assertEqual(mirror.branches(1, closed), ('shadow/base/1-r3', 'shadow/pr/1-r3'))
+
+    def test_base_force_update_is_always_rejected(self):
+        mirror = self.make_mirror()
+        for state in ('open', 'closed'):
+            mirror.mirrors[1] = {'state': state}
+            with self.assertRaises(ValueError):
+                Mirror.ref(mirror, 'shadow/base/1', 'new-base', force=True)
         mirror.api.write.assert_not_called()
 
     def test_missing_pr_is_opened_without_new_commit(self):
