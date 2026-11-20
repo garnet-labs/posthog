@@ -169,7 +169,8 @@ allowBuilds:
     # These install without their build scripts.
     '@datadog/pprof': false
     ffmpeg-static: false
-    free-email-domains: false
+    # Refresh the domain lists at install time.
+    free-email-domains: true
     # Optional dependency of code-inspector-plugin, used only by its AI terminal, which we do not enable.
     node-pty: false
     puppeteer: false
