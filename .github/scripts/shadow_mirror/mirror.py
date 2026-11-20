@@ -5,6 +5,7 @@ import base64
 import datetime
 import json
 import os
+from pathlib import Path
 import re
 import sys
 import time
@@ -107,8 +108,8 @@ class API:
 
 
 class Mirror:
-    def __init__(self, api, dry_run=False):
-        self.api, self.dry_run = api, dry_run
+    def __init__(self, api, dry_run=False, no_open_pr=False):
+        self.api, self.dry_run, self.no_open_pr = api, dry_run, no_open_pr
         content = api.call(FORK, f'contents/{WORKFLOW}?ref=master')
         workflow = base64.b64decode(content['content']).decode()
         self.patterns = workflow_paths(workflow)
@@ -172,7 +173,7 @@ class Mirror:
             return {'status': 'closed' if existing else 'skipped'}
         if pr['draft'] or pr['base']['ref'] != 'master':
             return {'status': 'skipped'}
-        if existing and MARKER.search(existing['body'])[2] == pr['head']['sha']:
+        if existing and not self.no_open_pr and MARKER.search(existing['body'])[2] == pr['head']['sha']:
             return {'status': 'unchanged', 'url': existing['html_url']}
         files = api.pages(SOURCE, f'pulls/{number}/files')
         matched = [f for f in files if path_matches(f['filename'], self.patterns)]
@@ -200,8 +201,12 @@ class Mirror:
                     raise
         self.baseline_started(base_branch, baseline)
         title = scrub_title(pr['title'])
-        head = self.commit(self.tree(pr['head']['sha']), [parent], title)
-        self.ref(head_branch, head)
+        tree = self.tree(pr['head']['sha'])
+        if parent != baseline and api.call(FORK, f'git/commits/{parent}')['tree']['sha'] == tree:
+            head = parent
+        else:
+            head = self.commit(tree, [parent], title)
+            self.ref(head_branch, head)
         lines = ['Dependency files changed:', '']
         for file in matched:
             lines.append(f'- `{scrub_title(file["filename"])}`')
@@ -210,6 +215,16 @@ class Mirror:
         lines.extend(['', f'Mirror base `{baseline}` → head `{head}`', '',
                       f'<!-- garnet-shadow-mirror upstream={number} upstream_head={pr["head"]["sha"]} upstream_base={pr["base"]["sha"]} -->'])
         data = {'title': title, 'body': '\n'.join(lines)}
+        if self.no_open_pr:
+            directory = Path('/tmp/shadow_mirror')
+            directory.mkdir(parents=True, exist_ok=True)
+            title_path = directory / f'{number}.title'
+            body_path = directory / f'{number}.body.md'
+            title_path.write_text(title + '\n', encoding='utf-8')
+            body_path.write_text(data['body'] + '\n', encoding='utf-8')
+            if not existing:
+                return {'status': 'ready', 'base': baseline, 'head': head,
+                        'title_file': str(title_path), 'body_file': str(body_path)}
         if existing:
             result = api.write(f'pulls/{existing["number"]}', data, 'PATCH')
         else:
@@ -224,9 +239,10 @@ def main():
     sync.add_argument('--pr', type=int, action='append')
     sync.add_argument('--since-hours', type=float, default=72)
     sync.add_argument('--dry-run', action='store_true')
+    sync.add_argument('--no-open-pr', action='store_true')
     args = parser.parse_args()
     api = API()
-    mirror = Mirror(api, args.dry_run)
+    mirror = Mirror(api, args.dry_run, args.no_open_pr)
     numbers = args.pr
     if not numbers:
         cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=args.since_hours)
