@@ -57,6 +57,10 @@ def workflow_paths(content):
     return [line.strip()[1:].strip().strip("'\"") for line in paths[1].splitlines()]
 
 
+def file_matches(file, patterns):
+    return any(path_matches(file[key], patterns) for key in ('filename', 'previous_filename') if file.get(key))
+
+
 def dependency_file(filename):
     name = filename.rsplit('/', 1)[-1]
     return name in {
@@ -272,7 +276,7 @@ class Mirror:
         if existing and not self.no_open_pr and MARKER.search(existing['body']).groups()[1:] == (pr['head']['sha'], upstream_base):
             return {'status': 'unchanged', 'url': existing['html_url']}
         files = api.pages(SOURCE, f'pulls/{number}/files')
-        matched = [f for f in files if path_matches(f['filename'], self.patterns)]
+        matched = [f for f in files if file_matches(f, self.patterns)]
         if not matched:
             return {'status': 'skipped'}
         if self.dry_run:

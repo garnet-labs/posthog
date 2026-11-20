@@ -217,6 +217,17 @@ class DeferredPRTest(unittest.TestCase):
         mirror.commit.assert_called_once_with('changed-tree', ['head'], 'Bump pnpm')
         mirror.ref.assert_called_once_with('shadow/pr/1', 'new-head')
 
+    def test_renames_check_old_and_new_paths(self):
+        for filename, previous, expected in [('moved.json', 'package.json', 'dry-run'),
+                                              ('package.json', 'moved.json', 'dry-run'),
+                                              ('other.json', 'old.json', 'skipped'),
+                                              ('other.json', WORKFLOW, 'skipped')]:
+            with self.subTest(filename=filename, previous=previous):
+                mirror = self.make_mirror()
+                mirror.dry_run = True
+                mirror.api.pages.return_value = [{'filename': filename, 'previous_filename': previous}]
+                self.assertEqual(mirror.sync(1)['status'], expected)
+
     def test_bad_message_is_replaced_with_same_tree_and_parent(self):
         mirror = self.make_mirror()
         original_call = mirror.api.call.side_effect
