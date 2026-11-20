@@ -180,6 +180,24 @@ class DeferredPRTest(unittest.TestCase):
                 Mirror.ref(mirror, 'shadow/base/1', 'new-base', force=True)
         mirror.api.write.assert_not_called()
 
+    def test_reopened_upstream_creates_new_pair_after_closed_revision(self):
+        mirror = self.make_mirror()
+        mirror.mirrors[1] = {'state': 'closed', 'base': {'ref': 'shadow/base/1-r2'}, 'head': {'ref': 'shadow/pr/1-r2'}}
+        original_call = mirror.api.call.side_effect
+        def call(repo, path):
+            if path.endswith('-r3'):
+                raise RuntimeError('HTTP 404: missing ref')
+            return original_call(repo, path)
+        mirror.api.call.side_effect = call
+        mirror.commit.side_effect = ['reopened-base', 'reopened-head']
+        with TemporaryDirectory() as directory, patch('mirror.Path', return_value=Path(directory)):
+            result = mirror.sync(1)
+        self.assertEqual(result['base_ref'], 'shadow/base/1-r3')
+        self.assertEqual(result['head_ref'], 'shadow/pr/1-r3')
+        mirror.ref.assert_any_call('shadow/base/1-r3', 'reopened-base')
+        mirror.ref.assert_any_call('shadow/pr/1-r3', 'reopened-head')
+        mirror.api.write.assert_not_called()
+
     def test_missing_pr_is_opened_without_new_commit(self):
         mirror = self.make_mirror(no_open_pr=False)
         mirror.api.write.return_value = {'html_url': 'https://example.com/mirror'}
