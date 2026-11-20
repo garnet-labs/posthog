@@ -200,6 +200,10 @@ class Mirror:
     def commit(self, tree, parents, message):
         return self.api.write('git/commits', {'tree': tree, 'parents': parents, 'message': message})['sha']
 
+    def merge_base(self, pr):
+        comparison = self.api.call(SOURCE, f'compare/{pr["base"]["sha"]}...{pr["head"]["sha"]}')
+        return comparison['merge_base_commit']['sha']
+
     def ref(self, name, sha, force=False):
         if force:
             if not name.startswith('shadow/pr/'):
@@ -241,7 +245,8 @@ class Mirror:
             return {'status': 'closed' if existing else 'skipped'}
         if pr['draft'] or pr['base']['ref'] != 'master':
             return {'status': 'skipped'}
-        if existing and not self.no_open_pr and MARKER.search(existing['body'])[2] == pr['head']['sha']:
+        upstream_base = self.merge_base(pr)
+        if existing and not self.no_open_pr and MARKER.search(existing['body']).groups()[1:] == (pr['head']['sha'], upstream_base):
             return {'status': 'unchanged', 'url': existing['html_url']}
         files = api.pages(SOURCE, f'pulls/{number}/files')
         matched = [f for f in files if path_matches(f['filename'], self.patterns)]
@@ -267,7 +272,7 @@ class Mirror:
             except RuntimeError as error:
                 if 'HTTP 404:' not in str(error):
                     raise
-                baseline = self.commit(self.tree(pr['base']['sha']), [], 'shadow: baseline')
+                baseline = self.commit(self.tree(upstream_base), [], 'shadow: baseline')
                 self.ref(base_branch, baseline)
             parent = baseline
             try:
@@ -296,7 +301,7 @@ class Mirror:
             for name, old, new in version_transitions(file['filename'], file.get('patch')):
                 lines.append(f'  - {scrub_title(name)} {scrub_title(old)} → {scrub_title(new)}')
         lines.extend(['', f'Mirror base `{baseline}` → head `{head}`', '',
-                      f'<!-- garnet-shadow-mirror upstream={number} upstream_head={pr["head"]["sha"]} upstream_base={pr["base"]["sha"]} -->'])
+                      f'<!-- garnet-shadow-mirror upstream={number} upstream_head={pr["head"]["sha"]} upstream_base={upstream_base} -->'])
         data = {'title': title, 'body': '\n'.join(lines)}
         if self.no_open_pr:
             directory = Path('/tmp/shadow_mirror')
@@ -305,9 +310,8 @@ class Mirror:
             body_path = directory / f'{number}.body.md'
             title_path.write_text(title + '\n', encoding='utf-8')
             body_path.write_text(data['body'] + '\n', encoding='utf-8')
-            if not existing:
-                return {'status': 'ready', 'base': baseline, 'head': head,
-                        'title_file': str(title_path), 'body_file': str(body_path)}
+            return {'status': 'ready', 'base': baseline, 'head': head,
+                    'title_file': str(title_path), 'body_file': str(body_path)}
         if existing:
             result = api.write(f'pulls/{existing["number"]}', data, 'PATCH')
         else:

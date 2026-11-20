@@ -60,6 +60,8 @@ class DeferredPRTest(unittest.TestCase):
         mirror.ref = Mock()
         mirror.baseline_started = Mock()
         def call(repo, path):
+            if path.startswith('compare/'):
+                return {'merge_base_commit': {'sha': 'source-merge-base'}}
             if path.startswith('contents/pnpm-workspace.yaml'):
                 return {'content': base64.b64encode(b'packages:\n  - services/mcp\n  - nodejs\n').decode()}
             if repo == SOURCE:
@@ -87,8 +89,33 @@ class DeferredPRTest(unittest.TestCase):
             body = Path(result['body_file']).read_text()
             self.assertIn('pnpm 9 → 10', body)
             self.assertIn('Mirror base `baseline` → head `head`', body)
+            self.assertIn('upstream_base=source-merge-base', body)
         mirror.commit.assert_not_called()
         mirror.ref.assert_not_called()
+        mirror.api.write.assert_not_called()
+
+    def test_new_baseline_uses_merge_base_not_current_master(self):
+        mirror = self.make_mirror()
+        original_call = mirror.api.call.side_effect
+        def call(repo, path):
+            if path.startswith('git/ref/'):
+                raise RuntimeError('HTTP 404: missing ref')
+            return original_call(repo, path)
+        mirror.api.call.side_effect = call
+        mirror.commit.side_effect = ['new-baseline', 'new-head']
+        with TemporaryDirectory() as directory, patch('mirror.Path', return_value=Path(directory)):
+            mirror.sync(1)
+        self.assertEqual(mirror.tree.call_args_list[0].args, ('source-merge-base',))
+        mirror.api.call.assert_any_call(SOURCE, 'compare/source-base...source-head')
+        self.assertEqual(mirror.commit.call_args_list[0].args, ('head-tree', [], 'shadow: baseline'))
+        self.assertEqual(mirror.commit.call_args_list[1].args, ('head-tree', ['new-baseline'], 'Bump pnpm'))
+
+    def test_existing_pr_no_open_exports_marker_without_updating_pr(self):
+        mirror = self.make_mirror()
+        mirror.mirrors[1] = {'state': 'open', 'base': {'sha': 'baseline'}}
+        with TemporaryDirectory() as directory, patch('mirror.Path', return_value=Path(directory)):
+            result = mirror.sync(1)
+            self.assertIn('upstream_base=source-merge-base', Path(result['body_file']).read_text())
         mirror.api.write.assert_not_called()
 
     def test_missing_pr_is_opened_without_new_commit(self):
