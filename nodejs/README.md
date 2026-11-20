@@ -30,3 +30,5 @@ pnpm jest tests/path/to.test.ts  # single file
 ```
 
 Destructive test helpers refuse to run against a database without `test` in its name — see `tests/helpers/database-guard.ts`. The guard's error message explains how to fix a misconfigured environment.
+
+Run `pnpm --filter=@posthog/nodejs start:dev` to start the services locally.
