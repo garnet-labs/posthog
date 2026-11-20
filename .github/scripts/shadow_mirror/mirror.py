@@ -65,6 +65,14 @@ def file_matches(file, patterns):
     return any(path_matches(file[key], patterns) for key in ('filename', 'previous_filename') if file.get(key))
 
 
+def is_mirror(pr, number):
+    head, base = pr.get('head') or {}, pr.get('base') or {}
+    if any((side.get('repo') or {}).get('full_name') != FORK for side in (head, base)):
+        return False
+    match = re.fullmatch(rf'shadow/pr/{number}(-r[1-9]\d*)?', head.get('ref', ''))
+    return bool(match and base.get('ref') == f'shadow/base/{number}{match[1] or ""}')
+
+
 def dependency_file(filename):
     name = filename.rsplit('/', 1)[-1]
     return name in {
@@ -190,7 +198,7 @@ class Mirror:
         self.history = {}
         for pr in api.pages(FORK, 'pulls?state=all'):
             marker = MARKER.search(pr.get('body') or '')
-            if marker:
+            if marker and is_mirror(pr, int(marker[1])):
                 number = int(marker[1])
                 self.history.setdefault(number, []).append(pr)
                 if number not in self.mirrors or pr['number'] > self.mirrors[number]['number']:

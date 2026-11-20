@@ -1,10 +1,11 @@
 import unittest
 import base64
+from copy import deepcopy
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
-from mirror import SOURCE, WORKFLOW, BaselineUnavailable, Mirror, dependency_file, path_matches, recorder_installs, scrub_title, version_transitions, workflow_paths
+from mirror import FORK, SOURCE, WORKFLOW, BaselineUnavailable, Mirror, dependency_file, path_matches, recorder_installs, scrub_title, version_transitions, workflow_paths
 
 
 class PathsTest(unittest.TestCase):
@@ -45,6 +46,37 @@ class TitleTest(unittest.TestCase):
         expected = 'Update `@scope/name` `npm:@scope/name@1.2.3` `package@2.0`'
         self.assertEqual(scrub_title(text), expected)
         self.assertEqual(scrub_title(expected), expected)
+
+
+class MirrorDiscoveryTest(unittest.TestCase):
+    def make_pr(self):
+        return {'number': 1, 'body': '<!-- garnet-shadow-mirror upstream=1 upstream_head=' + 'a' * 40 + ' upstream_base=' + 'b' * 40 + ' -->',
+                'head': {'repo': {'full_name': FORK}, 'ref': 'shadow/pr/1-r2'},
+                'base': {'repo': {'full_name': FORK}, 'ref': 'shadow/base/1-r2'}}
+
+    def discover(self, prs):
+        api = Mock()
+        workflow = b'on:\n    pull_request:\n        paths:\n            - package.json\n    push:\n        branches: [master]\n'
+        api.call.return_value = {'content': base64.b64encode(workflow).decode()}
+        api.pages.return_value = prs
+        return Mirror(api)
+
+    def test_valid_same_repository_pair_is_discovered(self):
+        pr = self.make_pr()
+        self.assertEqual(self.discover([pr]).mirrors, {1: pr})
+        self.assertEqual(self.discover([]).mirrors, {})
+
+    def test_spoofed_marker_is_ignored(self):
+        for side, key, value in [('head', 'repo', {'full_name': 'other/repository'}),
+                                  ('base', 'repo', {'full_name': 'other/repository'}),
+                                  ('head', 'repo', None), ('base', 'repo', None),
+                                  ('head', 'ref', 'shadow/pr/2-r2'), ('base', 'ref', 'shadow/base/2-r2'),
+                                  ('head', 'ref', 'shadow/pr/1-r2-extra'), ('base', 'ref', 'master'),
+                                  ('base', 'ref', 'shadow/base/1-r3')]:
+            with self.subTest(side=side, key=key, value=value):
+                pr = deepcopy(self.make_pr())
+                pr[side][key] = value
+                self.assertEqual(self.discover([pr]).mirrors, {})
 
 
 class DeferredPRTest(unittest.TestCase):
