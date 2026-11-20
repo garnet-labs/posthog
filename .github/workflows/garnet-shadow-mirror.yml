@@ -1,0 +1,49 @@
+name: Shadow dependency mirror
+on:
+    schedule:
+        - cron: '*/30 * * * *'
+    workflow_dispatch:
+        inputs:
+            prs:
+                description: Optional space-separated change numbers
+                required: false
+                type: string
+permissions: {}
+concurrency:
+    group: shadow-dependency-mirror
+    cancel-in-progress: false
+jobs:
+    sync:
+        if: github.repository == 'garnet-labs/posthog'
+        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+        env:
+            SHADOW_MIRROR_TOKEN: ${{ secrets.SHADOW_MIRROR_TOKEN }}
+            PRS: ${{ inputs.prs }}
+        steps:
+            - name: Check authentication
+              id: auth
+              run: |
+                  if [ -z "$SHADOW_MIRROR_TOKEN" ]; then
+                    echo '::notice::SHADOW_MIRROR_TOKEN is empty; mirror skipped (a PAT is required to trigger recording workflows).'
+                    echo 'enabled=false' >> "$GITHUB_OUTPUT"
+                  else
+                    echo 'enabled=true' >> "$GITHUB_OUTPUT"
+                  fi
+            - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+              if: steps.auth.outputs.enabled == 'true'
+              with:
+                  sparse-checkout: .github/scripts/shadow_mirror
+                  persist-credentials: false
+            - name: Sync dependency changes
+              if: steps.auth.outputs.enabled == 'true'
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  args=()
+                  for pr in $PRS; do
+                    [[ "$pr" =~ ^[0-9]+$ ]] || { echo 'Invalid change number'; exit 1; }
+                    args+=(--pr "$pr")
+                  done
+                  python3 .github/scripts/shadow_mirror/mirror.py sync "${args[@]}"
