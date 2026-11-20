@@ -294,6 +294,7 @@ class Mirror:
         if pr.get('author_association') not in {'OWNER', 'MEMBER', 'COLLABORATOR'} and pr.get('user', {}).get('type') != 'Bot':
             return {'status': 'untrusted_author'}
         upstream_base = self.merge_base(pr)
+        open_mirror = existing if existing and existing['state'] == 'open' else None
         marker = MARKER.search(existing.get('body') or '') if existing else None
         rebased = bool(marker and marker[3] != upstream_base)
         base_branch, head_branch = self.branches(number, existing, new_revision=rebased)
@@ -304,6 +305,11 @@ class Mirror:
         files = api.pages(SOURCE, f'pulls/{number}/files')
         matched = [f for f in files if file_matches(f, self.patterns)]
         if not matched:
+            if open_mirror:
+                if self.dry_run:
+                    return {'status': 'dry-run', 'action': 'closed_no_deps'}
+                api.write(f'pulls/{open_mirror["number"]}', {'state': 'closed'}, 'PATCH')
+                return {'status': 'closed_no_deps'}
             return {'status': 'skipped'}
         if self.dry_run:
             return {'status': 'dry-run', 'files': [f['filename'] for f in matched]}

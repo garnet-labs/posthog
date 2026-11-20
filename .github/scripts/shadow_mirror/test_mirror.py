@@ -290,6 +290,22 @@ class DeferredPRTest(unittest.TestCase):
         mirror.commit.assert_called_once_with('changed-tree', ['head'], 'Bump pnpm')
         mirror.ref.assert_called_once_with('shadow/pr/1', 'new-head')
 
+    def test_no_dependency_changes_closes_open_mirror_without_comment(self):
+        for dry_run in (False, True):
+            with self.subTest(dry_run=dry_run):
+                mirror = self.make_mirror()
+                mirror.dry_run = dry_run
+                mirror.mirrors[1] = {'state': 'open', 'number': 2,
+                                     'base': {'sha': 'baseline', 'ref': 'shadow/base/1'}, 'head': {'ref': 'shadow/pr/1'}}
+                mirror.api.pages.return_value = [{'filename': 'README.md'}]
+                result = mirror.sync(1)
+                self.assertEqual(result['status'], 'dry-run' if dry_run else 'closed_no_deps')
+                if dry_run:
+                    mirror.api.write.assert_not_called()
+                else:
+                    mirror.api.write.assert_called_once_with('pulls/2', {'state': 'closed'}, 'PATCH')
+                mirror.commit.assert_not_called()
+
     def test_renames_check_old_and_new_paths(self):
         for filename, previous, expected in [('moved.json', 'package.json', 'dry-run'),
                                               ('package.json', 'moved.json', 'dry-run'),
