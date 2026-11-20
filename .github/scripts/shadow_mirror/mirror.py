@@ -19,6 +19,10 @@ WORKFLOW = '.github/workflows/garnet-ci.yml'
 MARKER = re.compile(r'<!-- garnet-shadow-mirror upstream=(\d+) upstream_head=([a-f0-9]+) upstream_base=([a-f0-9]+) -->')
 
 
+class BaselineUnavailable(RuntimeError):
+    pass
+
+
 def scrub_title(title):
     title = re.sub(r'https?://\S+|www\.\S+|#\d+', '', title)
     title = re.sub(re.escape(SOURCE), '', title, flags=re.I)
@@ -221,8 +225,19 @@ class Mirror:
             match = re.fullmatch(rf'shadow/pr/{number}(?:-r(\d+))?', pr['head']['ref'])
             if match:
                 revision = max(revision, int(match[1] or 1) + 1)
+        revisions = self.branch_revisions(number)
+        revision = max([revision] + [r for r in revisions if r >= revision])
         suffix = f'-r{revision}' if revision > 1 else ''
         return f'shadow/base/{number}{suffix}', f'shadow/pr/{number}{suffix}'
+
+    def branch_revisions(self, number):
+        refs = self.api.call(FORK, f'git/matching-refs/heads/shadow/base/{number}')
+        revisions = []
+        for ref in refs:
+            match = re.fullmatch(rf'refs/heads/shadow/base/{number}(?:-r(\d+))?', ref['ref'])
+            if match:
+                revisions.append(int(match[1] or 1))
+        return revisions
 
     def ref(self, name, sha, force=False):
         if force:
@@ -248,12 +263,15 @@ class Mirror:
             if started():
                 return
             time.sleep(5)
-        self.api.write('actions/workflows/garnet-ci.yml/dispatches', {'ref': branch})
+        try:
+            self.api.write('actions/workflows/garnet-ci.yml/dispatches', {'ref': branch})
+        except RuntimeError as error:
+            raise BaselineUnavailable(str(error)) from error
         for _ in range(24):
             if started():
                 return
             time.sleep(5)
-        raise RuntimeError('Baseline workflow did not start; head was not pushed')
+        raise BaselineUnavailable('Baseline workflow did not start; head was not pushed')
 
     def sync(self, number):
         api = self.api
@@ -306,7 +324,16 @@ class Mirror:
             except RuntimeError as error:
                 if 'HTTP 404:' not in str(error):
                     raise
-        self.baseline_started(base_branch, baseline)
+        try:
+            self.baseline_started(base_branch, baseline)
+        except BaselineUnavailable:
+            current_revision = int(base_branch.rsplit('-r', 1)[1]) if '-r' in base_branch else 1
+            revision = max([current_revision] + self.branch_revisions(number)) + 1
+            base_branch, head_branch = f'shadow/base/{number}-r{revision}', f'shadow/pr/{number}-r{revision}'
+            baseline = self.commit(self.tree(upstream_base), [], 'chore: shadow baseline')
+            self.ref(base_branch, baseline)
+            parent, existing = baseline, None
+            self.baseline_started(base_branch, baseline)
         title = scrub_title(pr['title'])
         tree = self.tree(pr['head']['sha'])
         current = api.call(FORK, f'git/commits/{parent}') if parent != baseline else None

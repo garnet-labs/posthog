@@ -4,7 +4,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
-from mirror import SOURCE, WORKFLOW, Mirror, dependency_file, path_matches, recorder_installs, scrub_title, version_transitions, workflow_paths
+from mirror import SOURCE, WORKFLOW, BaselineUnavailable, Mirror, dependency_file, path_matches, recorder_installs, scrub_title, version_transitions, workflow_paths
 
 
 class PathsTest(unittest.TestCase):
@@ -60,6 +60,8 @@ class DeferredPRTest(unittest.TestCase):
         mirror.ref = Mock()
         mirror.baseline_started = Mock()
         def call(repo, path):
+            if path.startswith('git/matching-refs/'):
+                return []
             if path.startswith('compare/'):
                 return {'merge_base_commit': {'sha': 'source-merge-base'}}
             if path.startswith('contents/pnpm-workspace.yaml'):
@@ -93,6 +95,45 @@ class DeferredPRTest(unittest.TestCase):
         mirror.commit.assert_not_called()
         mirror.ref.assert_not_called()
         mirror.api.write.assert_not_called()
+
+    def test_failed_dispatch_allocates_fresh_pair(self):
+        mirror = self.make_mirror()
+        mirror.baseline_started.side_effect = [BaselineUnavailable('HTTP 403: dispatch denied'), None]
+        mirror.commit.side_effect = ['fresh-baseline', 'fresh-head']
+        with TemporaryDirectory() as directory, patch('mirror.Path', return_value=Path(directory)):
+            result = mirror.sync(1)
+        self.assertEqual(result['base_ref'], 'shadow/base/1-r2')
+        self.assertEqual(result['head_ref'], 'shadow/pr/1-r2')
+        self.assertEqual(mirror.baseline_started.call_args_list[1].args, ('shadow/base/1-r2', 'fresh-baseline'))
+        self.assertEqual(mirror.commit.call_args_list[1].args, ('head-tree', ['fresh-baseline'], 'Bump pnpm'))
+        self.assertEqual(mirror.ref.call_args_list[0].args, ('shadow/base/1-r2', 'fresh-baseline'))
+
+    def test_existing_revision_is_reused_without_old_refs_or_pr(self):
+        mirror = self.make_mirror()
+        original_call = mirror.api.call.side_effect
+        def call(repo, path):
+            if path.startswith('git/matching-refs/'):
+                return [{'ref': 'refs/heads/shadow/base/1-r2'}, {'ref': 'refs/heads/shadow/base/10-r9'}]
+            return original_call(repo, path)
+        mirror.api.call.side_effect = call
+        self.assertEqual(mirror.branches(1, None), ('shadow/base/1-r2', 'shadow/pr/1-r2'))
+
+    def test_denied_dispatch_reports_baseline_unavailable(self):
+        mirror = self.make_mirror()
+        mirror.api.call.return_value = {'workflow_runs': []}
+        mirror.api.call.side_effect = None
+        mirror.api.write.side_effect = RuntimeError('HTTP 403: dispatch denied')
+        with patch('mirror.time.sleep'), self.assertRaisesRegex(BaselineUnavailable, 'HTTP 403'):
+            Mirror.baseline_started(mirror, 'shadow/base/1', 'baseline')
+
+    def test_failed_fresh_baseline_does_not_push_head_or_recurse(self):
+        mirror = self.make_mirror()
+        mirror.baseline_started.side_effect = BaselineUnavailable('No baseline recording')
+        mirror.commit.return_value = 'fresh-baseline'
+        with self.assertRaises(BaselineUnavailable):
+            mirror.sync(1)
+        mirror.commit.assert_called_once_with('head-tree', [], 'chore: shadow baseline')
+        mirror.ref.assert_called_once_with('shadow/base/1-r2', 'fresh-baseline')
 
     def test_only_trusted_authors_and_bots_are_selected(self):
         for association, user_type, expected in [('NONE', 'User', 'untrusted_author'), ('CONTRIBUTOR', 'User', 'untrusted_author'),
