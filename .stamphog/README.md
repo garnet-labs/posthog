@@ -1,0 +1,39 @@
+# .stamphog
+
+The PostHog monorepo's own stamphog configuration.
+
+How the hosted product reads this directory: [`products/stamphog/README.md`](../products/stamphog/README.md#customize-the-review-for-your-repository).
+What each file contains and how per-folder overrides resolve: [the engine's "Policy files" section](../products/stamphog/packages/pr-approval-agent/README.md#policy-files).
+
+## What this repository configures
+
+`policy.yml` declares only what differs from the shipped default, which the engine merges it onto:
+
+- `infra_cicd` replaces its `paths` list. It also matches `.github/pr-deploy`, and of the workflows it keeps only the ones that CODEOWNERS assigns to `team-security`, so those stay denied for every author.
+- `ci_workflows` is an extra, owner-only category. It matches every file under `.github/workflows/` and `.depot/workflows/`, and its `exempt_author_teams` lets stamphog approve there only for authors on `team-devex`.
+- `stamphog_policy` extends its paths with `packages/owners-yaml/` and `product.yaml`, because those are gate inputs here. It matches `owners.yaml` through `edit_paths`, so a PR that only adds lines to one, such as a new rule, is not denied, and a PR that changes or removes a line is. It also matches the dependency proof workflows, `.github/scripts/dependency_proof/`, the `.github/scripts/dependency_scan.py` scanner and the `setup-uv` action they run, because an edit to them changes what a dependency proof checks.
+- `devex_guardrails` is an extra category. It matches the semgrep rules, ratchet baselines, invariant tests and lint code that guard the house patterns, so an edit to a guard always gets a human review.
+- `agent_steering` is an extra, owner-only category. It matches the root `AGENTS.md`, the five topic guides moved out of it (`.agents/agent-automation.md`, `architecture.md`, `ci.md`, `code-style.md` and `feature-usage-tracking.md`), the PR template, the `writing-pr-descriptions` skill, `.claude/settings.json`, `.claude/hooks/` and `.mcp.json`, and its `exempt_author_teams` lets stamphog approve there only for authors on `team-devex`.
+- `workflows_delivery` is an extra, owner-only category. It matches the CDP, Workflows and Messaging API, models and plugin-server worker code, and its `exempt_author_teams` lets stamphog approve there only for authors on `team-workflows`.
+- `mcp_core` is an extra, owner-only category. It matches the MCP `exec` tool, the server instructions, the core instruction templates and the guidance rules, and its `exempt_author_teams` lets stamphog approve there only for authors on `team-context-and-mcp`. It replaces a required CODEOWNERS review, which also blocked the team on its own changes.
+- `deny_exceptions` lifts `auth` and `billing` for `products/warehouse_sources/backend/temporal/data_imports/sources/` and `products/warehouse_sources/sources/`, because connector code does OAuth and talks to the Stripe API without touching PostHog's auth system or its billing. It lifts `workflows_delivery` for the CDP and Messaging API test directories. It lifts the `k8s` pattern of `infra_cicd` for `.rs` files under `rust/`, because a Rust source file named after Kubernetes is not infra code.
+- `allow` extends its path patterns with `.github/CODEOWNERS`.
+- `attestations` names the `Migration risk` check, pinned to the `tests-posthog` App, as the one that may lift `migrations` for the Django migration files it classified as Safe and their `max_migration.txt`. It also names the `Dependency proof` check, pinned to the `posthog-dependency-proof` App and to the prover files on the default branch, as the one that may lift `deps_toolchain` for the `package.json`, `pnpm-lock.yaml` and `pnpm-workspace.yaml` files it proved.
+- `bot_authors` names `renovate[bot]`, so stamphog reviews a Renovate PR and approves it only when the `Dependency proof` check proved every file in it.
+
+The repository uses the shipped default `review-guidance.md`.
+
+`steering.md` tells the reviewer to refuse a diff that adds a suppression or an exemption for one of those guards.
+A path rule cannot see these, because the marker sits in product code or in a busy file.
+That covers the isolation exemptions inside `tach.toml` and the product `turbo.json` files, which stay off the deny list because most of their edits are routine `depends_on` and input additions.
+
+`ownership` comes from the shipped default, which declares one `hogli-resolver` source at the repo root, so stamphog reads the same merged view the reviewer auto-assigner builds.
+
+`overrides` comes from the shipped default and grants folders a ceiling of 75 files and 1500 lines.
+Two folders currently take it up: [`products/desktop/`](../products/desktop/AGENT_APPROVALS.md) and [`products/visual_review/`](../products/visual_review/AGENT_APPROVALS.md).
+
+## Proposing a change
+
+Open a PR that edits these files.
+Stamphog can never auto-approve it: the `stamphog_policy` deny category matches `.stamphog/**`, any `AGENT_APPROVALS.md`, and the engine itself, so every change routes to a human reviewer.
+The loader also hard-fails if that self-governance entry is missing or loses a shipped pattern, so it cannot be dropped silently.
