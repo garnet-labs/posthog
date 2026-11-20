@@ -261,6 +261,8 @@ class Mirror:
             return {'status': 'closed' if existing else 'skipped'}
         if pr['draft'] or pr['base']['ref'] != 'master':
             return {'status': 'skipped'}
+        if pr.get('author_association') not in {'OWNER', 'MEMBER', 'COLLABORATOR'} and pr.get('user', {}).get('type') != 'Bot':
+            return {'status': 'untrusted_author'}
         base_branch, head_branch = self.branches(number, existing)
         if existing and existing['state'] != 'open':
             existing = None

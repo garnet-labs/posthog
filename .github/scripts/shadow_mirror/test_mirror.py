@@ -65,7 +65,7 @@ class DeferredPRTest(unittest.TestCase):
             if path.startswith('contents/pnpm-workspace.yaml'):
                 return {'content': base64.b64encode(b'packages:\n  - services/mcp\n  - nodejs\n').decode()}
             if repo == SOURCE:
-                return {'state': 'open', 'draft': False, 'base': {'ref': 'master', 'sha': 'source-base'},
+                return {'state': 'open', 'draft': False, 'author_association': 'MEMBER', 'user': {'type': 'User'}, 'base': {'ref': 'master', 'sha': 'source-base'},
                         'head': {'sha': 'source-head'}, 'title': 'Bump pnpm'}
             if path.startswith('git/ref/heads/shadow/base/'):
                 return {'object': {'sha': 'baseline'}}
@@ -93,6 +93,24 @@ class DeferredPRTest(unittest.TestCase):
         mirror.commit.assert_not_called()
         mirror.ref.assert_not_called()
         mirror.api.write.assert_not_called()
+
+    def test_only_trusted_authors_and_bots_are_selected(self):
+        for association, user_type, expected in [('NONE', 'User', 'untrusted_author'), ('CONTRIBUTOR', 'User', 'untrusted_author'),
+                                                  ('OWNER', 'User', 'dry-run'), ('MEMBER', 'User', 'dry-run'),
+                                                  ('COLLABORATOR', 'User', 'dry-run'), ('NONE', 'Bot', 'dry-run')]:
+            with self.subTest(association=association, user_type=user_type):
+                mirror = self.make_mirror()
+                mirror.dry_run = True
+                original_call = mirror.api.call.side_effect
+                def call(repo, path):
+                    result = original_call(repo, path)
+                    if path == 'pulls/1':
+                        result.update(author_association=association, user={'type': user_type})
+                    return result
+                mirror.api.call.side_effect = call
+                self.assertEqual(mirror.sync(1)['status'], expected)
+                mirror.api.write.assert_not_called()
+                mirror.commit.assert_not_called()
 
     def test_new_baseline_uses_merge_base_not_current_master(self):
         mirror = self.make_mirror()
