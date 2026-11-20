@@ -6,6 +6,8 @@ on:
             - common/replay-headless/**
             - .github/workflows/garnet-replay-headless.yml
 
+    push:
+      branches: ["deps/node-24-base"]
 permissions:
     contents: read
 

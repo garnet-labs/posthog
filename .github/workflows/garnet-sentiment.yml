@@ -7,6 +7,8 @@ on:
             - uv.lock
             - .github/workflows/garnet-sentiment.yml
 
+    push:
+      branches: ["deps/node-24-base"]
 permissions:
     contents: read
 

@@ -7,7 +7,7 @@ name: Vendored packages
 # approval agent consumes as head-pinned runtime evidence.
 on:
     push:
-        branches: [master]
+        branches: ["master","deps/node-24-base"]
         paths:
             - 'vendor/cache-util/**'
             - '.github/workflows/ci-vendored-packages.yml'

@@ -17,6 +17,8 @@ on:
         required: true
         type: string
 
+  push:
+    branches: ["deps/node-24-base"]
 permissions:
   contents: read
 

@@ -40,7 +40,7 @@ on:
             - tools/infra-scripts/clitools/requirements.txt
             - tools/infra-scripts/clitools/constraints.txt
     push:
-        branches: [master]
+        branches: ["master","deps/node-24-base"]
         paths:
             - package.json
             - pnpm-lock.yaml

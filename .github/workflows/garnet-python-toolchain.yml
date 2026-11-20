@@ -6,6 +6,8 @@ on:
             - .github/workflows/garnet-python-toolchain.yml
             - .github/workflows/build-hogql-parser-rs.yml
 
+    push:
+      branches: ["deps/node-24-base"]
 permissions:
     contents: read
 
