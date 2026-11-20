@@ -298,7 +298,7 @@ class Mirror:
             except RuntimeError as error:
                 if 'HTTP 404:' not in str(error):
                     raise
-                baseline = self.commit(self.tree(upstream_base), [], 'shadow: baseline')
+                baseline = self.commit(self.tree(upstream_base), [], 'chore: shadow baseline')
                 self.ref(base_branch, baseline)
             parent = baseline
             try:

@@ -125,7 +125,7 @@ class DeferredPRTest(unittest.TestCase):
             mirror.sync(1)
         self.assertEqual(mirror.tree.call_args_list[0].args, ('source-merge-base',))
         mirror.api.call.assert_any_call(SOURCE, 'compare/source-base...source-head')
-        self.assertEqual(mirror.commit.call_args_list[0].args, ('head-tree', [], 'shadow: baseline'))
+        self.assertEqual(mirror.commit.call_args_list[0].args, ('head-tree', [], 'chore: shadow baseline'))
         self.assertEqual(mirror.commit.call_args_list[1].args, ('head-tree', ['new-baseline'], 'Bump pnpm'))
 
     def test_existing_pr_no_open_exports_marker_without_updating_pr(self):
