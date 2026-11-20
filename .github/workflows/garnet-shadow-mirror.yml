@@ -35,6 +35,7 @@ jobs:
               if: steps.auth.outputs.enabled == 'true'
               with:
                   sparse-checkout: .github/scripts/shadow_mirror
+                  sparse-checkout-cone-mode: false
                   persist-credentials: false
             - name: Sync dependency changes
               if: steps.auth.outputs.enabled == 'true'
