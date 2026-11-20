@@ -20,8 +20,10 @@ MARKER = re.compile(r'<!-- garnet-shadow-mirror upstream=(\d+) upstream_head=([a
 
 
 def scrub_title(title):
-    title = re.sub(r'https?://\S+|www\.\S+|#\d+|@[\w-]+', '', title)
+    title = re.sub(r'https?://\S+|www\.\S+|#\d+', '', title)
     title = re.sub(re.escape(SOURCE), '', title, flags=re.I)
+    title = re.sub(r'`?((?:npm:)?(?:@[\w.-]+/[\w.-]+(?:@[\w.^~*+-]+)?|[\w.-]+@[\w.^~*+-]+))`?', r'`\1`', title)
+    title = re.sub(r'(?<![\w/])@[\w.-]+(?![\w./-])', '', title)
     return ' '.join(title.split()).strip() or 'Dependency update'
 
 
@@ -55,22 +57,82 @@ def workflow_paths(content):
     return [line.strip()[1:].strip().strip("'\"") for line in paths[1].splitlines()]
 
 
+def dependency_file(filename):
+    name = filename.rsplit('/', 1)[-1]
+    return name in {
+        'package.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'package-lock.json',
+        'npm-shrinkwrap.json', 'yarn.lock', 'bun.lock', 'bun.lockb', 'pyproject.toml',
+        'uv.lock', 'poetry.lock', 'Pipfile', 'Pipfile.lock', 'go.mod', 'go.sum',
+        'Cargo.toml', 'Cargo.lock', '.node-version', '.nvmrc',
+    } or bool(re.fullmatch(r'(?:requirements|constraints)[^/]*\.txt', name))
+
+
+def recorder_installs(filename, patterns, workspace):
+    if path_matches(filename, patterns):
+        return True
+    if not filename.endswith('/package.json') or 'package.json' not in patterns:
+        return False
+    directory = filename.rsplit('/', 1)[0]
+    included = [p for p in workspace if not p.startswith('!')]
+    excluded = [p[1:] for p in workspace if p.startswith('!')]
+    return path_matches(directory, included) and not path_matches(directory, excluded)
+
+
 def version_transitions(filename, patch):
     """Read paired dependency declarations from a unified manifest diff."""
-    if not (filename.endswith(('package.json', 'pyproject.toml', 'requirements.txt', 'constraints.txt'))):
+    if not dependency_file(filename):
         return []
     sides = {'-': {}, '+': {}}
+    package = None
+    pnpm = filename.endswith('pnpm-lock.yaml')
+    package_lock = filename.endswith(('Cargo.lock', 'uv.lock', 'poetry.lock'))
     for line in (patch or '').splitlines():
-        if not line or line[0] not in sides or line.startswith(('---', '+++')):
+        if line.startswith('@@'):
+            package = None
+        if not line or line[0] not in (' ', '-', '+') or line.startswith(('---', '+++')):
             continue
         value = line[1:].strip().rstrip(',')
-        pair = re.match(r'"([^"\s]+)"\s*:\s*"([^"]+)"', value)
-        if not pair:
+        if package_lock:
+            if value.startswith('[['):
+                package = None
+            match = re.match(r'name\s*=\s*"([^"]+)"', value)
+            if match:
+                package = match[1]
+        if line[0] not in sides:
+            continue
+        pair = None
+        if filename.endswith(('.node-version', '.nvmrc')):
+            pair = ('Node.js', value)
+        elif package_lock and package:
+            match = re.match(r'version\s*=\s*"([^"]+)"', value)
+            if match:
+                pair = (package, match[1])
+        elif pnpm:
+            match = re.match(r"['\"]?((?:@[\w.-]+/)?[\w.-]+)@([\w.+-]+)(?:\(|['\"]?:)", value)
+            if not match:
+                match = re.match(r"['\"]?((?:@[\w.-]+/)?[\w.-]+)['\"]?:\s*['\"]?([~^]?\d[\w.+-]*)", value)
+                if match and match[1] in ('version', 'specifier'):
+                    match = None
+            if match:
+                pair = (match[1], match[2])
+        elif filename.endswith(('go.mod', 'go.sum')):
+            match = re.match(r'(\S+)\s+(v\S+?)(?:/go.mod)?(?:\s|$)', value)
+            if match:
+                pair = (match[1], match[2])
+        if not pair and not pnpm and not package_lock:
+            pair = re.match(r'"([^"\s]+)"\s*:\s*"([^"]+)"', value)
+        if not pair and not pnpm and not package_lock:
             pair = re.match(r'["\']?([A-Za-z0-9_.-]+(?:\[[^\]]+\])?)\s*(?:=\s*["\']|(?=[<>=!~]))([^"\';]+)', value)
         if pair:
-            sides[line[0]][pair[1]] = pair[2].strip()
-    return [(name, sides['-'][name], new) for name, new in sorted(sides['+'].items())
-            if name in sides['-'] and sides['-'][name] != new]
+            name, version = (pair[1], pair[2]) if isinstance(pair, re.Match) else pair
+            sides[line[0]].setdefault(name, set()).add(version.strip())
+    transitions = []
+    for name in sorted(sides['-'].keys() | sides['+'].keys()):
+        old, new = sides['-'].get(name, set()), sides['+'].get(name, set())
+        removed, added = old - new, new - old
+        if removed or added:
+            transitions.append((name, ', '.join(sorted(removed)) or '∅', ', '.join(sorted(added)) or '∅'))
+    return transitions
 
 
 class API:
@@ -138,7 +200,13 @@ class Mirror:
     def commit(self, tree, parents, message):
         return self.api.write('git/commits', {'tree': tree, 'parents': parents, 'message': message})['sha']
 
-    def ref(self, name, sha):
+    def ref(self, name, sha, force=False):
+        if force:
+            if not name.startswith('shadow/pr/'):
+                raise ValueError('Only unreviewed mirror heads can be replaced')
+            query = urllib.parse.urlencode({'state': 'open', 'head': f'{FORK.split("/")[0]}:{name}'})
+            if self.api.pages(FORK, f'pulls?{query}'):
+                raise RuntimeError('Cannot replace a branch with an open mirror pull request')
         try:
             self.api.call(FORK, f'git/ref/heads/{name}')
         except RuntimeError as error:
@@ -146,7 +214,7 @@ class Mirror:
                 raise
             self.api.write('git/refs', {'ref': f'refs/heads/{name}', 'sha': sha})
         else:
-            self.api.write(f'git/refs/heads/{name}', {'sha': sha, 'force': False}, 'PATCH')
+            self.api.write(f'git/refs/heads/{name}', {'sha': sha, 'force': force}, 'PATCH')
 
     def baseline_started(self, branch, sha):
         query = urllib.parse.urlencode({'branch': branch, 'head_sha': sha, 'per_page': 10})
@@ -181,6 +249,14 @@ class Mirror:
             return {'status': 'skipped'}
         if self.dry_run:
             return {'status': 'dry-run', 'files': [f['filename'] for f in matched]}
+        workspace = []
+        if any(f['filename'].endswith('/package.json') and not path_matches(f['filename'], self.patterns) for f in files):
+            content = api.call(SOURCE, f'contents/pnpm-workspace.yaml?ref={pr["head"]["sha"]}')
+            document = base64.b64decode(content['content']).decode()
+            section = re.search(r'(?m)^packages:\s*\n(.*?)(?=^\S|\Z)', document, re.S)
+            if not section:
+                raise ValueError('Missing workspace packages list')
+            workspace = [m.strip().strip("'\"") for m in re.findall(r'(?m)^\s+-\s+([^\n]+)', section[1])]
         base_branch, head_branch = f'shadow/base/{number}', f'shadow/pr/{number}'
         if existing:
             baseline = existing['base']['sha']
@@ -202,14 +278,21 @@ class Mirror:
         self.baseline_started(base_branch, baseline)
         title = scrub_title(pr['title'])
         tree = self.tree(pr['head']['sha'])
-        if parent != baseline and api.call(FORK, f'git/commits/{parent}')['tree']['sha'] == tree:
+        current = api.call(FORK, f'git/commits/{parent}') if parent != baseline else None
+        if current and current['tree']['sha'] == tree:
             head = parent
+            if current['message'] != title and [p['sha'] for p in current['parents']] == [baseline] and not (existing and existing['state'] == 'open'):
+                head = self.commit(tree, [baseline], title)
+                self.ref(head_branch, head, force=True)
         else:
             head = self.commit(tree, [parent], title)
             self.ref(head_branch, head)
         lines = ['Dependency files changed:', '']
-        for file in matched:
-            lines.append(f'- `{scrub_title(file["filename"])}`')
+        for file in files:
+            if not dependency_file(file['filename']):
+                continue
+            recorded = 'recorder installs' if recorder_installs(file['filename'], self.patterns, workspace) else 'not installed by recorder'
+            lines.append(f'- `{scrub_title(file["filename"])}` ({recorded})')
             for name, old, new in version_transitions(file['filename'], file.get('patch')):
                 lines.append(f'  - {scrub_title(name)} {scrub_title(old)} → {scrub_title(new)}')
         lines.extend(['', f'Mirror base `{baseline}` → head `{head}`', '',

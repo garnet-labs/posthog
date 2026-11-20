@@ -1,9 +1,10 @@
 import unittest
+import base64
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
-from mirror import SOURCE, WORKFLOW, Mirror, path_matches, scrub_title, version_transitions, workflow_paths
+from mirror import SOURCE, WORKFLOW, Mirror, dependency_file, path_matches, recorder_installs, scrub_title, version_transitions, workflow_paths
 
 
 class PathsTest(unittest.TestCase):
@@ -39,6 +40,12 @@ class TitleTest(unittest.TestCase):
     def test_normal(self):
         self.assertEqual(scrub_title('Bump pnpm from 9 to 10'), 'Bump pnpm from 9 to 10')
 
+    def test_package_tokens_are_preserved_and_idempotent(self):
+        text = 'Update @scope/name npm:@scope/name@1.2.3 package@2.0 ' + chr(64) + 'reviewer'
+        expected = 'Update `@scope/name` `npm:@scope/name@1.2.3` `package@2.0`'
+        self.assertEqual(scrub_title(text), expected)
+        self.assertEqual(scrub_title(expected), expected)
+
 
 class DeferredPRTest(unittest.TestCase):
     def make_mirror(self, no_open_pr=True):
@@ -53,6 +60,8 @@ class DeferredPRTest(unittest.TestCase):
         mirror.ref = Mock()
         mirror.baseline_started = Mock()
         def call(repo, path):
+            if path.startswith('contents/pnpm-workspace.yaml'):
+                return {'content': base64.b64encode(b'packages:\n  - services/mcp\n  - nodejs\n').decode()}
             if repo == SOURCE:
                 return {'state': 'open', 'draft': False, 'base': {'ref': 'master', 'sha': 'source-base'},
                         'head': {'sha': 'source-head'}, 'title': 'Bump pnpm'}
@@ -61,7 +70,7 @@ class DeferredPRTest(unittest.TestCase):
             if path.startswith('git/ref/heads/shadow/pr/'):
                 return {'object': {'sha': 'head'}}
             if path == 'git/commits/head':
-                return {'tree': {'sha': 'head-tree'}}
+                return {'tree': {'sha': 'head-tree'}, 'message': 'Bump pnpm', 'parents': [{'sha': 'baseline'}]}
             raise AssertionError((repo, path))
         mirror.api.call.side_effect = call
         mirror.api.pages.return_value = [{'filename': 'package.json', 'patch': '- "pnpm": "9"\n+ "pnpm": "10"'}]
@@ -101,6 +110,50 @@ class DeferredPRTest(unittest.TestCase):
         mirror.commit.assert_called_once_with('changed-tree', ['head'], 'Bump pnpm')
         mirror.ref.assert_called_once_with('shadow/pr/1', 'new-head')
 
+    def test_bad_message_is_replaced_with_same_tree_and_parent(self):
+        mirror = self.make_mirror()
+        original_call = mirror.api.call.side_effect
+        def call(repo, path):
+            result = original_call(repo, path)
+            if path == 'pulls/1':
+                result['title'] = 'Bump @scope/name'
+            return result
+        mirror.api.call.side_effect = call
+        with TemporaryDirectory() as directory, patch('mirror.Path', return_value=Path(directory)):
+            mirror.sync(1)
+        mirror.commit.assert_called_once_with('head-tree', ['baseline'], 'Bump `@scope/name`')
+        mirror.ref.assert_called_once_with('shadow/pr/1', 'new-head', force=True)
+
+    def test_force_update_is_blocked_by_any_open_pr(self):
+        mirror = self.make_mirror()
+        mirror.api.pages.return_value = [{'number': 2}]
+        with self.assertRaisesRegex(RuntimeError, 'open mirror pull request'):
+            Mirror.ref(mirror, 'shadow/pr/1', 'new-head', force=True)
+        mirror.api.write.assert_not_called()
+
+    def test_force_update_allowed_without_open_pr(self):
+        mirror = self.make_mirror()
+        mirror.api.pages.return_value = []
+        Mirror.ref(mirror, 'shadow/pr/1', 'new-head', force=True)
+        mirror.api.write.assert_called_once_with('git/refs/heads/shadow/pr/1', {'sha': 'new-head', 'force': True}, 'PATCH')
+
+    def test_all_dependency_files_and_install_membership_are_exported(self):
+        mirror = self.make_mirror()
+        mirror.api.pages.return_value.extend([
+            {'filename': 'services/mcp/package.json', 'patch': '- "@scope/name": "npm:@scope/pkg@1"\n+ "@scope/name": "npm:@scope/pkg@2"'},
+            {'filename': 'nodejs/package.json', 'patch': '- "lib": "1"\n+ "lib": "2"'},
+            {'filename': 'other/go.mod', 'patch': '-example.com/lib v1.0.0\n+example.com/lib v2.0.0'},
+            {'filename': 'README.md', 'patch': ''},
+        ])
+        with TemporaryDirectory() as directory, patch('mirror.Path', return_value=Path(directory)):
+            result = mirror.sync(1)
+            body = Path(result['body_file']).read_text()
+        self.assertIn('`services/mcp/package.json` (recorder installs)', body)
+        self.assertIn('`nodejs/package.json` (recorder installs)', body)
+        self.assertIn('`other/go.mod` (not installed by recorder)', body)
+        self.assertIn('`@scope/name` `npm:@scope/pkg@1` → `npm:@scope/pkg@2`', body)
+        self.assertNotIn('README.md', body)
+
     def test_dry_run_does_not_write_files_or_refs(self):
         mirror = self.make_mirror()
         mirror.dry_run = True
@@ -120,6 +173,29 @@ class DeferredPRTest(unittest.TestCase):
 
 
 class VersionsTest(unittest.TestCase):
+    def test_dependency_file_types(self):
+        for path in ['a/package.json', 'pnpm-lock.yaml', 'a/requirements-dev.txt', 'a/go.mod', 'go.sum', 'Cargo.toml', 'Cargo.lock', '.node-version', '.nvmrc', 'uv.lock']:
+            self.assertTrue(dependency_file(path), path)
+        self.assertFalse(dependency_file('README.md'))
+        self.assertFalse(dependency_file(''))
+
+    def test_workspace_membership_excludes_independent_projects(self):
+        patterns = ['package.json']
+        workspace = ['products/*', '!products/mobile', 'services/mcp']
+        self.assertTrue(recorder_installs('services/mcp/package.json', patterns, workspace))
+        self.assertFalse(recorder_installs('products/mobile/package.json', patterns, workspace))
+        self.assertFalse(recorder_installs('other/go.sum', patterns, workspace))
+
+    def test_pnpm_lock(self):
+        patch = "-  '@scope/pkg@1.0.0':\n+  '@scope/pkg@2.0.0':\n-  lib@1.0.0:\n+  lib@2.0.0:\n-      '@scope/pkg': 1.0.0\n+      '@scope/pkg': 2.0.0"
+        self.assertEqual(version_transitions('pnpm-lock.yaml', patch), [('@scope/pkg', '1.0.0', '2.0.0'), ('lib', '1.0.0', '2.0.0')])
+
+    def test_go_rust_python_locks_and_node(self):
+        self.assertEqual(version_transitions('go.mod', '-example.com/lib v1.0.0\n+example.com/lib v2.0.0'), [('example.com/lib', 'v1.0.0', 'v2.0.0')])
+        for filename in ['Cargo.lock', 'uv.lock']:
+            self.assertEqual(version_transitions(filename, ' [[package]]\n name = "lib"\n-version = "1"\n+version = "2"'), [('lib', '1', '2')])
+        self.assertEqual(version_transitions('.nvmrc', '-20\n+22'), [('Node.js', '20', '22')])
+
     def test_json(self):
         self.assertEqual(version_transitions('package.json', '@@\n- "pnpm": "9",\n+ "pnpm": "10",'), [('pnpm', '9', '10')])
 
