@@ -84,6 +84,9 @@ jobs:
         timeout-minutes: 30
         env:
             PUPPETEER_SKIP_DOWNLOAD: "true"
+        permissions:
+            contents: read
+            id-token: write
         steps:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
               with:
@@ -91,8 +94,6 @@ jobs:
 
             - name: Garnet Runtime Visibility
               uses: garnet-org/action@673a06d87748bec49e4d8df22d371b2a3420aba4 # v2.5.2
-              with:
-                  api_token: ${{ secrets.GARNET_API_TOKEN }}
 
             - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
 
@@ -117,6 +118,9 @@ jobs:
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         runs-on: ubuntu-24.04
         timeout-minutes: 30
+        permissions:
+            contents: read
+            id-token: write
         steps:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
               with:
@@ -124,8 +128,6 @@ jobs:
 
             - name: Garnet Runtime Visibility
               uses: garnet-org/action@673a06d87748bec49e4d8df22d371b2a3420aba4 # v2.5.2
-              with:
-                  api_token: ${{ secrets.GARNET_API_TOKEN }}
 
             - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
               with:
@@ -150,6 +152,9 @@ jobs:
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         runs-on: ubuntu-24.04
         timeout-minutes: 30
+        permissions:
+            contents: read
+            id-token: write
         defaults:
             run:
                 working-directory: products/desktop
@@ -160,8 +165,6 @@ jobs:
 
             - name: Garnet Runtime Visibility
               uses: garnet-org/action@673a06d87748bec49e4d8df22d371b2a3420aba4 # v2.5.2
-              with:
-                  api_token: ${{ secrets.GARNET_API_TOKEN }}
 
             # The desktop workspace pins its own pnpm and Node versions.
             - uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
@@ -182,6 +185,9 @@ jobs:
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         runs-on: ubuntu-24.04
         timeout-minutes: 30
+        permissions:
+            contents: read
+            id-token: write
         defaults:
             run:
                 working-directory: services/llm-gateway
@@ -192,8 +198,6 @@ jobs:
 
             - name: Garnet Runtime Visibility
               uses: garnet-org/action@673a06d87748bec49e4d8df22d371b2a3420aba4 # v2.5.2
-              with:
-                  api_token: ${{ secrets.GARNET_API_TOKEN }}
 
             - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
               with:
@@ -212,6 +216,9 @@ jobs:
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         runs-on: ubuntu-24.04
         timeout-minutes: 30
+        permissions:
+            contents: read
+            id-token: write
         steps:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
               with:
@@ -219,8 +226,6 @@ jobs:
 
             - name: Garnet Runtime Visibility
               uses: garnet-org/action@673a06d87748bec49e4d8df22d371b2a3420aba4 # v2.5.2
-              with:
-                  api_token: ${{ secrets.GARNET_API_TOKEN }}
 
             - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
               with:
@@ -237,6 +242,9 @@ jobs:
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         runs-on: ubuntu-24.04
         timeout-minutes: 30
+        permissions:
+            contents: read
+            id-token: write
         steps:
             - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
               with:
@@ -244,8 +252,6 @@ jobs:
 
             - name: Garnet Runtime Visibility
               uses: garnet-org/action@673a06d87748bec49e4d8df22d371b2a3420aba4 # v2.5.2
-              with:
-                  api_token: ${{ secrets.GARNET_API_TOKEN }}
 
             - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
               with:
