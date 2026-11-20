@@ -136,6 +136,27 @@ class DeferredPRTest(unittest.TestCase):
             self.assertIn('upstream_base=source-merge-base', Path(result['body_file']).read_text())
         mirror.api.write.assert_not_called()
 
+    def test_changed_merge_base_allocates_fresh_baseline_revision(self):
+        mirror = self.make_mirror()
+        mirror.mirrors[1] = {'state': 'open', 'base': {'sha': 'old-baseline', 'ref': 'shadow/base/1'},
+                             'head': {'ref': 'shadow/pr/1'},
+                             'body': '<!-- garnet-shadow-mirror upstream=1 upstream_head=' + 'a' * 40 + ' upstream_base=' + 'b' * 40 + ' -->'}
+        original_call = mirror.api.call.side_effect
+        def call(repo, path):
+            if path.endswith('-r2'):
+                raise RuntimeError('HTTP 404: missing ref')
+            return original_call(repo, path)
+        mirror.api.call.side_effect = call
+        mirror.commit.side_effect = ['fresh-baseline', 'fresh-head']
+        with TemporaryDirectory() as directory, patch('mirror.Path', return_value=Path(directory)):
+            result = mirror.sync(1)
+        self.assertEqual(result['base_ref'], 'shadow/base/1-r2')
+        self.assertEqual(result['head_ref'], 'shadow/pr/1-r2')
+        self.assertEqual(mirror.tree.call_args_list[0].args, ('source-merge-base',))
+        mirror.baseline_started.assert_called_once_with('shadow/base/1-r2', 'fresh-baseline')
+        self.assertEqual(mirror.commit.call_args_list[1].args, ('head-tree', ['fresh-baseline'], 'Bump pnpm'))
+        mirror.ref.assert_any_call('shadow/base/1-r2', 'fresh-baseline')
+
     def test_closed_mirror_uses_next_revision_and_reuses_prepared_refs(self):
         mirror = self.make_mirror()
         closed = {'state': 'closed', 'base': {'ref': 'shadow/base/1'}, 'head': {'ref': 'shadow/pr/1'}}

@@ -208,8 +208,8 @@ class Mirror:
         comparison = self.api.call(SOURCE, f'compare/{pr["base"]["sha"]}...{pr["head"]["sha"]}')
         return comparison['merge_base_commit']['sha']
 
-    def branches(self, number, existing):
-        if existing and existing['state'] == 'open':
+    def branches(self, number, existing, new_revision=False):
+        if existing and existing['state'] == 'open' and not new_revision:
             return existing['base']['ref'], existing['head']['ref']
         history = getattr(self, 'history', {}).get(number, [existing] if existing else [])
         revision = 1
@@ -263,10 +263,12 @@ class Mirror:
             return {'status': 'skipped'}
         if pr.get('author_association') not in {'OWNER', 'MEMBER', 'COLLABORATOR'} and pr.get('user', {}).get('type') != 'Bot':
             return {'status': 'untrusted_author'}
-        base_branch, head_branch = self.branches(number, existing)
-        if existing and existing['state'] != 'open':
-            existing = None
         upstream_base = self.merge_base(pr)
+        marker = MARKER.search(existing.get('body') or '') if existing else None
+        rebased = bool(marker and marker[3] != upstream_base)
+        base_branch, head_branch = self.branches(number, existing, new_revision=rebased)
+        if existing and (existing['state'] != 'open' or rebased):
+            existing = None
         if existing and not self.no_open_pr and MARKER.search(existing['body']).groups()[1:] == (pr['head']['sha'], upstream_base):
             return {'status': 'unchanged', 'url': existing['html_url']}
         files = api.pages(SOURCE, f'pulls/{number}/files')
