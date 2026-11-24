@@ -27,7 +27,7 @@ catalog:
     '@types/node': ^20.0.0
     '@types/react': ^19.2.15
     '@types/react-dom': ^19.2.3
-    hono: ^4.6.14
+    hono: ^4.13.16
     inversify: ^7.10.6
     react: 19.2.6
     react-dom: 19.2.6
