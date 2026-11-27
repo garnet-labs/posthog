@@ -1,0 +1,141 @@
+version: 1
+owners: []
+rules:
+    - match: '/FeatureFlagPermissions.tsx'
+      owners: team-feature-flags
+    - match: '/actions/'
+      owners: team-analytics
+    - match: '/activity/'
+      owners: team-analytics
+    - match: '/agentic/'
+      owners: team-growth
+    - match: '/alerts/'
+      owners: team-analytics
+    - match: '/annotations/'
+      owners: team-analytics
+    - match: ['/approvals/', '/audit-logs/', '/authentication/']
+      owners: team-platform-features
+    - match: '/billing/'
+      owners: team-billing
+    - match: '/cohorts/'
+      owners: team-feature-flags
+    - match: '/comments/'
+      owners: conversations
+    - match: '/coupons/'
+      owners: team-billing
+    - match: '/dashboard/'
+      owners: team-dashboards-and-charts
+    - match: '/data-management/'
+      owners: team-warehouse-sources
+    - match: '/data-management/schema/'
+      owners: team-analytics
+    - match: '/data-management/tags/'
+      owners: team-platform-features
+    - match: '/data-pipelines/'
+      owners: team-workflows
+    # Narrower than the rule above, which would otherwise route the batch exports
+    # scene to workflows. Backend counterpart: products/batch_exports/product.yaml.
+    - match: '/data-pipelines/batch-exports/'
+      owners: batch-exports
+    - match: '/data-warehouse/'
+      owners: team-data-stack
+    - match: '/experiments/'
+      owners: team-experiments
+    - match: '/exports/'
+      owners: team-analytics
+    - match: '/feature-flags/'
+      owners: team-feature-flags
+    - match: ['/funnels/', '/groups/']
+      owners: team-analytics
+    - match: '/health-alerts/'
+      owners: team-analytics
+    - match: '/health/'
+      owners: team-growth
+    - match: '/hog-functions/'
+      owners: team-workflows
+    - match: '/insights/'
+      owners: team-analytics
+    - match: '/instance/'
+      owners: team-growth
+    - match: '/marketing-analytics/'
+      owners: team-analytics
+    - match: '/max/'
+      owners: team-surfaces
+    - match: '/settings/aiSubscriptions.test.ts'
+      owners: team-surfaces
+    - match: '/settings/organization/oauthApp*.test.ts'
+      owners: team-growth
+    # The topic list the AI homepage renders, so growth reviews it alongside Max.
+    - match: '/max/suggestionTopics.tsx'
+      owners: [team-surfaces, team-growth]
+    - match: '/models/'
+      owners: team-data-modeling
+    - match: '/notebooks/'
+      owners: team-data-tools
+    - match: ['/oauth/', '/onboarding/']
+      owners: team-growth
+    - match: '/onboarding/legacy/sdks/ai-observability/'
+      owners: team-ai-observability
+    - match: '/onboarding/legacy/sdks/surveys/'
+      owners: conversations
+    - match: ['/paths-v2/', '/paths/', '/persons-management/', '/persons/']
+      owners: team-analytics
+    - match: '/project-homepage/'
+      owners: team-growth
+    # Narrower than the rule above, which would otherwise route the Today homepage to growth.
+    - match: '/project-homepage/today/'
+      owners: team-surfaces
+    - match: '/resource-transfer/'
+      owners: team-platform-features
+    - match: ['/retention/', '/saved-insights/']
+      owners: team-analytics
+    - match: '/session-recordings/'
+      owners: team-replay
+    - match: '/sessions/'
+      owners: team-analytics-platform
+    # Org SSO settings: verified domains, and the SAML/SCIM/OIDC config behind them.
+    - match:
+          - '/settings/organization/IdentityProviderConfig/'
+          - '/settings/organization/VerifiedDomains/'
+      owners: team-platform-features
+    - match: '/startups/'
+      owners: team-growth
+    - match: '/surveys/'
+      owners: conversations
+    - match: ['/themes/', '/trends/']
+      owners: team-analytics
+    - match: '/toolbar-launch/'
+      owners: team-growth
+    - match: '/web-analytics/'
+      owners: team-analytics
+    - match: '/welcome/'
+      owners: team-growth
+    - match:
+          - '/real-time-usage/*.test.*'
+      owners: team-billing
+    - match:
+          - '/debug/*.test.*'
+      owners: team-data-tools
+    - match:
+          - '/sites/*.test.*'
+      owners: team-growth
+    - match:
+          - '/project/*.test.*'
+          - '/settings/organization/Approvals/*.test.*'
+          - '/settings/user/passkeys/*.test.*'
+      owners: team-platform-features
+    - match:
+          - '/analytics/*.test.*'
+      owners: team-analytics
+    - match:
+          - '/integrations/components/*.test.*'
+      owners: team-self-driving
+    - match:
+          - '/library/*.test.*'
+      owners: team-surfaces
+    - match:
+          - '/team-activity/customer_analytics_config/*.test.*'
+      owners: team-analytics
+    - match:
+          - '/integrations/aws-s3/*.test.*'
+      owners: team-workflows

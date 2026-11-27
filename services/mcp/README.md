@@ -1,0 +1,646 @@
+# PostHog MCP
+
+The official MCP server for PostHog. PostHog makes your product self-driving — it reads your data and ships changes with you, never without you — and this server gives MCP clients (Claude, Cursor, VS Code, Zed, and more) that full surface: analytics and SQL, dashboards, experiments, feature flags, surveys, session replay, error tracking, and more.
+
+Documentation: https://posthog.com/docs/model-context-protocol
+
+## Use the MCP Server
+
+### Quick install
+
+You can install the MCP server automatically into Cursor, Claude, Claude Code, VS Code and Zed by running the following command:
+
+```bash
+npx @posthog/wizard@latest mcp add
+```
+
+### Manual install
+
+1. Obtain a personal API key using the [MCP Server preset](https://us.posthog.com/settings/user-api-keys?preset=mcp_server).
+
+2. Add the MCP configuration to your desktop client (e.g. Cursor, Windsurf, Claude Desktop) and add your personal API key
+
+```json
+{
+  "mcpServers": {
+    "posthog": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-remote@latest",
+        "https://mcp.posthog.com/mcp",
+        "--header",
+        "Authorization:${POSTHOG_AUTH_HEADER}"
+      ],
+      "env": {
+        "POSTHOG_AUTH_HEADER": "Bearer {INSERT_YOUR_PERSONAL_API_KEY_HERE}"
+      }
+    }
+  }
+}
+```
+
+### Minimal Node client (Streamable HTTP)
+
+If you want to call MCP from Node (outside an IDE), use the Model Context Protocol SDK’s **Streamable HTTP** transport.
+
+- **Auth:** Use a **personal** PostHog API key and pass it as a Bearer token in `Authorization`.
+- **Accept header:** Clients **must** include `Accept: application/json, text/event-stream`.
+- **Lifecycle:** MCP requires `initialize` then a client `notifications/initialized`; the SDK performs this during `connect()`.
+
+```js
+// tools-list.mjs
+import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import { ListToolsResultSchema } from '@modelcontextprotocol/sdk/types.js'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { URL } from 'node:url'
+
+const AUTH = process.env.POSTHOG_AUTH_HEADER // "Bearer phx_…"
+const MCP_URL = process.env.MCP_URL || 'https://mcp.posthog.com/mcp'
+
+if (!AUTH?.startsWith('Bearer ')) {
+  console.error('Set POSTHOG_AUTH_HEADER="Bearer phx_..."')
+  process.exit(1)
+}
+
+const transport = new StreamableHTTPClientTransport(new URL(MCP_URL), {
+  requestInit: {
+    headers: {
+      Authorization: AUTH,
+      // Required for Streamable HTTP (JSON + SSE)
+      Accept: 'application/json, text/event-stream',
+    },
+  },
+  serverInfo: { name: 'example-node-client', version: '0.0.1' },
+})
+
+const client = new Client({ name: 'example-node-client', version: '0.0.1' })
+
+// Handles initialize + notifications/initialized
+await client.connect(transport)
+
+const toolsResp = await client.request({ method: 'tools/list' }, ListToolsResultSchema) // { tools: [...] }
+const tools = toolsResp?.tools ?? []
+console.log('Tools:', tools.length)
+
+// (Optional) Save the full JSON-RPC envelope to a file (run from repo root)
+const envelope = { jsonrpc: '2.0', id: 'list-1', result: toolsResp }
+mkdirSync('reports', { recursive: true })
+writeFileSync(join('reports', 'tools-list-http.json'), JSON.stringify(envelope, null, 2))
+console.log('Saved: reports/tools-list-http.json')
+
+await client.close()
+```
+
+**Why these headers & steps?**
+
+- Streamable HTTP requires the `Accept` header to include **both** JSON and SSE.
+- After `initialize`, the client must send `notifications/initialized`; the SDK does this for you in `connect()`.
+
+See also the main PostHog MCP docs for available tools and setup flows: [https://posthog.com/docs/model-context-protocol](https://posthog.com/docs/model-context-protocol)
+
+### Example Prompts
+
+Below are detailed examples showing realistic prompts and expected outputs:
+
+#### Example 1: Feature flag management
+
+**Prompt:** "Create a feature flag called 'new-checkout-flow' that's enabled for 20% of users, and show me the configuration"
+
+**What happens:**
+
+1. The `create-feature-flag` tool creates the flag with a 20% rollout
+2. Returns the flag configuration including the key, rollout percentage, and targeting rules
+
+**Expected output:**
+
+```text
+Created feature flag 'new-checkout-flow':
+- Key: new-checkout-flow
+- Active: true
+- Rollout: 20% of all users
+- URL: https://us.posthog.com/project/<project-id>/feature_flags/12345
+```
+
+#### Example 2: Analytics query
+
+**Prompt:** "How many unique users signed up in the last 7 days, broken down by day?"
+
+**What happens:**
+
+1. The `query-trends` tool executes a trends query filtering for `$signup` events
+2. Returns daily counts with unique user aggregation
+
+**Expected output:**
+
+```text
+Signups over the last 7 days:
+
+| Date       | Unique users |
+|------------|--------------|
+| 2025-01-17 | 142          |
+| 2025-01-18 | 156          |
+| 2025-01-19 | 98           |
+| ...        | ...          |
+
+Total: 847 unique signups
+```
+
+#### Example 3: A/B test creation and monitoring
+
+**Prompt:** "Create an A/B test for our pricing page that measures conversion to the checkout page"
+
+**What happens:**
+
+1. The `experiment-create` tool creates an experiment with control/test variants
+2. Sets up a funnel metric: pricing page view → checkout page view
+3. Creates an associated feature flag for variant assignment
+
+**Expected output:**
+
+```text
+Created experiment 'Pricing page test':
+- Feature flag: pricing-page-test
+- Variants: control (50%), test (50%)
+- Primary metric: Funnel conversion (pricing_page → checkout)
+- Status: Draft (ready to launch)
+- URL: https://us.posthog.com/project/<project-id>/experiments/789
+```
+
+#### Example 4: Error investigation
+
+**Prompt:** "What are the top 5 errors in my project this week and how many users are affected?"
+
+**What happens:**
+
+1. The `query-error-tracking-issues-list` tool fetches error groups sorted by occurrence count
+2. Returns error details including affected user counts
+
+**Expected output:**
+
+```text
+Top 5 errors this week:
+
+1. TypeError: Cannot read property 'id' of undefined
+   - Occurrences: 1,247
+   - Users affected: 89
+   - First seen: 2 days ago
+
+2. NetworkError: Failed to fetch
+   - Occurrences: 856
+   - Users affected: 234
+   - First seen: 5 days ago
+...
+```
+
+#### Quick prompts
+
+For simpler queries, you can use shorter prompts:
+
+- "What feature flags do I have active?"
+- "Show me my LLM costs this week"
+- "List my dashboards"
+- "What events are being tracked?"
+
+### Feature Filtering
+
+You can limit which tools are available by adding query parameters to the MCP URL. If no features are specified, all tools are available. When features are specified, only tools matching those features are exposed.
+
+```text
+https://mcp.posthog.com/mcp?features=flags,workspace,dashboards
+```
+
+Available features:
+
+| Feature                  | Description                                                                                     |
+| ------------------------ | ----------------------------------------------------------------------------------------------- |
+| `actions`                | [Actions](https://posthog.com/docs/data/actions)                                                |
+| `alerts`                 | [Alerts](https://posthog.com/docs/alerts)                                                       |
+| `annotations`            | [Annotations](https://posthog.com/docs/product-analytics/annotations)                           |
+| `batch_exports`          | Data pipelines                                                                                  |
+| `business_knowledge`     | Business knowledge                                                                              |
+| `canvas`                 | Canvas                                                                                          |
+| `code_review`            | PostHog Review                                                                                  |
+| `cohorts`                | [Cohorts](https://posthog.com/docs/data/cohorts)                                                |
+| `conversations`          | Conversations                                                                                   |
+| `core`                   | Core utilities (project switching, docs search)                                                 |
+| `customer_analytics`     | [Customer analytics](https://posthog.com/docs/customer-analytics)                               |
+| `dashboards`             | [Dashboards](https://posthog.com/docs/product-analytics/dashboards)                             |
+| `data_catalog`           | Data catalog                                                                                    |
+| `data_schema`            | Data schema exploration                                                                         |
+| `data_warehouse`         | [Data warehouse](https://posthog.com/docs/data-warehouse)                                       |
+| `debug`                  | Debug and diagnostic tools                                                                      |
+| `docs`                   | PostHog documentation search                                                                    |
+| `early_access_features`  | [Early access features](https://posthog.com/docs/feature-flags/early-access-feature-management) |
+| `endpoints`              | [Endpoints](https://posthog.com/docs/endpoints)                                                 |
+| `engineering_analytics`  | Engineering analytics                                                                           |
+| `error_tracking`         | [Error tracking alerts](https://posthog.com/docs/error-tracking)                                |
+| `events`                 | Event and property definitions                                                                  |
+| `experiments`            | [Experiments](https://posthog.com/docs/experiments)                                             |
+| `feedback`               | Send feedback to the PostHog team                                                               |
+| `field_notes`            | Field notes                                                                                     |
+| `flags`                  | [Feature flags](https://posthog.com/docs/feature-flags)                                         |
+| `health_issues`          | Health                                                                                          |
+| `hog_function_templates` | CDP function template browsing                                                                  |
+| `hog_functions`          | [Functions](https://posthog.com/docs/cdp)                                                       |
+| `insights`               | [Run insight queries](https://posthog.com/docs/product-analytics/insights)                      |
+| `integrations`           | Integrations                                                                                    |
+| `links`                  | PostHog app URL generation                                                                      |
+| `llm_analytics`          | [AI observability](https://posthog.com/docs/ai-observability)                                   |
+| `logs`                   | [Logs](https://posthog.com/docs/logs)                                                           |
+| `managed_migrations`     | Managed migrations                                                                              |
+| `marketing_analytics`    | Marketing analytics                                                                             |
+| `messaging`              | Messaging                                                                                       |
+| `mcp_analytics`          | MCP analytics                                                                                   |
+| `mcp_store`              | MCP Store                                                                                       |
+| `metrics`                | Metrics                                                                                         |
+| `notebooks`              | [Notebooks](https://posthog.com/docs/notebooks)                                                 |
+| `persons`                | [Persons](https://posthog.com/docs/data/persons)                                                |
+| `platform_features`      | Platform Features                                                                               |
+| `product_analytics`      | Saved insights and other product analytics tools                                                |
+| `reminders`              | Reminders                                                                                       |
+| `replay`                 | [Session replays](https://posthog.com/docs/session-replay)                                      |
+| `replay_vision`          | Replay vision                                                                                   |
+| `reverse_proxy`          | Reverse proxy record management                                                                 |
+| `signals`                | [Signals](https://posthog.com/docs/self-driving)                                                |
+| `skills`                 | Skills                                                                                          |
+| `sql`                    | SQL query execution                                                                             |
+| `streamlit_apps`         | Streamlit apps                                                                                  |
+| `subscriptions`          | Subscriptions                                                                                   |
+| `surveys`                | [Surveys](https://posthog.com/docs/surveys)                                                     |
+| `tasks`                  | [Tasks](https://posthog.com/docs/posthog-desktop/tasks)                                         |
+| `tracing`                | Tracing                                                                                         |
+| `visual_review`          | Visual review                                                                                   |
+| `warehouse_sources`      | Warehouse sources                                                                               |
+| `web_analytics`          | [Web analytics](https://posthog.com/docs/web-analytics)                                         |
+| `workflows`              | [Workflows](https://posthog.com/docs/workflows)                                                 |
+| `workspace`              | Organization and project management                                                             |
+
+> **Note:** Hyphens and underscores are treated as equivalent in feature names (e.g., `error-tracking` and `error_tracking` both work).
+
+To view which tools are available per feature, see our [documentation](https://posthog.com/docs/model-context-protocol) or check `schema/tool-definitions.json` (hand-written tools) and `schema/generated-tool-definitions.json` (tools generated from YAML).
+
+### Learning and skills in cli mode
+
+In cli mode, the `exec` tool keeps the guidance needed for a correct first call in its `command` schema, and serves task-specific guidance on demand through `learn`.
+Every cli client gets this compact schema except `consumer=posthog-code`, which has no `learn` and gets the full schema with every section inline.
+Claude web and desktop also get the compact tool-domain index inline, because they never show `instructions` to the model, and a shorter skills section, because they silently drop `exec` when its serialized `inputSchema` reaches 16,384 characters.
+Optional, task-specific guidance is served through the same tool:
+
+- `learn` lists the available built-in guides and, when enabled, the PostHog/project skill discovery syntax.
+- `learn analytics` loads the core analytics guidance: governed metrics first, typed query runners over SQL, and schema-first discovery. Agents load it for almost every data task, so it stays small. Claude web and desktop also get the catalog's certified tables and verified joins here; other cli clients keep the query-tool routing inline in the command reference instead.
+- `learn sql` (cli clients other than Claude web and desktop) loads the guidance for writing `execute-sql`: searching saved entities, certified tables, and verified joins.
+- `learn artifacts` loads the guidance for choosing and building a notebook, dashboard, or saved insight, and for explaining why a chart changed.
+- `learn activity` loads the configuration history procedure when an activity log reader is available.
+- `learn examples` loads worked multi-step analysis plans.
+- `learn hogql` loads the full HogQL guidelines, SQL examples, and the observability and LLM table reference for `execute-sql`.
+- `learn visualizations` loads rendering guidance when visualizations are available.
+- `learn urls` loads the PostHog app link formatting rules.
+- `learn feedback` loads feedback guidance when feedback is available.
+- `learn <topic> <topic...>` loads several guides in one result. Every guide fits in one tool result on its own, and guides that together would pass the smallest client tool-result limit are named in a notice for a separate `learn` command instead of being cut.
+- `learn skills` lists qualified names from the published PostHog bundle (`posthog:`) and the current project's Skills store (`project:`).
+- `learn -s "<up to 8 keywords>"` searches both sources in names, descriptions, Markdown bodies, and bundled file paths. Longer keywords take priority when a query contains more than eight. Results from both sources are merged into one relevance order.
+- `learn -d <source>:<skill> [...]` prints the one-line description of each named skill without reading its body (up to 20 per call). Unknown names are reported inline without failing the batch.
+- `learn posthog:<skill> [path]` or `learn project:<skill> [path]` reads a skill or one of its bundled files.
+- `learn <source>:<skill> <path> [path...]` reads several bundled files, and `learn <source>:<skill> [<source>:<skill>...]` reads several skills, in one call (up to 10 targets). Like guides, skills or files that together would pass the smallest client tool-result limit are named for a separate `learn` command instead of being cut.
+- `learn <source>:<skill> <path> -s "<up to 8 keywords>"` searches within one Markdown file.
+- `learn <source>:<skill> <path> --lines <start>:<end>` reads an inclusive line range.
+
+Built-in guides are available to every cli-mode client except the PostHog Code consumer. Skill discovery is independently available to the same clients when the `mcp-exec-skills` feature flag is enabled. If the flag is missing, disabled, or cannot be evaluated, skill commands are omitted from the schema and rejected at runtime.
+When skill discovery is enabled, the inline prompt tells every non-plugin cli client, including Claude web and desktop, to search with `learn -s "<task keywords>"` before non-trivial PostHog work, load matches by exact qualified name, and follow the loaded `SKILL.md` before choosing tools. Trivial lookups and unrelated conversation skip this workflow.
+Skill use is advisory: a product `call` is never rejected for skipping `learn`, so every client behaves the same whether or not it holds an MCP session id.
+
+`info execute-sql` carries the HogQL rules needed for routine queries inline. The full HogQL guidelines and reference stay inline only for clients that cannot load them on demand. Other clients get a pointer instead:
+
+- Every cli client with built-in guides: `learn hogql`.
+- `consumer=plugin`, and any client that sends `x-posthog-mcp-bundled-skills: true`: the bundled `querying-posthog-data` skill.
+
+A PostHog Code Tasks sandbox sends that header unless the run strips the bundled skills (`disable_skills`, `POSTHOG_CODE_DISABLE_BUNDLED_SKILLS=1` in its sandbox environment, or the Pi runtime).
+Tools mode and `consumer=posthog-code` without the header keep the full description, because they have no on-demand path the server can rely on.
+
+A tool can also give `info` a short description for a long input field through `infoFieldDescriptions`, and `schema <tool> <field>` still returns the full one.
+`info generate-app-url` uses this for its `url` field, so the catalog of app path templates loads only through `schema generate-app-url url`. Tools mode keeps the catalog inline.
+
+A tool result is bounded before it returns, in both tools mode and `exec`, only for a client with a documented tool result limit. Codex gets its own 10,000-token limit, counted as 4 UTF-8 bytes per token as Codex counts it. Other clients get the whole result and handle size themselves (Claude Code saves a large result to a file). The text and `structuredContent` are bounded separately, and `_meta` is left whole.
+A shortened result stays valid in its format: JSON and TOON are re-serialized with whole array items and the short fields kept, and other text is cut at a line boundary inside any informational tags. It starts with a `[Response shortened …]` notice, stored under `_responseBudget` in JSON, that lists what was cut and how to ask for less. `output_tokens` records the shortened size, and `mcp_tool_responses_shortened_total` counts shortened results by tool.
+
+The skill bundle is shared through Redis: each pod loads it once at startup, parses it into memory, and serves every `learn` command from that parsed catalog.
+A background timer polls a small version key in Redis; only when the version changes does a pod read the archive bytes again.
+One pod at a time refreshes the archive from its source when the shared copy is older than ten minutes, using a conditional request so an unchanged release costs a 304.
+The cached bytes are kept for thirty days and re-extended on every refresh, so a source outage serves the last good archive.
+No `learn`, `initialize`, or `discover` request reads the archive from Redis.
+By default it is loaded from `https://github.com/PostHog/posthog/releases/download/agent-skills-latest/skills.zip`.
+Set `POSTHOG_MCP_SKILLS_URL` to use another archive during local development.
+The context-mill omnibus skills are overlaid on that bundle from the shared copy the resource refresh publishes; set `POSTHOG_MCP_OMNIBUS_SKILLS=off` to serve the bundle alone.
+A pinned bundle (`POSTHOG_MCP_SKILLS_SHA256`) serves no overlay, and a product skill keeps its name when an overlay skill collides with it.
+Custom archive URLs use separate Redis cache namespaces so a local bundle cannot read or overwrite the published bundle's cache entry.
+Project skills are read directly from the request-authenticated project and are not cached by the MCP server.
+Only latest, active, uncategorized skills are exposed through `learn`; category-specific skills such as scouts stay on their own surfaces.
+Project full-text search is bounded to 10 skills, two short snippets per skill, and a five-second database timeout.
+Individual `learn` responses stay below 44,000 characters; large references return a heading outline for follow-up search or line reads.
+The fixed command syntax stays in the tool schema, while skill names and bodies are loaded only when requested.
+`consumer=plugin` and `consumer=posthog-code` get no skill commands from `learn`, because both surfaces already supply their own bundled skill context, regardless of the feature flag. `consumer=plugin` still gets the built-in guides and the compact command reference; `consumer=posthog-code` keeps the full reference without `learn`.
+
+### Skills in tools mode
+
+Tools mode lists a `learn` tool when skill discovery is enabled for the connection.
+The rules match cli mode: the `mcp-exec-skills` flag is on and the consumer is not `plugin` or `posthog-code`.
+Connections through the MCP store do not get the tool.
+The `features` and `tools` filters do not hide it, as with the tools marked `always_available`.
+Its `command` takes the skill commands above, with or without the leading `learn`, and serves them from the same catalog.
+The tools-mode `instructions` then tell the agent to search with `learn` before non-trivial PostHog work.
+
+### Tool filtering
+
+In CLI mode, `tools` and `exclude_tools` also apply to namespaced connected tools. A `features` filter excludes connected tools unless `tools` explicitly names them. Exclusions take precedence over explicit selections.
+
+For finer-grained control you can allowlist specific tools by name using the `tools` query parameter. Only the exact tool names listed will be exposed, regardless of their feature category.
+
+```text
+https://mcp.posthog.com/mcp?tools=dashboard-get,feature-flag-get-all,execute-sql
+```
+
+When `features` and `tools` are both provided they are combined as a **union** — a tool is included if it matches a feature category **or** is in the tools list. This lets you select a feature group and add a handful of individual tools on top:
+
+```text
+https://mcp.posthog.com/mcp?features=flags&tools=dashboard-get
+```
+
+The example above exposes all flag tools plus `dashboard-get`.
+
+### Resource filtering
+
+The server advertises its skills, docs, and UI apps as MCP resources, and some clients add every resource to their `@` file picker.
+Pass `resources` to choose which ones `resources/list` returns, or `none` to return none:
+
+```text
+https://mcp.posthog.com/mcp?resources=none
+https://mcp.posthog.com/mcp?resources=feature-flags,docs
+```
+
+```http
+x-posthog-mcp-resources: none
+```
+
+| Value              | Lists                                                                                       |
+| ------------------ | ------------------------------------------------------------------------------------------- |
+| `none`             | No resources.                                                                               |
+| `skills`           | Every skill (`posthog://skills/…`).                                                         |
+| `<skill category>` | The skills in one category, such as `feature-flags` for `posthog://skills/feature-flags/…`. |
+| `docs`             | The docs resources (`posthog://docs/…`).                                                    |
+| `apps`             | The UI apps that render tool results (`ui://posthog/…`).                                    |
+
+Values are comma-separated and combined as a union, like `features`.
+Hyphens and underscores are equivalent, and a value that matches no resource adds nothing.
+The header wins when both the header and the query parameter are set.
+The filter changes only what the server lists: `resources/read` still serves every resource, so tools that render UI apps keep working.
+
+### Server mode (tools vs cli)
+
+The MCP server can register either every PostHog tool individually (**tools** mode) or wrap them all behind a single `exec` CLI-like tool (**cli** mode).
+**cli is the default for all clients.**
+When the caller does not pin a mode, the server only auto-selects tools mode for a short allow-list of clients that are better served by the full per-tool roster — currently Cursor (matched by its self-reported client name or its `Cursor/…` User-Agent).
+Cursor is moving to cli mode behind the `mcp-cursor-exec-mode` feature flag: a Cursor connection with the flag on gets the cli default, and one with the flag off keeps tools mode.
+Every OpenAI surface (ChatGPT, Codex, Agent Builder, Responses API) gets the cli default. OpenAI's `openai-mcp` client caches the roster it captures for a published plugin and serves that snapshot to every user of the plugin, so the mode a plugin listing should run in is pinned on the URL submitted to OpenAI rather than inferred from a User-Agent label.
+
+You can pin the choice yourself with either a query parameter or a header. Only `tools` and `cli` are accepted:
+
+```text
+https://mcp.posthog.com/mcp?mode=cli
+https://mcp.posthog.com/mcp?mode=tools
+```
+
+```http
+x-posthog-mcp-mode: cli
+x-posthog-mcp-mode: tools
+```
+
+| Value   | Behavior                                             |
+| ------- | ---------------------------------------------------- |
+| `tools` | Force tools mode (one MCP tool per PostHog tool).    |
+| `cli`   | Force cli mode (single `exec` tool wraps all tools). |
+
+The header wins when both the header and the query parameter are set.
+An explicit value always wins over the client auto-detection; any other value is ignored and the auto-detection takes over.
+
+### Separate read and write tools in cli mode
+
+By default every cli-mode command goes through `exec`, so a client can only allow all of them or ask about each one.
+In cli mode, send `split_writes=true` to list two tools in its place:
+
+| Tool         | Runs                                                              | `readOnlyHint` | `destructiveHint` |
+| ------------ | ----------------------------------------------------------------- | -------------- | ----------------- |
+| `exec-read`  | Every discovery command and `call`s to read-only tools.           | `true`         | `false`           |
+| `exec-write` | `call`s to tools that change data, and anything `exec-read` runs. | `false`        | `true`            |
+
+```text
+https://mcp.posthog.com/mcp?split_writes=true
+```
+
+```http
+x-posthog-split-writes: true
+```
+
+The header wins when both are set.
+A client can then always allow `exec-read` and keep asking about `exec-write`.
+Claude and ChatGPT run tools marked `readOnlyHint: true` without asking by default, and Claude Code, Codex and Cursor take an allow rule for each tool name.
+Clients that honor `destructiveHint`, such as Claude, ask about every `exec-write` call even when it is set to always allow.
+
+- `exec-read` refuses a `call` to a tool whose definition lacks `readOnlyHint: true`, and to every tool from a connected MCP server, because PostHog can't check that server's claim. The refusal names `exec-write`.
+- `exec-read` refuses writes on every request and every connection, so a client that cached it as read-only never has it run a write, whatever later requests send.
+- `exec-write` answers only on a request that asks for the split. A connection that sends `consumer`, such as the AI plugin, PostHog Code or a Tasks sandbox, never gets it, because those wrappers gate writes on the `exec` name.
+- `exec` keeps working on every connection that doesn't ask for the split. A split connection answers it as not found, so allow rules written for `exec` don't carry over.
+
+The cli-mode command surface is documented publicly on [posthog.com/docs/model-context-protocol/tools](https://posthog.com/docs/model-context-protocol/tools), which embeds `schema/exec-command-reference.md` at build time.
+That fragment is generated from the templates in `src/templates/sections/` by `scripts/generate-exec-docs.ts` (part of `hogli build:openapi`); edit the templates, not the fragment.
+
+### Business knowledge for your own agent
+
+Your own agent, with no PostHog user behind it, can search a project's business knowledge.
+Connect to `/mcp/business-knowledge` with a project secret API key (`phs_...`) that has the `business_knowledge:read` scope:
+
+```json
+{
+  "mcpServers": {
+    "business-knowledge": {
+      "url": "https://mcp.posthog.com/mcp/business-knowledge",
+      "headers": { "Authorization": "Bearer <your project secret API key>" }
+    }
+  }
+}
+```
+
+- The key decides the project and the region, so the URL takes no project ID. A `project_id` or `organization_id` sent with the request is ignored.
+- `/mcp/business-knowledge` accepts only project secret API keys, and every other `/mcp` path refuses them.
+- The connection lists six read-only tools: document search, document window, library list, library get, repository search, and repository file read. It reaches no other tool, whatever `features` or `tools` say.
+- These connections default to tools mode. Send `mode=cli` for the single `exec` tool.
+- Keep the key on your server. Anyone who has it can read all the business knowledge in the project, or one library when the key is limited to a library.
+
+### Consumer attribution
+
+Wrapping apps and AI-tool plugins that install or proxy the PostHog MCP can self-identify so usage can be attributed to the install path (e.g. plugin-installed vs. manually-pasted URL). The wrapped MCP client (Claude Code, Cursor, …) is already captured separately via the MCP `clientInfo` handshake — this signal is only for the wrapping context.
+
+```text
+https://mcp.posthog.com/mcp?consumer=plugin
+```
+
+```http
+x-posthog-mcp-consumer: plugin
+```
+
+The header wins when both the header and the query parameter are set. Reserved values: `plugin` (AI-tool plugin installs), `posthog-code` (PostHog Desktop Tasks sandbox), `slack` (Slack integration).
+
+### Data processing
+
+The MCP server runs in PostHog's US and EU Kubernetes clusters and stores session state in the region you connect to.
+A stateless Cloudflare Worker in front of it only authenticates requests and routes them to your cloud region; it does not store any sensitive data.
+
+### Using self-hosted instances
+
+If you're using a self-hosted instance of PostHog, you can specify a custom base URL by setting the `POSTHOG_API_BASE_URL` environment variable when running the MCP server locally or on your own infrastructure, e.g. `POSTHOG_API_BASE_URL=https://posthog.example.com`
+
+# Development
+
+To run the MCP server (Hono on Node) locally, run the following command:
+
+```bash
+pnpm run dev
+```
+
+Or use `bin/start-mcp-server` from the repo root, which also bootstraps `.env` and sets Redis/port defaults.
+Then replace `https://mcp.posthog.com/mcp` with `http://localhost:8787/mcp` in the MCP configuration.
+
+The server defaults to port **8787**, reads config from `.env` (see `.env.example`), and expects a local Redis on port `6379` for session state; production deployments must set `REDIS_URL` to a TLS-encrypted `rediss://` endpoint.
+
+Startup waits up to 45 seconds for Redis to become ready, including connection retries. If Redis stops reconnecting or the deadline expires, the process exits without starting the HTTP server.
+
+### Session cache
+
+Each MCP transport session keeps its own active organization and project, including connections without a `project_id` or `organization_id` pin. An unpinned session starts from the user's active organization and project, within the credential's allowed scope. Later website changes and switches in other MCP sessions do not change that selection. `switch-project` and `switch-organization` update only the calling session; switching to another organization clears the previous project.
+
+`switch-project` requires a positive integer `projectId`. It also accepts `project_id` and `new_project_id` as aliases. If several are supplied, `projectId` takes precedence, followed by `project_id`.
+
+Clients without an MCP session ID use the SDK's `conversation_id` instead. Echo the handle returned by the first tool call on subsequent calls. A switch without a carried session or conversation handle returns an error and a new handle; retry with that handle to apply the switch. Conversation state is bound to the credential and stored separately from transport sessions. Calls without either identity start from the connection's pin or default selection. If your client cannot retain conversation handles, pin the project or organization in the connection URL.
+
+Legacy JSON-RPC batches restore each call's conversation handle independently. The wrapper's `sessionId` query parameter is an analytics hint and does not replace a conversation handle; wrapper-only calls still receive a new handle from the SDK.
+
+Session defaults are stored once, separately from explicit selections. A delayed lookup can resolve context for its own request without overwriting a completed switch.
+
+If default project discovery fails, later requests retry within the session's original organization. The first successful project discovery wins, and explicit switches still take precedence. An organization switch retains a selected project when the destination's team list confirms that it belongs there, even if the credential cannot read project metadata.
+
+A session's client context lives in one `mcp:s:<id>:c` key with a 24-hour idle expiry, refreshed on every request in the session.
+Concurrent requests merge their fields through a Lua compare-and-merge, so a field first seen mid-session is never lost to an overlapping write.
+
+Monitor `mcp_session_cache_operations_total` for `read_error` and `write_error`.
+Both are non-blocking: a failed read serves whatever context the current request carries, so attribution degrades rather than the call failing.
+Each also logs a warning prefixed `[McpSessionRedisStore]`, so a Redis failure on this path is greppable in logs and not only visible on the metrics counter.
+
+### Edge-proxy worker (Cloudflare)
+
+In production, a thin Cloudflare Worker sits in front of the Hono deployments as a stateless edge router: it serves the OAuth metadata endpoints, validates tokens, resolves the caller's cloud region, and proxies `/mcp` traffic to `mcp.us.posthog.com` / `mcp.eu.posthog.com`.
+It does not serve the MCP protocol itself - see [ARCHITECTURE.md](ARCHITECTURE.md).
+To run just the worker locally:
+
+```bash
+pnpm run dev:proxy
+```
+
+### Developing with local resources
+
+To develop with warm loading for MCP resources (workflows, prompts, examples):
+
+1. Start the [context-mill](https://github.com/PostHog/context-mill) dev server: `cd ../context-mill && npm run dev`
+2. Start the MCP server with local resources: `pnpm run dev:local-resources` (runs `bin/start-mcp-server` with `POSTHOG_MCP_LOCAL_SKILLS_URL` pointed at context-mill)
+
+Changes in the examples repo will be reflected on the next request.
+
+## Project Structure
+
+- `src/` - The MCP server: Hono app (`src/hono/`), tool handlers (`src/tools/`), prompt templates (`src/templates/`)
+- `definitions/` - Hand-authored YAML tool definitions (per-product YAML lives at `products/<product>/mcp/` in the monorepo)
+- `schema/` - Tool definitions: hand-written `tool-definitions.json`, plus generated files such as `generated-tool-definitions.json`
+
+### Development Commands
+
+- `pnpm run dev` - Start the MCP development server
+- `pnpm run dev:proxy` - Start the edge-proxy worker (wrangler)
+- `pnpm run lint` / `pnpm run format:check` - Verify linting and formatting without changing files
+- `pnpm run lint:fix` - Apply safe lint fixes without suggestion fixes
+- `pnpm run format` - Format code with Oxfmt only
+- `pnpm run fix` - Apply safe lint fixes, always format code, and report failures from either tool
+- `pnpm run build:cli:catalog` - Write the API tool catalog that the PostHog app serves to hog at `/api/cli/catalog.json`. The image build runs it, and so does `bin/start-backend` in the background, so local dev serves the catalog of your checkout
+
+### Adding New Tools
+
+Most tools are generated from `products/<product>/mcp/tools.yaml`.
+Follow the [implementing MCP tools skill](../../.agents/skills/implementing-mcp-tools/SKILL.md) and the [handbook guide](../../docs/published/handbook/engineering/ai/implementing-mcp-tools.md) for that flow.
+Use [src/tools/README.md](src/tools/README.md) only for hand-written tools.
+
+### Environment variables
+
+Copy `.env.example` to `.env` in the root and adjust the values as needed.
+
+### Configuring the Model Context Protocol Inspector
+
+During development you can directly inspect the MCP tool call results using the [MCP Inspector](https://modelcontextprotocol.io/docs/tools/inspector).
+
+You can run it using the following command:
+
+```bash
+npx @modelcontextprotocol/inspector npx -y mcp-remote@latest http://localhost:8787/mcp --header "\"Authorization: Bearer {INSERT_YOUR_PERSONAL_API_KEY_HERE}\""
+```
+
+Alternatively, you can use the following configuration in the MCP Inspector:
+
+Use transport type `STDIO`.
+
+**Command:**
+
+```bash
+npx
+```
+
+**Arguments:**
+
+```bash
+-y mcp-remote@latest http://localhost:8787/mcp --header "Authorization: Bearer {INSERT_YOUR_PERSONAL_API_KEY_HERE}"
+```
+
+### Developing against Claude Desktop
+
+Claude Desktop is one of the easiest ways to test MCP Apps - while PostHog Desktop doesn't support it. You can configure access Settings > Developer and then edit `claude_desktop_config.json` with the following:
+
+```json
+{
+  "mcpServers": {
+    "posthog-local": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote@latest", "http://localhost:8787/mcp"]
+    }
+  }
+}
+```
+
+## MCP Registry listing
+
+The server is listed in the [MCP Registry](https://registry.modelcontextprotocol.io/v0/servers?search=com.posthog/mcp) as `com.posthog/mcp`, from [`server.json`](server.json).
+The `MCP Registry publish` workflow validates the file on pull requests and publishes it when it lands on `master`.
+
+- Bump `version` whenever you change `server.json`. The registry never accepts the same version twice, so the check fails when a published version's content differs from the file.
+- The registry verifies the `com.posthog` namespace through the public key at `https://posthog.com/.well-known/mcp-registry-auth`. The publish job signs with the matching private key, the `MCP_REGISTRY_PRIVATE_KEY` secret of the `mcp-registry` environment, which only admits `master`. Keep it out of organization and repository secrets, because any workflow on any branch can read those. The team password manager holds a copy. Rotate all of them together.
+- To deprecate an old version, log in with `mcp-publisher login http --domain posthog.com` and run `mcp-publisher status --status deprecated com.posthog/mcp <version>`.
+
+## Privacy & Support
+
+- **Privacy Policy:** https://posthog.com/privacy
+- **Terms of Service:** https://posthog.com/terms
+- **Support:** https://posthog.com/questions or email support@posthog.com
+- **GitHub Issues:** https://github.com/PostHog/posthog/issues
+
+### Data handling
+
+The MCP server acts as a proxy to your PostHog instance. It does not store your analytics data - all queries are executed against your PostHog project and results are returned directly to your AI client. Session state (active project/organization) is cached temporarily, keyed by your API key hash.
+
+For EU users, use the `mcp-eu.posthog.com` endpoint to ensure OAuth flows route to the EU PostHog instance.

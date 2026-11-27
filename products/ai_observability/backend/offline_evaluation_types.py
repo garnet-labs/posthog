@@ -1,0 +1,82 @@
+from dataclasses import field
+from datetime import datetime
+from typing import Literal
+from uuid import UUID
+
+from posthog.dataclasses import frozen
+
+MAX_ITEM_PAYLOAD_BYTES = 1024 * 1024
+MAX_RESULT_PAYLOAD_BYTES = 256 * 1024
+
+type JSONValue = None | bool | int | float | str | list[JSONValue] | dict[str, JSONValue]
+type ResultValue = float | bool | list[str]
+type RunSource = Literal["ci", "local", "scheduled"]
+type ResultStatus = Literal["ok", "error", "skipped", "not_applicable"]
+
+
+def reported_score_errors(status: str, value: object, error_code: object) -> dict[str, str]:
+    errors: dict[str, str] = {}
+    if status == "ok" and value is None:
+        errors["value"] = "A score is required for an ok result."
+    if status != "ok" and value is not None:
+        errors["value"] = "Only an ok result may contain a score."
+    if status != "error" and error_code is not None:
+        errors["error_code"] = "Only an error result may contain an error code."
+    return errors
+
+
+def result_payload_error(status: str, payload: dict[str, JSONValue] | None) -> str | None:
+    if status != "error" and payload and payload.get("error_message") is not None:
+        return "Only an error result may contain an error message."
+    return None
+
+
+@frozen
+class ExperimentSubmission:
+    id: UUID
+    name: str
+    started_at: datetime
+    run_source: RunSource | None = None
+    expected_item_count: int | None = None
+    expected_result_count: int | None = None
+    suite_key: str | None = None
+    experiment_scorer_version_id: UUID | None = None
+    dataset_source: str | None = None
+    dataset_identifier: str | None = None
+    dataset_revision_identifier: str | None = None
+    dataset_revision_id: UUID | None = None
+    application_version: str | None = None
+    model_version: str | None = None
+    prompt_version: str | None = None
+
+
+@frozen
+class ItemSubmission:
+    id: UUID
+    model_version: str | None = None
+    case_key: str | None = None
+    trial: str | None = None
+    dataset_item_identifier: str | None = None
+    dataset_item_version_identifier: str | None = None
+    dataset_item_version_id: UUID | None = None
+    application_trace_id: str | None = None
+    payload: dict[str, JSONValue] | None = field(default=None, repr=False)
+
+
+@frozen
+class ResultSubmission:
+    item_id: UUID
+    scorer_version_id: UUID
+    status: ResultStatus
+    calculate: bool = False
+    value: ResultValue | None = None
+    error_code: str | None = None
+    evaluator_trace_id: str | None = None
+    evaluated_at: datetime | None = None
+    payload: dict[str, JSONValue] | None = field(default=None, repr=False)
+
+
+@frozen
+class UploadSubmission:
+    results: list[ResultSubmission]
+    items: list[ItemSubmission] = field(default_factory=list)

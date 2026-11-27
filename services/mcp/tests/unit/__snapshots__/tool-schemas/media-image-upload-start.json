@@ -1,0 +1,17 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "properties": {
+        "name": {
+            "description": "The file's display name, e.g. 'logo.png'.",
+            "maxLength": 1000,
+            "type": "string"
+        },
+        "purpose": {
+            "description": "Library to add this image to once uploaded, e.g. 'email'. Use 'conversations' for a support ticket reply image. No library lists those.",
+            "maxLength": 100,
+            "type": "string"
+        }
+    },
+    "required": ["name", "purpose"],
+    "type": "object"
+}

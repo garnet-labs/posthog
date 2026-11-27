@@ -1,0 +1,52 @@
+from django.conf import settings
+
+AGENT_EGRESS_DOMAIN_PATTERN = r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}"
+
+
+def sandbox_ai_gateway_worker_url() -> str:
+    return settings.SANDBOX_AI_GATEWAY_WORKER_URL or settings.SANDBOX_AI_GATEWAY_URL or ""
+
+
+def agent_egress_staging_environment() -> bool:
+    return (
+        not settings.DEBUG and settings.CLOUD_DEPLOYMENT == "DEV" and str(settings.SANDBOX_PROVIDER).upper() == "MODAL"
+    )
+
+
+def agent_egress_staging_probe_enabled() -> bool:
+    return agent_egress_staging_environment() and bool(settings.AGENT_EGRESS_STAGING_PROBE_RUN_ID)
+
+
+def agent_egress_enrollment_environment() -> bool:
+    return (settings.DEBUG and str(settings.SANDBOX_PROVIDER).upper() == "MODAL_DOCKER") or (
+        not settings.DEBUG
+        and settings.CLOUD_DEPLOYMENT in {"DEV", "US", "EU"}
+        and (not settings.SANDBOX_PROVIDER or str(settings.SANDBOX_PROVIDER).upper() == "MODAL")
+    )
+
+
+def agent_egress_enrollment_enabled() -> bool:
+    return agent_egress_enrollment_environment() and bool(settings.AGENT_EGRESS_ENROLLMENT_CONFIG)
+
+
+# Production: 6 hours (safety net; workflow inactivity timeout handles cleanup).
+# Tests: 15 min so any sandbox orphaned by a crashed test auto-destroys quickly
+# instead of burning Modal capacity for hours.
+SANDBOX_TTL_SECONDS = 15 * 60 if settings.TEST else 6 * 60 * 60
+
+# Default request floor for burstable sandboxes (used when SandboxConfig.burstable_resources is
+# True): the box reserves only this much and bursts up to its configured cpu_cores / memory_gb.
+# Modal bills max(request, actual), so an idle burstable box costs the floor, not the full size.
+BURSTABLE_REQUEST_CPU_CORES = 0.5
+BURSTABLE_REQUEST_MEMORY_MB = 1024
+
+VM_SANDBOX_CPU_CORES = 8.0
+
+# Upper bounds for per-task sandbox resource overrides. Override values are clamped
+# to these so a bad or hostile value can't provision an oversized/long-lived sandbox.
+MAX_SANDBOX_CPU_CORES = 16
+MAX_SANDBOX_MEMORY_GB = 64
+MAX_SANDBOX_TTL_SECONDS = SANDBOX_TTL_SECONDS
+
+DEV_STACK_MEMORY_GB = 64.0
+DEV_STACK_CPU_REQUEST_CORES = 2.0

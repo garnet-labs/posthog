@@ -1,0 +1,40 @@
+from typing import TYPE_CHECKING
+
+from products.metrics.backend.temporal.activities import (
+    analyze_team_activity,
+    check_preview_activity,
+    draft_template_activity,
+    find_teams_to_analyze_activity,
+    finish_generation_activity,
+    render_preview_activity,
+    start_generation_activity,
+)
+from products.metrics.backend.temporal.recording_rules import (
+    METRICS_RECORDING_RULES_ACTIVITIES,
+    METRICS_RECORDING_RULES_WORKFLOWS,
+)
+from products.metrics.backend.temporal.workflows import (
+    MetricsDashboardDiscoveryWorkflow,
+    MetricsDashboardGenerateWorkflow,
+    MetricsDashboardSuggestWorkflow,
+)
+
+if TYPE_CHECKING:
+    from posthog.temporal.common.registration import ActivityDefinition
+
+WORKFLOWS = [
+    MetricsDashboardDiscoveryWorkflow,
+    MetricsDashboardSuggestWorkflow,
+    MetricsDashboardGenerateWorkflow,
+    *METRICS_RECORDING_RULES_WORKFLOWS,
+]
+ACTIVITIES: list[ActivityDefinition] = [
+    find_teams_to_analyze_activity,
+    analyze_team_activity,
+    start_generation_activity,
+    draft_template_activity,
+    render_preview_activity,
+    check_preview_activity,
+    finish_generation_activity,
+    *METRICS_RECORDING_RULES_ACTIVITIES,
+]

@@ -1,0 +1,201 @@
+import { useMountedLogic, useValues } from 'kea'
+import { router, combineUrl } from 'kea-router'
+import { Suspense } from 'react'
+
+import { LemonButton, LemonTab, LemonTabs, LemonTag } from '@posthog/lemon-ui'
+import { Button } from '@posthog/quill'
+
+import { NotFound } from 'lib/components/NotFound'
+import { FEATURE_FLAGS } from 'lib/constants'
+import { useFeatureFlag } from 'lib/hooks/useFeatureFlag'
+import { LinkPrimitive } from 'lib/lemon-ui/Link'
+import { featureFlagLogic } from 'lib/logic/featureFlagLogic'
+import { lazyWithRetry } from 'lib/utils/retryImport'
+import { urls } from 'scenes/urls'
+
+import { SceneContent } from '~/layout/scenes/components/SceneContent'
+import { SceneTitleSection } from '~/layout/scenes/components/SceneTitleSection'
+import { ProductKey } from '~/queries/schema/schema-general'
+import { SceneExport } from '~/scenes/sceneTypes'
+
+import { MCPAnalyticsClustering } from './clustering/MCPAnalyticsClustering'
+import { MCPAnalyticsActivityDashboard } from './earlyData/MCPAnalyticsEarlyData'
+import { mcpAnalyticsEmptyState } from './emptyState/mcpAnalyticsEmptyState'
+import { FirstDataSeen } from './FirstDataSeen'
+import { MCPAnalyticsLeaderboardHome } from './leaderboardHome/MCPAnalyticsLeaderboardHome'
+import { mcpAnalyticsFiltersLogic, pickSharedFilterParams } from './mcpAnalyticsFiltersLogic'
+import { mcpAnalyticsOnboardingLogic } from './mcpAnalyticsOnboardingLogic'
+import { MCPAnalyticsTab, TAB_DESCRIPTIONS, mcpAnalyticsSceneLogic } from './mcpAnalyticsSceneLogic'
+import { MCPAnalyticsSceneMenuBar } from './MCPAnalyticsSceneMenuBar'
+import { MCPAnalyticsToolQuality } from './MCPAnalyticsToolQuality'
+import { MCPAnalyticsMissingCapabilities } from './missingCapabilities/MCPAnalyticsMissingCapabilities'
+import { MCPAnalyticsNotifications } from './notifications/MCPAnalyticsNotifications'
+import { mcpAnalyticsNotificationsLogic } from './notifications/mcpAnalyticsNotificationsLogic'
+import { MCPSessionsPlaylist } from './sessions/MCPSessionsPlaylist'
+import { MCPSetupMode } from './setupMode/MCPSetupMode'
+import { SetupGuideButton } from './setupMode/SetupGuideButton'
+import { MCPAnalyticsUsers } from './users/MCPAnalyticsUsers'
+import { MCPWrapped } from './wrapped/MCPWrapped'
+import { WrappedButton } from './wrapped/WrappedButton'
+
+export const scene: SceneExport = {
+    component: MCPAnalyticsScene,
+    logic: mcpAnalyticsSceneLogic,
+    productKey: ProductKey.MCP_ANALYTICS,
+    emptyState: mcpAnalyticsEmptyState,
+}
+
+const MCP_DOCS_URL = 'https://posthog.com/docs/mcp-analytics/installation'
+
+const LegacyMCPAnalyticsScene = lazyWithRetry(() =>
+    import('./legacy/MCPAnalyticsScene').then((m) => ({ default: m.MCPAnalyticsScene }))
+)
+
+export function MCPAnalyticsScene(): JSX.Element {
+    const redesign = useFeatureFlag('MCP_ANALYTICS_REDESIGN')
+    if (!redesign) {
+        return (
+            <Suspense fallback={null}>
+                <LegacyMCPAnalyticsScene />
+            </Suspense>
+        )
+    }
+    return (
+        <>
+            <FirstDataSeen />
+            <MCPAnalyticsSceneBody />
+        </>
+    )
+}
+
+function MCPAnalyticsSceneBody(): JSX.Element {
+    // The scene logic is shared with the legacy UI, so the redesign mounts its own filters logic.
+    useMountedLogic(mcpAnalyticsFiltersLogic)
+    const { searchParams } = useValues(router)
+    const { activeTab } = useValues(mcpAnalyticsSceneLogic)
+    const { onboardingState } = useValues(mcpAnalyticsOnboardingLogic)
+    const { notificationCount } = useValues(mcpAnalyticsNotificationsLogic)
+    const { featureFlags } = useValues(featureFlagLogic)
+    const intentRoutingEnabled = !!featureFlags[FEATURE_FLAGS.MCP_ANALYTICS_INTENT_ROUTING]
+    const todayRailNav = useFeatureFlag('TODAY_RAIL_NAV')
+
+    if (activeTab === 'intent-clustering' && !intentRoutingEnabled) {
+        return <NotFound object="page" />
+    }
+
+    // Only the shared filters and search carry across tabs.
+    const sharedParams = pickSharedFilterParams(searchParams)
+    const tabParams = searchParams.search ? { ...sharedParams, search: searchParams.search } : sharedParams
+
+    const activityTab: LemonTab<MCPAnalyticsTab> = {
+        key: 'activity',
+        label: 'Activity',
+        content: <MCPAnalyticsActivityDashboard />,
+        link: combineUrl(urls.mcpAnalyticsActivity(), sharedParams).url,
+        'data-attr': 'mcp-analytics-activity-tab',
+    }
+    const dashboardTab: LemonTab<MCPAnalyticsTab> = {
+        key: 'dashboard',
+        label: 'Dashboard',
+        content: <MCPAnalyticsLeaderboardHome />,
+        link: combineUrl(urls.mcpAnalyticsDashboard(), sharedParams).url,
+        'data-attr': 'mcp-analytics-dashboard-tab',
+    }
+
+    const tabs: LemonTab<MCPAnalyticsTab>[] = [
+        dashboardTab,
+        activityTab,
+        {
+            key: 'sessions',
+            label: 'Sessions',
+            content: <MCPSessionsPlaylist />,
+            link: combineUrl(urls.mcpAnalyticsSessions(), tabParams).url,
+            'data-attr': 'mcp-analytics-sessions-tab',
+        },
+        {
+            key: 'users',
+            label: 'Users',
+            content: <MCPAnalyticsUsers />,
+            link: combineUrl(urls.mcpAnalyticsUsers(), tabParams).url,
+            'data-attr': 'mcp-analytics-users-tab',
+        },
+        {
+            key: 'tool-quality',
+            label: 'Tool quality',
+            content: <MCPAnalyticsToolQuality />,
+            link: combineUrl(urls.mcpAnalyticsToolQuality(), sharedParams).url,
+            'data-attr': 'mcp-analytics-tool-quality-tab',
+        },
+        ...(intentRoutingEnabled
+            ? [
+                  {
+                      key: 'intent-clustering' as const,
+                      label: 'Intent clustering',
+                      content: <MCPAnalyticsClustering />,
+                      link: combineUrl(urls.mcpAnalyticsIntentClustering(), sharedParams).url,
+                      'data-attr': 'mcp-analytics-intent-clustering-tab',
+                  },
+              ]
+            : []),
+        {
+            key: 'missing-capabilities',
+            label: 'Missing capabilities',
+            content: <MCPAnalyticsMissingCapabilities />,
+            link: combineUrl(urls.mcpAnalyticsMissingCapabilities(), tabParams).url,
+            'data-attr': 'mcp-analytics-missing-capabilities-tab',
+        },
+        {
+            key: 'notifications',
+            label: (
+                <span className="flex items-center gap-1.5">
+                    Notifications
+                    {notificationCount > 0 && (
+                        <LemonTag type="completion" size="small">
+                            {notificationCount}
+                        </LemonTag>
+                    )}
+                </span>
+            ),
+            content: <MCPAnalyticsNotifications />,
+            link: combineUrl(urls.mcpAnalyticsNotifications(), sharedParams).url,
+            'data-attr': 'mcp-analytics-notifications-tab',
+        },
+    ]
+
+    return (
+        <SceneContent>
+            <MCPSetupMode />
+            <MCPWrapped />
+            <MCPAnalyticsSceneMenuBar />
+            <SceneTitleSection
+                name="MCP analytics"
+                description={onboardingState === 'onboarded' ? TAB_DESCRIPTIONS[activeTab] : null}
+                resourceType={{ type: 'mcp_analytics' }}
+                actions={
+                    todayRailNav ? (
+                        <>
+                            <WrappedButton quill />
+                            <SetupGuideButton quill />
+                            <Button variant="outline" render={<LinkPrimitive to={MCP_DOCS_URL} target="_blank" />}>
+                                Documentation
+                            </Button>
+                        </>
+                    ) : (
+                        <>
+                            <WrappedButton quill={false} />
+                            <SetupGuideButton quill={false} />
+                            <LemonButton to={MCP_DOCS_URL} type="secondary" targetBlank size="small">
+                                Documentation
+                            </LemonButton>
+                        </>
+                    )
+                }
+            />
+
+            {/* Loading and pre-data states are handled by the app-shell empty-state gate
+                (see `emptyState` on the SceneExport) — by the time this renders, either
+                tool calls exist or the user explicitly skipped setup. */}
+            <LemonTabs activeKey={activeTab} data-attr="mcp-analytics-tabs" tabs={tabs} sceneInset />
+        </SceneContent>
+    )
+}

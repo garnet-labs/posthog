@@ -1,0 +1,77 @@
+from products.warehouse_sources.sources.sdk import IncrementalField, IncrementalFieldType, frozen
+
+TRAFFICSTARS_BASE_URL = "https://api.trafficstars.com"
+TRAFFICSTARS_TOKEN_URL = "https://api.trafficstars.com/v1/auth/token"
+
+CREATIVES_PAGE_SIZE = 100
+
+# How far back the first sync of the daily statistics reads.
+HISTORY_DAYS = 180
+
+# TrafficStars documents no attribution window. Re-reading the last week picks up late conversions.
+LOOKBACK_SECONDS = 7 * 24 * 60 * 60
+
+
+@frozen
+class TrafficStarsEndpointConfig:
+    name: str
+    path: str
+    data_selector: str
+    primary_keys: tuple[str, ...]
+    incremental_fields: tuple[IncrementalField, ...] = ()
+    partition_key: str | None = None
+    # Set on the daily statistics tables: the `group_by` value of the v2 statistics request.
+    group_by: str | None = None
+
+
+DATE_INCREMENTAL_FIELD: IncrementalField = {
+    "label": "date",
+    "type": IncrementalFieldType.Date,
+    "field": "date",
+    "field_type": IncrementalFieldType.Date,
+}
+
+
+def _daily_statistics(name: str, group_by: str) -> TrafficStarsEndpointConfig:
+    return TrafficStarsEndpointConfig(
+        name=name,
+        path="/v2/campaigns/statistics",
+        data_selector="data",
+        primary_keys=("date", "id"),
+        incremental_fields=(DATE_INCREMENTAL_FIELD,),
+        partition_key="date",
+        group_by=group_by,
+    )
+
+
+TRAFFICSTARS_ENDPOINTS: dict[str, TrafficStarsEndpointConfig] = {
+    "campaigns": TrafficStarsEndpointConfig(
+        name="campaigns", path="/v1.1/campaigns", data_selector="response", primary_keys=("id",)
+    ),
+    "creatives": TrafficStarsEndpointConfig(
+        name="creatives", path="/v2/banners", data_selector="response", primary_keys=("id",)
+    ),
+    "campaign_statistics_daily": _daily_statistics("campaign_statistics_daily", "campaign"),
+    "country_statistics_daily": _daily_statistics("country_statistics_daily", "country"),
+    "creative_statistics_daily": _daily_statistics("creative_statistics_daily", "creative"),
+    "spot_statistics_daily": _daily_statistics("spot_statistics_daily", "spot"),
+    "device_statistics_daily": _daily_statistics("device_statistics_daily", "device"),
+    "os_statistics_daily": _daily_statistics("os_statistics_daily", "os"),
+    # A bare JSON array with no paging.
+    "countries": TrafficStarsEndpointConfig(
+        name="countries", path="/v1.1/countries", data_selector="$", primary_keys=("code",)
+    ),
+}
+
+ENDPOINTS = tuple(TRAFFICSTARS_ENDPOINTS)
+
+INCREMENTAL_FIELDS: dict[str, list[IncrementalField]] = {
+    name: list(config.incremental_fields) for name, config in TRAFFICSTARS_ENDPOINTS.items()
+}
+
+DAILY_STATISTICS = tuple(name for name, config in TRAFFICSTARS_ENDPOINTS.items() if config.group_by is not None)
+
+LOOKBACK: dict[str, int] = dict.fromkeys(DAILY_STATISTICS, LOOKBACK_SECONDS)
+
+# Daily statistics re-read a trailing week each run. Appending would write those rows again.
+MERGE_ONLY = DAILY_STATISTICS

@@ -1,0 +1,2 @@
+# No lockfile here, so this cap is what keeps a fresh install on the current SDK major.
+posthog<9

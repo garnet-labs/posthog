@@ -1,0 +1,282 @@
+import { useActions, useValues } from 'kea'
+import { useState } from 'react'
+
+import { IconPlus, IconRefresh } from '@posthog/icons'
+import { LemonBanner, LemonButton, LemonCard, LemonCollapse, LemonInput, LemonTag } from '@posthog/lemon-ui'
+
+import { RestrictionScope, useRestrictedArea } from 'lib/components/RestrictedArea'
+import { OrganizationMembershipLevel } from 'lib/constants'
+import { useFeatureFlag } from 'lib/hooks/useFeatureFlag'
+
+import { SceneSection } from '~/layout/scenes/components/SceneSection'
+
+import { EmailDisplayNameSettings } from '../../components/EmailDisplayNameSettings/EmailDisplayNameSettings'
+import { EmailForwardingAddress } from '../../components/EmailForwardingAddress/EmailForwardingAddress'
+import { QuillEmailSection } from '../../components/QuillEmailSection/QuillEmailSection'
+import { TrustedRelaySenderSettings } from '../../components/TrustedRelaySenderSettings/TrustedRelaySenderSettings'
+import { confirmDisconnectEmail, defaultEmailDisabledReason, DnsRecord } from './emailSettingsHelpers'
+import { EmailConfigStatus, supportSettingsLogic } from './supportSettingsLogic'
+import { useEmailConfigContent } from './useEmailConfigContent'
+
+function DnsRecordsTable({ records }: { records: DnsRecord[] }): JSX.Element | null {
+    if (!records || records.length === 0) {
+        return null
+    }
+    return (
+        <div className="border rounded overflow-x-auto">
+            <table className="w-full text-xs">
+                <thead>
+                    <tr className="bg-surface-primary">
+                        <th className="text-left px-2 py-1">Type</th>
+                        <th className="text-left px-2 py-1">Name</th>
+                        <th className="text-left px-2 py-1">Value</th>
+                        <th className="text-left px-2 py-1">Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {records.map((record: DnsRecord, i: number) => (
+                        <tr key={i} className="border-t">
+                            <td className="px-2 py-1 font-mono">{record.record_type}</td>
+                            <td className="px-2 py-1 font-mono break-all max-w-[200px]">{record.name}</td>
+                            <td className="px-2 py-1 font-mono break-all max-w-[300px]">{record.value}</td>
+                            <td className="px-2 py-1">
+                                {record.valid === 'valid' ? (
+                                    <LemonTag type="success" size="small">
+                                        Valid
+                                    </LemonTag>
+                                ) : (
+                                    <LemonTag type="warning" size="small">
+                                        Pending
+                                    </LemonTag>
+                                )}
+                            </td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        </div>
+    )
+}
+
+function EmailConfigContent({ config }: { config: EmailConfigStatus }): JSX.Element {
+    const email = useEmailConfigContent(config)
+
+    return (
+        <div className="flex flex-col gap-3 p-3">
+            {config.forwarding_address && <EmailForwardingAddress forwardingAddress={config.forwarding_address} />}
+
+            <EmailDisplayNameSettings
+                configId={config.id}
+                value={email.displayName}
+                savedValue={config.from_name}
+                restrictionReason={email.adminRestrictionReason}
+                savingConfigId={email.emailDisplayNameSavingConfigId}
+                onChange={email.setDisplayNameDraft}
+                onSave={email.saveDisplayName}
+            />
+
+            {/* Domain verification */}
+            <div>
+                <label className="font-medium text-sm">Domain verification</label>
+                <p className="text-xs text-muted-alt mb-1">Add DNS records to enable outbound sending (SPF/DKIM).</p>
+
+                <DnsRecordsTable records={email.sendingRecords} />
+
+                {!config.domain_verified && (
+                    <LemonBanner type="info" className="mt-2">
+                        Add the DNS records above, then click "Verify domain". If you already have an SPF record (e.g.{' '}
+                        <code className="text-xs">v=spf1 include:someservice.com ~all</code>), don't create a second one
+                        — merge them into a single record:{' '}
+                        <code className="text-xs">v=spf1 include:someservice.com include:mailgun.org ~all</code>
+                    </LemonBanner>
+                )}
+
+                <div className="flex gap-2 mt-2">
+                    <LemonButton
+                        type={config.domain_verified ? 'secondary' : 'primary'}
+                        size="small"
+                        onClick={email.verifyEmail}
+                        loading={email.isVerifying}
+                        disabledReason={email.adminRestrictionReason}
+                        icon={<IconRefresh />}
+                    >
+                        {config.domain_verified ? 'Re-verify' : 'Verify domain'}
+                    </LemonButton>
+
+                    {config.domain_verified && (
+                        <LemonButton
+                            type="secondary"
+                            size="small"
+                            onClick={email.sendTestEmail}
+                            loading={email.isTesting}
+                        >
+                            Send test email
+                        </LemonButton>
+                    )}
+                </div>
+            </div>
+
+            {config.trusted_relay_sender !== undefined && (
+                <TrustedRelaySenderSettings
+                    configId={config.id}
+                    value={email.trustedRelaySender}
+                    savedValue={config.trusted_relay_sender}
+                    restrictionReason={email.adminRestrictionReason}
+                    savingConfigId={email.trustedRelaySavingConfigId}
+                    onChange={email.setTrustedRelaySenderDraft}
+                    onSave={email.saveTrustedRelaySender}
+                />
+            )}
+
+            {/* Default + disconnect */}
+            <div className="flex justify-between items-center border-t pt-2">
+                <LemonButton
+                    type="secondary"
+                    size="small"
+                    loading={email.isSettingDefault}
+                    disabledReason={defaultEmailDisabledReason(
+                        email.adminRestrictionReason,
+                        config,
+                        email.isSettingAnyDefault
+                    )}
+                    tooltip="Tickets opened from the widget are sent from the primary address"
+                    onClick={email.setDefaultEmail}
+                >
+                    {config.is_default ? 'Primary address' : 'Set as primary'}
+                </LemonButton>
+                <LemonButton
+                    type="secondary"
+                    status="danger"
+                    size="small"
+                    disabledReason={email.adminRestrictionReason}
+                    onClick={() => confirmDisconnectEmail(config, email.disconnectEmail)}
+                >
+                    Disconnect
+                </LemonButton>
+            </div>
+        </div>
+    )
+}
+
+function AddEmailForm(): JSX.Element {
+    const { newEmailFromEmail, newEmailFromName, emailConnecting, addEmailFormVisible } =
+        useValues(supportSettingsLogic)
+    const { setNewEmailFromEmail, setNewEmailFromName, connectEmail, setAddEmailFormVisible } =
+        useActions(supportSettingsLogic)
+    const adminRestrictionReason = useRestrictedArea({
+        scope: RestrictionScope.Organization,
+        minimumAccessLevel: OrganizationMembershipLevel.Admin,
+    })
+
+    if (!addEmailFormVisible) {
+        return (
+            <div>
+                <LemonButton
+                    type="secondary"
+                    size="small"
+                    icon={<IconPlus />}
+                    onClick={() => setAddEmailFormVisible(true)}
+                    disabledReason={adminRestrictionReason}
+                >
+                    Add email address
+                </LemonButton>
+            </div>
+        )
+    }
+
+    return (
+        <LemonCard hoverEffect={false} className="flex flex-col gap-2 px-4 py-3">
+            <label className="font-medium">Connect new email</label>
+            <p className="text-xs text-muted-alt">
+                Enter the email address customers will contact you at (e.g. support@company.com). We'll give you a
+                forwarding address to set up in your email provider and register your domain for outbound sending.
+            </p>
+            <LemonInput
+                value={newEmailFromEmail}
+                onChange={(value) => setNewEmailFromEmail(value)}
+                placeholder="support@company.com"
+                fullWidth
+            />
+            <LemonInput
+                value={newEmailFromName}
+                onChange={(value) => setNewEmailFromName(value)}
+                placeholder="Display name (e.g. Acme Support)"
+                fullWidth
+            />
+            <div className="flex gap-2">
+                <LemonButton
+                    type="primary"
+                    size="small"
+                    onClick={connectEmail}
+                    loading={emailConnecting}
+                    disabledReason={
+                        adminRestrictionReason ??
+                        (!newEmailFromEmail || !newEmailFromName ? 'Enter email address and display name' : undefined)
+                    }
+                >
+                    Connect email
+                </LemonButton>
+                <LemonButton type="secondary" size="small" onClick={() => setAddEmailFormVisible(false)}>
+                    Cancel
+                </LemonButton>
+            </div>
+        </LemonCard>
+    )
+}
+
+function configHeader(config: EmailConfigStatus): JSX.Element {
+    return (
+        <div className="flex min-w-0 items-center gap-2 text-left">
+            <span className="font-medium truncate">{config.from_email}</span>
+            {config.from_name && <span className="text-xs text-muted truncate">({config.from_name})</span>}
+            {config.is_default && (
+                <LemonTag type="primary" size="small" className="shrink-0">
+                    Primary
+                </LemonTag>
+            )}
+            {config.domain_verified ? (
+                <LemonTag type="success" size="small" className="shrink-0">
+                    Verified
+                </LemonTag>
+            ) : (
+                <LemonTag type="warning" size="small" className="shrink-0">
+                    Unverified
+                </LemonTag>
+            )}
+        </div>
+    )
+}
+
+export function EmailSection(): JSX.Element {
+    const { emailConfigs } = useValues(supportSettingsLogic)
+    const [expandedKeys, setExpandedKeys] = useState<string[]>([])
+    const todayRailNav = useFeatureFlag('TODAY_RAIL_NAV')
+
+    if (todayRailNav) {
+        return <QuillEmailSection emailConfigs={emailConfigs} />
+    }
+
+    return (
+        <SceneSection
+            title="Email channel"
+            description="Receive customer emails as support tickets and reply directly from PostHog. Set up forwarding and verify your domain to enable two-way email."
+        >
+            <div className="flex flex-col gap-3 max-w-[800px]">
+                {emailConfigs.length > 0 && (
+                    <LemonCollapse
+                        className="bg-surface-primary"
+                        multiple
+                        activeKeys={expandedKeys}
+                        onChange={setExpandedKeys}
+                        panels={emailConfigs.map((config: EmailConfigStatus) => ({
+                            key: config.id,
+                            header: configHeader(config),
+                            content: <EmailConfigContent config={config} />,
+                        }))}
+                    />
+                )}
+                <AddEmailForm />
+            </div>
+        </SceneSection>
+    )
+}

@@ -1,0 +1,179 @@
+"""Resolving what kind of Slack conversation a thread lives in.
+
+The answer decides whether the thread's task is readable by the whole team or stays with
+its creator, so it is resolved once at task creation and stored on the thread mapping
+rather than recomputed per request.
+
+The three steps below are ordered cheapest-first, but the ordering is load-bearing rather
+than an optimization: ``conversations.info`` is the only step that costs a round-trip, and
+it is the one step that cannot answer for a DM. ``im:read`` is not in the scopes we request
+and ``mpim:read`` is still in Slack review, so the call fails outright on a ``D…`` id.
+Steps 1 and 2 settle direct messages without it, leaving the API responsible only for the
+public-vs-private split among channels, where ``channels:read`` and ``groups:read`` do apply.
+"""
+
+from typing import Any
+
+from django.core.cache import cache
+
+import structlog
+from slack_sdk.errors import SlackApiError
+
+from posthog.dataclasses import frozen
+from posthog.models.integration import SlackIntegration
+
+from products.slack_app.backend.models import SlackThreadTaskMapping
+
+logger = structlog.get_logger(__name__)
+
+ConversationType = SlackThreadTaskMapping.ConversationType
+
+_CHANNEL_NAME_TTL_SECONDS = 60 * 60
+
+# `channel_type` rides on `message` events and is what the event router already keys on to
+# send DMs to the assistant surface. `group` is Slack's wire name for a private channel.
+_CHANNEL_TYPE_TO_CONVERSATION_TYPE = {
+    "im": ConversationType.IM,
+    "mpim": ConversationType.MPIM,
+    "group": ConversationType.PRIVATE_CHANNEL,
+    "channel": ConversationType.PUBLIC_CHANNEL,
+}
+
+
+def resolve_conversation_type(
+    slack: SlackIntegration,
+    event: dict[str, Any],
+    channel_id: str,
+) -> SlackThreadTaskMapping.ConversationType:
+    """The shape of the conversation ``channel_id`` names.
+
+    Never raises: an unresolvable conversation comes back as ``UNKNOWN``, which keeps the task
+    with its creator downstream. Task creation must not fail over this.
+    """
+    channel_type = event.get("channel_type")
+    if channel_type in _CHANNEL_TYPE_TO_CONVERSATION_TYPE:
+        return _CHANNEL_TYPE_TO_CONVERSATION_TYPE[channel_type]
+
+    # `app_mention` carries no `channel_type` and is the primary way a new task starts, so
+    # the id prefix is the only signal left for a DM. Slack discourages relying on prefixes,
+    # which is why it is a fallback and not the first check — but `D…` is unambiguous, and
+    # the alternative (`conversations.info`) is exactly the call we lack the scope to make.
+    # `G…` is deliberately not mapped: it means either a group DM or a legacy private
+    # channel. Both are shared conversations, so the distinction does not change who may
+    # read the task — only which label we store — and the lookup below can try to get it right.
+    if channel_id.startswith("D"):
+        return ConversationType.IM
+
+    return _channel_privacy_from_slack(slack, channel_id)
+
+
+def _channel_privacy_from_slack(
+    slack: SlackIntegration,
+    channel_id: str,
+) -> SlackThreadTaskMapping.ConversationType:
+    """Split public from private for something we already believe is a channel."""
+    try:
+        channel = slack.client.conversations_info(channel=channel_id).get("channel") or {}
+    except SlackApiError as e:
+        # Most likely an install predating `channels:read`/`groups:read`, or a ratelimit.
+        logger.warning(
+            "slack_app_conversation_type_lookup_failed",
+            channel_id=channel_id,
+            error=e.response.get("error"),
+        )
+        return ConversationType.UNKNOWN
+    except Exception:
+        logger.warning("slack_app_conversation_type_lookup_failed", channel_id=channel_id, exc_info=True)
+        return ConversationType.UNKNOWN
+
+    _remember_channel_name(slack, channel_id, channel)
+
+    # A group DM reached here only if its id did not start with `D`; `conversations.info`
+    # still labels it, so honour that before falling back to the private/public split.
+    if channel.get("is_im"):
+        return ConversationType.IM
+    if channel.get("is_mpim"):
+        return ConversationType.MPIM
+    if "is_private" not in channel:
+        return ConversationType.UNKNOWN
+    return ConversationType.PRIVATE_CHANNEL if channel["is_private"] else ConversationType.PUBLIC_CHANNEL
+
+
+@frozen
+class ChannelInfoLookup:
+    """A `conversations.info` result: the channel record, or the Slack error code when Slack refused."""
+
+    channel: dict[str, Any] | None = None
+    error: str | None = None
+
+
+def lookup_channel_info(slack: SlackIntegration, channel_id: str) -> ChannelInfoLookup:
+    """Like `fetch_channel_info`, for a caller that acts on why the lookup failed."""
+    try:
+        channel: dict[str, Any] = slack.client.conversations_info(channel=channel_id).get("channel") or {}
+    except SlackApiError as error:
+        code = str((error.response or {}).get("error") or "unknown")
+        logger.warning("slack_app_channel_info_lookup_failed", channel_id=channel_id, error=code)
+        return ChannelInfoLookup(error=code)
+    except Exception:
+        logger.warning("slack_app_channel_info_lookup_failed", channel_id=channel_id, exc_info=True)
+        return ChannelInfoLookup(error="request_failed")
+    _remember_channel_name(slack, channel_id, channel)
+    return ChannelInfoLookup(channel=channel)
+
+
+def fetch_channel_info(slack: SlackIntegration, channel_id: str) -> dict[str, Any] | None:
+    """The channel's `conversations.info` record, or None when Slack could not say. Warms the name cache."""
+    return lookup_channel_info(slack, channel_id).channel
+
+
+def resolve_channel_name(slack: SlackIntegration, channel_id: str) -> str | None:
+    if channel_id.startswith("D"):
+        return None
+    cached = cache.get(_channel_name_key(slack, channel_id))
+    if cached is None and fetch_channel_info(slack, channel_id) is not None:
+        cached = cache.get(_channel_name_key(slack, channel_id))
+    return cached or None
+
+
+def _remember_channel_name(slack: SlackIntegration, channel_id: str, channel: dict[str, Any]) -> str | None:
+    name = channel.get("name")
+    if channel.get("is_im") or channel.get("is_mpim") or not isinstance(name, str):
+        name = ""
+    cache.set(_channel_name_key(slack, channel_id), name, timeout=_CHANNEL_NAME_TTL_SECONDS)
+    return name or None
+
+
+def _channel_name_key(slack: SlackIntegration, channel_id: str) -> str:
+    return f"slack_app:channel_name:v1:{slack.integration.integration_id}:{channel_id}"
+
+
+def channel_is_ext_shared(slack: SlackIntegration, channel: str) -> bool:
+    """Whether the channel is a Slack Connect channel.
+
+    Unlike events, interactivity payloads carry no ``is_ext_shared_channel`` on the
+    envelope, so this costs a ``conversations.info`` round trip. Fails closed: an
+    unreadable channel is treated as externally shared, which at worst asks the user
+    to approve a channel that did not need it.
+    """
+    return channel_ext_shared_state(slack, channel) is not False
+
+
+def channel_ext_shared_state(slack: SlackIntegration, channel: str) -> bool | None:
+    """Like ``channel_is_ext_shared``, but ``None`` when Slack could not say.
+
+    For a caller that can wait and ask again, a failed lookup is not the same as a shared
+    channel.
+    """
+    # A DM with the app is never a Slack Connect channel. The lookup below also cannot answer
+    # for a `D…` id because the app does not request `im:read`, so without this check every DM
+    # reads as shared and is sent to an approval it can never get.
+    if channel.startswith("D"):
+        return False
+    try:
+        info = slack.client.conversations_info(channel=channel)
+        conversation: dict[str, Any] = info.get("channel") or {}
+        return bool(conversation.get("is_ext_shared") or conversation.get("is_pending_ext_shared"))
+    except Exception:
+        logger.warning("slack_app_channel_info_failed", channel=channel)
+        return None

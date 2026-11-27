@@ -1,0 +1,14 @@
+{
+    "$schema": "https://raw.githubusercontent.com/PostHog/posthog/master/hog/posthog.schema.json",
+    "host": "https://us.posthog.com",
+    "projectId": 2,
+    "languages": {
+        "typescript": {
+            "output_path": "frontend/src/lib/posthog-typed.ts",
+            "sdk": "posthog-js",
+            "schema_hash": "4b9689da6f2510919a470a6e90459673",
+            "updated_at": "2026-11-19T19:00:00.072Z",
+            "event_count": 96
+        }
+    }
+}

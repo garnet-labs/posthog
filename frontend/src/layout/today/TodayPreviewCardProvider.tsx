@@ -1,0 +1,181 @@
+import { PreviewCard } from '@base-ui/react/preview-card'
+import { ReactNode, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+
+import { Card, Skeleton } from '@posthog/quill'
+import { PostHogErrorBoundary } from '@posthog/react'
+
+import { lazyWithRetry } from 'lib/utils/retryImport'
+
+import { TodayPreviewCard, TodayPreviewCardContext } from './todayPreviewCardContext'
+import { TodayPreviewPayload } from './todayPreviewCards'
+import type { TodayRailPane } from './todayShellLogic'
+
+const TodayRailAnalyticsHoverCard = lazyWithRetry(() =>
+    import('products/today/frontend/rail/TodayRailAnalyticsHoverCard').then((m) => ({
+        default: m.TodayRailAnalyticsHoverCard,
+    }))
+)
+const TodayRailProductsHoverCard = lazyWithRetry(() =>
+    import('products/today/frontend/rail/TodayRailProductsHoverCard').then((m) => ({
+        default: m.TodayRailProductsHoverCard,
+    }))
+)
+
+const TodayRailHoverCard = lazyWithRetry(() =>
+    import('products/today/frontend/rail/TodayRailHoverCard').then((m) => ({ default: m.TodayRailHoverCard }))
+)
+const TodayRailChatsHoverCard = lazyWithRetry(() =>
+    import('products/today/frontend/rail/TodayRailChatsHoverCard').then((m) => ({ default: m.TodayRailChatsHoverCard }))
+)
+
+const TodayChatHoverCard = lazyWithRetry(() =>
+    import('./TodayChatHoverCard').then((m) => ({ default: m.TodayChatHoverCard }))
+)
+const TodayObjectHoverCard = lazyWithRetry(() =>
+    import('./TodayObjectHoverCard').then((m) => ({ default: m.TodayObjectHoverCard }))
+)
+const TodayProductHoverCard = lazyWithRetry(() =>
+    import('./TodayProductHoverCard').then((m) => ({ default: m.TodayProductHoverCard }))
+)
+const TodaySessionHoverCard = lazyWithRetry(() =>
+    import('./TodaySessionHoverCard').then((m) => ({ default: m.TodaySessionHoverCard }))
+)
+
+function railHoverCard(pane: TodayRailPane, onAction: () => void): JSX.Element {
+    if (pane === 'analytics') {
+        return <TodayRailAnalyticsHoverCard onAction={onAction} />
+    }
+    if (pane === 'products') {
+        return <TodayRailProductsHoverCard onAction={onAction} />
+    }
+    if (pane === 'spaces') {
+        return <TodayRailChatsHoverCard onAction={onAction} />
+    }
+    return <TodayRailHoverCard pane={pane} onAction={onAction} />
+}
+
+function TodayPreviewPositioner({
+    below,
+    alignStart,
+    children,
+}: {
+    below: boolean
+    alignStart: boolean
+    children: ReactNode
+}): JSX.Element {
+    return (
+        <PreviewCard.Positioner
+            data-quill
+            data-quill-portal="popover"
+            // Quill's portal rule reads this token and wins over a z-index utility class.
+            className="[--quill-z-popover:var(--z-popover-with-chart)]"
+            side={below ? 'bottom' : 'right'}
+            align={below || alignStart ? 'start' : 'center'}
+            sideOffset={below ? 6 : 10}
+        >
+            {children}
+        </PreviewCard.Positioner>
+    )
+}
+
+/**
+ * One hover card for every row in the sidebar, like PostHog Desktop. The rows are only triggers on a shared handle,
+ * and Base UI skips the open delay when the pointer moves to another trigger of an open card,
+ * so sliding down the list swaps the card's contents instead of waiting again on every row.
+ */
+export function TodayPreviewCardProvider({
+    children,
+    disabled = false,
+    onOpenChange,
+}: {
+    children: ReactNode
+    disabled?: boolean
+    onOpenChange?: (open: boolean) => void
+}): JSX.Element {
+    const [handle] = useState(() => PreviewCard.createHandle<TodayPreviewPayload>())
+    const [open, setOpen] = useState(false)
+    // A ref, so a hover that lands while a menu is open is refused on the same event.
+    const menuOpen = useRef(false)
+    // A ref for the same reason. Base UI still runs the clicked row's pending hover timer, so its open is refused here.
+    const dismissedTrigger = useRef<Element | null>(null)
+    const card = useMemo<TodayPreviewCard>(
+        () => ({
+            handle,
+            setMenuOpen: (next) => {
+                menuOpen.current = next
+                if (next) {
+                    setOpen(false)
+                }
+            },
+            dismissFor: (trigger) => {
+                dismissedTrigger.current = trigger
+                setOpen(false)
+            },
+            rearm: (trigger) => {
+                if (dismissedTrigger.current === trigger) {
+                    dismissedTrigger.current = null
+                }
+            },
+        }),
+        [handle]
+    )
+    const close = useCallback(() => {
+        setOpen(false)
+    }, [])
+    const shown = open && !disabled
+    useEffect(() => {
+        onOpenChange?.(shown)
+    }, [shown, onOpenChange])
+
+    return (
+        <TodayPreviewCardContext.Provider value={card}>
+            {children}
+            <PreviewCard.Root
+                handle={handle}
+                // A session dialog or the bulk archive confirm keeps the card shut, so the card cannot open over it.
+                open={open && !disabled}
+                onOpenChange={(next, { trigger }) =>
+                    setOpen(next && !menuOpen.current && !disabled && trigger !== dismissedTrigger.current)
+                }
+            >
+                {({ payload }) =>
+                    payload ? (
+                        <PreviewCard.Portal>
+                            <TodayPreviewPositioner
+                                below={payload.kind === 'object'}
+                                alignStart={payload.kind === 'rail'}
+                            >
+                                {/* Inside the popup, not its `render`: on React 18 quill's Card takes no ref. */}
+                                <PreviewCard.Popup className="origin-[var(--transform-origin)] outline-none transition-[opacity,scale] duration-150 ease-out data-[ending-style]:scale-97 data-[ending-style]:opacity-0 data-[starting-style]:scale-97 data-[starting-style]:opacity-0 motion-reduce:transition-none">
+                                    <Card
+                                        size="sm"
+                                        className="w-72 max-w-[calc(100vw-2rem)] gap-0 border empty:hidden border-border py-0 shadow-[var(--shadow-md)]"
+                                    >
+                                        <PostHogErrorBoundary
+                                            key={payload.kind === 'rail' ? `rail:${payload.pane}` : payload.kind}
+                                            fallback={<></>}
+                                        >
+                                            <Suspense fallback={<Skeleton className="h-24 w-full" />}>
+                                                {payload.kind === 'rail' ? (
+                                                    railHoverCard(payload.pane, close)
+                                                ) : payload.kind === 'chat' ? (
+                                                    <TodayChatHoverCard preview={payload} onAction={close} />
+                                                ) : payload.kind === 'object' ? (
+                                                    <TodayObjectHoverCard preview={payload} onAction={close} />
+                                                ) : payload.kind === 'product' || payload.kind === 'explainer' ? (
+                                                    <TodayProductHoverCard preview={payload} onAction={close} />
+                                                ) : (
+                                                    <TodaySessionHoverCard preview={payload} onAction={close} />
+                                                )}
+                                            </Suspense>
+                                        </PostHogErrorBoundary>
+                                    </Card>
+                                </PreviewCard.Popup>
+                            </TodayPreviewPositioner>
+                        </PreviewCard.Portal>
+                    ) : null
+                }
+            </PreviewCard.Root>
+        </TodayPreviewCardContext.Provider>
+    )
+}

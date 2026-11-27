@@ -1,0 +1,167 @@
+import { noOpTelemetry, ReplayTelemetry } from '../telemetry'
+import { EncodedRecordingSnapshot, RecordingSnapshot } from '../types'
+import { ExpansionBudget, ExpansionBudgetExceededError } from './decompress'
+import { parseJsonSnapshots, createWindowIdRegistry, RegisterWindowIdCallback } from './process-all-snapshots'
+
+export type SnappyDecompressor = (block: Uint8Array) => Promise<Uint8Array>
+
+function isLengthPrefixedSnappy(uint8Data: Uint8Array): boolean {
+    if (uint8Data.byteLength < 4) {
+        return false
+    }
+
+    const firstLength = ((uint8Data[0] << 24) | (uint8Data[1] << 16) | (uint8Data[2] << 8) | uint8Data[3]) >>> 0
+
+    if (firstLength === 0 || firstLength > uint8Data.byteLength) {
+        return false
+    }
+
+    if (4 + firstLength > uint8Data.byteLength) {
+        return false
+    }
+
+    return true
+}
+
+function extractLengthPrefixedBlocks(uint8Data: Uint8Array): Uint8Array[] {
+    const blocks: Uint8Array[] = []
+    let offset = 0
+
+    while (offset < uint8Data.byteLength) {
+        if (offset + 4 > uint8Data.byteLength) {
+            break
+        }
+
+        const length =
+            ((uint8Data[offset] << 24) |
+                (uint8Data[offset + 1] << 16) |
+                (uint8Data[offset + 2] << 8) |
+                uint8Data[offset + 3]) >>>
+            0
+        offset += 4
+
+        if (offset + length > uint8Data.byteLength) {
+            break
+        }
+
+        blocks.push(uint8Data.subarray(offset, offset + length))
+        offset += length
+    }
+
+    return blocks
+}
+
+function splitLines(text: string): string[] {
+    return text.split('\n').filter((line) => line.trim().length > 0)
+}
+
+const DECOMPRESSION_BATCH_SIZE = 10
+
+// Splits each block on its own, so a large source never builds one string past the browser's length limit.
+async function decompressBlockLines(blocks: Uint8Array[], decompressor: SnappyDecompressor): Promise<string[]> {
+    const textDecoder = new TextDecoder('utf-8')
+    const lines: string[] = []
+
+    for (let i = 0; i < blocks.length; i += DECOMPRESSION_BATCH_SIZE) {
+        const batch = blocks.slice(i, i + DECOMPRESSION_BATCH_SIZE)
+        const results = await Promise.all(batch.map((block) => decompressor(block)))
+        for (const data of results) {
+            for (const line of splitLines(textDecoder.decode(data))) {
+                lines.push(line)
+            }
+        }
+        if (i + DECOMPRESSION_BATCH_SIZE < blocks.length) {
+            await new Promise<void>((r) => setTimeout(r, 0))
+        }
+    }
+
+    return lines
+}
+
+export const parseEncodedSnapshots = async (
+    items: (RecordingSnapshot | EncodedRecordingSnapshot | string)[] | ArrayBuffer | Uint8Array,
+    sessionId: string,
+    telemetry: ReplayTelemetry = noOpTelemetry,
+    registerWindowId?: RegisterWindowIdCallback,
+    decompressor?: SnappyDecompressor,
+    budget?: ExpansionBudget
+): Promise<RecordingSnapshot[]> => {
+    const startTime = performance.now()
+    const registerFn: RegisterWindowIdCallback = registerWindowId || createWindowIdRegistry()
+
+    if (items instanceof ArrayBuffer || items instanceof Uint8Array) {
+        const uint8Data = items instanceof Uint8Array ? items : new Uint8Array(items)
+
+        if (!decompressor) {
+            const textDecoder = new TextDecoder('utf-8')
+            const text = textDecoder.decode(uint8Data)
+            return parseJsonSnapshots(splitLines(text), sessionId, telemetry, registerFn, budget)
+        }
+
+        if (isLengthPrefixedSnappy(uint8Data)) {
+            try {
+                const blocks = extractLengthPrefixedBlocks(uint8Data)
+                const lines = await decompressBlockLines(blocks, decompressor)
+                const snapshots = await parseEncodedSnapshots(
+                    lines,
+                    sessionId,
+                    telemetry,
+                    registerFn,
+                    undefined,
+                    budget
+                )
+                telemetry.capture('replay_parse_timing', {
+                    snapshot_count: snapshots.length,
+                    parse_duration_ms: performance.now() - startTime,
+                    line_count: lines.length,
+                    compression_type: 'length_prefixed_snappy',
+                })
+                return snapshots
+            } catch (error) {
+                telemetry.captureException(new Error('Failed to decompress length-prefixed snapshot data'), {
+                    sessionId,
+                    error: error instanceof Error ? error.message : 'Unknown error',
+                    feature: 'session-recording-client-side-decompression',
+                })
+                // Rethrow so the source load fails and retries/errors: returning [] would record a corrupt
+                // source as successfully-fetched-but-empty, leaving the player buffering with no error.
+                throw error
+            }
+        }
+
+        try {
+            const decompressedData = await decompressor(uint8Data)
+            const textDecoder = new TextDecoder('utf-8')
+            const text = textDecoder.decode(decompressedData)
+            const lines = splitLines(text)
+            const snapshots = await parseEncodedSnapshots(lines, sessionId, telemetry, registerFn, undefined, budget)
+            telemetry.capture('replay_parse_timing', {
+                snapshot_count: snapshots.length,
+                parse_duration_ms: performance.now() - startTime,
+                line_count: lines.length,
+                compression_type: 'raw_snappy',
+            })
+            return snapshots
+        } catch (error) {
+            if (error instanceof ExpansionBudgetExceededError) {
+                throw error
+            }
+            try {
+                const textDecoder = new TextDecoder('utf-8')
+                const text = textDecoder.decode(uint8Data)
+                return parseEncodedSnapshots(splitLines(text), sessionId, telemetry, registerFn, undefined, budget)
+            } catch (decodeError) {
+                telemetry.captureException(new Error('Failed to process snapshot data'), {
+                    sessionId,
+                    decompressionError: error instanceof Error ? error.message : 'Unknown error',
+                    decodeError: decodeError instanceof Error ? decodeError.message : 'Unknown error',
+                    feature: 'session-recording-client-side-decompression',
+                })
+                // Rethrow the original decompression error (see length-prefixed path above).
+                throw error
+            }
+        }
+    }
+
+    return parseJsonSnapshots(items, sessionId, telemetry, registerFn, budget)
+}

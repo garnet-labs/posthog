@@ -1,0 +1,1738 @@
+import re
+import sys
+from collections.abc import Sequence
+from enum import StrEnum
+from typing import Optional
+
+from clickhouse_driver.errors import (
+    Error as ClickHouseDriverError,
+    NetworkError,
+    ServerException,
+    SocketTimeoutError,
+    UnknownTypeError,
+)
+
+from posthog.hogql.errors import ExposedHogQLError
+
+from posthog.clickhouse.client.limit import ConcurrencyLimitExceeded
+from posthog.dataclasses import frozen
+from posthog.exceptions import (
+    ClickHouseAtCapacity,
+    ClickHouseClusterMemoryLimitExceeded,
+    ClickHouseEstimatedQueryExecutionTimeTooLong,
+    ClickHouseQueryMemoryLimitExceeded,
+    ClickHouseQuerySizeExceeded,
+    ClickHouseQueryTimeOut,
+    ClickHouseUDFTimeOut,
+)
+
+
+class QueryErrorCategory(StrEnum):
+    SUCCESS = "success"
+    CANCELLED = "cancelled"
+    RATE_LIMITED = "rate_limited"
+    USER_ERROR = "user_error"
+    ERROR = "error"
+    QUERY_PERFORMANCE_ERROR = "query_performance_error"
+
+
+class InternalCHQueryError(ServerException):
+    code_name: Optional[str]
+    """Can be null if re-raised from a thread."""
+
+    def __init__(self, message, *, code=None, nested=None, code_name=None):
+        self.code_name = code_name
+        super().__init__(message, code, nested)
+
+
+class ExposedCHQueryError(InternalCHQueryError):
+    """User-safe ClickHouse query error. Its message is suitable for returning to a query caller."""
+
+    user_safe = True
+
+    def __str__(self) -> str:
+        message: str = str(self.message)
+        try:
+            start_index = message.index("DB::Exception:") + len("DB::Exception:")
+        except ValueError:
+            start_index = 0
+        try:
+            end_index = message.index("Stack trace:")
+        except ValueError:
+            end_index = len(message)
+        return message[start_index:end_index].strip()
+
+
+@frozen(kw_only=False)
+class ErrorCodeMeta:
+    name: str
+    user_safe: str | None = None
+    """Fixed public explanation for errors the caller can correct."""
+    category: QueryErrorCategory | None = None
+    """Explicit error category for observability. If None, defaults to USER_ERROR when user_safe
+    is set, otherwise ERROR. Set explicitly for CANCELLED and RATE_LIMITED codes."""
+
+    def get_category(self) -> QueryErrorCategory:
+        if self.category is not None:
+            return self.category
+        if self.user_safe:
+            return QueryErrorCategory.USER_ERROR
+        return QueryErrorCategory.ERROR
+
+    @property
+    def label(self) -> str:
+        return self.name.replace("_", " ").title().replace(" ", "")
+
+
+_HTTP_CLIENT_ERROR_CODE = re.compile(r"\b[Cc]ode: ([0-9]{1,6})\b")
+_HTTP_CLIENT_RESPONSE_PREFIX = "server response: "
+_HTTP_CLIENT_URL_SUFFIX = re.compile(r"\s*\(for url [^)]*\)\s*$")
+_SERVER_CODE_PREFIX = re.compile(r"^Code: [0-9]{1,6}\.\s*")
+
+
+def _server_exception_from_http_client_error(err: Exception) -> ServerException | None:
+    """Rebuild a clickhouse_connect error as the native driver's ServerException.
+
+    The HTTP client (ProxyClient) raises clickhouse_connect errors that carry the ClickHouse code only
+    in the message text, for example "Received ClickHouse exception, code: 394, server response: Code:
+    394. DB::Exception: ...". Rebuilding them lets both clients share one code mapping.
+    """
+    # Importing clickhouse_connect loads pandas, so do not import it here. If the module is not
+    # loaded, no HTTP client ran and the error cannot come from it.
+    exceptions = sys.modules.get("clickhouse_connect.driver.exceptions")
+    if exceptions is None or not isinstance(err, (exceptions.DatabaseError, exceptions.StreamFailureError)):
+        return None
+    text = str(err)
+    code_match = _HTTP_CLIENT_ERROR_CODE.search(text)
+    if code_match is None:
+        return None
+    _, has_prefix, response = text.partition(_HTTP_CLIENT_RESPONSE_PREFIX)
+    if not has_prefix:
+        response = text
+    # The URL holds the cluster host, so it stays out of the message.
+    message = _SERVER_CODE_PREFIX.sub("", _HTTP_CLIENT_URL_SUFFIX.sub("", response).strip())
+    return ServerException(message, int(code_match.group(1)))
+
+
+def clickhouse_error_type(e: Exception) -> str:
+    "Provide a ClickHouse error type for observability"
+    e = _server_exception_from_http_client_error(e) or e
+    if not isinstance(e, ServerException):
+        return type(e).__name__
+    return f"CHQueryError{look_up_clickhouse_error_code_meta(e).label}"
+
+
+CSV_ROW_NUMBER_PATTERN = re.compile(r"\(at row ([0-9]{1,19})\)")
+_ACRONYM_BOUNDARY = re.compile(r"([A-Z]+)([A-Z][a-z])")
+_WORD_BOUNDARY = re.compile(r"([a-z0-9])([A-Z])")
+_SIMPLE_CLICKHOUSE_TYPE = re.compile(
+    r"U?Int(?:8|16|32|64|128|256)|Float(?:32|64)|(?:Fixed)?String|Bool|Date(?:32|Time64|Time)?|UUID|Array|Tuple|Map|Nothing|IPv[46]"
+)
+# ClickHouse rewrites HogQL's `trim(x)` to `trimBoth(x)`, a name HogQL doesn't expose.
+_HOGQL_NAMES_OF_CLICKHOUSE_FUNCTIONS = {"trimBoth": "trim"}
+BAD_GET_TYPE_MISMATCH_PATTERN = re.compile(
+    r"\bBad get: has (?P<actual>[A-Za-z][A-Za-z0-9_]{0,63}), "
+    r"requested (?P<expected>[A-Za-z][A-Za-z0-9_]{0,63})(?:\.|$)"
+)
+
+BAD_GET_FALLBACK_MESSAGE = "A value in the query has the wrong type. Check function parameters and type conversions."
+
+CORRUPTED_PARQUET_METADATA_MESSAGE = (
+    "A Parquet file backing this table has corrupted or oversized metadata and can't be read. "
+    "This happens when the file is overwritten while it's being read, or when it wasn't written correctly. "
+    "Try again, and if it keeps happening, re-sync the source (or re-upload the file if you manage it "
+    "yourself). Contact support if that doesn't fix it."
+)
+
+S3_ACCESS_DENIED_MESSAGE = (
+    "Access was denied when reading a file from the bucket. "
+    "Check that the provided credentials can read objects in this bucket (s3:GetObject), then try again."
+)
+# A HEAD request has no response body, so S3's denial reaches ClickHouse without "Access Denied".
+# A bare "Access Denied" would also match a denied bucket listing, which needs s3:ListBucket instead.
+_S3_ACCESS_DENIED_NEEDLES = ("Access Denied: while reading key:", "HTTP response code: 403")
+
+
+def _wrap_storage_file_changed_error(err: ServerException) -> "CHQueryErrorS3FileChangedDuringRead":
+    return CHQueryErrorS3FileChangedDuringRead(
+        CHQueryErrorS3FileChangedDuringRead.public_message,
+        code=err.code,
+        code_name=CHQueryErrorS3FileChangedDuringRead.public_code,
+    )
+
+
+def _wrap_s3_access_denied_error(err: ServerException) -> "CHQueryErrorS3AccessDenied":
+    wrapped = CHQueryErrorS3AccessDenied(
+        CHQueryErrorS3AccessDenied.public_message,
+        code=err.code,
+        code_name=CHQueryErrorS3AccessDenied.public_code,
+    )
+    wrapped.raw_message = err.message
+    return wrapped
+
+
+def _wrap_malformed_csv_row_error(err: ServerException) -> "CHQueryErrorMalformedCsvRow":
+    row_match = CSV_ROW_NUMBER_PATTERN.search(err.message)
+    location = f" at row {row_match.group(1)}" if row_match else ""
+    return CHQueryErrorMalformedCsvRow(
+        f"A row in a CSV file backing this table is malformed{location}. "
+        "Check that row for unescaped quotes, a wrong delimiter, or a different number of columns.",
+        code=err.code,
+        code_name="malformed_csv_row",
+    )
+
+
+_ARROW_PARQUET_READER_THRIFT_ERROR = "deserialize thrift"
+_PARQUET_V3_READER_THRIFT_ERROR = "Failed to parse Parquet Thrift metadata"
+_PARQUET_V3_READER_THRIFT_ERROR_CODES = ("INCORRECT_DATA", "CANNOT_EXTRACT_TABLE_STRUCTURE")
+
+
+def _is_unparseable_parquet_metadata_error(code_name: str, message: str) -> bool:
+    if code_name == "STD_EXCEPTION":
+        return _ARROW_PARQUET_READER_THRIFT_ERROR in message
+    return code_name in _PARQUET_V3_READER_THRIFT_ERROR_CODES and _PARQUET_V3_READER_THRIFT_ERROR in message
+
+
+def _wrap_bad_get_error(err: ServerException) -> "CHQueryErrorBadGet":
+    match = BAD_GET_TYPE_MISMATCH_PATTERN.search(err.message or "")
+    message = BAD_GET_FALLBACK_MESSAGE
+    if match and all(_SIMPLE_CLICKHOUSE_TYPE.fullmatch(value) for value in match.groups()):
+        message = (
+            f"A value in the query has the wrong type: got {match.group('actual')}, "
+            f"expected {match.group('expected')}. Check function parameters and type conversions."
+        )
+    return CHQueryErrorBadGet(message, code=err.code, code_name="bad_get")
+
+
+def _public_operand_type(raw_type: str) -> str | None:
+    type_name = raw_type.strip("`")
+    wrapper = re.fullmatch(r"(?:Array|Nullable|LowCardinality)\(([A-Za-z0-9]+)\)", type_name)
+    if wrapper and _SIMPLE_CLICKHOUSE_TYPE.fullmatch(wrapper[1]):
+        return type_name
+    family = type_name.partition("(")[0]
+    return family if _SIMPLE_CLICKHOUSE_TYPE.fullmatch(family) else None
+
+
+def _comparison_type_message(message: str) -> str | None:
+    operand = r"(`[^`\n]{1,256}`|[A-Za-z0-9]+)"
+    pair = re.search(rf"\bIllegal types of arguments \({operand}, {operand}\) of function `?([A-Za-z]+)\b", message)
+    if not pair:
+        return None
+    from posthog.hogql.functions.mapping import HOGQL_COMPARISON_MAPPING
+
+    operator = HOGQL_COMPARISON_MAPPING.get(pair[3])
+    left, right = _public_operand_type(pair[1]), _public_operand_type(pair[2])
+    if operator and left and right:
+        return f"The {operator} operator cannot compare {left} and {right}. Use compatible types on both sides of the comparison."
+    return None
+
+
+def _argument_type_message(message: str, fallback: str) -> str:
+    message = re.split(
+        r": In scope\b|[.:] While (?:processing|executing)\b|Stack trace:", message, maxsplit=1, flags=re.I
+    )[0]
+    if comparison := _comparison_type_message(message):
+        return comparison
+    subject = "The function"
+    if match := re.search(r"\b(?:of|for|to) (?:aggregate )?function [`']?([A-Za-z][A-Za-z0-9_]{0,63})\b", message):
+        from posthog.hogql.functions.mapping import find_hogql_aggregation, find_hogql_function
+
+        name = _HOGQL_NAMES_OF_CLICKHOUSE_FUNCTIONS.get(match[1], match[1])
+        if find_hogql_function(name) or find_hogql_aggregation(name):
+            subject = f"`{name}`"
+    argument = re.search(
+        r"as ([1-9][0-9]?(?:st|nd|rd|th)) argument '[^'\n]{1,64}' to function '[A-Za-z0-9_]+'\. "
+        r"Expected: ([^\n]{1,128}?), got: ([A-Za-z0-9_]+\(?)",  # a kept "(" hides Array(String) outside the date case
+        message,
+    )
+    if argument and subject != "The function":
+        position, expected, actual = argument.groups()
+        if expected == "Date[32] or DateTime[64]":
+            actual, advice = actual.removesuffix("("), "Use a date or date-time value."
+        elif all(_SIMPLE_CLICKHOUSE_TYPE.fullmatch(t) for t in expected.split(" or ")):
+            advice = f"Convert it to {expected}."
+        else:
+            advice = "Convert it to a type the function accepts."
+        if _SIMPLE_CLICKHOUSE_TYPE.fullmatch(actual):
+            return f"The {position} argument to {subject} has type {actual}. {advice}"
+    pair = re.search(r"\bIllegal types ([A-Za-z0-9]+)(?:\([^()\n]{0,128}\))? and ([A-Za-z0-9]+)\b", message)
+    if pair and all(_SIMPLE_CLICKHOUSE_TYPE.fullmatch(t) for t in pair.groups()):
+        return (
+            f"{subject} cannot combine {pair[1]} and {pair[2]} here. Check the types on both sides of the expression."
+        )
+    if actual := re.search(r"\bIllegal type ([A-Za-z][A-Za-z0-9]+)\b", message):
+        if _SIMPLE_CLICKHOUSE_TYPE.fullmatch(actual[1]):
+            return f"{subject} cannot use an argument of type {actual[1]} here. Check the argument order and cast it to a supported type."
+    if subject != "The function":
+        return f"Check the argument types for {subject}. Cast each argument to a type the function accepts."
+    return fallback
+
+
+def _unreadable_type_advice(unreadable_type: str) -> str:
+    if unreadable_type.startswith("AggregateFunction("):
+        return (
+            "The column holds a stored aggregate state. "
+            "Wrap it in the matching -Merge function, for example `argMinMerge(column)`, to get the final value."
+        )
+    if unreadable_type.startswith("Variant("):
+        return (
+            "The column mixes value types. This usually comes from `UNION ALL` branches, `coalesce()` or "
+            "`ifNull()` arguments, or `if()` branches that return different types. "
+            "Make them return one type, for example with `toString()` or `toFloat()`."
+        )
+    return "Convert the column to a basic type such as a string, number, or date, or leave it out of the results."
+
+
+def _unreadable_type_subject(unreadable_type: str, column_names: Sequence[str]) -> str:
+    quoted_names = [f"`{name}`" for name in column_names]
+    if not quoted_names:
+        return f"This query returns a column of type `{unreadable_type}`"
+    if len(quoted_names) == 1:
+        return f"The {quoted_names[0]} column has type `{unreadable_type}`"
+    return f"The {', '.join(quoted_names[:-1])} and {quoted_names[-1]} columns have type `{unreadable_type}`"
+
+
+def unknown_type_error(
+    unreadable_type: str, column_names: Sequence[str] = (), code: int | None = None
+) -> "CHQueryErrorUnknownType":
+    family = unreadable_type.partition("(")[0]
+    if family not in {
+        "AggregateFunction",
+        "SimpleAggregateFunction",
+        "Variant",
+        "Dynamic",
+        "Object",
+        "JSON",
+    } and not _SIMPLE_CLICKHOUSE_TYPE.fullmatch(family):
+        family = "unsupported"
+    subject = _unreadable_type_subject(family, column_names)
+    advice = _unreadable_type_advice(unreadable_type)
+    error = CHQueryErrorUnknownType(
+        f"{subject}, which PostHog can't send back in results. {advice}", code=code, code_name="unknown_type"
+    )
+    error.unreadable_type = unreadable_type
+    return error
+
+
+def _wrap_unknown_type_error(err: UnknownTypeError) -> "CHQueryErrorUnknownType":
+    return unknown_type_error((err.message or "").removeprefix("Unknown type "), code=err.code)
+
+
+# NOT_IMPLEMENTED covers many ClickHouse limits, and PostHog-generated SQL can reach some of them. Only
+# these message shapes are known to come from the SQL a person wrote. Every other shape stays internal,
+# so error tracking still receives it.
+USER_CAUSED_NOT_IMPLEMENTED_MESSAGES: tuple[tuple[tuple[str, ...], str], ...] = (
+    (
+        ("Correlated subqueries", "Cannot decorrelate query", "Lateral joins are not supported"),
+        "A subquery refers to a column of the outer query, which ClickHouse doesn't support here. "
+        "Rewrite it as a JOIN, or move the filter into the outer query.",
+    ),
+    (
+        ("RANGE OFFSET frame",),
+        "A window frame with RANGE and an offset doesn't work with the type of this ORDER BY column. "
+        "Use a ROWS frame, or change the type of the ORDER BY column.",
+    ),
+    (
+        ("Conversion between numeric types and UUID is not supported",),
+        "A number is being converted to a UUID, which ClickHouse doesn't support. Put the UUID value in quotes.",
+    ),
+)
+
+
+def _user_caused_not_implemented_message(raw_message: str) -> str | None:
+    for needles, message in USER_CAUSED_NOT_IMPLEMENTED_MESSAGES:
+        if any(needle in raw_message for needle in needles):
+            return message
+    return None
+
+
+_FUNNEL_UDF_FAILED = re.compile(r"User defined function '?aggregate_funnel\w*'? failed")
+_INNER_TIMEOUT = re.compile(r"\bCode: 159\b|\(TIMEOUT_EXCEEDED\)")
+
+
+def _is_udf_timeout(name: str, raw_message: str) -> bool:
+    # A funnel UDF (aggregate_funnel_*) that times out raises UDF_EXECUTION_FAILED with the inner
+    # TIMEOUT_EXCEEDED error in the message. Other executable UDFs, such as JSONDropKeysPool, stay internal.
+    return (
+        name == "UDF_EXECUTION_FAILED"
+        and _FUNNEL_UDF_FAILED.search(raw_message) is not None
+        and _INNER_TIMEOUT.search(raw_message) is not None
+    )
+
+
+def wrap_clickhouse_query_error(err: Exception) -> Exception:
+    "Beautifies clickhouse client errors, using custom error classes for every code"
+    if isinstance(err, UnknownTypeError):
+        return _wrap_unknown_type_error(err)
+    err = _server_exception_from_http_client_error(err) or err
+    if not isinstance(err, ServerException):
+        return err
+
+    meta = look_up_clickhouse_error_code_meta(err)
+    name = meta.name
+    raw_message = err.message or ""
+
+    # Naming convention:
+    # - Exceptions starting with ClickHouse inherit from APIException and are not sent to error reporting.
+    # - Exceptions starting with CH inherit from InternalCHQueryError or ExposedCHQueryError.
+    #   These ultimately extend clickhouse_driver.errors.ServerException and are sent to error reporting.
+
+    # infrastructure errors - custom messages to hide internals
+    if name in ("TOO_MANY_SIMULTANEOUS_QUERIES", "CANNOT_SCHEDULE_TASK"):
+        return ClickHouseAtCapacity()
+    elif name == "TIMEOUT_EXCEEDED":
+        return ClickHouseQueryTimeOut()
+    elif _is_udf_timeout(name, raw_message):
+        return ClickHouseUDFTimeOut()
+    elif name == "MEMORY_LIMIT_EXCEEDED":
+        # Match the known per-query phrasings ("Memory limit (for query) exceeded" before
+        # ClickHouse 26, "Query memory limit exceeded" since). Anything else - "(total)",
+        # "(for user)", or a future rewording - counts as transient cluster pressure, which gets
+        # its own class so the CH_TRANSIENT_ERRORS retry paths cover it.
+        if "(for query)" in raw_message or "Query memory limit exceeded" in raw_message:
+            memory_error = ClickHouseQueryMemoryLimitExceeded()
+            memory_error.is_per_query_limit = True
+            return memory_error
+        return ClickHouseClusterMemoryLimitExceeded()
+    elif (
+        name == "SYNTAX_ERROR" and "query size exceeded" in raw_message
+    ):  # Handle syntax error when "max query size exceeded" in the message
+        return ClickHouseQuerySizeExceeded()
+    elif name == "TOO_SLOW":
+        # Return a 512 error for queries which would time out
+        detail = "Estimated query execution time is too long"
+        if match := re.search(
+            r"Estimated query execution time \([0-9]{1,12}(?:\.[0-9]{1,9})? seconds\) is too long\.", raw_message
+        ):
+            detail = match.group(0)
+        return ClickHouseEstimatedQueryExecutionTimeTooLong(
+            detail=f"{detail} Try reducing its scope by changing the time range."
+        )
+    elif name == "S3_ERROR":
+        if "The requested range is not satisfiable" in raw_message:
+            return _wrap_storage_file_changed_error(err)
+        if any(needle in raw_message for needle in _S3_ACCESS_DENIED_NEEDLES):
+            return _wrap_s3_access_denied_error(err)
+        return CHQueryErrorS3Error(f"S3 error occurred. ({raw_message})", code=err.code)
+    elif name == "INCORRECT_DATA" and "Not a Parquet file" in raw_message and "(in file/uri" in raw_message:
+        return _wrap_storage_file_changed_error(err)
+    elif name == "INCORRECT_DATA" and "Expected end of line" in raw_message:
+        # A bad row in a self-managed CSV file. Table validation reads only the first rows, so a later
+        # bad row first shows up at query time. The raw message holds row contents, so it stays hidden.
+        return _wrap_malformed_csv_row_error(err)
+    elif _is_unparseable_parquet_metadata_error(name, raw_message):
+        return CHQueryErrorCorruptedParquetMetadata(
+            CORRUPTED_PARQUET_METADATA_MESSAGE, code=err.code, code_name="corrupted_parquet_metadata"
+        )
+    elif name == "TABLE_IS_READ_ONLY":
+        # Transient: a replica dropped its ZooKeeper/Keeper session and went read-only; it self-heals.
+        return CHQueryErrorTableIsReadOnly(raw_message, code=err.code, code_name="table_is_read_only")
+    elif name == "QUERY_WAS_CANCELLED":
+        # Not retryable by default: a deploy cancelling in-flight queries and a deliberate
+        # KILL QUERY are indistinguishable here, so this stays out of CH_TRANSIENT_ERRORS and
+        # callers that want the deploy case retried opt in themselves.
+        return CHQueryErrorQueryWasCancelled(raw_message, code=err.code, code_name="query_was_cancelled")
+
+    elif name == "BAD_GET":
+        return _wrap_bad_get_error(err)
+    elif name == "UNKNOWN_IDENTIFIER":
+        return CHQueryErrorUnknownIdentifier(raw_message, code=err.code, code_name="unknown_identifier")
+    elif name == "UNSUPPORTED_METHOD":
+        return CHQueryErrorUnsupportedMethod(raw_message, code=err.code, code_name="unsupported_method")
+    elif name == "NOT_IMPLEMENTED" and (fixed_message := _user_caused_not_implemented_message(raw_message)):
+        return CHQueryErrorNotImplemented(fixed_message, code=err.code, code_name="not_implemented")
+
+    class_name = f"CHQueryError{meta.label}"
+    if meta.user_safe is not None:
+        message = meta.user_safe
+        if name == "ILLEGAL_TYPE_OF_ARGUMENT":
+            message = _argument_type_message(raw_message, message)
+        elif name == "FUNCTION_THROW_IF_VALUE_IS_NON_ZERO":
+            # ClickHouse appends the executing SQL and row values after the explicit throwIf message.
+            match = re.search(
+                r"DB::Exception:\s*([^\r\n]+?)(?:[:.]\s*while (?:executing|processing)\b|\s*\(FUNCTION_THROW_IF_VALUE_IS_NON_ZERO\))",
+                raw_message,
+                re.IGNORECASE,
+            )
+            if match:
+                message = match[1].strip()
+        exposed_type = _EXPOSED_CH_ERROR_TYPES.get(name) or type(class_name, (ExposedCHQueryError,), {})
+        return exposed_type(message, code=err.code, code_name=name.lower())
+
+    return type(class_name, (InternalCHQueryError,), {})(raw_message, code=err.code, code_name=name.lower())
+
+
+def look_up_clickhouse_error_code_meta(error: ClickHouseDriverError) -> ErrorCodeMeta:
+    code = getattr(error, "code", None)
+    if code is None or code not in CLICKHOUSE_ERROR_CODE_LOOKUP:
+        return CLICKHOUSE_UNKNOWN_EXCEPTION
+    return CLICKHOUSE_ERROR_CODE_LOOKUP[code]
+
+
+def classify_query_error(e: Exception) -> QueryErrorCategory:
+    """Classify a query execution exception into a high-level category for observability."""
+    e = _server_exception_from_http_client_error(e) or e
+    if isinstance(e, ServerException):
+        meta = look_up_clickhouse_error_code_meta(e)
+        # NOT_IMPLEMENTED is a user error only for the allowlisted message shapes. A wrapped error has
+        # lost its raw text to the fixed message, so its class carries the decision. A raw error still
+        # holds the ClickHouse text.
+        if meta.name == "NOT_IMPLEMENTED" and (
+            isinstance(e, CHQueryErrorNotImplemented) or _user_caused_not_implemented_message(e.message or "")
+        ):
+            return QueryErrorCategory.USER_ERROR
+        if _is_udf_timeout(meta.name, e.message or ""):
+            return QueryErrorCategory.QUERY_PERFORMANCE_ERROR
+        return meta.get_category()
+
+    # Cluster-wide / per-user memory pressure is transient capacity, not a problem with this query,
+    # so it classifies with the other rate-limited capacity errors. Checked before its parent below.
+    if isinstance(e, (ClickHouseAtCapacity, ConcurrencyLimitExceeded, ClickHouseClusterMemoryLimitExceeded)):
+        return QueryErrorCategory.RATE_LIMITED
+
+    if isinstance(
+        e,
+        (
+            ClickHouseQueryTimeOut,
+            ClickHouseQueryMemoryLimitExceeded,
+            ClickHouseEstimatedQueryExecutionTimeTooLong,
+            ClickHouseQuerySizeExceeded,
+        ),
+    ):
+        return QueryErrorCategory.QUERY_PERFORMANCE_ERROR
+
+    if isinstance(e, ExposedHogQLError):
+        return QueryErrorCategory.USER_ERROR
+
+    return QueryErrorCategory.ERROR
+
+
+# Specific error classes we need
+# These exist here and are not dynamically created because they are used in the codebase.
+class CHQueryErrorS3Error(InternalCHQueryError):
+    pass
+
+
+class CHQueryErrorS3FileChangedDuringRead(ExposedCHQueryError):
+    """A file backing a warehouse table was overwritten or deleted while ClickHouse was reading it."""
+
+    public_code = "s3_file_changed_during_read"
+    public_message = (
+        "A file backing a data warehouse table changed while the query was reading it. "
+        "Retry the query. If you manage these files yourself, avoid overwriting files in place: "
+        "upload new files and delete old ones instead."
+    )
+
+
+class CHQueryErrorS3AccessDenied(ExposedCHQueryError):
+    """The bucket behind a warehouse table refused to let ClickHouse read a file."""
+
+    public_code = "s3_access_denied"
+    public_message = S3_ACCESS_DENIED_MESSAGE
+    # The message is replaced with fixed copy, so warehouse table checks match on this instead.
+    raw_message: str | None = None
+
+
+_EXPOSED_S3_ERRORS = (CHQueryErrorS3FileChangedDuringRead, CHQueryErrorS3AccessDenied)
+
+
+class CHQueryErrorTableIsReadOnly(InternalCHQueryError):
+    pass
+
+
+class CHQueryErrorQueryWasCancelled(InternalCHQueryError):
+    pass
+
+
+class CHQueryErrorCorruptedParquetMetadata(ExposedCHQueryError):
+    """A Parquet file backing a warehouse table has corrupted or oversized thrift metadata."""
+
+    pass
+
+
+class CHQueryErrorMalformedCsvRow(ExposedCHQueryError):
+    """A row in a CSV file backing a warehouse table has the wrong shape."""
+
+    pass
+
+
+# User query errors - these are errors caused by user input/queries
+class CHQueryErrorIllegalTypeOfArgument(ExposedCHQueryError):
+    pass
+
+
+class CHQueryErrorBadGet(ExposedCHQueryError):
+    pass
+
+
+class CHQueryErrorUnknownType(ExposedCHQueryError):
+    unreadable_type: str = ""
+
+
+class CHQueryErrorNoCommonType(ExposedCHQueryError):
+    pass
+
+
+class CHQueryErrorNotAnAggregate(ExposedCHQueryError):
+    pass
+
+
+class CHQueryErrorUnknownFunction(ExposedCHQueryError):
+    pass
+
+
+class CHQueryErrorTypeMismatch(ExposedCHQueryError):
+    pass
+
+
+class CHQueryErrorIllegalAggregation(ExposedCHQueryError):
+    pass
+
+
+class CHQueryErrorNumberOfArgumentsDoesntMatch(ExposedCHQueryError):
+    pass
+
+
+class CHQueryErrorUnknownIdentifier(InternalCHQueryError):
+    pass
+
+
+class CHQueryErrorTooManyBytes(ExposedCHQueryError):
+    pass
+
+
+class CHQueryErrorCannotParseUuid(ExposedCHQueryError):
+    pass
+
+
+class CHQueryErrorCannotParseBool(ExposedCHQueryError):
+    pass
+
+
+class CHQueryErrorUnsupportedMethod(InternalCHQueryError):
+    pass
+
+
+class CHQueryErrorInvalidJoinOnExpression(ExposedCHQueryError):
+    pass
+
+
+class CHQueryErrorUnknownTable(ExposedCHQueryError):
+    pass
+
+
+class CHQueryErrorNotImplemented(ExposedCHQueryError):
+    pass
+
+
+_EXPOSED_CH_ERROR_TYPES: dict[str, type[ExposedCHQueryError]] = {
+    "CANNOT_PARSE_BOOL": CHQueryErrorCannotParseBool,
+    "CANNOT_PARSE_UUID": CHQueryErrorCannotParseUuid,
+    "ILLEGAL_AGGREGATION": CHQueryErrorIllegalAggregation,
+    "ILLEGAL_TYPE_OF_ARGUMENT": CHQueryErrorIllegalTypeOfArgument,
+    "INVALID_JOIN_ON_EXPRESSION": CHQueryErrorInvalidJoinOnExpression,
+    "NOT_AN_AGGREGATE": CHQueryErrorNotAnAggregate,
+    "NO_COMMON_TYPE": CHQueryErrorNoCommonType,
+    "NUMBER_OF_ARGUMENTS_DOESNT_MATCH": CHQueryErrorNumberOfArgumentsDoesntMatch,
+    "TOO_MANY_BYTES": CHQueryErrorTooManyBytes,
+    "TYPE_MISMATCH": CHQueryErrorTypeMismatch,
+    "UNKNOWN_FUNCTION": CHQueryErrorUnknownFunction,
+    "UNKNOWN_TABLE": CHQueryErrorUnknownTable,
+}
+
+
+#
+# From https://github.com/ClickHouse/ClickHouse/blob/v25.8.12.129-lts/src/Common/ErrorCodes.cpp#L17-L650
+#
+# Please keep this list up to date at each ClickHouse upgrade.
+#
+# You can fetch and print an updated list of error codes with something like:
+#
+# ```py
+# import re
+# import requests
+#
+# TAG = "v25.8.12.129-lts"
+# URL = f"https://raw.githubusercontent.com/ClickHouse/ClickHouse/refs/tags/{TAG}/src/Common/ErrorCodes.cpp"
+#
+# resp = requests.get(URL, timeout=30)
+# resp.raise_for_status()
+#
+# seen = set()
+#
+# for line in resp.text.split("\n"):
+#     s = line.strip()
+#     match = re.search(r"^M\((\d+),\s*([A-Z0-9_]+)\)", s)
+#     if match:
+#         code = int(match.group(1))
+#         name = match.group(2)
+#
+#         # avoid accidental duplicates if the macro list appears more than once
+#         if code in seen:
+#             continue
+#         seen.add(code)
+#
+#         print(f'    {code}: ErrorCodeMeta("{name}"),')
+# ```
+#
+# Remember to add back the `user_safe` args though!
+
+CLICKHOUSE_UNKNOWN_EXCEPTION = ErrorCodeMeta("UNKNOWN_EXCEPTION")
+# ClickHouse can append expressions and query context to any error. Use fixed messages for
+# new exposed codes; auditing the initial throw alone does not establish that raw text is safe.
+CLICKHOUSE_ERROR_CODE_LOOKUP: dict[int, ErrorCodeMeta] = {
+    0: ErrorCodeMeta("OK"),
+    1: ErrorCodeMeta("UNSUPPORTED_METHOD", category=QueryErrorCategory.USER_ERROR),
+    2: ErrorCodeMeta("UNSUPPORTED_PARAMETER"),
+    3: ErrorCodeMeta("UNEXPECTED_END_OF_FILE"),
+    4: ErrorCodeMeta("EXPECTED_END_OF_FILE"),
+    6: ErrorCodeMeta(
+        "CANNOT_PARSE_TEXT",
+        user_safe="Cannot parse a value as the requested type. Check your input formats and type conversions.",
+    ),
+    7: ErrorCodeMeta(
+        "INCORRECT_NUMBER_OF_COLUMNS",
+        user_safe="The column count doesn't match. Check the columns on each side of the expression.",
+        category=QueryErrorCategory.ERROR,
+    ),
+    8: ErrorCodeMeta(
+        "THERE_IS_NO_COLUMN",
+        user_safe="A referenced column is missing. Check the table schema and the columns returned by each subquery.",
+        category=QueryErrorCategory.ERROR,
+    ),
+    9: ErrorCodeMeta("SIZES_OF_COLUMNS_DOESNT_MATCH"),
+    10: ErrorCodeMeta("NOT_FOUND_COLUMN_IN_BLOCK"),
+    11: ErrorCodeMeta("POSITION_OUT_OF_BOUND"),
+    12: ErrorCodeMeta("PARAMETER_OUT_OF_BOUND"),
+    13: ErrorCodeMeta("SIZES_OF_COLUMNS_IN_TUPLE_DOESNT_MATCH"),
+    15: ErrorCodeMeta(
+        "DUPLICATE_COLUMN", user_safe="Two output columns have the same name. Give them distinct aliases."
+    ),
+    16: ErrorCodeMeta(
+        "NO_SUCH_COLUMN_IN_TABLE",
+        user_safe="A referenced column is missing. Check the column names in the source table.",
+        category=QueryErrorCategory.ERROR,
+    ),
+    19: ErrorCodeMeta("SIZE_OF_FIXED_STRING_DOESNT_MATCH"),
+    20: ErrorCodeMeta(
+        "NUMBER_OF_COLUMNS_DOESNT_MATCH",
+        user_safe="The number of columns doesn't match. Make sure both sides of an IN, and each part of a UNION, "
+        "have the same number of columns.",
+    ),
+    23: ErrorCodeMeta("CANNOT_READ_FROM_ISTREAM"),
+    24: ErrorCodeMeta("CANNOT_WRITE_TO_OSTREAM"),
+    25: ErrorCodeMeta("CANNOT_PARSE_ESCAPE_SEQUENCE"),
+    26: ErrorCodeMeta("CANNOT_PARSE_QUOTED_STRING"),
+    27: ErrorCodeMeta(
+        "CANNOT_PARSE_INPUT_ASSERTION_FAILED",
+        user_safe="Cannot parse a value in the expected format. Check the format of your data and your type conversions.",
+    ),
+    28: ErrorCodeMeta("CANNOT_PRINT_FLOAT_OR_DOUBLE_NUMBER"),
+    32: ErrorCodeMeta("ATTEMPT_TO_READ_AFTER_EOF"),
+    33: ErrorCodeMeta("CANNOT_READ_ALL_DATA"),
+    34: ErrorCodeMeta(
+        "TOO_MANY_ARGUMENTS_FOR_FUNCTION",
+        user_safe="A function received too many arguments. Check its signature and remove the extra arguments.",
+    ),
+    35: ErrorCodeMeta(
+        "TOO_FEW_ARGUMENTS_FOR_FUNCTION",
+        user_safe="A function is missing arguments. Check its signature and supply each required argument.",
+    ),
+    36: ErrorCodeMeta(
+        "BAD_ARGUMENTS",
+        user_safe="A function received an invalid argument. Check the order, types, and allowed values of its arguments.",
+    ),
+    37: ErrorCodeMeta("UNKNOWN_ELEMENT_IN_AST"),
+    38: ErrorCodeMeta("CANNOT_PARSE_DATE", user_safe="Cannot parse a date. Check your date values and their format."),
+    39: ErrorCodeMeta("TOO_LARGE_SIZE_COMPRESSED"),
+    40: ErrorCodeMeta("CHECKSUM_DOESNT_MATCH"),
+    41: ErrorCodeMeta(
+        "CANNOT_PARSE_DATETIME", user_safe="Cannot parse a date and time. Check your datetime values and their format."
+    ),
+    42: ErrorCodeMeta(
+        "NUMBER_OF_ARGUMENTS_DOESNT_MATCH",
+        user_safe="The argument count doesn't match the function signature. Check the required and optional arguments.",
+    ),
+    43: ErrorCodeMeta(
+        "ILLEGAL_TYPE_OF_ARGUMENT",
+        user_safe="A function or operator received an incompatible type. Run each expression separately and use "
+        "toTypeName(expression) to check the type of each input.",
+    ),
+    44: ErrorCodeMeta(
+        "ILLEGAL_COLUMN",
+        user_safe="A column cannot be used in this expression. Check whether the function requires a constant argument.",
+    ),  # column has wrong type for the operation (e.g. non-constant where constant required)
+    46: ErrorCodeMeta(
+        "UNKNOWN_FUNCTION",
+        user_safe="ClickHouse couldn't find a function used in this query. Check its spelling and the SQL function list.",
+    ),
+    47: ErrorCodeMeta("UNKNOWN_IDENTIFIER", category=QueryErrorCategory.USER_ERROR),
+    48: ErrorCodeMeta("NOT_IMPLEMENTED"),
+    49: ErrorCodeMeta("LOGICAL_ERROR"),
+    50: ErrorCodeMeta(
+        "UNKNOWN_TYPE",
+        user_safe="ClickHouse couldn't find a data type used in this query. Check the type name in casts and function arguments.",
+    ),  # referenced data type does not exist
+    51: ErrorCodeMeta(
+        "EMPTY_LIST_OF_COLUMNS_QUERIED", user_safe="The query selects no columns. Add a column or expression to SELECT."
+    ),
+    52: ErrorCodeMeta("COLUMN_QUERIED_MORE_THAN_ONCE"),
+    53: ErrorCodeMeta(
+        "TYPE_MISMATCH",
+        user_safe="The types on the two sides of an expression don't match. Cast them to a common type before comparing or combining them.",
+    ),
+    55: ErrorCodeMeta("STORAGE_REQUIRES_PARAMETER"),
+    56: ErrorCodeMeta("UNKNOWN_STORAGE"),
+    57: ErrorCodeMeta("TABLE_ALREADY_EXISTS"),
+    58: ErrorCodeMeta("TABLE_METADATA_ALREADY_EXISTS"),
+    59: ErrorCodeMeta(
+        "ILLEGAL_TYPE_OF_COLUMN_FOR_FILTER",
+        user_safe="The filter needs a boolean condition. Use an explicit comparison in WHERE or HAVING.",
+    ),  # WHERE/HAVING column is not boolean-convertible
+    60: ErrorCodeMeta(
+        "UNKNOWN_TABLE",
+        user_safe="ClickHouse couldn't find a table used in this query. Check the table name in the schema and the scope of any table aliases.",
+    ),
+    # Stays internal: HogQL validates syntax before ClickHouse, so a raw CH syntax error means
+    # PostHog generated invalid SQL — a bug we want in error tracking, not hidden as user-safe.
+    62: ErrorCodeMeta("SYNTAX_ERROR", category=QueryErrorCategory.USER_ERROR),
+    63: ErrorCodeMeta(
+        "UNKNOWN_AGGREGATE_FUNCTION",
+        user_safe="ClickHouse couldn't find an aggregate function used in this query. Check its name and any aggregate suffix.",
+    ),
+    68: ErrorCodeMeta("CANNOT_GET_SIZE_OF_FIELD"),
+    # Fixed message: the raw CH text formats a per-row value (e.g. geoToH3 resolution) into the error.
+    69: ErrorCodeMeta(
+        "ARGUMENT_OUT_OF_BOUND",
+        user_safe="A function argument is outside its allowed range. Check its bounds and the values passed to it.",
+    ),
+    # Fixed message: the raw CH text embeds the failing data value (see code 6 note), so a fixed
+    # string keeps that value out of the response while still returning a 400 for the bad query.
+    70: ErrorCodeMeta(
+        "CANNOT_CONVERT_TYPE",
+        user_safe="Cannot convert one type to another in the query. Check the types in your comparisons and IN clauses.",
+    ),
+    71: ErrorCodeMeta("CANNOT_WRITE_AFTER_END_OF_BUFFER"),
+    72: ErrorCodeMeta(
+        "CANNOT_PARSE_NUMBER", user_safe="Cannot parse a number. Check for non-numeric values in your type conversions."
+    ),
+    73: ErrorCodeMeta("UNKNOWN_FORMAT"),
+    74: ErrorCodeMeta("CANNOT_READ_FROM_FILE_DESCRIPTOR"),
+    75: ErrorCodeMeta("CANNOT_WRITE_TO_FILE_DESCRIPTOR"),
+    76: ErrorCodeMeta("CANNOT_OPEN_FILE"),
+    77: ErrorCodeMeta("CANNOT_CLOSE_FILE"),
+    78: ErrorCodeMeta("UNKNOWN_TYPE_OF_QUERY"),
+    79: ErrorCodeMeta("INCORRECT_FILE_NAME"),
+    80: ErrorCodeMeta(
+        "INCORRECT_QUERY",
+        user_safe="ClickHouse couldn't execute this combination of SQL clauses. Run the inner SELECT on its own, then add the outer clauses one at a time.",
+    ),  # query parses but is semantically invalid
+    81: ErrorCodeMeta("UNKNOWN_DATABASE"),
+    82: ErrorCodeMeta("DATABASE_ALREADY_EXISTS"),
+    83: ErrorCodeMeta("DIRECTORY_DOESNT_EXIST"),
+    84: ErrorCodeMeta("DIRECTORY_ALREADY_EXISTS"),
+    85: ErrorCodeMeta("FORMAT_IS_NOT_SUITABLE_FOR_INPUT"),
+    86: ErrorCodeMeta("RECEIVED_ERROR_FROM_REMOTE_IO_SERVER"),
+    87: ErrorCodeMeta("CANNOT_SEEK_THROUGH_FILE"),
+    88: ErrorCodeMeta("CANNOT_TRUNCATE_FILE"),
+    89: ErrorCodeMeta("UNKNOWN_COMPRESSION_METHOD"),
+    90: ErrorCodeMeta("EMPTY_LIST_OF_COLUMNS_PASSED"),
+    91: ErrorCodeMeta("SIZES_OF_MARKS_FILES_ARE_INCONSISTENT"),
+    92: ErrorCodeMeta("EMPTY_DATA_PASSED"),
+    93: ErrorCodeMeta("UNKNOWN_AGGREGATED_DATA_VARIANT"),
+    94: ErrorCodeMeta("CANNOT_MERGE_DIFFERENT_AGGREGATED_DATA_VARIANTS"),
+    95: ErrorCodeMeta("CANNOT_READ_FROM_SOCKET"),
+    96: ErrorCodeMeta("CANNOT_WRITE_TO_SOCKET"),
+    99: ErrorCodeMeta("UNKNOWN_PACKET_FROM_CLIENT"),
+    100: ErrorCodeMeta("UNKNOWN_PACKET_FROM_SERVER"),
+    101: ErrorCodeMeta("UNEXPECTED_PACKET_FROM_CLIENT"),
+    102: ErrorCodeMeta("UNEXPECTED_PACKET_FROM_SERVER"),
+    104: ErrorCodeMeta("TOO_SMALL_BUFFER_SIZE"),
+    107: ErrorCodeMeta("FILE_DOESNT_EXIST"),
+    108: ErrorCodeMeta("NO_DATA_TO_INSERT"),
+    109: ErrorCodeMeta("CANNOT_BLOCK_SIGNAL"),
+    110: ErrorCodeMeta("CANNOT_UNBLOCK_SIGNAL"),
+    111: ErrorCodeMeta("CANNOT_MANIPULATE_SIGSET"),
+    112: ErrorCodeMeta("CANNOT_WAIT_FOR_SIGNAL"),
+    113: ErrorCodeMeta("THERE_IS_NO_SESSION"),
+    114: ErrorCodeMeta("CANNOT_CLOCK_GETTIME"),
+    115: ErrorCodeMeta("UNKNOWN_SETTING"),
+    116: ErrorCodeMeta("THERE_IS_NO_DEFAULT_VALUE"),
+    117: ErrorCodeMeta("INCORRECT_DATA"),
+    119: ErrorCodeMeta("ENGINE_REQUIRED"),
+    120: ErrorCodeMeta("CANNOT_INSERT_VALUE_OF_DIFFERENT_SIZE_INTO_TUPLE"),
+    121: ErrorCodeMeta(
+        "UNSUPPORTED_JOIN_KEYS",
+        user_safe="Unsupported JOIN keys. Check the expressions and types used to join your tables.",
+    ),
+    122: ErrorCodeMeta(
+        "INCOMPATIBLE_COLUMNS",
+        user_safe="The column types don't match the expected schema. Check the number, order, and types of the selected columns.",
+    ),  # column types don't match expected schema
+    123: ErrorCodeMeta("UNKNOWN_TYPE_OF_AST_NODE"),
+    124: ErrorCodeMeta(
+        "INCORRECT_ELEMENT_OF_SET",
+        user_safe="An element of an IN set is invalid. Make sure each tuple in the IN list has the same number "
+        "of elements as the left side, and that each element is a constant.",
+    ),
+    125: ErrorCodeMeta(
+        "INCORRECT_RESULT_OF_SCALAR_SUBQUERY",
+        user_safe="A scalar subquery returned more than one row, or an empty result that cannot be nullable. "
+        "Make sure the subquery returns a single value.",
+    ),
+    127: ErrorCodeMeta("ILLEGAL_INDEX"),
+    128: ErrorCodeMeta(
+        "TOO_LARGE_ARRAY_SIZE",
+        user_safe="An array has an invalid or unsupported size. Check array lengths and reduce the number of elements.",
+    ),
+    129: ErrorCodeMeta("FUNCTION_IS_SPECIAL"),
+    130: ErrorCodeMeta(
+        "CANNOT_READ_ARRAY_FROM_TEXT",
+        user_safe="Cannot parse an array. Check the format of the values converted to arrays.",
+    ),
+    131: ErrorCodeMeta("TOO_LARGE_STRING_SIZE"),
+    133: ErrorCodeMeta(
+        "AGGREGATE_FUNCTION_DOESNT_ALLOW_PARAMETERS",
+        user_safe="This aggregate doesn't take parameters. Pass its input columns in a single pair of parentheses.",
+    ),
+    134: ErrorCodeMeta(
+        "PARAMETERS_TO_AGGREGATE_FUNCTIONS_MUST_BE_LITERALS",
+        user_safe="The aggregate parameters must be constants. Put constant parameters in the first pair of parentheses and input columns in the second.",
+    ),
+    135: ErrorCodeMeta(
+        "ZERO_ARRAY_OR_TUPLE_INDEX", user_safe="Array and tuple indexes start at 1. Use 1 to select the first element."
+    ),
+    137: ErrorCodeMeta("UNKNOWN_ELEMENT_IN_CONFIG"),
+    138: ErrorCodeMeta("EXCESSIVE_ELEMENT_IN_CONFIG"),
+    139: ErrorCodeMeta("NO_ELEMENTS_IN_CONFIG"),
+    141: ErrorCodeMeta("SAMPLING_NOT_SUPPORTED"),
+    142: ErrorCodeMeta("NOT_FOUND_NODE"),
+    145: ErrorCodeMeta("UNKNOWN_OVERFLOW_MODE"),
+    152: ErrorCodeMeta("UNKNOWN_DIRECTION_OF_SORTING"),
+    153: ErrorCodeMeta(
+        "ILLEGAL_DIVISION",
+        user_safe="Division failed. Check the divisor for zero and use nullIf(divisor, 0) if a missing result is appropriate.",
+    ),
+    156: ErrorCodeMeta("DICTIONARIES_WAS_NOT_LOADED"),
+    158: ErrorCodeMeta("TOO_MANY_ROWS", category=QueryErrorCategory.QUERY_PERFORMANCE_ERROR),
+    159: ErrorCodeMeta("TIMEOUT_EXCEEDED", category=QueryErrorCategory.QUERY_PERFORMANCE_ERROR),
+    160: ErrorCodeMeta(
+        "TOO_SLOW", category=QueryErrorCategory.QUERY_PERFORMANCE_ERROR
+    ),  # estimated execution time exceeds threshold
+    161: ErrorCodeMeta("TOO_MANY_COLUMNS", category=QueryErrorCategory.QUERY_PERFORMANCE_ERROR),
+    162: ErrorCodeMeta("TOO_DEEP_SUBQUERIES", category=QueryErrorCategory.QUERY_PERFORMANCE_ERROR),
+    164: ErrorCodeMeta("READONLY"),
+    165: ErrorCodeMeta("TOO_MANY_TEMPORARY_COLUMNS", category=QueryErrorCategory.QUERY_PERFORMANCE_ERROR),
+    166: ErrorCodeMeta(
+        "TOO_MANY_TEMPORARY_NON_CONST_COLUMNS", category=QueryErrorCategory.QUERY_PERFORMANCE_ERROR
+    ),  # too many per-row intermediate columns during expression evaluation
+    167: ErrorCodeMeta("TOO_DEEP_AST", category=QueryErrorCategory.QUERY_PERFORMANCE_ERROR),
+    168: ErrorCodeMeta("TOO_BIG_AST", category=QueryErrorCategory.QUERY_PERFORMANCE_ERROR),
+    169: ErrorCodeMeta("BAD_TYPE_OF_FIELD"),
+    # The wrapper exposes only allowlisted ClickHouse type identifiers from the raw message.
+    170: ErrorCodeMeta("BAD_GET", user_safe=BAD_GET_FALLBACK_MESSAGE),
+    172: ErrorCodeMeta("CANNOT_CREATE_DIRECTORY"),
+    173: ErrorCodeMeta("CANNOT_ALLOCATE_MEMORY", category=QueryErrorCategory.QUERY_PERFORMANCE_ERROR),
+    174: ErrorCodeMeta(
+        "CYCLIC_ALIASES",
+        user_safe="Two or more aliases depend on each other. Give each expression a distinct name and remove the circular reference.",
+    ),
+    179: ErrorCodeMeta(
+        "MULTIPLE_EXPRESSIONS_FOR_ALIAS",
+        user_safe="Several expressions use the same alias. Give each expression a distinct alias.",
+    ),
+    180: ErrorCodeMeta("THERE_IS_NO_PROFILE"),
+    181: ErrorCodeMeta("ILLEGAL_FINAL"),
+    182: ErrorCodeMeta(
+        "ILLEGAL_PREWHERE", user_safe="ClickHouse couldn't apply the PREWHERE filter. Move the condition into WHERE."
+    ),
+    183: ErrorCodeMeta("UNEXPECTED_EXPRESSION"),
+    184: ErrorCodeMeta(
+        "ILLEGAL_AGGREGATION",
+        user_safe="An aggregate is nested inside another aggregate or used in a clause that runs before grouping. Move the inner aggregate to a subquery or filter groups with HAVING.",
+    ),
+    186: ErrorCodeMeta("UNSUPPORTED_COLLATION_LOCALE"),
+    187: ErrorCodeMeta("COLLATION_COMPARISON_FAILED"),
+    190: ErrorCodeMeta(
+        "SIZES_OF_ARRAYS_DONT_MATCH",
+        user_safe="Array sizes do not match. Make sure arrays used together have the same number of elements.",
+    ),
+    191: ErrorCodeMeta("SET_SIZE_LIMIT_EXCEEDED"),
+    192: ErrorCodeMeta("UNKNOWN_USER"),
+    193: ErrorCodeMeta("WRONG_PASSWORD"),
+    194: ErrorCodeMeta("REQUIRED_PASSWORD"),
+    195: ErrorCodeMeta("IP_ADDRESS_NOT_ALLOWED"),
+    196: ErrorCodeMeta("UNKNOWN_ADDRESS_PATTERN_TYPE"),
+    198: ErrorCodeMeta("DNS_ERROR"),
+    199: ErrorCodeMeta("UNKNOWN_QUOTA"),
+    201: ErrorCodeMeta("QUOTA_EXCEEDED"),
+    202: ErrorCodeMeta("TOO_MANY_SIMULTANEOUS_QUERIES", category=QueryErrorCategory.RATE_LIMITED),
+    203: ErrorCodeMeta("NO_FREE_CONNECTION", category=QueryErrorCategory.RATE_LIMITED),
+    204: ErrorCodeMeta("CANNOT_FSYNC"),
+    206: ErrorCodeMeta(
+        "ALIAS_REQUIRED",
+        user_safe="A subquery or table function in a JOIN needs an alias. Add one, for example JOIN (SELECT ...) AS sub.",
+    ),
+    207: ErrorCodeMeta(
+        "AMBIGUOUS_IDENTIFIER",
+        user_safe="A name matches more than one column or alias. Qualify the column with its table alias or give the expressions distinct names.",
+    ),  # identifier resolves to multiple columns or aliases
+    208: ErrorCodeMeta("EMPTY_NESTED_TABLE"),
+    209: ErrorCodeMeta("SOCKET_TIMEOUT"),
+    210: ErrorCodeMeta("NETWORK_ERROR"),
+    211: ErrorCodeMeta("EMPTY_QUERY", user_safe="The query is empty. Enter a SELECT statement and run it again."),
+    212: ErrorCodeMeta("UNKNOWN_LOAD_BALANCING"),
+    213: ErrorCodeMeta("UNKNOWN_TOTALS_MODE"),
+    214: ErrorCodeMeta("CANNOT_STATVFS"),
+    215: ErrorCodeMeta(
+        "NOT_AN_AGGREGATE",
+        user_safe="A selected expression uses a column outside an aggregate. Add the column to GROUP BY or aggregate it.",
+    ),
+    216: ErrorCodeMeta("QUERY_WITH_SAME_ID_IS_ALREADY_RUNNING"),
+    217: ErrorCodeMeta("CLIENT_HAS_CONNECTED_TO_WRONG_PORT"),
+    218: ErrorCodeMeta("TABLE_IS_DROPPED"),
+    219: ErrorCodeMeta("DATABASE_NOT_EMPTY"),
+    220: ErrorCodeMeta("DUPLICATE_INTERSERVER_IO_ENDPOINT"),
+    221: ErrorCodeMeta("NO_SUCH_INTERSERVER_IO_ENDPOINT"),
+    223: ErrorCodeMeta("UNEXPECTED_AST_STRUCTURE"),
+    224: ErrorCodeMeta("REPLICA_IS_ALREADY_ACTIVE"),
+    225: ErrorCodeMeta("NO_ZOOKEEPER"),
+    226: ErrorCodeMeta("NO_FILE_IN_DATA_PART"),
+    227: ErrorCodeMeta("UNEXPECTED_FILE_IN_DATA_PART"),
+    228: ErrorCodeMeta("BAD_SIZE_OF_FILE_IN_DATA_PART"),
+    229: ErrorCodeMeta("QUERY_IS_TOO_LARGE", category=QueryErrorCategory.QUERY_PERFORMANCE_ERROR),
+    230: ErrorCodeMeta("NOT_FOUND_EXPECTED_DATA_PART"),
+    231: ErrorCodeMeta("TOO_MANY_UNEXPECTED_DATA_PARTS"),
+    232: ErrorCodeMeta("NO_SUCH_DATA_PART"),
+    233: ErrorCodeMeta("BAD_DATA_PART_NAME"),
+    234: ErrorCodeMeta("NO_REPLICA_HAS_PART"),
+    235: ErrorCodeMeta("DUPLICATE_DATA_PART"),
+    236: ErrorCodeMeta("ABORTED", category=QueryErrorCategory.CANCELLED),
+    237: ErrorCodeMeta("NO_REPLICA_NAME_GIVEN"),
+    238: ErrorCodeMeta("FORMAT_VERSION_TOO_OLD"),
+    239: ErrorCodeMeta("CANNOT_MUNMAP"),
+    240: ErrorCodeMeta("CANNOT_MREMAP"),
+    241: ErrorCodeMeta(
+        # Code 241 short-circuits to ClickHouseQueryMemoryLimitExceeded in wrap_clickhouse_query_error,
+        # so the user-facing copy lives on that exception's default_detail, not on user_safe here.
+        "MEMORY_LIMIT_EXCEEDED",
+        category=QueryErrorCategory.QUERY_PERFORMANCE_ERROR,
+    ),
+    242: ErrorCodeMeta("TABLE_IS_READ_ONLY"),
+    243: ErrorCodeMeta("NOT_ENOUGH_SPACE"),
+    244: ErrorCodeMeta("UNEXPECTED_ZOOKEEPER_ERROR"),
+    246: ErrorCodeMeta("CORRUPTED_DATA"),
+    248: ErrorCodeMeta("INVALID_PARTITION_VALUE"),
+    251: ErrorCodeMeta("NO_SUCH_REPLICA"),
+    252: ErrorCodeMeta("TOO_MANY_PARTS"),
+    253: ErrorCodeMeta("REPLICA_ALREADY_EXISTS"),
+    254: ErrorCodeMeta("NO_ACTIVE_REPLICAS"),
+    255: ErrorCodeMeta("TOO_MANY_RETRIES_TO_FETCH_PARTS"),
+    256: ErrorCodeMeta("PARTITION_ALREADY_EXISTS"),
+    257: ErrorCodeMeta("PARTITION_DOESNT_EXIST"),
+    258: ErrorCodeMeta(
+        "UNION_ALL_RESULT_STRUCTURES_MISMATCH",
+        user_safe="The UNION branches return different structures. Select the same number of columns in the same order with compatible types.",
+    ),
+    260: ErrorCodeMeta("CLIENT_OUTPUT_FORMAT_SPECIFIED"),
+    261: ErrorCodeMeta("UNKNOWN_BLOCK_INFO_FIELD"),
+    262: ErrorCodeMeta("BAD_COLLATION"),
+    263: ErrorCodeMeta("CANNOT_COMPILE_CODE"),
+    264: ErrorCodeMeta(
+        "INCOMPATIBLE_TYPE_OF_JOIN",
+        user_safe="The join types are incompatible. Check the JOIN kind and cast the join keys on both sides to compatible types.",
+    ),  # join type not supported for this engine or context
+    265: ErrorCodeMeta("NO_AVAILABLE_REPLICA"),
+    266: ErrorCodeMeta("MISMATCH_REPLICAS_DATA_SOURCES"),
+    269: ErrorCodeMeta("INFINITE_LOOP"),
+    270: ErrorCodeMeta("CANNOT_COMPRESS"),
+    271: ErrorCodeMeta("CANNOT_DECOMPRESS"),
+    272: ErrorCodeMeta("CANNOT_IO_SUBMIT"),
+    273: ErrorCodeMeta("CANNOT_IO_GETEVENTS"),
+    274: ErrorCodeMeta("AIO_READ_ERROR"),
+    275: ErrorCodeMeta("AIO_WRITE_ERROR"),
+    277: ErrorCodeMeta("INDEX_NOT_USED"),
+    279: ErrorCodeMeta("ALL_CONNECTION_TRIES_FAILED"),
+    280: ErrorCodeMeta("NO_AVAILABLE_DATA"),
+    281: ErrorCodeMeta("DICTIONARY_IS_EMPTY"),
+    282: ErrorCodeMeta("INCORRECT_INDEX"),
+    283: ErrorCodeMeta("UNKNOWN_DISTRIBUTED_PRODUCT_MODE"),
+    284: ErrorCodeMeta("WRONG_GLOBAL_SUBQUERY"),
+    285: ErrorCodeMeta("TOO_FEW_LIVE_REPLICAS"),
+    286: ErrorCodeMeta("UNSATISFIED_QUORUM_FOR_PREVIOUS_WRITE"),
+    287: ErrorCodeMeta("UNKNOWN_FORMAT_VERSION"),
+    288: ErrorCodeMeta("DISTRIBUTED_IN_JOIN_SUBQUERY_DENIED"),
+    289: ErrorCodeMeta("REPLICA_IS_NOT_IN_QUORUM"),
+    290: ErrorCodeMeta(
+        "LIMIT_EXCEEDED", category=QueryErrorCategory.QUERY_PERFORMANCE_ERROR
+    ),  # generic catch-all for miscellaneous resource limits
+    291: ErrorCodeMeta("DATABASE_ACCESS_DENIED"),
+    293: ErrorCodeMeta("MONGODB_CANNOT_AUTHENTICATE"),
+    294: ErrorCodeMeta("CANNOT_WRITE_TO_FILE"),
+    295: ErrorCodeMeta("RECEIVED_EMPTY_DATA"),
+    297: ErrorCodeMeta("SHARD_HAS_NO_CONNECTIONS"),
+    298: ErrorCodeMeta("CANNOT_PIPE"),
+    299: ErrorCodeMeta("CANNOT_FORK"),
+    300: ErrorCodeMeta("CANNOT_DLSYM"),
+    301: ErrorCodeMeta("CANNOT_CREATE_CHILD_PROCESS"),
+    302: ErrorCodeMeta("CHILD_WAS_NOT_EXITED_NORMALLY"),
+    303: ErrorCodeMeta("CANNOT_SELECT"),
+    304: ErrorCodeMeta("CANNOT_WAITPID"),
+    305: ErrorCodeMeta("TABLE_WAS_NOT_DROPPED"),
+    306: ErrorCodeMeta("TOO_DEEP_RECURSION", category=QueryErrorCategory.QUERY_PERFORMANCE_ERROR),
+    307: ErrorCodeMeta(
+        "TOO_MANY_BYTES",
+        user_safe="This query exceeded its byte limit. Narrow the date range, filter rows earlier, or select fewer columns.",
+        category=QueryErrorCategory.QUERY_PERFORMANCE_ERROR,
+    ),  # too many bytes read from storage
+    308: ErrorCodeMeta("UNEXPECTED_NODE_IN_ZOOKEEPER"),
+    309: ErrorCodeMeta(
+        "FUNCTION_CANNOT_HAVE_PARAMETERS",
+        user_safe="This function doesn't take a separate parameter list. Pass its arguments in a single pair of parentheses.",
+    ),
+    318: ErrorCodeMeta("INVALID_CONFIG_PARAMETER"),
+    319: ErrorCodeMeta("UNKNOWN_STATUS_OF_INSERT"),
+    321: ErrorCodeMeta(
+        "VALUE_IS_OUT_OF_RANGE_OF_DATA_TYPE",
+        user_safe="A value is outside the range of its data type. Check the input values or use a type with a wider range.",
+    ),
+    336: ErrorCodeMeta("UNKNOWN_DATABASE_ENGINE"),
+    341: ErrorCodeMeta("UNFINISHED"),
+    342: ErrorCodeMeta("METADATA_MISMATCH"),
+    344: ErrorCodeMeta("SUPPORT_IS_DISABLED"),
+    345: ErrorCodeMeta("TABLE_DIFFERS_TOO_MUCH"),
+    346: ErrorCodeMeta("CANNOT_CONVERT_CHARSET"),
+    347: ErrorCodeMeta("CANNOT_LOAD_CONFIG"),
+    349: ErrorCodeMeta(
+        "CANNOT_INSERT_NULL_IN_ORDINARY_COLUMN",
+        user_safe="An expression produced NULL for a non-nullable column. Filter out NULLs or supply a default with coalesce().",
+    ),
+    352: ErrorCodeMeta(
+        "AMBIGUOUS_COLUMN_NAME",
+        user_safe="A column name is ambiguous. Qualify it with its table alias and give duplicate output columns distinct aliases.",
+    ),
+    353: ErrorCodeMeta(
+        "INDEX_OF_POSITIONAL_ARGUMENT_IS_OUT_OF_RANGE",
+        user_safe="A column position is outside the SELECT list. Use an existing column alias or a position starting at 1.",
+    ),
+    354: ErrorCodeMeta("ZLIB_INFLATE_FAILED"),
+    355: ErrorCodeMeta("ZLIB_DEFLATE_FAILED"),
+    358: ErrorCodeMeta("INTO_OUTFILE_NOT_ALLOWED"),
+    359: ErrorCodeMeta("TABLE_SIZE_EXCEEDS_MAX_DROP_SIZE_LIMIT"),
+    360: ErrorCodeMeta("CANNOT_CREATE_CHARSET_CONVERTER"),
+    361: ErrorCodeMeta("SEEK_POSITION_OUT_OF_BOUND"),
+    362: ErrorCodeMeta("CURRENT_WRITE_BUFFER_IS_EXHAUSTED"),
+    363: ErrorCodeMeta("CANNOT_CREATE_IO_BUFFER"),
+    364: ErrorCodeMeta("RECEIVED_ERROR_TOO_MANY_REQUESTS"),
+    366: ErrorCodeMeta("SIZES_OF_NESTED_COLUMNS_ARE_INCONSISTENT"),
+    369: ErrorCodeMeta("ALL_REPLICAS_ARE_STALE"),
+    370: ErrorCodeMeta("DATA_TYPE_CANNOT_BE_USED_IN_TABLES"),
+    371: ErrorCodeMeta("INCONSISTENT_CLUSTER_DEFINITION"),
+    372: ErrorCodeMeta("SESSION_NOT_FOUND"),
+    373: ErrorCodeMeta("SESSION_IS_LOCKED"),
+    374: ErrorCodeMeta("INVALID_SESSION_TIMEOUT"),
+    375: ErrorCodeMeta("CANNOT_DLOPEN"),
+    376: ErrorCodeMeta(
+        "CANNOT_PARSE_UUID", user_safe="Cannot parse a UUID. Check the format of the values converted to UUIDs."
+    ),
+    377: ErrorCodeMeta(
+        "ILLEGAL_SYNTAX_FOR_DATA_TYPE",
+        user_safe="A data type declaration is invalid. Check its name, parentheses, and parameters.",
+    ),
+    378: ErrorCodeMeta(
+        "DATA_TYPE_CANNOT_HAVE_ARGUMENTS",
+        user_safe="This data type doesn't take parameters. Remove its arguments or choose a parameterized type.",
+    ),
+    380: ErrorCodeMeta("CANNOT_KILL"),
+    381: ErrorCodeMeta("HTTP_LENGTH_REQUIRED"),
+    382: ErrorCodeMeta("CANNOT_LOAD_CATBOOST_MODEL"),
+    383: ErrorCodeMeta("CANNOT_APPLY_CATBOOST_MODEL"),
+    384: ErrorCodeMeta("PART_IS_TEMPORARILY_LOCKED"),
+    385: ErrorCodeMeta("MULTIPLE_STREAMS_REQUIRED"),
+    386: ErrorCodeMeta(
+        "NO_COMMON_TYPE",
+        user_safe="ClickHouse couldn't find a common type for these expressions. Cast comparison operands, conditional branches, or UNION columns to the same type.",
+    ),
+    387: ErrorCodeMeta("DICTIONARY_ALREADY_EXISTS"),
+    388: ErrorCodeMeta("CANNOT_ASSIGN_OPTIMIZE"),
+    389: ErrorCodeMeta("INSERT_WAS_DEDUPLICATED"),
+    390: ErrorCodeMeta("CANNOT_GET_CREATE_TABLE_QUERY"),
+    391: ErrorCodeMeta("EXTERNAL_LIBRARY_ERROR"),
+    392: ErrorCodeMeta("QUERY_IS_PROHIBITED"),
+    393: ErrorCodeMeta("THERE_IS_NO_QUERY"),
+    394: ErrorCodeMeta("QUERY_WAS_CANCELLED", category=QueryErrorCategory.CANCELLED),
+    395: ErrorCodeMeta(
+        "FUNCTION_THROW_IF_VALUE_IS_NON_ZERO",
+        user_safe="A throwIf condition evaluated to true. Check the condition and the rows it applies to.",
+    ),
+    396: ErrorCodeMeta(
+        "TOO_MANY_ROWS_OR_BYTES", category=QueryErrorCategory.QUERY_PERFORMANCE_ERROR
+    ),  # result set exceeds row or byte limit
+    397: ErrorCodeMeta("QUERY_IS_NOT_SUPPORTED_IN_MATERIALIZED_VIEW"),
+    398: ErrorCodeMeta("UNKNOWN_MUTATION_COMMAND"),
+    399: ErrorCodeMeta("FORMAT_IS_NOT_SUITABLE_FOR_OUTPUT"),
+    400: ErrorCodeMeta("CANNOT_STAT"),
+    401: ErrorCodeMeta("FEATURE_IS_NOT_ENABLED_AT_BUILD_TIME"),
+    402: ErrorCodeMeta("CANNOT_IOSETUP"),
+    403: ErrorCodeMeta(
+        "INVALID_JOIN_ON_EXPRESSION",
+        user_safe="Invalid JOIN ON expression. Check that the condition uses supported comparisons between the joined tables.",
+    ),
+    404: ErrorCodeMeta("BAD_ODBC_CONNECTION_STRING"),
+    406: ErrorCodeMeta("TOP_AND_LIMIT_TOGETHER", user_safe="Use either TOP or LIMIT to set the row count."),
+    # Fixed message: the raw CH text can format a converted decimal value into the overflow error.
+    407: ErrorCodeMeta(
+        "DECIMAL_OVERFLOW",
+        user_safe="A decimal result exceeds its precision. Use a wider decimal type before the calculation.",
+    ),
+    408: ErrorCodeMeta("BAD_REQUEST_PARAMETER"),
+    410: ErrorCodeMeta("EXTERNAL_SERVER_IS_NOT_RESPONDING"),
+    411: ErrorCodeMeta("PTHREAD_ERROR"),
+    412: ErrorCodeMeta("NETLINK_ERROR"),
+    413: ErrorCodeMeta("CANNOT_SET_SIGNAL_HANDLER"),
+    415: ErrorCodeMeta("ALL_REPLICAS_LOST"),
+    416: ErrorCodeMeta("REPLICA_STATUS_CHANGED"),
+    417: ErrorCodeMeta("EXPECTED_ALL_OR_ANY"),
+    418: ErrorCodeMeta("UNKNOWN_JOIN"),
+    419: ErrorCodeMeta("MULTIPLE_ASSIGNMENTS_TO_COLUMN"),
+    420: ErrorCodeMeta("CANNOT_UPDATE_COLUMN"),
+    421: ErrorCodeMeta("CANNOT_ADD_DIFFERENT_AGGREGATE_STATES"),
+    422: ErrorCodeMeta("UNSUPPORTED_URI_SCHEME"),
+    423: ErrorCodeMeta("CANNOT_GETTIMEOFDAY"),
+    424: ErrorCodeMeta("CANNOT_LINK"),
+    425: ErrorCodeMeta("SYSTEM_ERROR"),
+    427: ErrorCodeMeta(
+        "CANNOT_COMPILE_REGEXP",
+        user_safe="Cannot compile the regular expression. Check RE2 syntax, escaping, and the number of capturing groups.",
+    ),
+    429: ErrorCodeMeta("FAILED_TO_GETPWUID"),
+    430: ErrorCodeMeta("MISMATCHING_USERS_FOR_PROCESS_AND_DATA"),
+    431: ErrorCodeMeta("ILLEGAL_SYNTAX_FOR_CODEC_TYPE"),
+    432: ErrorCodeMeta("UNKNOWN_CODEC"),
+    433: ErrorCodeMeta("ILLEGAL_CODEC_PARAMETER"),
+    434: ErrorCodeMeta("CANNOT_PARSE_PROTOBUF_SCHEMA"),
+    435: ErrorCodeMeta("NO_COLUMN_SERIALIZED_TO_REQUIRED_PROTOBUF_FIELD"),
+    436: ErrorCodeMeta("PROTOBUF_BAD_CAST"),
+    437: ErrorCodeMeta("PROTOBUF_FIELD_NOT_REPEATED"),
+    438: ErrorCodeMeta("DATA_TYPE_CANNOT_BE_PROMOTED"),
+    439: ErrorCodeMeta("CANNOT_SCHEDULE_TASK", category=QueryErrorCategory.RATE_LIMITED),
+    440: ErrorCodeMeta(
+        "INVALID_LIMIT_EXPRESSION",
+        user_safe="Invalid LIMIT or OFFSET expression. Use a constant number in the supported range.",
+    ),
+    441: ErrorCodeMeta("CANNOT_PARSE_DOMAIN_VALUE_FROM_STRING"),
+    442: ErrorCodeMeta("BAD_DATABASE_FOR_TEMPORARY_TABLE"),
+    443: ErrorCodeMeta("NO_COLUMNS_SERIALIZED_TO_PROTOBUF_FIELDS"),
+    444: ErrorCodeMeta("UNKNOWN_PROTOBUF_FORMAT"),
+    445: ErrorCodeMeta("CANNOT_MPROTECT"),
+    446: ErrorCodeMeta("FUNCTION_NOT_ALLOWED"),
+    447: ErrorCodeMeta("HYPERSCAN_CANNOT_SCAN_TEXT"),
+    448: ErrorCodeMeta("BROTLI_READ_FAILED"),
+    449: ErrorCodeMeta("BROTLI_WRITE_FAILED"),
+    450: ErrorCodeMeta("BAD_TTL_EXPRESSION"),
+    451: ErrorCodeMeta("BAD_TTL_FILE"),
+    452: ErrorCodeMeta("SETTING_CONSTRAINT_VIOLATION"),
+    453: ErrorCodeMeta("MYSQL_CLIENT_INSUFFICIENT_CAPABILITIES"),
+    454: ErrorCodeMeta("OPENSSL_ERROR"),
+    455: ErrorCodeMeta("SUSPICIOUS_TYPE_FOR_LOW_CARDINALITY"),
+    456: ErrorCodeMeta("UNKNOWN_QUERY_PARAMETER"),
+    457: ErrorCodeMeta("BAD_QUERY_PARAMETER"),
+    458: ErrorCodeMeta("CANNOT_UNLINK"),
+    459: ErrorCodeMeta("CANNOT_SET_THREAD_PRIORITY"),
+    460: ErrorCodeMeta("CANNOT_CREATE_TIMER"),
+    461: ErrorCodeMeta("CANNOT_SET_TIMER_PERIOD"),
+    463: ErrorCodeMeta("CANNOT_FCNTL"),
+    464: ErrorCodeMeta("CANNOT_PARSE_ELF"),
+    465: ErrorCodeMeta("CANNOT_PARSE_DWARF"),
+    466: ErrorCodeMeta("INSECURE_PATH"),
+    467: ErrorCodeMeta(
+        "CANNOT_PARSE_BOOL", user_safe="Cannot parse a boolean. Check for values other than true, false, 1, or 0."
+    ),
+    468: ErrorCodeMeta("CANNOT_PTHREAD_ATTR"),
+    469: ErrorCodeMeta("VIOLATED_CONSTRAINT"),
+    471: ErrorCodeMeta("INVALID_SETTING_VALUE"),
+    472: ErrorCodeMeta("READONLY_SETTING"),
+    473: ErrorCodeMeta("DEADLOCK_AVOIDED"),
+    474: ErrorCodeMeta("INVALID_TEMPLATE_FORMAT"),
+    475: ErrorCodeMeta(
+        "INVALID_WITH_FILL_EXPRESSION",
+        user_safe="Invalid WITH FILL expression. FROM and TO must be constants of the same type as the column you "
+        "order by. STEP must be a number, or an interval such as INTERVAL 1 DAY for date and time columns.",
+    ),
+    476: ErrorCodeMeta(
+        "WITH_TIES_WITHOUT_ORDER_BY",
+        user_safe="LIMIT WITH TIES needs an ORDER BY clause. Add the ordering that defines a tie or remove WITH TIES.",
+    ),
+    477: ErrorCodeMeta("INVALID_USAGE_OF_INPUT"),
+    478: ErrorCodeMeta("UNKNOWN_POLICY"),
+    479: ErrorCodeMeta("UNKNOWN_DISK"),
+    480: ErrorCodeMeta("UNKNOWN_PROTOCOL"),
+    481: ErrorCodeMeta("PATH_ACCESS_DENIED"),
+    482: ErrorCodeMeta("DICTIONARY_ACCESS_DENIED"),
+    483: ErrorCodeMeta("TOO_MANY_REDIRECTS"),
+    484: ErrorCodeMeta("INTERNAL_REDIS_ERROR"),
+    487: ErrorCodeMeta("CANNOT_GET_CREATE_DICTIONARY_QUERY"),
+    489: ErrorCodeMeta("INCORRECT_DICTIONARY_DEFINITION"),
+    490: ErrorCodeMeta("CANNOT_FORMAT_DATETIME"),
+    # Raised when a warehouse table points at a storage host the query engine may not read.
+    # The raw ClickHouse message echoes the whole URL, which a public shared insight must not
+    # show, so carry a fixed message instead.
+    491: ErrorCodeMeta(
+        "UNACCEPTABLE_URL",
+        user_safe=(
+            "PostHog can't read from this storage host. Check the files URL pattern on the table points at "
+            "S3, Google Cloud Storage, Cloudflare R2, or Azure Blob Storage."
+        ),
+    ),
+    492: ErrorCodeMeta("ACCESS_ENTITY_NOT_FOUND"),
+    493: ErrorCodeMeta("ACCESS_ENTITY_ALREADY_EXISTS"),
+    495: ErrorCodeMeta("ACCESS_STORAGE_READONLY"),
+    496: ErrorCodeMeta("QUOTA_REQUIRES_CLIENT_KEY"),
+    497: ErrorCodeMeta("ACCESS_DENIED"),
+    498: ErrorCodeMeta("LIMIT_BY_WITH_TIES_IS_NOT_SUPPORTED", user_safe="Use LIMIT BY or LIMIT WITH TIES separately."),
+    499: ErrorCodeMeta("S3_ERROR"),
+    500: ErrorCodeMeta("AZURE_BLOB_STORAGE_ERROR"),
+    501: ErrorCodeMeta("CANNOT_CREATE_DATABASE"),
+    502: ErrorCodeMeta("CANNOT_SIGQUEUE"),
+    503: ErrorCodeMeta("AGGREGATE_FUNCTION_THROW"),
+    504: ErrorCodeMeta("FILE_ALREADY_EXISTS"),
+    507: ErrorCodeMeta("UNABLE_TO_SKIP_UNUSED_SHARDS"),
+    508: ErrorCodeMeta("UNKNOWN_ACCESS_TYPE"),
+    509: ErrorCodeMeta("INVALID_GRANT"),
+    510: ErrorCodeMeta("CACHE_DICTIONARY_UPDATE_FAIL"),
+    511: ErrorCodeMeta("UNKNOWN_ROLE"),
+    512: ErrorCodeMeta("SET_NON_GRANTED_ROLE"),
+    513: ErrorCodeMeta("UNKNOWN_PART_TYPE"),
+    514: ErrorCodeMeta("ACCESS_STORAGE_FOR_INSERTION_NOT_FOUND"),
+    515: ErrorCodeMeta("INCORRECT_ACCESS_ENTITY_DEFINITION"),
+    516: ErrorCodeMeta("AUTHENTICATION_FAILED"),
+    517: ErrorCodeMeta("CANNOT_ASSIGN_ALTER"),
+    518: ErrorCodeMeta("CANNOT_COMMIT_OFFSET"),
+    519: ErrorCodeMeta("NO_REMOTE_SHARD_AVAILABLE"),
+    520: ErrorCodeMeta("CANNOT_DETACH_DICTIONARY_AS_TABLE"),
+    521: ErrorCodeMeta("ATOMIC_RENAME_FAIL"),
+    523: ErrorCodeMeta("UNKNOWN_ROW_POLICY"),
+    524: ErrorCodeMeta("ALTER_OF_COLUMN_IS_FORBIDDEN"),
+    525: ErrorCodeMeta("INCORRECT_DISK_INDEX"),
+    527: ErrorCodeMeta("NO_SUITABLE_FUNCTION_IMPLEMENTATION"),
+    528: ErrorCodeMeta("CASSANDRA_INTERNAL_ERROR"),
+    529: ErrorCodeMeta("NOT_A_LEADER"),
+    530: ErrorCodeMeta("CANNOT_CONNECT_RABBITMQ"),
+    531: ErrorCodeMeta("CANNOT_FSTAT"),
+    532: ErrorCodeMeta("LDAP_ERROR"),
+    535: ErrorCodeMeta("UNKNOWN_RAID_TYPE"),
+    536: ErrorCodeMeta("CANNOT_RESTORE_FROM_FIELD_DUMP"),
+    537: ErrorCodeMeta("ILLEGAL_MYSQL_VARIABLE"),
+    538: ErrorCodeMeta("MYSQL_SYNTAX_ERROR"),
+    539: ErrorCodeMeta("CANNOT_BIND_RABBITMQ_EXCHANGE"),
+    540: ErrorCodeMeta("CANNOT_DECLARE_RABBITMQ_EXCHANGE"),
+    541: ErrorCodeMeta("CANNOT_CREATE_RABBITMQ_QUEUE_BINDING"),
+    542: ErrorCodeMeta("CANNOT_REMOVE_RABBITMQ_EXCHANGE"),
+    543: ErrorCodeMeta("UNKNOWN_MYSQL_DATATYPES_SUPPORT_LEVEL"),
+    544: ErrorCodeMeta("ROW_AND_ROWS_TOGETHER"),
+    545: ErrorCodeMeta("FIRST_AND_NEXT_TOGETHER"),
+    546: ErrorCodeMeta("NO_ROW_DELIMITER"),
+    547: ErrorCodeMeta("INVALID_RAID_TYPE"),
+    548: ErrorCodeMeta("UNKNOWN_VOLUME"),
+    549: ErrorCodeMeta("DATA_TYPE_CANNOT_BE_USED_IN_KEY"),
+    552: ErrorCodeMeta("UNRECOGNIZED_ARGUMENTS"),
+    553: ErrorCodeMeta("LZMA_STREAM_ENCODER_FAILED"),
+    554: ErrorCodeMeta("LZMA_STREAM_DECODER_FAILED"),
+    555: ErrorCodeMeta("ROCKSDB_ERROR"),
+    556: ErrorCodeMeta("SYNC_MYSQL_USER_ACCESS_ERROR"),
+    557: ErrorCodeMeta("UNKNOWN_UNION"),
+    558: ErrorCodeMeta(
+        "EXPECTED_ALL_OR_DISTINCT",
+        user_safe="Specify UNION ALL to keep duplicate rows or UNION DISTINCT to remove them.",
+    ),
+    559: ErrorCodeMeta("INVALID_GRPC_QUERY_INFO"),
+    560: ErrorCodeMeta("ZSTD_ENCODER_FAILED"),
+    561: ErrorCodeMeta("ZSTD_DECODER_FAILED"),
+    562: ErrorCodeMeta("TLD_LIST_NOT_FOUND"),
+    563: ErrorCodeMeta(
+        "CANNOT_READ_MAP_FROM_TEXT",
+        user_safe="A value couldn't be read as a map. Check its key and value types and its format.",
+    ),
+    564: ErrorCodeMeta("INTERSERVER_SCHEME_DOESNT_MATCH"),
+    565: ErrorCodeMeta("TOO_MANY_PARTITIONS"),
+    566: ErrorCodeMeta("CANNOT_RMDIR"),
+    567: ErrorCodeMeta("DUPLICATED_PART_UUIDS"),
+    568: ErrorCodeMeta("RAFT_ERROR"),
+    569: ErrorCodeMeta("MULTIPLE_COLUMNS_SERIALIZED_TO_SAME_PROTOBUF_FIELD"),
+    570: ErrorCodeMeta("DATA_TYPE_INCOMPATIBLE_WITH_PROTOBUF_FIELD"),
+    571: ErrorCodeMeta("DATABASE_REPLICATION_FAILED"),
+    572: ErrorCodeMeta(
+        "TOO_MANY_QUERY_PLAN_OPTIMIZATIONS", category=QueryErrorCategory.QUERY_PERFORMANCE_ERROR
+    ),  # optimizer exceeded max iteration passes
+    573: ErrorCodeMeta("EPOLL_ERROR"),
+    574: ErrorCodeMeta("DISTRIBUTED_TOO_MANY_PENDING_BYTES"),
+    575: ErrorCodeMeta("UNKNOWN_SNAPSHOT"),
+    576: ErrorCodeMeta("KERBEROS_ERROR"),
+    577: ErrorCodeMeta("INVALID_SHARD_ID"),
+    578: ErrorCodeMeta("INVALID_FORMAT_INSERT_QUERY_WITH_DATA"),
+    579: ErrorCodeMeta("INCORRECT_PART_TYPE"),
+    580: ErrorCodeMeta("CANNOT_SET_ROUNDING_MODE"),
+    581: ErrorCodeMeta("TOO_LARGE_DISTRIBUTED_DEPTH"),
+    582: ErrorCodeMeta("NO_SUCH_PROJECTION_IN_TABLE"),
+    583: ErrorCodeMeta("ILLEGAL_PROJECTION"),
+    584: ErrorCodeMeta("PROJECTION_NOT_USED"),
+    585: ErrorCodeMeta("CANNOT_PARSE_YAML"),
+    586: ErrorCodeMeta("CANNOT_CREATE_FILE"),
+    587: ErrorCodeMeta("CONCURRENT_ACCESS_NOT_SUPPORTED"),
+    588: ErrorCodeMeta("DISTRIBUTED_BROKEN_BATCH_INFO"),
+    589: ErrorCodeMeta("DISTRIBUTED_BROKEN_BATCH_FILES"),
+    590: ErrorCodeMeta("CANNOT_SYSCONF"),
+    591: ErrorCodeMeta("SQLITE_ENGINE_ERROR"),
+    592: ErrorCodeMeta("DATA_ENCRYPTION_ERROR"),
+    593: ErrorCodeMeta("ZERO_COPY_REPLICATION_ERROR"),
+    594: ErrorCodeMeta("BZIP2_STREAM_DECODER_FAILED"),
+    595: ErrorCodeMeta("BZIP2_STREAM_ENCODER_FAILED"),
+    596: ErrorCodeMeta(
+        "INTERSECT_OR_EXCEPT_RESULT_STRUCTURES_MISMATCH",
+        user_safe="The two SELECT statements must return the same number of columns with compatible types in each position.",
+    ),
+    597: ErrorCodeMeta("NO_SUCH_ERROR_CODE"),
+    598: ErrorCodeMeta("BACKUP_ALREADY_EXISTS"),
+    599: ErrorCodeMeta("BACKUP_NOT_FOUND"),
+    600: ErrorCodeMeta("BACKUP_VERSION_NOT_SUPPORTED"),
+    601: ErrorCodeMeta("BACKUP_DAMAGED"),
+    602: ErrorCodeMeta("NO_BASE_BACKUP"),
+    603: ErrorCodeMeta("WRONG_BASE_BACKUP"),
+    604: ErrorCodeMeta("BACKUP_ENTRY_ALREADY_EXISTS"),
+    605: ErrorCodeMeta("BACKUP_ENTRY_NOT_FOUND"),
+    606: ErrorCodeMeta("BACKUP_IS_EMPTY"),
+    607: ErrorCodeMeta("CANNOT_RESTORE_DATABASE"),
+    608: ErrorCodeMeta("CANNOT_RESTORE_TABLE"),
+    609: ErrorCodeMeta("FUNCTION_ALREADY_EXISTS"),
+    610: ErrorCodeMeta("CANNOT_DROP_FUNCTION"),
+    611: ErrorCodeMeta("CANNOT_CREATE_RECURSIVE_FUNCTION"),
+    614: ErrorCodeMeta("POSTGRESQL_CONNECTION_FAILURE"),
+    615: ErrorCodeMeta("CANNOT_ADVISE"),
+    616: ErrorCodeMeta("UNKNOWN_READ_METHOD"),
+    617: ErrorCodeMeta("LZ4_ENCODER_FAILED"),
+    618: ErrorCodeMeta("LZ4_DECODER_FAILED"),
+    619: ErrorCodeMeta("POSTGRESQL_REPLICATION_INTERNAL_ERROR"),
+    620: ErrorCodeMeta("QUERY_NOT_ALLOWED"),
+    621: ErrorCodeMeta("CANNOT_NORMALIZE_STRING"),
+    622: ErrorCodeMeta("CANNOT_PARSE_CAPN_PROTO_SCHEMA"),
+    623: ErrorCodeMeta("CAPN_PROTO_BAD_CAST"),
+    624: ErrorCodeMeta("BAD_FILE_TYPE"),
+    625: ErrorCodeMeta("IO_SETUP_ERROR"),
+    626: ErrorCodeMeta("CANNOT_SKIP_UNKNOWN_FIELD"),
+    627: ErrorCodeMeta("BACKUP_ENGINE_NOT_FOUND"),
+    628: ErrorCodeMeta(
+        "OFFSET_FETCH_WITHOUT_ORDER_BY",
+        user_safe="Add an ORDER BY clause before OFFSET and FETCH to define which rows to return.",
+    ),
+    629: ErrorCodeMeta("HTTP_RANGE_NOT_SATISFIABLE"),
+    630: ErrorCodeMeta("HAVE_DEPENDENT_OBJECTS"),
+    631: ErrorCodeMeta("UNKNOWN_FILE_SIZE"),
+    632: ErrorCodeMeta("UNEXPECTED_DATA_AFTER_PARSED_VALUE"),
+    633: ErrorCodeMeta("QUERY_IS_NOT_SUPPORTED_IN_WINDOW_VIEW"),
+    634: ErrorCodeMeta("MONGODB_ERROR"),
+    635: ErrorCodeMeta("CANNOT_POLL"),
+    636: ErrorCodeMeta("CANNOT_EXTRACT_TABLE_STRUCTURE"),
+    637: ErrorCodeMeta("INVALID_TABLE_OVERRIDE"),
+    638: ErrorCodeMeta("SNAPPY_UNCOMPRESS_FAILED"),
+    639: ErrorCodeMeta("SNAPPY_COMPRESS_FAILED"),
+    640: ErrorCodeMeta("NO_HIVEMETASTORE"),
+    641: ErrorCodeMeta("CANNOT_APPEND_TO_FILE"),
+    642: ErrorCodeMeta("CANNOT_PACK_ARCHIVE"),
+    643: ErrorCodeMeta("CANNOT_UNPACK_ARCHIVE"),
+    645: ErrorCodeMeta("NUMBER_OF_DIMENSIONS_MISMATCHED"),
+    647: ErrorCodeMeta("CANNOT_BACKUP_TABLE"),
+    648: ErrorCodeMeta("WRONG_DDL_RENAMING_SETTINGS"),
+    649: ErrorCodeMeta("INVALID_TRANSACTION"),
+    650: ErrorCodeMeta("SERIALIZATION_ERROR"),
+    651: ErrorCodeMeta("CAPN_PROTO_BAD_TYPE"),
+    652: ErrorCodeMeta(
+        "ONLY_NULLS_WHILE_READING_SCHEMA",
+        user_safe="ClickHouse found only NULL values while inferring the schema. Supply explicit column types or provide a file with representative values.",
+        category=QueryErrorCategory.ERROR,
+    ),
+    653: ErrorCodeMeta("CANNOT_PARSE_BACKUP_SETTINGS"),
+    654: ErrorCodeMeta("WRONG_BACKUP_SETTINGS"),
+    655: ErrorCodeMeta("FAILED_TO_SYNC_BACKUP_OR_RESTORE"),
+    659: ErrorCodeMeta("UNKNOWN_STATUS_OF_TRANSACTION"),
+    660: ErrorCodeMeta("HDFS_ERROR"),
+    661: ErrorCodeMeta("CANNOT_SEND_SIGNAL"),
+    662: ErrorCodeMeta("FS_METADATA_ERROR"),
+    663: ErrorCodeMeta("INCONSISTENT_METADATA_FOR_BACKUP"),
+    664: ErrorCodeMeta("ACCESS_STORAGE_DOESNT_ALLOW_BACKUP"),
+    665: ErrorCodeMeta("CANNOT_CONNECT_NATS"),
+    667: ErrorCodeMeta("NOT_INITIALIZED"),
+    668: ErrorCodeMeta("INVALID_STATE"),
+    669: ErrorCodeMeta("NAMED_COLLECTION_DOESNT_EXIST"),
+    670: ErrorCodeMeta("NAMED_COLLECTION_ALREADY_EXISTS"),
+    671: ErrorCodeMeta("NAMED_COLLECTION_IS_IMMUTABLE"),
+    672: ErrorCodeMeta("INVALID_SCHEDULER_NODE"),
+    673: ErrorCodeMeta("RESOURCE_ACCESS_DENIED"),
+    674: ErrorCodeMeta("RESOURCE_NOT_FOUND"),
+    675: ErrorCodeMeta(
+        "CANNOT_PARSE_IPV4", user_safe="Cannot parse an IPv4 address. Check the format of your IP addresses."
+    ),
+    676: ErrorCodeMeta(
+        "CANNOT_PARSE_IPV6", user_safe="Cannot parse an IPv6 address. Check the format of your IP addresses."
+    ),
+    677: ErrorCodeMeta("THREAD_WAS_CANCELED"),
+    678: ErrorCodeMeta("IO_URING_INIT_FAILED"),
+    679: ErrorCodeMeta("IO_URING_SUBMIT_ERROR"),
+    690: ErrorCodeMeta("MIXED_ACCESS_PARAMETER_TYPES"),
+    691: ErrorCodeMeta(
+        "UNKNOWN_ELEMENT_OF_ENUM",
+        user_safe="A value is not a member of the enum. Check the allowed values of the enum type.",
+    ),
+    692: ErrorCodeMeta("TOO_MANY_MUTATIONS"),
+    693: ErrorCodeMeta("AWS_ERROR"),
+    694: ErrorCodeMeta("ASYNC_LOAD_CYCLE"),
+    695: ErrorCodeMeta("ASYNC_LOAD_FAILED"),
+    696: ErrorCodeMeta("ASYNC_LOAD_CANCELED"),
+    697: ErrorCodeMeta("CANNOT_RESTORE_TO_NONENCRYPTED_DISK"),
+    698: ErrorCodeMeta("INVALID_REDIS_STORAGE_TYPE"),
+    699: ErrorCodeMeta("INVALID_REDIS_TABLE_STRUCTURE"),
+    700: ErrorCodeMeta("USER_SESSION_LIMIT_EXCEEDED"),
+    701: ErrorCodeMeta("CLUSTER_DOESNT_EXIST"),
+    702: ErrorCodeMeta("CLIENT_INFO_DOES_NOT_MATCH"),
+    703: ErrorCodeMeta(
+        "INVALID_IDENTIFIER",
+        user_safe="A table, column, or alias has an invalid name. Check the spelling and quote identifiers that contain spaces or punctuation.",
+    ),  # identifier contains invalid characters
+    704: ErrorCodeMeta("QUERY_CACHE_USED_WITH_NONDETERMINISTIC_FUNCTIONS"),
+    705: ErrorCodeMeta("TABLE_NOT_EMPTY"),
+    706: ErrorCodeMeta("LIBSSH_ERROR"),
+    707: ErrorCodeMeta("GCP_ERROR"),
+    708: ErrorCodeMeta("ILLEGAL_STATISTICS"),
+    709: ErrorCodeMeta("CANNOT_GET_REPLICATED_DATABASE_SNAPSHOT"),
+    710: ErrorCodeMeta("FAULT_INJECTED"),
+    711: ErrorCodeMeta("FILECACHE_ACCESS_DENIED"),
+    712: ErrorCodeMeta("TOO_MANY_MATERIALIZED_VIEWS"),
+    713: ErrorCodeMeta("BROKEN_PROJECTION"),
+    714: ErrorCodeMeta("UNEXPECTED_CLUSTER"),
+    715: ErrorCodeMeta("CANNOT_DETECT_FORMAT"),
+    716: ErrorCodeMeta("CANNOT_FORGET_PARTITION"),
+    717: ErrorCodeMeta("EXPERIMENTAL_FEATURE_ERROR"),
+    718: ErrorCodeMeta(
+        "TOO_SLOW_PARSING", category=QueryErrorCategory.QUERY_PERFORMANCE_ERROR
+    ),  # SQL parser exceeded max backtracking limit
+    719: ErrorCodeMeta("QUERY_CACHE_USED_WITH_SYSTEM_TABLE"),
+    720: ErrorCodeMeta("USER_EXPIRED"),
+    721: ErrorCodeMeta("DEPRECATED_FUNCTION"),
+    722: ErrorCodeMeta("ASYNC_LOAD_WAIT_FAILED"),
+    723: ErrorCodeMeta("PARQUET_EXCEPTION"),
+    724: ErrorCodeMeta("TOO_MANY_TABLES"),
+    725: ErrorCodeMeta("TOO_MANY_DATABASES"),
+    726: ErrorCodeMeta("UNEXPECTED_HTTP_HEADERS"),
+    727: ErrorCodeMeta("UNEXPECTED_TABLE_ENGINE"),
+    728: ErrorCodeMeta("UNEXPECTED_DATA_TYPE"),
+    729: ErrorCodeMeta("ILLEGAL_TIME_SERIES_TAGS"),
+    730: ErrorCodeMeta("REFRESH_FAILED"),
+    731: ErrorCodeMeta("QUERY_CACHE_USED_WITH_NON_THROW_OVERFLOW_MODE"),
+    733: ErrorCodeMeta("TABLE_IS_BEING_RESTARTED"),
+    734: ErrorCodeMeta("CANNOT_WRITE_AFTER_BUFFER_CANCELED"),
+    735: ErrorCodeMeta("QUERY_WAS_CANCELLED_BY_CLIENT", category=QueryErrorCategory.CANCELLED),
+    736: ErrorCodeMeta("DATALAKE_DATABASE_ERROR"),
+    737: ErrorCodeMeta("GOOGLE_CLOUD_ERROR"),
+    738: ErrorCodeMeta("PART_IS_LOCKED"),
+    739: ErrorCodeMeta("BUZZHOUSE"),
+    740: ErrorCodeMeta("POTENTIALLY_BROKEN_DATA_PART"),
+    741: ErrorCodeMeta("TABLE_UUID_MISMATCH"),
+    742: ErrorCodeMeta("DELTA_KERNEL_ERROR"),
+    743: ErrorCodeMeta("ICEBERG_SPECIFICATION_VIOLATION"),
+    744: ErrorCodeMeta("SESSION_ID_EMPTY"),
+    745: ErrorCodeMeta(
+        "SERVER_OVERLOADED", category=QueryErrorCategory.RATE_LIMITED
+    ),  # server too busy to accept new queries
+    746: ErrorCodeMeta("DEPENDENCIES_NOT_FOUND"),
+    747: ErrorCodeMeta("FILECACHE_CANNOT_WRITE_THROUGH_CACHE_WITH_CONCURRENT_READS"),
+    748: ErrorCodeMeta("AVRO_EXCEPTION"),
+    749: ErrorCodeMeta("TCP_CONNECTION_LIMIT_REACHED"),
+    750: ErrorCodeMeta("ARROWFLIGHT_INTERNAL_ERROR"),
+    751: ErrorCodeMeta("ARROWFLIGHT_CONNECTION_FAILURE"),
+    752: ErrorCodeMeta("ARROWFLIGHT_FETCH_SCHEMA_ERROR"),
+    753: ErrorCodeMeta("ARROWFLIGHT_WRITE_ERROR"),
+    754: ErrorCodeMeta("UDF_EXECUTION_FAILED"),
+    755: ErrorCodeMeta("TOO_LARGE_LIGHTWEIGHT_UPDATES"),
+    756: ErrorCodeMeta("CANNOT_PARSE_PROMQL_QUERY"),
+    900: ErrorCodeMeta("DISTRIBUTED_CACHE_ERROR"),
+    901: ErrorCodeMeta("CANNOT_USE_DISTRIBUTED_CACHE"),
+    902: ErrorCodeMeta("PROTOCOL_VERSION_MISMATCH"),
+    903: ErrorCodeMeta("LICENSE_EXPIRED"),
+    999: ErrorCodeMeta("KEEPER_EXCEPTION"),
+    1000: ErrorCodeMeta("POCO_EXCEPTION"),
+    1001: ErrorCodeMeta("STD_EXCEPTION"),
+    1002: CLICKHOUSE_UNKNOWN_EXCEPTION,
+    1003: ErrorCodeMeta("SSH_EXCEPTION"),
+    1004: ErrorCodeMeta("STARTUP_SCRIPTS_ERROR"),
+}
+
+_CH_ERRORS_BY_NAME = {meta.name: meta for meta in CLICKHOUSE_ERROR_CODE_LOOKUP.values()}
+
+_TOO_MUCH_DATA_MESSAGE = (
+    "This query reads or returns more data than the limit allows. "
+    "Use a shorter date range, add filters, or add a LIMIT clause. Then run the query again."
+)
+_TOO_COMPLEX_MESSAGE = (
+    "This query is too complex to run. "
+    "Use fewer nested subqueries, conditions, or values in IN lists. Then run the query again."
+)
+_TEMPORARY_FAILURE_MESSAGE = (
+    "The database had a temporary problem while it ran this query. "
+    "Wait a few minutes, then run the query again. If the problem continues, contact support."
+)
+
+TRANSIENT_CH_ERROR_NAMES = frozenset(
+    {
+        "TOO_MANY_PARTS",
+        "TABLE_IS_READ_ONLY",
+        "NETWORK_ERROR",
+        "SOCKET_TIMEOUT",
+        "ALL_CONNECTION_TRIES_FAILED",
+        "EXTERNAL_SERVER_IS_NOT_RESPONDING",
+        "SHARD_HAS_NO_CONNECTIONS",
+        "NO_AVAILABLE_REPLICA",
+        "NO_ACTIVE_REPLICAS",
+        "NO_FREE_CONNECTION",
+        "S3_ERROR",
+        CHQueryErrorS3FileChangedDuringRead.public_code.upper(),
+    }
+)
+
+# Fixed copy for internal ClickHouse errors. The raw ClickHouse message stays hidden, because it can
+# contain stored data values or server internals.
+INTERNAL_CH_ERROR_USER_MESSAGES: dict[str, str] = {
+    **dict.fromkeys(TRANSIENT_CH_ERROR_NAMES, _TEMPORARY_FAILURE_MESSAGE),
+    "TIMEOUT_EXCEEDED": str(ClickHouseQueryTimeOut.default_detail),
+    "TOO_SLOW": "The query would take too long to finish. Shorten the date range or filter the rows before joining or aggregating.",
+    "MEMORY_LIMIT_EXCEEDED": "The database ran out of memory. Try again once, then narrow the date range or reduce the size of the joins.",
+    "CANNOT_ALLOCATE_MEMORY": "The database couldn't allocate memory for this query. Wait a few minutes, then run it again.",
+    "TOO_MANY_QUERY_PLAN_OPTIMIZATIONS": _TOO_COMPLEX_MESSAGE,
+    "TOO_SLOW_PARSING": _TOO_COMPLEX_MESSAGE,
+    "TOO_MANY_ROWS": _TOO_MUCH_DATA_MESSAGE,
+    "TOO_MANY_ROWS_OR_BYTES": _TOO_MUCH_DATA_MESSAGE,
+    "SET_SIZE_LIMIT_EXCEEDED": _TOO_MUCH_DATA_MESSAGE,
+    "TOO_MANY_COLUMNS": "This query uses more columns than the limit allows. Select fewer columns, then run the query again.",
+    "TOO_DEEP_SUBQUERIES": _TOO_COMPLEX_MESSAGE,
+    "TOO_DEEP_AST": _TOO_COMPLEX_MESSAGE,
+    "TOO_BIG_AST": _TOO_COMPLEX_MESSAGE,
+    "TOO_DEEP_RECURSION": _TOO_COMPLEX_MESSAGE,
+    "QUERY_IS_TOO_LARGE": _TOO_COMPLEX_MESSAGE,
+    "TOO_MANY_TEMPORARY_COLUMNS": _TOO_COMPLEX_MESSAGE,
+    "TOO_MANY_TEMPORARY_NON_CONST_COLUMNS": _TOO_COMPLEX_MESSAGE,
+    "S3_ERROR": (
+        "PostHog couldn't read from storage while running this query. "
+        "Wait a few minutes, then run the query again. If the problem continues, contact support."
+    ),
+    "UNSUPPORTED_METHOD": "This operation isn't supported here. Simplify the expression or use a different SQL function.",
+    "NOT_IMPLEMENTED": "ClickHouse doesn't support this combination of operations. Try running each subquery separately to isolate the unsupported expression.",
+    "SYNTAX_ERROR": "ClickHouse couldn't parse the SQL generated for this query. Contact support and include the error code SYNTAX_ERROR.",
+    "CANNOT_EXTRACT_TABLE_STRUCTURE": "ClickHouse couldn't infer the source table's schema. Check the source file's format and column definitions.",
+    "INCORRECT_DATA": "ClickHouse couldn't read the data in the expected format. Check the source format and column types.",
+    "UNKNOWN_IDENTIFIER": (
+        "A column in this query doesn't exist in the data. "
+        "Check the column names. If the query uses a view, check that the view still matches its source table."
+    ),
+}
+
+
+def clickhouse_error_category(code_name: str) -> QueryErrorCategory | None:
+    meta = _CH_ERRORS_BY_NAME.get(code_name.upper())
+    return meta.get_category() if meta else None
+
+
+def is_clickhouse_query_rejection(code_name: str) -> bool:
+    return code_name.upper() != "SYNTAX_ERROR" and clickhouse_error_category(code_name) == QueryErrorCategory.USER_ERROR
+
+
+def internal_ch_error_user_message(code_name: str | None) -> str | None:
+    """Translate a stored status code. Statuses from other query engines share this field."""
+    if not code_name:
+        return None
+    for exposed_s3_error in _EXPOSED_S3_ERRORS:
+        if code_name.lower() == exposed_s3_error.public_code:
+            return exposed_s3_error.public_message
+    meta = _CH_ERRORS_BY_NAME.get(code_name.upper())
+    if meta is None:
+        if not re.fullmatch(r"clickhouse_[0-9]{1,10}", code_name):
+            return None
+        reference = code_name.removeprefix("clickhouse_")
+    else:
+        if message := INTERNAL_CH_ERROR_USER_MESSAGES.get(meta.name) or meta.user_safe:
+            return message
+        match meta.get_category():
+            case QueryErrorCategory.CANCELLED:
+                return "The query was cancelled before it finished. Run it again if you still need the results."
+            case QueryErrorCategory.RATE_LIMITED:
+                return _TEMPORARY_FAILURE_MESSAGE
+            case QueryErrorCategory.QUERY_PERFORMANCE_ERROR:
+                return _TOO_MUCH_DATA_MESSAGE
+        reference = meta.name
+    return f"ClickHouse couldn't complete this query. Contact support and include the error code {reference}."
+
+
+def clickhouse_error_message(error: ClickHouseDriverError) -> str:
+    if isinstance(error, ExposedCHQueryError):
+        return str(error)
+    message = internal_ch_error_user_message(error_code_from_type(error))
+    assert message is not None
+    return message
+
+
+def error_code_from_type(error: BaseException) -> str:
+    """Return a code for an error from its type alone, since its message can quote stored data.
+
+    A ClickHouse error gets its error name. Any other error gets `unhandled_<exception class>`.
+    """
+    if isinstance(error, _EXPOSED_S3_ERRORS):
+        return error.public_code
+    if isinstance(error, ClickHouseDriverError):
+        meta = look_up_clickhouse_error_code_meta(error)
+        if (
+            meta is CLICKHOUSE_UNKNOWN_EXCEPTION
+            and type(error.code) is int
+            and 0 <= error.code <= 2**31 - 1
+            and error.code not in CLICKHOUSE_ERROR_CODE_LOOKUP
+        ):
+            return f"clickhouse_{error.code}"
+        return meta.name.lower()
+    class_name = _WORD_BOUNDARY.sub(r"\1_\2", _ACRONYM_BOUNDARY.sub(r"\1_\2", type(error).__name__))
+    return f"unhandled_{class_name.lower()}"
+
+
+def unwrap_exposed_hogql_error(error: ExposedHogQLError) -> BaseException:
+    """Return the first cause that is not a plain `ExposedHogQLError` wrapper, such as a database adapter's error."""
+    cause: BaseException = error
+    seen: set[int] = set()
+    while type(cause) is ExposedHogQLError and cause.__cause__ is not None and id(cause) not in seen:
+        seen.add(id(cause))
+        cause = cause.__cause__
+    return cause
+
+
+# Transient ClickHouse infrastructure errors that are safe to retry.
+# This can be used in things like celery `autoretry_for` to increase resiliency.
+# Capacity errors (codes 202/439) are wrapped as ClickHouseAtCapacity by wrap_clickhouse_query_error.
+# For every entry the client knows the query did not complete. Either it never reached the server, or
+# the client holds the server's own error for that query. Keep it that way: this tuple is shared with
+# write callers such as calculate_cohort_ch, whose INSERT INTO cohortpeople appends rows at a version
+# it does not delete first. An error that leaves the outcome unknown must not go in here. A repeated
+# write duplicates the membership rows of a live cohort version.
+# CHQueryErrorQueryWasCancelled (394) is deliberately absent: a deploy cancelling in-flight queries
+# and an operator or user deliberately killing one are indistinguishable at this layer, so callers
+# that want the deploy case retried opt in themselves (see COHORT_RECALCULATION_TRANSIENT_ERRORS).
+# UnknownPacketFromServerError is deliberately absent for the write reason above: it means a pooled
+# socket is out of sync, and the driver can read that unexpected packet after the server already ran
+# the query. Read-only callers opt in themselves (see FEATURE_FLAG_SYNC_TRANSIENT_ERRORS).
+# NetworkError and SocketTimeoutError are raised only while a connection is being opened (connect, or
+# the ping-then-reconnect on a stale pooled socket), before any query is sent, so nothing has run and
+# a retry is safe. Neither is a ServerException, so wrap_clickhouse_query_error passes them through
+# untouched: a bare "Code: 209. (host:9440)" is the driver's 10s connect_timeout firing, typically
+# because a node dropped out of the cluster's load balancer for a few seconds.
+CH_TRANSIENT_ERRORS = (
+    CHQueryErrorS3Error,
+    CHQueryErrorS3FileChangedDuringRead,
+    CHQueryErrorTableIsReadOnly,
+    ClickHouseAtCapacity,
+    ClickHouseClusterMemoryLimitExceeded,
+    NetworkError,
+    SocketTimeoutError,
+)

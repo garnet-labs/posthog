@@ -1,0 +1,73 @@
+.CustomerTasksTable {
+    container-type: inline-size;
+}
+
+// Source order makes this container override take precedence over the base rule.
+.CustomerTasksTable__narrow-assignee {
+    display: none;
+}
+
+.CustomerTasksTable__narrow-controls {
+    display: none;
+}
+
+// Collapse a hidden column to zero width instead of removing its cells. LemonTable's loader row spans
+// every column, so a removed cell would shift the cells after it into the wrong columns.
+@mixin collapsed-cell {
+    padding: 0 !important;
+    overflow: hidden;
+    visibility: hidden;
+    border: 0 !important;
+}
+
+@container (max-width: 720px) {
+    .CustomerTasksTable__updated,
+    .CustomerTasksTable__tags,
+    .CustomerTasksTable__assignee {
+        @include collapsed-cell;
+    }
+
+    .CustomerTasksTable__narrow-assignee {
+        display: block;
+    }
+
+    // LemonTable renders one <col> per column, so these must follow the column order in CustomerTasksTable.tsx.
+    // Account: Selection 1, Task 2, Tags 3, Status 4, Assignee 5, Due 6, Updated 7. Inbox adds Account at 5.
+    .CustomerTasksTable--account .LemonTable colgroup col:nth-child(3),
+    .CustomerTasksTable--account .LemonTable colgroup col:nth-child(5),
+    .CustomerTasksTable--account .LemonTable colgroup col:nth-child(7),
+    .CustomerTasksTable--inbox .LemonTable colgroup col:nth-child(3),
+    .CustomerTasksTable--inbox .LemonTable colgroup col:nth-child(6),
+    .CustomerTasksTable--inbox .LemonTable colgroup col:nth-child(8) {
+        width: 0 !important;
+    }
+}
+
+@container (max-width: 560px) {
+    .CustomerTasksTable {
+        .CustomerTasksTable__status,
+        .CustomerTasksTable__due {
+            @include collapsed-cell;
+        }
+
+        &--account .LemonTable colgroup col:nth-child(4),
+        &--account .LemonTable colgroup col:nth-child(6),
+        &--inbox .LemonTable colgroup col:nth-child(4),
+        &--inbox .LemonTable colgroup col:nth-child(7) {
+            width: 0 !important;
+        }
+
+        .CustomerTasksTable__narrow-controls {
+            display: flex;
+
+            // LemonCalendarSelectInput always renders full width, which pushes the due date onto its own line.
+            .LemonButton--full-width {
+                width: auto;
+            }
+        }
+
+        &--account .LemonTable colgroup col:nth-child(2) {
+            width: auto !important;
+        }
+    }
+}

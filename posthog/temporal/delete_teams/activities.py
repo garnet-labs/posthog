@@ -1,0 +1,351 @@
+from django.db import OperationalError
+
+import psycopg
+import structlog
+import temporalio.activity
+from temporalio.exceptions import ApplicationError
+
+from posthog.sync import database_sync_to_async_pool
+from posthog.temporal.common.heartbeat import Heartbeater
+from posthog.temporal.delete_teams.types import (
+    OrganizationEmailInputs,
+    OrganizationRecordInputs,
+    ProjectEmailInputs,
+    ProjectRecordInputs,
+    TeamDataActivityInputs,
+)
+
+LOGGER = structlog.get_logger(__name__)
+
+# The delete_team_records attempt from which a statement timeout fails the deletion. Earlier attempts retry it,
+# because lock contention can also push a statement past its timeout.
+STATEMENT_TIMEOUT_TERMINAL_ATTEMPT = 5
+
+TASK_SESSION_PAGE_TASKS_MAX = 1000
+TASK_SESSION_PAGES_MAX = 5000
+
+
+def _resolve_deleted_by(user_id: int) -> str:
+    from posthog.models.user import User
+
+    user = User.objects.filter(id=user_id).first()
+    return user.email if user else f"deleted_user_id:{user_id}"
+
+
+@temporalio.activity.defn
+async def queue_recording_deletions_activity(inputs: TeamDataActivityInputs) -> None:
+    """Start the autonomous session-replay recording-deletion workflows for each team."""
+    async with Heartbeater():
+        from posthog.tasks.tasks import _queue_delete_team_recordings
+
+        deleted_by = await database_sync_to_async_pool(_resolve_deleted_by)(inputs.user_id)
+        await database_sync_to_async_pool(_queue_delete_team_recordings)(inputs.team_ids, deleted_by)
+
+
+@temporalio.activity.defn
+async def delete_misc_small_tables_activity(inputs: TeamDataActivityInputs) -> None:
+    async with Heartbeater():
+        from posthog.models.team.util import _delete_misc_small_tables_for_teams
+
+        # A cancel does not stop the worker thread, so the purge checks for it between batches.
+        await database_sync_to_async_pool(_delete_misc_small_tables_for_teams)(
+            inputs.team_ids, should_stop=temporalio.activity.is_cancelled
+        )
+
+
+@temporalio.activity.defn
+async def delete_ui_customization_activity(inputs: TeamDataActivityInputs) -> None:
+    async with Heartbeater():
+        from products.ui_customization.backend.facade.api import delete_fragments_for_teams
+
+        await database_sync_to_async_pool(delete_fragments_for_teams)(inputs.team_ids)
+
+
+@temporalio.activity.defn
+async def delete_event_properties_activity(inputs: TeamDataActivityInputs) -> None:
+    async with Heartbeater():
+        from posthog.models.team.util import _delete_event_properties_for_teams
+
+        # A cancel does not stop the worker thread, so the purge checks for it between batches.
+        await database_sync_to_async_pool(_delete_event_properties_for_teams)(
+            inputs.team_ids, should_stop=temporalio.activity.is_cancelled
+        )
+
+
+@temporalio.activity.defn
+async def delete_cohort_members_activity(inputs: TeamDataActivityInputs) -> None:
+    async with Heartbeater():
+        from posthog.models.team.util import _delete_cohort_members_for_all_teams
+
+        await database_sync_to_async_pool(_delete_cohort_members_for_all_teams)(inputs.team_ids)
+
+
+@temporalio.activity.defn
+async def delete_groups_activity(inputs: TeamDataActivityInputs) -> None:
+    async with Heartbeater():
+        from posthog.models.team.util import _delete_group_type_mappings_for_teams, _delete_groups_for_teams
+
+        # A cancel does not stop the worker thread, so the purge checks for it between batches.
+        await database_sync_to_async_pool(_delete_groups_for_teams)(
+            inputs.team_ids, should_stop=temporalio.activity.is_cancelled
+        )
+        await database_sync_to_async_pool(_delete_group_type_mappings_for_teams)(
+            inputs.team_ids, should_stop=temporalio.activity.is_cancelled
+        )
+
+
+@temporalio.activity.defn
+async def delete_team_persons_activity(inputs: TeamDataActivityInputs) -> None:
+    async with Heartbeater():
+        from posthog.models.team.util import _delete_persons_for_teams
+
+        # A cancel does not stop the worker thread, so the purge checks for it between batches.
+        await database_sync_to_async_pool(_delete_persons_for_teams)(
+            inputs.team_ids, should_stop=temporalio.activity.is_cancelled
+        )
+
+
+@temporalio.activity.defn
+async def delete_batch_exports_activity(inputs: TeamDataActivityInputs) -> None:
+    async with Heartbeater():
+        from products.batch_exports.backend.facade.api import delete_batch_exports_for_teams
+
+        await database_sync_to_async_pool(delete_batch_exports_for_teams)(inputs.team_ids)
+
+
+@temporalio.activity.defn
+async def delete_data_modeling_schedules_activity(inputs: TeamDataActivityInputs) -> None:
+    """Tear down data modeling's Temporal Schedules for the teams. CASCADE removes the saved query
+    and DAG rows but never talks to Temporal, so without this the Schedules keep firing forever into
+    a team that no longer exists."""
+    async with Heartbeater():
+        from products.data_modeling.backend.facade.api import delete_team_data_modeling_schedules
+
+        for team_id in inputs.team_ids:
+            await database_sync_to_async_pool(delete_team_data_modeling_schedules)(team_id)
+
+
+# Legacy loops are gone. Stays registered so deletions that scheduled it before the skip patch can finish.
+@temporalio.activity.defn
+async def delete_loop_trigger_schedules_activity(inputs: TeamDataActivityInputs) -> None:
+    return None
+
+
+@temporalio.activity.defn
+async def delete_team_records_activity(inputs: TeamDataActivityInputs) -> None:
+    async with Heartbeater():
+        from posthog.models.team.util import delete_team_records
+
+        try:
+            # A cancel does not stop the worker thread, so the purges check for it between batches.
+            await database_sync_to_async_pool(delete_team_records)(
+                inputs.team_ids, should_stop=temporalio.activity.is_cancelled
+            )
+        except RecursionError:
+            # The cascade delete materializes full rows for models with delete signals, which
+            # decodes their JSON columns via json.loads. A pathologically deeply-nested JSON
+            # value (deep enough that Postgres stores it but json.loads cannot decode it under
+            # Python's fixed C-recursion limit) overflows here. Retrying is futile — the data is
+            # unchanged — and the multi-thousand-frame traceback exceeds Temporal's failure-size
+            # limit, so re-raise a small, non-retryable error that surfaces cleanly instead.
+            raise ApplicationError(
+                f"Recursion limit exceeded deleting team records for {inputs.team_ids}; a cascaded "
+                "row most likely holds a deeply-nested JSON value that json.loads cannot decode. "
+                "Repair that row before retrying.",
+                type="RecursionError",
+                non_retryable=True,
+            ) from None
+        except OperationalError as error:
+            cause = error.__cause__
+            is_statement_timeout = isinstance(cause, psycopg.errors.QueryCanceled) and "statement timeout" in str(cause)
+            if not is_statement_timeout or temporalio.activity.info().attempt < STATEMENT_TIMEOUT_TERMINAL_ATTEMPT:
+                raise
+            # The cascade runs under a statement timeout so that it cannot hold its locks for long. A timeout
+            # that persists past a few retries means slow data, not lock contention, and every further retry
+            # would hold the locks again. A lock timeout and an operator's pg_cancel_backend stay retryable.
+            raise ApplicationError(
+                f"A statement timed out deleting team records for {inputs.team_ids}. Add a batched purge for "
+                "the cascaded table that the statement deletes, then reset the workflow.",
+                type="StatementTimeout",
+                non_retryable=True,
+            ) from None
+
+
+def _enqueue_clickhouse_deletion(team_ids: list[int], user_id: int) -> None:
+    from posthog.models.async_deletion import AsyncDeletion, DeletionType
+    from posthog.models.user import User
+
+    user = User.objects.filter(id=user_id).first()
+    AsyncDeletion.objects.bulk_create(
+        [
+            AsyncDeletion(
+                deletion_type=DeletionType.Team,
+                team_id=team_id,
+                key=str(team_id),
+                created_by=user,
+            )
+            for team_id in team_ids
+        ],
+        ignore_conflicts=True,
+    )
+
+
+@temporalio.activity.defn
+async def enqueue_clickhouse_deletion_activity(inputs: TeamDataActivityInputs) -> None:
+    async with Heartbeater():
+        await database_sync_to_async_pool(_enqueue_clickhouse_deletion)(inputs.team_ids, inputs.user_id)
+
+
+@temporalio.activity.defn
+async def delete_task_session_storage_activity(inputs: TeamDataActivityInputs) -> None:
+    async with Heartbeater() as heartbeater:
+        from products.tasks.backend.facade.api import delete_team_task_session_storage_page
+
+        heartbeat_details = temporalio.activity.info().heartbeat_details
+        after_task_id: str | None = heartbeat_details[0] if heartbeat_details else None
+        for _ in range(TASK_SESSION_PAGES_MAX):
+            try:
+                after_task_id = await database_sync_to_async_pool(delete_team_task_session_storage_page)(
+                    inputs.team_ids,
+                    after_task_id=after_task_id,
+                    limit=TASK_SESSION_PAGE_TASKS_MAX,
+                    should_stop=temporalio.activity.is_cancelled,
+                )
+            except Exception:
+                LOGGER.exception(
+                    "delete_teams.task_session_storage_deletion_failed",
+                    team_ids=inputs.team_ids,
+                    after_task_id=after_task_id,
+                )
+                raise
+            if after_task_id is None:
+                return
+            heartbeater.details = (after_task_id,)
+        LOGGER.warning(
+            "delete_teams.task_session_storage_page_limit_reached",
+            team_ids=inputs.team_ids,
+            after_task_id=after_task_id,
+            pages_max=TASK_SESSION_PAGES_MAX,
+        )
+        raise ApplicationError(
+            f"Swept {TASK_SESSION_PAGES_MAX} pages of task sessions, resuming after task {after_task_id}",
+            type="TaskSessionPageLimitReached",
+            non_retryable=False,
+        )
+
+
+@temporalio.activity.defn
+async def delete_task_storage_activity(inputs: TeamDataActivityInputs) -> None:
+    async with Heartbeater() as heartbeater:
+        from products.tasks.backend.facade.api import delete_team_task_storage
+
+        for team_id in inputs.team_ids:
+            heartbeater.details = (team_id,)
+            try:
+                await database_sync_to_async_pool(delete_team_task_storage)(
+                    team_id, should_stop=temporalio.activity.is_cancelled
+                )
+            except Exception:
+                LOGGER.exception("delete_teams.task_storage_deletion_failed", team_id=team_id)
+                raise
+
+
+def _is_project_pending_deletion(project_id: int) -> bool:
+    from posthog.models.project import Project
+
+    project = Project.objects.only("is_pending_deletion").filter(pk=project_id).first()
+    return project is not None and project.is_deletion_pending()
+
+
+@temporalio.activity.defn
+async def check_project_pending_deletion_activity(inputs: ProjectRecordInputs) -> bool:
+    async with Heartbeater():
+        return await database_sync_to_async_pool(_is_project_pending_deletion)(inputs.project_id)
+
+
+@temporalio.activity.defn
+async def delete_project_record_activity(inputs: ProjectRecordInputs) -> None:
+    async with Heartbeater():
+        from posthog.models.team.util import delete_project_record
+
+        await database_sync_to_async_pool(delete_project_record)(inputs.project_id)
+
+
+def _deprovision_managed_warehouse(organization_id: str) -> None:
+    from products.managed_warehouse.backend.facade.api import deprovision_for_org_deletion
+
+    deprovision_for_org_deletion(organization_id)
+
+
+@temporalio.activity.defn
+async def deprovision_managed_warehouse_activity(inputs: OrganizationRecordInputs) -> None:
+    """Deprovision the org's managed duckgres warehouse (no-op for orgs without one).
+
+    Must run before ``delete_organization_record_activity``: the org-record cascade
+    destroys the ``DuckgresServer`` row, after which the warehouse would be orphaned
+    alive (ingestion, metering, and credentials all still working) with no pointer left.
+    """
+    async with Heartbeater():
+        await database_sync_to_async_pool(_deprovision_managed_warehouse)(inputs.organization_id)
+
+
+def _delete_organization_record(organization_id: str, user_id: int) -> None:
+    from posthog.event_usage import report_organization_deletion_completed
+    from posthog.models.team.util import delete_organization_record
+
+    delete_organization_record(organization_id)
+    report_organization_deletion_completed(user_id=user_id, organization_id=organization_id)
+
+
+@temporalio.activity.defn
+async def delete_organization_record_activity(inputs: OrganizationRecordInputs) -> None:
+    async with Heartbeater():
+        await database_sync_to_async_pool(_delete_organization_record)(inputs.organization_id, inputs.user_id)
+
+
+@temporalio.activity.defn
+async def delete_organization_task_storage_activity(inputs: OrganizationRecordInputs) -> None:
+    async with Heartbeater():
+        from products.tasks.backend.facade.api import delete_organization_task_storage
+
+        try:
+            await database_sync_to_async_pool(delete_organization_task_storage)(
+                inputs.organization_id, should_stop=temporalio.activity.is_cancelled
+            )
+        except Exception:
+            LOGGER.exception(
+                "delete_teams.organization_task_storage_deletion_failed", organization_id=inputs.organization_id
+            )
+            raise
+
+
+def _send_project_deleted_email(user_id: int, project_name: str) -> None:
+    from posthog.email import is_email_available
+    from posthog.tasks.email import send_project_deleted_email
+
+    if is_email_available():
+        send_project_deleted_email.delay(user_id=user_id, project_name=project_name)
+
+
+@temporalio.activity.defn
+async def send_project_deleted_email_activity(inputs: ProjectEmailInputs) -> None:
+    async with Heartbeater():
+        await database_sync_to_async_pool(_send_project_deleted_email)(inputs.user_id, inputs.project_name)
+
+
+def _send_organization_deleted_email(user_id: int, organization_name: str, project_names: list[str]) -> None:
+    from posthog.email import is_email_available
+    from posthog.tasks.email import send_organization_deleted_email
+
+    if is_email_available():
+        send_organization_deleted_email.delay(
+            user_id=user_id, organization_name=organization_name, project_names=project_names
+        )
+
+
+@temporalio.activity.defn
+async def send_organization_deleted_email_activity(inputs: OrganizationEmailInputs) -> None:
+    async with Heartbeater():
+        await database_sync_to_async_pool(_send_organization_deleted_email)(
+            inputs.user_id, inputs.organization_name, inputs.project_names
+        )

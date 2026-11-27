@@ -1,0 +1,132 @@
+from __future__ import annotations
+
+from collections.abc import Iterable
+from typing import TYPE_CHECKING
+from uuid import UUID
+
+from temporalio import activity
+
+from posthog.models.comment import Comment
+from posthog.sync import database_sync_to_async
+from posthog.temporal.common.heartbeat import Heartbeater
+from posthog.temporal.common.utils import close_db_connections
+
+from products.business_knowledge.backend.logic import get_always_on_context
+from products.conversations.backend.ai.suggest import _build_ticket_context
+from products.conversations.backend.models import Ticket
+from products.conversations.backend.temporal.ai_reply.constants import (
+    LEARNED_CHUNK_LABEL,
+    LEARNED_CHUNK_NOTE,
+    MAX_TICKET_CONTEXT_CHARS,
+    PUBLISHABLE_TICKET_TYPES,
+    TRIGGER_FIRST_MESSAGE,
+    TRIGGER_MANUAL,
+)
+from products.conversations.backend.temporal.ai_reply.publish import channel_allows_bot_reply
+from products.conversations.backend.temporal.ai_reply.schemas import BuildContextOutput, SupportReplyInput
+
+if TYPE_CHECKING:
+    from products.business_knowledge.backend.logic import KnowledgeSearchResult
+
+
+def _format_always_on_context(chunks: list[KnowledgeSearchResult]) -> str:
+    """Join always-on chunks, keeping the learned-from-support label on the ones that need it.
+
+    The draft prompt puts this text under TEAM POLICY, so an unlabeled learned chunk would read
+    as documentation the team wrote rather than how it resolved one past ticket. Only generated
+    chunks get a prefix: the rest are already team-authored, and the block is char-capped.
+    """
+    if not chunks:
+        return ""
+    rendered = "\n\n".join(f"{LEARNED_CHUNK_LABEL} {c.content}" if c.is_generated else c.content for c in chunks)
+    if any(c.is_generated for c in chunks):
+        return f"{LEARNED_CHUNK_NOTE}\n\n{rendered}"
+    return rendered
+
+
+@activity.defn
+@close_db_connections
+async def support_build_context_activity(input: SupportReplyInput) -> BuildContextOutput:
+    """Build the full ticket context string reusing the existing suggest.py helper."""
+    async with Heartbeater():
+        return await database_sync_to_async(_build_context_sync, thread_sensitive=False)(
+            input.team_id, input.ticket_id, input.clarification_round, getattr(input, "trigger", TRIGGER_FIRST_MESSAGE)
+        )
+
+
+def _context_comments(comments: Iterable[Comment]) -> list[Comment]:
+    kept: list[Comment] = []
+    for comment in comments:
+        item_context = comment.item_context or {}
+        if item_context.get("email_forwarded") is True:
+            # The note above a forward is internal, so the AI gets only the forwarded email, as the customer's.
+            content = str(item_context.get("forwarded_email") or "")
+            kept.append(
+                Comment(content=content, item_context={"author_type": "customer"}, created_at=comment.created_at)
+            )
+        elif item_context.get("is_private") is not True:
+            kept.append(comment)
+    return kept
+
+
+def _build_context_sync(
+    team_id: int, ticket_id: str, clarification_round: int = 0, trigger: str = TRIGGER_FIRST_MESSAGE
+) -> BuildContextOutput:
+    try:
+        UUID(str(ticket_id))
+    except (ValueError, TypeError, AttributeError):
+        raise Ticket.DoesNotExist from None
+    ticket = Ticket.objects.select_related("team").filter(id=ticket_id, team_id=team_id).first()
+    if ticket is None:
+        # A soft-deleted ticket is hidden from the live manager. Stop the workflow
+        # instead of retrying a lookup that will never succeed.
+        if Ticket.all_objects.filter(id=ticket_id, team_id=team_id, deleted_at__isnull=False).exists():
+            return BuildContextOutput(ticket_context="", ticket_title="", ticket_gone=True)
+        raise Ticket.DoesNotExist
+    team = ticket.team
+    comments = _context_comments(
+        Comment.objects.filter(
+            team_id=team_id,
+            scope="conversations_ticket",
+            item_id=str(ticket.id),
+        )
+        .exclude(deleted=True)
+        .order_by("created_at")
+    )
+    context = _build_ticket_context(ticket, comments, team)[:MAX_TICKET_CONTEXT_CHARS]
+    title = getattr(ticket, "title", "") or f"Ticket {ticket_id}"
+
+    always_on_chunks = get_always_on_context(team_id)
+    always_on_text = _format_always_on_context(always_on_chunks)
+
+    settings_dict = team.conversations_settings or {}
+    diagnostics_allowed = bool(settings_dict.get("ai_diagnostics_enabled", False))
+    raw_docs_source = settings_dict.get("docs_source")
+    docs_source = raw_docs_source if isinstance(raw_docs_source, str) else ""
+    raw_custom = settings_dict.get("ai_reply_custom_instructions")
+    custom_instructions = raw_custom if isinstance(raw_custom, str) else ""
+
+    # A teammate asked for a manual run, so its output goes to that teammate and never to the customer.
+    auto_publish_ticket_types = (
+        []
+        if trigger == TRIGGER_MANUAL
+        else [tt for tt in PUBLISHABLE_TICKET_TYPES if channel_allows_bot_reply(ticket=ticket, ticket_type=tt)]
+    )
+
+    triage = ticket.ai_triage if isinstance(ticket.ai_triage, dict) else {}
+    prior_ticket_type = triage.get("ticket_type") if isinstance(triage.get("ticket_type"), str) else ""
+    prior_needs_diagnostics = bool(triage.get("needs_diagnostics"))
+    followup_cancelled = clarification_round >= 1 and triage.get("status") != "awaiting_clarification"
+
+    return BuildContextOutput(
+        ticket_context=context,
+        ticket_title=title,
+        always_on_context=always_on_text,
+        diagnostics_allowed=diagnostics_allowed,
+        auto_publish_ticket_types=auto_publish_ticket_types,
+        prior_ticket_type=prior_ticket_type or "",
+        prior_needs_diagnostics=prior_needs_diagnostics,
+        followup_cancelled=followup_cancelled,
+        docs_source=docs_source,
+        custom_instructions=custom_instructions,
+    )

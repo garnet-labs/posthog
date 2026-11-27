@@ -1,0 +1,760 @@
+import datetime
+from typing import Any
+
+from django.utils import timezone
+
+from drf_spectacular.utils import OpenApiResponse
+from rest_framework import serializers, viewsets
+from rest_framework.decorators import action
+from rest_framework.exceptions import NotFound, ValidationError
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.request import Request
+from rest_framework.response import Response
+
+from posthog.schema import IntervalType
+
+from posthog.api.mixins import ValidatedRequest, validated_request
+from posthog.api.routing import TeamAndOrgViewSetMixin
+from posthog.auth import (
+    OAuthAccessTokenAuthentication,
+    PersonalAPIKeyAuthentication,
+    SessionAuthentication,
+    is_mcp_request,
+)
+from posthog.dataclasses import frozen
+from posthog.event_usage import report_user_action
+from posthog.models import User
+from posthog.permissions import APIScopePermission, is_service_auth
+from posthog.ph_client import feature_enabled_or_false
+from posthog.utils import relative_date_parse
+
+from products.signals.backend.facade import api as signals_facade
+from products.signals.backend.facade.api import (
+    VIEWED_WITHIN_DAYS,
+    AnomalyDashboardNotFound,
+    AnomalyGroupBy,
+    AnomalyHistoryFilters,
+    AnomalyInterval,
+    AnomalyJudgeKind,
+    AnomalyOrder,
+    AnomalySearchFilters,
+    AnomalySeriesRef,
+)
+
+ANOMALIES_SEARCH_FLAG = "anomalies-search"
+READ_EVENT = "anomaly search read"
+# Bounds the work of filling unscored buckets: an hourly series has 24 buckets a day.
+MAX_RANGE = datetime.timedelta(days=366)
+# The most series one points request reads: one page of search rows at the largest `limit`.
+MAX_POINTS_SERIES = 100
+
+
+@frozen
+class _DateRange:
+    date_from: datetime.datetime
+    date_to: datetime.datetime
+
+
+class ProjectDateTimeField(serializers.DateTimeField):
+    """Keeps the offset of the project timezone. The default field converts every value to UTC."""
+
+    def to_representation(self, value: datetime.datetime) -> str:
+        return value.isoformat()
+
+
+class AnomalySearchQuerySerializer(serializers.Serializer):
+    date_from = serializers.CharField(
+        default="-7d",
+        help_text="Earliest bucket start in the range. A relative date such as `-7d` or `-24h`, or an ISO 8601 date.",
+    )
+    date_to = serializers.CharField(
+        required=False,
+        help_text="Latest bucket start in the range. A relative date or an ISO 8601 date. Defaults to now.",
+    )
+    insight_id = serializers.IntegerField(required=False, help_text="Only the series of this insight, by numeric id.")
+    dashboard_id = serializers.IntegerField(
+        required=False, help_text="Only the series of the insights on this dashboard, by numeric id."
+    )
+    interval = serializers.ChoiceField(
+        choices=AnomalyInterval.choices, required=False, help_text="Only series with this interval."
+    )
+    only_flagged = serializers.BooleanField(
+        default=True,
+        help_text="Only series, or insights, with at least one flagged bucket in the range. Set false to also list quiet ones.",
+    )
+    group_by = serializers.ChoiceField(
+        choices=AnomalyGroupBy.choices,
+        default=AnomalyGroupBy.SERIES,
+        help_text="`series` returns one row per series in `series`. `insight` returns one row per insight in `insights`.",
+    )
+    order = serializers.ChoiceField(
+        choices=AnomalyOrder.choices,
+        default=AnomalyOrder.UNUSUAL,
+        help_text=(
+            "`unusual` puts flagged series first, and among them the series that flagged the smallest share of the "
+            "scored buckets in the chart window of its interval, because a flag on a series that rarely flags is the "
+            "surprising one. A series with fewer than 10 scored buckets in its chart window sorts after the series "
+            "with a share. The chart window ends at `date_to` and does not follow `date_from`. `recent` puts the "
+            "series whose newest flagged bucket ended last first, whatever its interval, so an hour flagged this "
+            "morning sorts above a day flagged yesterday. Series whose flagged buckets ended at the same time sort as "
+            "`unusual`. With `group_by: insight`, each insight sorts by its first series."
+        ),
+    )
+    search = serializers.CharField(
+        required=False,
+        allow_blank=True,
+        max_length=200,
+        help_text="Only insights whose name contains this text, ignoring case.",
+    )
+    limit = serializers.IntegerField(min_value=1, max_value=100, default=25, help_text="The most rows to return.")
+    offset = serializers.IntegerField(
+        min_value=0,
+        max_value=10_000,
+        default=0,
+        help_text="Rows to skip in the sorted result. Pass the previous `offset` plus `limit` when `has_more` is true.",
+    )
+    include_points = serializers.BooleanField(
+        default=False,
+        help_text=(
+            "Add `points` to each series row: its scored buckets in the chart window of its interval, oldest first. "
+            "The chart window ends at `date_to` and does not follow `date_from`: 7 days for `hour`, 14 days for "
+            "`day`, 26 weeks for `week` and 24 months for `month`. Costs one more query. Has no effect with "
+            "`group_by: insight`."
+        ),
+    )
+    viewed_within_days = serializers.ChoiceField(
+        choices=VIEWED_WITHIN_DAYS,
+        required=False,
+        help_text=(
+            "Only the insights the caller viewed in this many days: insights they opened, and insights on the "
+            "dashboards they opened, with the tiles those dashboards have now. Views count only in the web app, not "
+            "through the API or an MCP tool. Without it the search covers every insight in the project. When the "
+            "caller viewed no insight in the window, the search covers every insight and `viewed_scope_empty` is true."
+        ),
+    )
+
+
+class AnomalyInsightQuerySerializer(serializers.Serializer):
+    insight_id = serializers.IntegerField(help_text="The insight, by numeric id.")
+    series_key = serializers.CharField(
+        required=False, help_text="Only this series, by the `series_key` of an anomaly search row."
+    )
+    date_from = serializers.CharField(
+        default="-30d",
+        help_text="Earliest bucket start in the range. A relative date such as `-30d`, or an ISO 8601 date.",
+    )
+    date_to = serializers.CharField(
+        required=False,
+        help_text="Latest bucket start in the range. A relative date or an ISO 8601 date. Defaults to now.",
+    )
+    include_buckets = serializers.BooleanField(
+        default=True, help_text="Return the buckets of each series. Set false for the per-series summary only."
+    )
+    include_warmup = serializers.BooleanField(
+        default=False,
+        help_text="Include warm-up buckets: scored rows with a null score and flag, written while the detector "
+        "still lacks history. When false, a warm-up bucket shows as `scored: false`.",
+    )
+
+
+# The AI judge's verdict on a flagged bucket. A project whose scoring has no AI judge gets null for both.
+def _anomaly_kind_field() -> serializers.ChoiceField:
+    return serializers.ChoiceField(
+        source="verdict.kind",
+        choices=AnomalyJudgeKind.choices,
+        allow_null=True,
+        help_text=(
+            "The kind of anomaly the AI judge saw in a flagged bucket. Null when the bucket is not flagged, when the "
+            "judge was not asked or gave no verdict, or when it named no kind."
+        ),
+    )
+
+
+def _anomaly_reason_field() -> serializers.CharField:
+    return serializers.CharField(
+        source="verdict.reason",
+        allow_null=True,
+        help_text=(
+            "Why the AI judge confirmed the flag, in its own words. It is model output, so show it as plain text. "
+            "Null when the bucket is not flagged, or when the judge was not asked or gave no verdict."
+        ),
+    )
+
+
+class AnomalyFlaggedPointSerializer(serializers.Serializer):
+    bucket_start = ProjectDateTimeField(help_text="The start of the flagged bucket, in the project timezone.")
+    value = serializers.FloatField(allow_null=True, help_text="The series value of the bucket at scoring time.")
+    score = serializers.FloatField(
+        allow_null=True, help_text="The detector score of the bucket. Compare it only with buckets of the same series."
+    )
+    anomaly_kind = _anomaly_kind_field()
+    anomaly_reason = _anomaly_reason_field()
+
+
+class AnomalySeriesPointSerializer(serializers.Serializer):
+    bucket_start = ProjectDateTimeField(help_text="The start of the scored bucket, in the project timezone.")
+    value = serializers.FloatField(allow_null=True, help_text="The series value of the bucket at scoring time.")
+    flag = serializers.BooleanField(help_text="Whether the detector flagged the bucket.")
+    anomaly_kind = _anomaly_kind_field()
+    anomaly_reason = _anomaly_reason_field()
+
+
+class AnomalySeriesRefSerializer(serializers.Serializer):
+    insight_id = serializers.IntegerField(help_text="The numeric id of the insight, from an anomaly search row.")
+    series_key = serializers.CharField(max_length=64, help_text="The `series_key` of an anomaly search row.")
+    interval = serializers.ChoiceField(
+        choices=AnomalyInterval.choices,
+        help_text="The `interval` of the anomaly search row. It sets the length of the chart window.",
+    )
+
+
+class AnomalyPointsRequestSerializer(serializers.Serializer):
+    series = serializers.ListField(
+        child=AnomalySeriesRefSerializer(),
+        min_length=1,
+        max_length=MAX_POINTS_SERIES,
+        help_text=f"The series to read points for, usually one page of anomaly search rows. At most {MAX_POINTS_SERIES}.",
+    )
+
+
+class AnomalySeriesPointsSerializer(serializers.Serializer):
+    insight_id = serializers.IntegerField(source="series.insight_id", help_text="The numeric id of the insight.")
+    series_key = serializers.CharField(source="series.series_key", help_text="Identifies the series.")
+    interval = serializers.ChoiceField(
+        source="series.interval", choices=AnomalyInterval.choices, help_text="The interval the chart window uses."
+    )
+    date_from = ProjectDateTimeField(
+        help_text=(
+            "The start of the chart window, in the project timezone: 7 days before `date_to` for `hour`, 14 days for "
+            "`day`, 26 weeks for `week` and 24 months for `month`."
+        )
+    )
+    points = AnomalySeriesPointSerializer(
+        many=True,
+        help_text=(
+            "The scored buckets of the series in the chart window, oldest first. A bucket that was not scored, or "
+            "only has a warm-up row, has no point: it is unknown, not 0."
+        ),
+    )
+
+
+class AnomalyPointsResponseSerializer(serializers.Serializer):
+    date_to = ProjectDateTimeField(
+        help_text="The end of every chart window: the time of the request, in the project timezone."
+    )
+    series = AnomalySeriesPointsSerializer(
+        many=True,
+        help_text=(
+            "One entry per requested series, in request order. A series whose insight does not exist, or that the "
+            "caller cannot read, is left out. A series with no scored bucket in its chart window has no points."
+        ),
+    )
+
+
+class AnomalyDashboardSerializer(serializers.Serializer):
+    id = serializers.IntegerField(help_text="The numeric id of the dashboard.")
+    name = serializers.CharField(allow_null=True, help_text="The name of the dashboard. Null when it has none.")
+
+
+class AnomalySeriesSerializer(serializers.Serializer):
+    insight_id = serializers.IntegerField(source="summary.insight_id", help_text="The numeric id of the insight.")
+    insight_name = serializers.CharField(
+        source="insight.name", allow_null=True, help_text="The name of the insight. Null when it has none."
+    )
+    insight_url = serializers.CharField(
+        help_text="Opens the insight with a date range around the flagged buckets of this series."
+    )
+    series_key = serializers.CharField(
+        source="summary.series_key", help_text="Identifies the series. Pass it to anomaly insight history."
+    )
+    series_label = serializers.CharField(
+        source="summary.series_label", allow_null=True, help_text="The series name as the insight shows it."
+    )
+    breakdown_value = serializers.CharField(
+        source="summary.breakdown_value", allow_null=True, help_text="The breakdown value of the series, if any."
+    )
+    interval = serializers.ChoiceField(
+        source="summary.interval", choices=AnomalyInterval.choices, help_text="The bucket interval of the series."
+    )
+    scored_buckets = serializers.IntegerField(
+        source="summary.scored_buckets", help_text="Buckets in the range with a score. Warm-up buckets do not count."
+    )
+    flagged_buckets = serializers.IntegerField(
+        source="summary.flagged_buckets", help_text="Scored buckets in the range that the detector flagged."
+    )
+    anomaly_rate = serializers.FloatField(
+        source="summary.anomaly_rate", allow_null=True, help_text="`flagged_buckets / scored_buckets`."
+    )
+    expected_buckets = serializers.IntegerField(
+        help_text="Completed buckets of the series interval in the range, scored or not."
+    )
+    coverage = serializers.FloatField(
+        allow_null=True,
+        help_text="`scored_buckets / expected_buckets`: how much of the range was scored. Unscored buckets are unknown, not quiet.",
+    )
+    scored_through = ProjectDateTimeField(
+        source="summary.scored_through",
+        allow_null=True,
+        help_text="The newest scored bucket in the range. Buckets after it were not checked yet.",
+    )
+    first_flagged_bucket = ProjectDateTimeField(
+        source="summary.first_flagged_bucket",
+        allow_null=True,
+        help_text="The oldest flagged bucket in the range, in the project timezone.",
+    )
+    last_flagged_bucket = ProjectDateTimeField(
+        source="summary.last_flagged_bucket",
+        allow_null=True,
+        help_text="The newest flagged bucket in the range, in the project timezone.",
+    )
+    flagged_points = AnomalyFlaggedPointSerializer(
+        many=True, help_text="Up to 5 flagged buckets in the range, newest first."
+    )
+    dashboards = AnomalyDashboardSerializer(
+        many=True,
+        help_text="The dashboards the insight sits on that the caller may view, oldest tile first. Empty when none.",
+    )
+    points = AnomalySeriesPointSerializer(
+        many=True,
+        required=False,
+        help_text=(
+            "Only with `include_points`. The scored buckets of the series in the chart window of its interval, "
+            "oldest first. The chart window can start before `date_from`, so the points do not match `scored_buckets`. "
+            "A bucket that was not scored, or only has a warm-up row, has no point: it is unknown, not 0."
+        ),
+    )
+
+    def to_representation(self, instance: Any) -> dict[str, Any]:
+        data = super().to_representation(instance)
+        if instance.points is None:
+            data.pop("points")
+        return data
+
+
+class AnomalyTopSeriesSerializer(serializers.Serializer):
+    series_key = serializers.CharField(help_text="Identifies the series.")
+    series_label = serializers.CharField(allow_null=True, help_text="The series name as the insight shows it.")
+    breakdown_value = serializers.CharField(allow_null=True, help_text="The breakdown value of the series, if any.")
+    scored_buckets = serializers.IntegerField(help_text="Scored buckets of the series in the range.")
+    flagged_buckets = serializers.IntegerField(help_text="Flagged buckets of the series in the range.")
+    anomaly_rate = serializers.FloatField(allow_null=True, help_text="`flagged_buckets / scored_buckets`.")
+
+
+class AnomalyInsightRowSerializer(serializers.Serializer):
+    insight_id = serializers.IntegerField(source="insight.id", help_text="The numeric id of the insight.")
+    insight_name = serializers.CharField(
+        source="insight.name", allow_null=True, help_text="The name of the insight. Null when it has none."
+    )
+    insight_url = serializers.CharField(help_text="Opens the insight with a date range around its flagged buckets.")
+    series_count = serializers.IntegerField(
+        source="rollup.series_count", help_text="Series of the insight scored in the range."
+    )
+    flagged_series = serializers.IntegerField(
+        source="rollup.flagged_series", help_text="Series with at least one flagged bucket in the range."
+    )
+    scored_buckets = serializers.IntegerField(
+        source="rollup.scored_buckets", help_text="Scored buckets, summed over the series."
+    )
+    flagged_buckets = serializers.IntegerField(
+        source="rollup.flagged_buckets", help_text="Flagged buckets, summed over the series."
+    )
+    anomaly_rate = serializers.FloatField(
+        source="rollup.anomaly_rate",
+        allow_null=True,
+        help_text="Summed `flagged_buckets / scored_buckets`. Never an average of series rates.",
+    )
+    last_flagged_bucket = ProjectDateTimeField(
+        source="rollup.last_flagged_bucket", allow_null=True, help_text="The newest flagged bucket of any series."
+    )
+    top_series = AnomalyTopSeriesSerializer(many=True, help_text="Up to 3 flagged series, in the requested `order`.")
+
+
+class AnomalyIntervalRangeSerializer(serializers.Serializer):
+    interval = serializers.ChoiceField(choices=AnomalyInterval.choices, help_text="The bucket interval.")
+    date_from = ProjectDateTimeField(
+        help_text=(
+            "The applied start of the range for series of this interval, in the project timezone. For `week` it is "
+            "never later than the start of the last 2 completed weeks, and for `month` the start of the last "
+            "completed month, so a short range still checks them. For `hour` and `day` it is the requested start."
+        )
+    )
+    date_to = ProjectDateTimeField(help_text="The applied end of the range, in the project timezone.")
+
+
+class AnomalySearchResponseSerializer(serializers.Serializer):
+    scoring_enabled = serializers.BooleanField(
+        help_text=(
+            "Whether anomaly scoring scores this project now. False when scoring does not cover the "
+            "project, or when the project turned it off in its Product analytics source. Scores written "
+            "before scoring was turned off are still returned."
+        )
+    )
+    watched_insights = serializers.IntegerField(
+        help_text=(
+            "Active insights that scoring checks: saved trends insights that a person viewed, that sit on a "
+            "dashboard someone opened, or that were edited in the active window (90 days by default), "
+            "or that have an enabled alert or subscription."
+        )
+    )
+    insights_scored_in_range = serializers.IntegerField(
+        help_text="Insights with at least one scored bucket in the range. Results cover only these insights."
+    )
+    scored_days = serializers.IntegerField(
+        help_text=(
+            "Distinct UTC days with a scored daily bucket of any insight series in the last 28 days. It does not "
+            "follow the requested range, and it counts scores written before scoring was turned off."
+        )
+    )
+    scored_history_ready = serializers.BooleanField(
+        help_text=(
+            "True when `scored_days` is 14 or more. Until then the project has too little scored history to rely "
+            "on its scores, even when `scoring_enabled` is true."
+        )
+    )
+    date_from = ProjectDateTimeField(
+        help_text=(
+            "The requested start of the range, in the project timezone. Weekly and monthly series can use an "
+            "earlier start: see `interval_ranges`."
+        )
+    )
+    date_to = ProjectDateTimeField(help_text="The applied end of the range, in the project timezone.")
+    interval_ranges = AnomalyIntervalRangeSerializer(
+        many=True,
+        help_text=(
+            "The range applied to the series of each interval the search covers, from `hour` to `month`. Only the "
+            "requested `interval` when one was passed. Every count of a series row covers the range of its interval."
+        ),
+    )
+    group_by = serializers.ChoiceField(choices=AnomalyGroupBy.choices, help_text="The applied grouping.")
+    order = serializers.ChoiceField(choices=AnomalyOrder.choices, help_text="The applied order.")
+    series = AnomalySeriesSerializer(
+        many=True, help_text="One row per series, in the requested `order`. Empty unless `group_by` is `series`."
+    )
+    insights = AnomalyInsightRowSerializer(
+        many=True, help_text="One row per insight, in the requested `order`. Empty unless `group_by` is `insight`."
+    )
+    has_more = serializers.BooleanField(
+        help_text="True when rows exist after this page. Read them with `offset` set to `offset + limit`."
+    )
+    truncated = serializers.BooleanField(help_text="True when `limit` or a read cap left rows out.")
+    series_capped = serializers.BooleanField(
+        help_text=(
+            "True when the project has more scored series in the range than one search reads (10,000), so some "
+            "series that match the filters are missing from every page. Narrow the range or the filters to see "
+            "them. With `only_flagged`, series with a flagged bucket are read first, so this is true only when "
+            "flagged series alone pass the cap."
+        )
+    )
+    message = serializers.CharField(allow_null=True, help_text="Says why the result is empty. Null when it is not.")
+    scored_through = ProjectDateTimeField(
+        allow_null=True,
+        help_text=(
+            "The newest scored bucket of any series that matches the filters, in the project timezone. It does not "
+            "depend on `order`, `only_flagged` or the page. Null when no bucket in the range was scored."
+        ),
+    )
+    viewed_within_days = serializers.IntegerField(
+        allow_null=True,
+        help_text=(
+            "The `viewed_within_days` of the request. Null when it passed none, so the result covers every insight in "
+            "the project. When `viewed_scope_empty` is true, the result covers every insight too."
+        ),
+    )
+    viewed_scope_empty = serializers.BooleanField(
+        help_text=(
+            "True when the request passed `viewed_within_days` and the caller viewed no insight or dashboard with an "
+            "insight in that window, so the result covers every insight in the project instead."
+        )
+    )
+
+
+class AnomalyBucketSerializer(serializers.Serializer):
+    bucket_start = ProjectDateTimeField(help_text="The start of the bucket, in the project timezone.")
+    scored = serializers.BooleanField(
+        help_text="False for a completed bucket that has no score. Its value, score and flag are unknown, not 0."
+    )
+    value = serializers.FloatField(allow_null=True, help_text="The series value of the bucket at scoring time.")
+    score = serializers.FloatField(
+        allow_null=True, help_text="The detector score. Null on an unscored or warm-up bucket."
+    )
+    flag = serializers.BooleanField(
+        allow_null=True, help_text="Whether the detector flagged the bucket. Null on an unscored or warm-up bucket."
+    )
+    scored_at = ProjectDateTimeField(allow_null=True, help_text="When the bucket was scored.")
+    details = serializers.DictField(
+        child=serializers.JSONField(),
+        allow_null=True,
+        help_text="Detector-specific values for the bucket. The keys depend on the detector.",
+    )
+    anomaly_kind = _anomaly_kind_field()
+    anomaly_reason = _anomaly_reason_field()
+
+
+class AnomalyInsightSeriesSerializer(serializers.Serializer):
+    series_key = serializers.CharField(source="summary.series_key", help_text="Identifies the series.")
+    series_label = serializers.CharField(
+        source="summary.series_label", allow_null=True, help_text="The series name as the insight shows it."
+    )
+    breakdown_value = serializers.CharField(
+        source="summary.breakdown_value", allow_null=True, help_text="The breakdown value of the series, if any."
+    )
+    scored_buckets = serializers.IntegerField(
+        source="summary.scored_buckets", help_text="Buckets in the range with a score."
+    )
+    flagged_buckets = serializers.IntegerField(
+        source="summary.flagged_buckets", help_text="Scored buckets in the range that the detector flagged."
+    )
+    anomaly_rate = serializers.FloatField(
+        source="summary.anomaly_rate", allow_null=True, help_text="`flagged_buckets / scored_buckets`."
+    )
+    expected_buckets = serializers.IntegerField(help_text="Completed buckets in the range, scored or not.")
+    coverage = serializers.FloatField(allow_null=True, help_text="`scored_buckets / expected_buckets`.")
+    last_flagged_bucket = ProjectDateTimeField(
+        source="summary.last_flagged_bucket", allow_null=True, help_text="The newest flagged bucket in the range."
+    )
+    buckets = AnomalyBucketSerializer(
+        many=True, help_text="Oldest first, the newest result of each bucket. Empty when `include_buckets` is false."
+    )
+
+
+class AnomalyInsightResponseSerializer(serializers.Serializer):
+    scoring_enabled = serializers.BooleanField(
+        help_text=(
+            "Whether anomaly scoring scores this project now. False when scoring does not cover the "
+            "project, or when the project turned it off in its Product analytics source. Scores written "
+            "before scoring was turned off are still returned."
+        )
+    )
+    insight_id = serializers.IntegerField(source="insight.id", help_text="The numeric id of the insight.")
+    insight_name = serializers.CharField(
+        source="insight.name", allow_null=True, help_text="The name of the insight. Null when it has none."
+    )
+    insight_url = serializers.CharField(help_text="Opens the insight with a date range around its flagged buckets.")
+    interval = serializers.ChoiceField(
+        choices=AnomalyInterval.choices, allow_null=True, help_text="The bucket interval the scorer used."
+    )
+    profile = serializers.CharField(allow_null=True, help_text="The scoring profile.")
+    detector = serializers.CharField(allow_null=True, help_text="The detector type, for example `zscore`.")
+    detector_version = serializers.CharField(
+        allow_null=True, help_text="A hash of the detector settings. It changes when the settings change."
+    )
+    series_count = serializers.IntegerField(source="rollup.series_count", help_text="Series scored in the range.")
+    flagged_series = serializers.IntegerField(
+        source="rollup.flagged_series", help_text="Series with at least one flagged bucket in the range."
+    )
+    scored_buckets = serializers.IntegerField(
+        source="rollup.scored_buckets", help_text="Scored buckets, summed over the series."
+    )
+    flagged_buckets = serializers.IntegerField(
+        source="rollup.flagged_buckets", help_text="Flagged buckets, summed over the series."
+    )
+    anomaly_rate = serializers.FloatField(
+        source="rollup.anomaly_rate",
+        allow_null=True,
+        help_text="Summed `flagged_buckets / scored_buckets`. Never an average of series rates.",
+    )
+    date_from = ProjectDateTimeField(help_text="The applied start of the range, in the project timezone.")
+    date_to = ProjectDateTimeField(help_text="The applied end of the range, in the project timezone.")
+    series = AnomalyInsightSeriesSerializer(many=True, help_text="Every scored series, most anomalous first.")
+    truncated = serializers.BooleanField(help_text="True when the cap of 2,000 buckets cut the history.")
+    message = serializers.CharField(allow_null=True, help_text="Says why the result is empty. Null when it is not.")
+
+
+class AnomalyViewSet(TeamAndOrgViewSetMixin, viewsets.GenericViewSet):
+    """Read-only anomaly rates of the saved trends insights that anomaly scoring checks."""
+
+    authentication_classes = [SessionAuthentication, PersonalAPIKeyAuthentication, OAuthAccessTokenAuthentication]
+    permission_classes = [IsAuthenticated, APIScopePermission]
+    scope_object = "insight"
+    pagination_class = None
+
+    def _user(self, request: Request) -> User:
+        # The flag and insight access are both per user, so a request without a real user sees nothing.
+        if is_service_auth(request) or not isinstance(request.user, User) or not self._enabled(request.user):
+            raise NotFound()
+        return request.user
+
+    def _enabled(self, user: User) -> bool:
+        organization_id = str(self.team.organization_id)
+        return feature_enabled_or_false(
+            ANOMALIES_SEARCH_FLAG,
+            str(user.distinct_id),
+            groups={"organization": organization_id, "project": str(self.team.uuid)},
+            group_properties={
+                "organization": {"id": organization_id},
+                "project": {"id": self.team.id, "uuid": str(self.team.uuid)},
+            },
+        )
+
+    def _date_range(self, query: dict[str, Any], now: datetime.datetime) -> _DateRange:
+        timezone_info = self.team.timezone_info
+        try:
+            date_from = relative_date_parse(query["date_from"], timezone_info, now=now)
+            date_to = relative_date_parse(query["date_to"], timezone_info, now=now) if query.get("date_to") else now
+        except (ValueError, OverflowError):
+            raise ValidationError({"date_from": "Use a relative date such as -7d, or an ISO 8601 date."})
+        date_from, date_to = date_from.astimezone(timezone_info), date_to.astimezone(timezone_info)
+        if date_from >= date_to:
+            raise ValidationError({"date_from": "date_from must be before date_to."})
+        if date_to - date_from > MAX_RANGE:
+            raise ValidationError({"date_from": "The range can be at most 366 days."})
+        return _DateRange(date_from=date_from, date_to=date_to)
+
+    def _capture_read(self, request: Request, endpoint: str, **properties: Any) -> None:
+        report_user_action(
+            request.user,
+            READ_EVENT,
+            properties={"endpoint": endpoint, "via_mcp": is_mcp_request(request), **properties},
+            team=self.team,
+            request=request,
+        )
+
+    @validated_request(
+        query_serializer=AnomalySearchQuerySerializer,
+        responses={200: OpenApiResponse(response=AnomalySearchResponseSerializer)},
+        summary="Search anomalous insight series",
+    )
+    @action(detail=False, methods=["GET"], required_scopes=["insight:read"])
+    def search(self, request: ValidatedRequest, **kwargs: object) -> Response:
+        user = self._user(request)
+        query = request.validated_query_data
+        now = timezone.now()
+        date_range = self._date_range(query, now)
+        filters = AnomalySearchFilters(
+            date_from=date_range.date_from,
+            date_to=date_range.date_to,
+            insight_id=query.get("insight_id"),
+            dashboard_id=query.get("dashboard_id"),
+            interval=IntervalType(query["interval"]) if query.get("interval") else None,
+            only_flagged=query["only_flagged"],
+            group_by=AnomalyGroupBy(query["group_by"]),
+            order=AnomalyOrder(query["order"]),
+            limit=query["limit"],
+            offset=query["offset"],
+            search=query.get("search") or None,
+            include_points=query["include_points"],
+            viewed_within_days=query.get("viewed_within_days"),
+        )
+        try:
+            result = signals_facade.search_anomalies(team=self.team, user=user, filters=filters, now=now)
+        except AnomalyDashboardNotFound:
+            raise NotFound("Dashboard not found.")
+        self._capture_read(
+            request,
+            "search",
+            group_by=filters.group_by.value,
+            order=filters.order.value,
+            offset=filters.offset,
+            searched=filters.search is not None,
+            include_points=filters.include_points,
+            scoring_enabled=result.scoring_enabled,
+            rows=len(result.series) + len(result.insights),
+            insights_scored_in_range=result.insights_scored_in_range,
+            series_capped=result.series_capped,
+            viewed_within_days=filters.viewed_within_days,
+            viewed_scope_empty=result.viewed_scope_empty,
+        )
+        return Response(
+            AnomalySearchResponseSerializer(
+                {
+                    "scoring_enabled": result.scoring_enabled,
+                    "watched_insights": result.watched_insights,
+                    "insights_scored_in_range": result.insights_scored_in_range,
+                    "scored_days": result.scored_days,
+                    "scored_history_ready": result.scored_history_ready,
+                    "date_from": date_range.date_from,
+                    "date_to": date_range.date_to,
+                    "interval_ranges": result.interval_ranges,
+                    "group_by": filters.group_by,
+                    "order": filters.order,
+                    "series": result.series,
+                    "insights": result.insights,
+                    "has_more": result.has_more,
+                    "truncated": result.truncated,
+                    "series_capped": result.series_capped,
+                    "message": result.message,
+                    "scored_through": result.scored_through,
+                    "viewed_within_days": filters.viewed_within_days,
+                    "viewed_scope_empty": result.viewed_scope_empty,
+                }
+            ).data
+        )
+
+    @validated_request(
+        request_serializer=AnomalyPointsRequestSerializer,
+        responses={200: OpenApiResponse(response=AnomalyPointsResponseSerializer)},
+        summary="Get the chart points of anomaly series",
+    )
+    @action(detail=False, methods=["POST"], required_scopes=["insight:read"])
+    def points(self, request: ValidatedRequest, **kwargs: object) -> Response:
+        user = self._user(request)
+        now = timezone.now().astimezone(self.team.timezone_info)
+        series = signals_facade.get_anomaly_series_points(
+            team=self.team,
+            user=user,
+            series=[
+                AnomalySeriesRef(
+                    insight_id=ref["insight_id"], series_key=ref["series_key"], interval=IntervalType(ref["interval"])
+                )
+                for ref in request.validated_data["series"]
+            ],
+            now=now,
+        )
+        self._capture_read(request, "points", requested=len(request.validated_data["series"]), series=len(series))
+        return Response(AnomalyPointsResponseSerializer({"date_to": now, "series": series}).data)
+
+    @validated_request(
+        query_serializer=AnomalyInsightQuerySerializer,
+        responses={
+            200: OpenApiResponse(response=AnomalyInsightResponseSerializer),
+            404: OpenApiResponse(description="The insight does not exist or the user cannot read it."),
+        },
+        summary="Get the scored anomaly history of an insight",
+    )
+    @action(detail=False, methods=["GET"], required_scopes=["insight:read"])
+    def insight(self, request: ValidatedRequest, **kwargs: object) -> Response:
+        user = self._user(request)
+        query = request.validated_query_data
+        now = timezone.now()
+        date_range = self._date_range(query, now)
+        history = signals_facade.get_anomaly_insight_history(
+            team=self.team,
+            user=user,
+            filters=AnomalyHistoryFilters(
+                insight_id=query["insight_id"],
+                date_from=date_range.date_from,
+                date_to=date_range.date_to,
+                series_key=query.get("series_key"),
+                include_buckets=query["include_buckets"],
+                include_warmup=query["include_warmup"],
+            ),
+            now=now,
+        )
+        if history is None:
+            raise NotFound("Insight not found.")
+        self._capture_read(
+            request,
+            "insight",
+            scoring_enabled=history.scoring_enabled,
+            series=len(history.series),
+            flagged_series=history.rollup.flagged_series,
+        )
+        return Response(
+            AnomalyInsightResponseSerializer(
+                {
+                    "scoring_enabled": history.scoring_enabled,
+                    "insight": history.insight,
+                    "insight_url": history.insight_url,
+                    "interval": history.interval,
+                    "profile": history.profile,
+                    "detector": history.detector,
+                    "detector_version": history.detector_version,
+                    "rollup": history.rollup,
+                    "date_from": date_range.date_from,
+                    "date_to": date_range.date_to,
+                    "series": history.series,
+                    "truncated": history.truncated,
+                    "message": history.message,
+                }
+            ).data
+        )

@@ -1,0 +1,194 @@
+from typing import TypeAlias
+
+from django.contrib.postgres.indexes import GinIndex
+from django.db import models, transaction
+from django.db.models.expressions import F
+from django.db.models.functions import Coalesce
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+
+from posthog.models.tagged_items_relation import Taggable
+from posthog.models.utils import UniqueConstraintByExpression, UUIDTModel
+from posthog.utils import invalidate_has_person_email_cache
+
+from products.event_definitions.backend.facade.enums import PropertyDefinitionType
+
+# Frozen import paths: posthog/migrations/0889 passes PropertyType to `choices=`, and
+# posthog/clickhouse/migrations/0120 imports the DDL, both from this module. The DDL lives in
+# products.event_definitions.backend.sql; new code imports it from there.
+from products.event_definitions.backend.property_type import PropertyType
+from products.event_definitions.backend.sql import (
+    DROP_PROPERTY_DEFINITIONS_TABLE_SQL as DROP_PROPERTY_DEFINITIONS_TABLE_SQL,
+    PROPERTY_DEFINITIONS_TABLE_SQL as PROPERTY_DEFINITIONS_TABLE_SQL,
+)
+
+PERSON_EMAIL_PROPERTY_NAME = "email"
+
+
+def effective_project_id_expr() -> Coalesce:
+    """
+    The project scope the taxonomy tables are indexed by, for `.alias(effective_project_id=...)`.
+
+    It has to stay identical to the leading column of `posthog_propdef_proj_uniq` and of
+    `index_property_def_query_proj` below, or a filter on it stops being a seek and becomes a
+    range walk. Keep it next to those index definitions for that reason. `EventProperty` and
+    `EventDefinition` carry the same pair of columns, and `event_definition_proj_uniq` leads with
+    the same expression, so they use this too.
+
+    Always prefer this to `Q(project_id=X) | Q(project_id__isnull=True, team_id=X)`. The two select
+    the same rows, but no index covers the OR form, so Postgres bitmap-ORs its way through instead.
+
+    Returns a new expression per call, so callers never share one instance across querysets.
+    """
+    return Coalesce(F("project_id"), F("team_id"), output_field=models.BigIntegerField())
+
+
+def group_type_index_key_expr() -> Coalesce:
+    """
+    `group_type_index` as `posthog_propdef_proj_uniq` and `index_property_def_query_proj` store it, with -1 for no group.
+
+    A filter or an ordering must use this exact expression, or Postgres cannot use those index columns for it.
+    """
+    return Coalesce(F("group_type_index"), -1, output_field=models.IntegerField())
+
+
+class PropertyFormat(models.TextChoices):
+    UnixTimestamp = "unix_timestamp", "Unix Timestamp in seconds"
+    UnixTimestampMilliseconds = (
+        "unix_timestamp_milliseconds",
+        "Unix Timestamp in milliseconds",
+    )
+    ISO8601Date = "YYYY-MM-DDThh:mm:ssZ", "YYYY-MM-DDThh:mm:ssZ"
+    FullDate = "YYYY-MM-DD hh:mm:ss", "YYYY-MM-DD hh:mm:ss"
+    FullDateIncreasing = "DD-MM-YYYY hh:mm:ss", "DD-MM-YYYY hh:mm:ss"
+    Date = "YYYY-MM-DD", "YYYY-MM-DD"
+    RFC822 = "rfc_822", "day, DD MMM YYYY hh:mm:ss TZ"
+    WithSlashes = "YYYY/MM/DD hh:mm:ss", "YYYY/MM/DD hh:mm:ss"
+    WithSlashesIncreasing = "DD/MM/YYYY hh:mm:ss", "DD/MM/YYYY hh:mm:ss"
+
+
+class PropertyDefinition(Taggable, UUIDTModel):
+    # A `type` statement would make this a TypeAliasType, and callers read members like `PropertyDefinition.Type.EVENT`.
+    Type: TypeAlias = PropertyDefinitionType  # noqa: UP040
+
+    # No index of its own: posthog_pro_team_id_eac36d_idx (team_id, type, is_numerical) leads with team_id.
+    team = models.ForeignKey(
+        "posthog.Team",
+        on_delete=models.CASCADE,
+        related_name="property_definitions",
+        related_query_name="team",
+        db_index=False,
+    )
+    # No automatic index: the named Meta index on `project` covers project_id.
+    project = models.ForeignKey(
+        "posthog.Project", on_delete=models.CASCADE, null=True, related_name="+", db_index=False
+    )
+    name = models.CharField(max_length=400)
+    is_numerical = models.BooleanField(
+        default=False
+    )  # whether the property can be interpreted as a number, and therefore used for math aggregation operations
+
+    property_type = models.CharField(max_length=50, choices=PropertyType, blank=True, null=True)
+
+    # :TRICKY: May be null for historical events
+    type = models.PositiveSmallIntegerField(
+        default=PropertyDefinitionType.EVENT.value, choices=PropertyDefinitionType.choices
+    )
+    # Only populated for `Type.GROUP`
+    group_type_index = models.PositiveSmallIntegerField(null=True)
+
+    # Provenance for properties populated from a data warehouse source (Customer analytics
+    # warehouse -> person properties). Null for the vast majority of definitions. Written by
+    # Django only; the Rust property-defs upsert lists its columns explicitly and never touches
+    # this one. Shape: {source_id, schema_id, table_name, column, custom_property_source_id,
+    # last_synced_at}.
+    warehouse_origin = models.JSONField(null=True, blank=True, default=None)
+
+    # DEPRECATED
+    property_type_format = models.CharField(
+        max_length=50, choices=PropertyFormat, blank=True, null=True
+    )  # Deprecated in #8292
+
+    # DEPRECATED
+    volume_30_day = models.IntegerField(default=None, null=True)  # Deprecated in #4480
+
+    # DEPRECATED
+    # Number of times an insight has been saved with this property in its filter in the last 30 rolling days (computed asynchronously when stars align)
+    query_usage_30_day = models.IntegerField(default=None, null=True)
+
+    class Meta:
+        db_table = "posthog_propertydefinition"
+        indexes = [
+            # Index on project_id foreign key
+            models.Index(fields=["project"], name="posthog_prop_proj_id_d3eb982d"),
+            # This indexes the query in api/property_definition.py
+            # :KLUDGE: django ORM typing is off here
+            models.Index(
+                Coalesce(F("project_id"), F("team_id")),
+                F("type"),
+                Coalesce(F("group_type_index"), -1),
+                F("query_usage_30_day").desc(nulls_last=True),
+                F("name").asc(),
+                name="index_property_def_query_proj",
+            ),
+            # creates an index pganalyze identified as missing
+            # https://app.pganalyze.com/servers/i35ydkosi5cy5n7tly45vkjcqa/checks/index_advisor/missing_index/15282978
+            models.Index(fields=["team_id", "type", "is_numerical"]),
+            models.Index(
+                Coalesce(F("project_id"), F("team_id")),
+                F("type"),
+                F("is_numerical"),
+                name="posthog_pro_project_3583d2_idx",
+            ),
+            GinIndex(
+                name="index_property_definition_name",
+                fields=["name"],
+                opclasses=["gin_trgm_ops"],
+            ),  # To speed up DB-based fuzzy searching
+            # `is_feature_flag=true` lists filter on `name LIKE '$feature/%'`. Without this index the
+            # planner answers that prefix from the trigram GIN above, which is not scoped by project and
+            # visits every `$feature/` row across all teams. The condition must stay identical to the
+            # filter in `QueryContext.with_feature_flags`, or the planner cannot prove the index applies.
+            models.Index(
+                Coalesce(F("project_id"), F("team_id")),
+                F("type"),
+                Coalesce(F("group_type_index"), -1),
+                F("name"),
+                condition=models.Q(name__startswith="$feature/"),
+                name="index_propdef_feature_flag",
+            ),
+        ]
+        constraints = [
+            models.CheckConstraint(
+                name="property_type_is_valid",
+                condition=models.Q(property_type__in=PropertyType.values),
+            ),
+            models.CheckConstraint(
+                name="group_type_index_set",
+                condition=~models.Q(type=3) | models.Q(group_type_index__isnull=False),
+            ),
+            UniqueConstraintByExpression(
+                concurrently=True,
+                name="posthog_propdef_proj_uniq",
+                expression="(coalesce(project_id, team_id), name, type, coalesce(group_type_index, -1))",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.name} / {self.team.name}"
+
+    # This is a dynamically calculated field in api/property_definition.py. Defaults to `True` here to help serializers.
+    def is_seen_on_filtered_events(self) -> None:
+        return None
+
+
+# Deliberately no post_delete receiver: any delete listener on PropertyDefinition would
+# disable Django's fast-path cascade delete for this very large table (team/project/org
+# deletion), and delete staleness is already bounded by the cache TTLs.
+@receiver(post_save, sender=PropertyDefinition)
+def _invalidate_has_person_email_on_save(
+    sender: type[PropertyDefinition], instance: PropertyDefinition, **kwargs
+) -> None:
+    if instance.type == PropertyDefinition.Type.PERSON and instance.name == PERSON_EMAIL_PROPERTY_NAME:
+        project_id = instance.project_id or instance.team_id
+        transaction.on_commit(lambda: invalidate_has_person_email_cache(project_id))
