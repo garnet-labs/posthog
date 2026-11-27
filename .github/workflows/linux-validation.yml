@@ -1,0 +1,37 @@
+name: Linux validation
+
+on:
+  push:
+    branches: [ci-linux-validation]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  validation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: "actions/checkout@v6"
+        with:
+          persist-credentials: false
+      - uses: "garnet-org/action@v2.6.0"
+      - uses: "actions/setup-node@v7"
+        with:
+          node-version: "26"
+          package-manager-cache: false
+      - uses: "pnpm/action-setup@v4"
+      - name: "Install dependencies"
+        run: |
+          pnpm --filter=@posthog/mcp... --filter='./products/*' install --frozen-lockfile
+        working-directory: "."
+      - name: "Build prerequisites"
+        run: |
+          pnpm build
+          pnpm exec tsx scripts/copy-instructions.ts
+        working-directory: "services/mcp"
+      - name: "Run checks"
+        run: |
+          pnpm run test:hono
+        working-directory: "services/mcp"
