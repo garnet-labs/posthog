@@ -1,3 +1,4 @@
+# Workspace packages; layout notes live in docs/internal/monorepo-layout.md
 packages:
     - '.'
     - common/esbuilder
