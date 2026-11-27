@@ -1,0 +1,589 @@
+import {
+    LogicWrapper,
+    MakeLogicType,
+    actions,
+    afterMount,
+    kea,
+    key,
+    listeners,
+    path,
+    props,
+    reducers,
+    selectors,
+} from 'kea'
+import { loaders } from 'kea-loaders'
+import posthog from 'posthog-js'
+
+import { AccountsEvents } from 'products/customer_analytics/frontend/components/Accounts/constants'
+import * as api from 'products/customer_analytics/frontend/generated/api'
+import type {
+    AccountRelationshipDefinitionApi,
+    CustomPropertyDefinitionApi,
+    PinnedAccountPropertiesSourceApi,
+    PinnedAccountPropertyApi,
+    UserCustomerAnalyticsConfigApi,
+} from 'products/customer_analytics/frontend/generated/api.schemas'
+
+import {
+    AccountPropertyDefaultOption,
+    AccountPropertyOption,
+    FollowedDefaultPinnedProperties,
+    MAX_PINNED_ACCOUNT_PROPERTIES,
+    PINNABLE_ACCOUNT_FIELDS,
+    PinnableAccountField,
+} from './components/accountPropertyTypes'
+
+export { MAX_PINNED_ACCOUNT_PROPERTIES } from './components/accountPropertyTypes'
+const DEFINITION_PAGE_SIZE = 100
+// The requesting user always owns this configuration, so the endpoint accepts only this fixed lookup token.
+const CURRENT_USER_CONFIG_ID = '@me'
+
+export type PinnedAccountProperty = PinnedAccountPropertyApi
+
+export interface AccountSidebarConfigLogicProps {
+    projectId: number
+}
+
+export type ResolvedPinnedAccountProperty =
+    | {
+          kind: 'custom_property'
+          reference: PinnedAccountProperty
+          definition: CustomPropertyDefinitionApi
+      }
+    | {
+          kind: 'relationship'
+          reference: PinnedAccountProperty
+          definition: AccountRelationshipDefinitionApi
+      }
+    | {
+          kind: 'account_field'
+          reference: PinnedAccountProperty
+          field: PinnableAccountField
+      }
+
+export interface AvailableDefinitions {
+    customProperties: CustomPropertyDefinitionApi[]
+    relationships: AccountRelationshipDefinitionApi[]
+}
+
+interface PinnedPropertyResolution {
+    resolved: ResolvedPinnedAccountProperty[]
+    stale: PinnedAccountProperty[]
+}
+
+const CONFIGURATOR_KEY_PREFIXES: Record<PinnedAccountProperty['kind'], string> = {
+    custom_property: 'custom',
+    relationship: 'relationship',
+    account_field: 'field',
+}
+
+export function pinnedPropertyToConfiguratorKey(reference: PinnedAccountProperty): string {
+    return `${CONFIGURATOR_KEY_PREFIXES[reference.kind]}:${reference.id}`
+}
+
+export function configuratorKeysToPinnedProperties(keys: string[]): PinnedAccountProperty[] {
+    return keys.flatMap((key): PinnedAccountProperty[] => {
+        const separatorIndex = key.indexOf(':')
+        if (separatorIndex < 1 || separatorIndex === key.length - 1) {
+            return []
+        }
+        const kind = key.slice(0, separatorIndex)
+        const id = key.slice(separatorIndex + 1)
+        if (kind === 'custom') {
+            return [{ kind: 'custom_property', id }]
+        }
+        if (kind === 'relationship') {
+            return [{ kind: 'relationship', id }]
+        }
+        if (kind === 'field') {
+            return [{ kind: 'account_field', id }]
+        }
+        return []
+    })
+}
+
+export function buildPinnedPropertyOptions(definitions: AvailableDefinitions): AccountPropertyOption[] {
+    return [
+        ...definitions.customProperties.map((definition) => ({
+            key: pinnedPropertyToConfiguratorKey({ kind: 'custom_property', id: definition.id }),
+            label: definition.name,
+            kind: 'custom' as const,
+        })),
+        ...definitions.relationships.map((definition) => ({
+            key: pinnedPropertyToConfiguratorKey({ kind: 'relationship', id: definition.id }),
+            label: definition.name,
+            kind: 'relationship' as const,
+        })),
+        ...PINNABLE_ACCOUNT_FIELDS.map((field) => ({
+            key: pinnedPropertyToConfiguratorKey({ kind: 'account_field', id: field.key }),
+            label: field.label,
+            kind: 'account_field' as const,
+        })),
+    ]
+}
+
+const referenceKey = (reference: PinnedAccountProperty): string => `${reference.kind}:${reference.id}`
+
+const pinnedPropertiesEqual = (
+    first: readonly PinnedAccountProperty[],
+    second: readonly PinnedAccountProperty[]
+): boolean =>
+    first.length === second.length &&
+    first.every((reference, index) => referenceKey(reference) === referenceKey(second[index]))
+
+const loadEveryPage = async <T>(
+    loadPage: (params: { limit: number; offset: number }) => Promise<{ count: number; results: T[] }>
+): Promise<T[]> => {
+    const results: T[] = []
+    let offset = 0
+    let count = 1
+    while (offset < count) {
+        const page = await loadPage({ limit: DEFINITION_PAGE_SIZE, offset })
+        count = page.count
+        results.push(...page.results)
+        if (page.results.length === 0) {
+            break
+        }
+        offset += page.results.length
+    }
+    return results
+}
+
+export const resolvePinnedProperties = (
+    references: readonly PinnedAccountProperty[],
+    definitions: AvailableDefinitions
+): PinnedPropertyResolution => {
+    const customPropertiesById = new Map(definitions.customProperties.map((definition) => [definition.id, definition]))
+    const relationshipsById = new Map(definitions.relationships.map((definition) => [definition.id, definition]))
+    const accountFieldsByKey = new Map<string, PinnableAccountField>(
+        PINNABLE_ACCOUNT_FIELDS.map((field) => [field.key, field])
+    )
+    const resolved: ResolvedPinnedAccountProperty[] = []
+    const stale: PinnedAccountProperty[] = []
+
+    for (const reference of references) {
+        if (reference.kind === 'custom_property') {
+            const definition = customPropertiesById.get(reference.id)
+            if (definition) {
+                resolved.push({ kind: reference.kind, reference, definition })
+            } else {
+                stale.push(reference)
+            }
+        } else if (reference.kind === 'account_field') {
+            const field = accountFieldsByKey.get(reference.id)
+            if (field) {
+                resolved.push({ kind: reference.kind, reference, field })
+            } else {
+                stale.push(reference)
+            }
+        } else {
+            const definition = relationshipsById.get(reference.id)
+            if (definition) {
+                resolved.push({ kind: reference.kind, reference, definition })
+            } else {
+                stale.push(reference)
+            }
+        }
+    }
+    return { resolved, stale }
+}
+
+// Generated by kea-typegen. Update if you're an agent, ignore if you're human.
+export interface accountSidebarConfigLogicValues {
+    activeConfiguratorKey: string | null
+    availableDefaultPinnedProperties: AccountPropertyDefaultOption[]
+    availableDefinitions: AvailableDefinitions | null
+    availableDefinitionsLoadFailed: boolean
+    availableDefinitionsLoading: boolean
+    canSavePinnedProperties: boolean
+    config: UserCustomerAnalyticsConfigApi | null
+    configLoadFailed: boolean
+    configLoading: boolean
+    draftFollowedDefault: FollowedDefaultPinnedProperties | null
+    draftPinLimitReached: boolean
+    draftPinnedProperties: PinnedAccountProperty[]
+    isConfiguring: boolean
+    pinnedPropertiesSource: PinnedAccountPropertiesSourceApi | null
+    pinnedPropertyResolution: PinnedPropertyResolution
+    resolvedPinnedProperties: ResolvedPinnedAccountProperty[]
+    stalePinnedProperties: PinnedAccountProperty[]
+}
+
+// Generated by kea-typegen. Update if you're an agent, ignore if you're human.
+export interface accountSidebarConfigLogicActions {
+    beginConfiguring: (configuratorKey?: string) => {
+        configuratorKey: string
+    }
+    cancelConfiguring: () => {
+        value: true
+    }
+    loadAvailableDefinitions: () => any
+    loadAvailableDefinitionsFailure: (
+        error: string,
+        errorObject?: any
+    ) => {
+        error: string
+        errorObject?: any
+    }
+    loadAvailableDefinitionsSuccess: (
+        availableDefinitions: AvailableDefinitions,
+        payload?: any
+    ) => {
+        availableDefinitions: AvailableDefinitions
+        payload?: any
+    }
+    loadConfig: () => any
+    loadConfigFailure: (
+        error: string,
+        errorObject?: any
+    ) => {
+        error: string
+        errorObject?: any
+    }
+    loadConfigSuccess: (
+        config: UserCustomerAnalyticsConfigApi,
+        payload?: any
+    ) => {
+        config: UserCustomerAnalyticsConfigApi
+        payload?: any
+    }
+    movePinnedProperty: (
+        fromIndex: number,
+        toIndex: number
+    ) => {
+        fromIndex: number
+        toIndex: number
+    }
+    persistFollowedDefault: ({ followedDefault }: { followedDefault: FollowedDefaultPinnedProperties }) => {
+        followedDefault: FollowedDefaultPinnedProperties
+    }
+    persistFollowedDefaultFailure: (
+        error: string,
+        errorObject?: any
+    ) => {
+        error: string
+        errorObject?: any
+    }
+    persistFollowedDefaultSuccess: (
+        config: UserCustomerAnalyticsConfigApi,
+        payload?: {
+            followedDefault: FollowedDefaultPinnedProperties
+        }
+    ) => {
+        config: UserCustomerAnalyticsConfigApi
+        payload?: {
+            followedDefault: FollowedDefaultPinnedProperties
+        }
+    }
+    persistPinnedProperties: ({ pinnedProperties }: { pinnedProperties: PinnedAccountProperty[] }) => {
+        pinnedProperties: PinnedAccountProperty[]
+    }
+    persistPinnedPropertiesFailure: (
+        error: string,
+        errorObject?: any
+    ) => {
+        error: string
+        errorObject?: any
+    }
+    persistPinnedPropertiesSuccess: (
+        config: UserCustomerAnalyticsConfigApi,
+        payload?: {
+            pinnedProperties: PinnedAccountProperty[]
+        }
+    ) => {
+        config: UserCustomerAnalyticsConfigApi
+        payload?: {
+            pinnedProperties: PinnedAccountProperty[]
+        }
+    }
+    resetDraftToDefault: (option: AccountPropertyDefaultOption) => {
+        option: AccountPropertyDefaultOption
+    }
+    savePinnedProperties: () => {
+        value: true
+    }
+    setDraftPinnedProperties: (pinnedProperties: PinnedAccountProperty[]) => {
+        pinnedProperties: PinnedAccountPropertyApi[]
+    }
+    togglePinnedProperty: (pinnedProperty: PinnedAccountProperty) => {
+        pinnedProperty: PinnedAccountPropertyApi
+    }
+}
+
+// Generated by kea-typegen. Update if you're an agent, ignore if you're human.
+export interface accountSidebarConfigLogicMeta {
+    key: number
+    __keaTypeGenInternalSelectorTypes: {
+        isConfiguring: (activeConfiguratorKey: string | null) => boolean
+        pinnedPropertiesSource: (
+            config: UserCustomerAnalyticsConfigApi | null
+        ) => PinnedAccountPropertiesSourceApi | null
+        availableDefaultPinnedProperties: (
+            config: UserCustomerAnalyticsConfigApi | null,
+            availableDefinitions: AvailableDefinitions | null
+        ) => AccountPropertyDefaultOption[]
+        pinnedPropertyResolution: (
+            config: UserCustomerAnalyticsConfigApi | null,
+            availableDefinitions: AvailableDefinitions | null
+        ) => PinnedPropertyResolution
+        resolvedPinnedProperties: (
+            pinnedPropertyResolution: PinnedPropertyResolution
+        ) => ResolvedPinnedAccountProperty[]
+        stalePinnedProperties: (pinnedPropertyResolution: PinnedPropertyResolution) => PinnedAccountProperty[]
+        draftPinLimitReached: (draftPinnedProperties: PinnedAccountPropertyApi[]) => boolean
+        canSavePinnedProperties: (
+            isConfiguring: boolean,
+            config: UserCustomerAnalyticsConfigApi | null,
+            draftPinnedProperties: PinnedAccountPropertyApi[],
+            draftFollowedDefault: FollowedDefaultPinnedProperties | null,
+            configLoading: boolean
+        ) => boolean
+    }
+}
+
+export type accountSidebarConfigLogicType = MakeLogicType<
+    accountSidebarConfigLogicValues,
+    accountSidebarConfigLogicActions,
+    AccountSidebarConfigLogicProps,
+    accountSidebarConfigLogicMeta
+>
+
+export const accountSidebarConfigLogic: LogicWrapper<accountSidebarConfigLogicType> =
+    kea<accountSidebarConfigLogicType>([
+        path([
+            'products',
+            'customer_analytics',
+            'frontend',
+            'scenes',
+            'CustomerAnalyticsAccountScene',
+            'accountSidebarConfigLogic',
+        ]),
+        props({} as AccountSidebarConfigLogicProps),
+        key((props) => props.projectId),
+        actions({
+            beginConfiguring: (configuratorKey: string = 'default') => ({ configuratorKey }),
+            cancelConfiguring: true,
+            setDraftPinnedProperties: (pinnedProperties: PinnedAccountProperty[]) => ({ pinnedProperties }),
+            togglePinnedProperty: (pinnedProperty: PinnedAccountProperty) => ({ pinnedProperty }),
+            movePinnedProperty: (fromIndex: number, toIndex: number) => ({ fromIndex, toIndex }),
+            resetDraftToDefault: (option: AccountPropertyDefaultOption) => ({ option }),
+            savePinnedProperties: true,
+        }),
+        loaders(({ props }) => ({
+            config: [
+                null as UserCustomerAnalyticsConfigApi | null,
+                {
+                    loadConfig: async (): Promise<UserCustomerAnalyticsConfigApi> =>
+                        await api.userCustomerAnalyticsConfigRetrieve(String(props.projectId), CURRENT_USER_CONFIG_ID),
+                    persistPinnedProperties: async ({
+                        pinnedProperties,
+                    }: {
+                        pinnedProperties: PinnedAccountProperty[]
+                    }): Promise<UserCustomerAnalyticsConfigApi> =>
+                        await api.userCustomerAnalyticsConfigPartialUpdate(
+                            String(props.projectId),
+                            CURRENT_USER_CONFIG_ID,
+                            {
+                                pinned_properties: pinnedProperties.map(({ kind, id }) => ({ kind, id })),
+                            }
+                        ),
+                    persistFollowedDefault: async ({
+                        followedDefault,
+                    }: {
+                        followedDefault: FollowedDefaultPinnedProperties
+                    }): Promise<UserCustomerAnalyticsConfigApi> =>
+                        await api.userCustomerAnalyticsConfigPartialUpdate(
+                            String(props.projectId),
+                            CURRENT_USER_CONFIG_ID,
+                            { followed_default: followedDefault }
+                        ),
+                },
+            ],
+            availableDefinitions: [
+                null as AvailableDefinitions | null,
+                {
+                    loadAvailableDefinitions: async (): Promise<AvailableDefinitions> => {
+                        const projectId = String(props.projectId)
+                        const [customProperties, relationships] = await Promise.all([
+                            loadEveryPage((params) => api.customPropertyDefinitionsList(projectId, params)),
+                            loadEveryPage((params) => api.accountRelationshipDefinitionsList(projectId, params)),
+                        ])
+                        return {
+                            customProperties: customProperties.filter(({ target_type }) => target_type === 'account'),
+                            relationships,
+                        }
+                    },
+                },
+            ],
+        })),
+        reducers({
+            configLoadFailed: [
+                false,
+                {
+                    loadConfig: () => false,
+                    loadConfigSuccess: () => false,
+                    loadConfigFailure: () => true,
+                },
+            ],
+            availableDefinitionsLoadFailed: [
+                false,
+                {
+                    loadAvailableDefinitions: () => false,
+                    loadAvailableDefinitionsSuccess: () => false,
+                    loadAvailableDefinitionsFailure: () => true,
+                },
+            ],
+            activeConfiguratorKey: [
+                null as string | null,
+                {
+                    beginConfiguring: (_, { configuratorKey }) => configuratorKey,
+                    cancelConfiguring: () => null,
+                    persistPinnedPropertiesSuccess: () => null,
+                    persistFollowedDefaultSuccess: () => null,
+                    // A failed save keeps the selector open, so the user can retry or correct the
+                    // draft that the request did not store.
+                },
+            ],
+            draftFollowedDefault: [
+                null as FollowedDefaultPinnedProperties | null,
+                {
+                    resetDraftToDefault: (_, { option }) => option.followedDefault,
+                    setDraftPinnedProperties: () => null,
+                    togglePinnedProperty: () => null,
+                    movePinnedProperty: () => null,
+                },
+            ],
+            draftPinnedProperties: [
+                [] as PinnedAccountProperty[],
+                {
+                    resetDraftToDefault: (_, { option }) =>
+                        configuratorKeysToPinnedProperties(option.pinnedPropertyKeys),
+                    setDraftPinnedProperties: (_, { pinnedProperties }) => [...pinnedProperties],
+                    togglePinnedProperty: (state, { pinnedProperty }) => {
+                        const existingIndex = state.findIndex(
+                            (reference) => referenceKey(reference) === referenceKey(pinnedProperty)
+                        )
+                        if (existingIndex >= 0) {
+                            return state.filter((_, index) => index !== existingIndex)
+                        }
+                        return state.length < MAX_PINNED_ACCOUNT_PROPERTIES ? [...state, pinnedProperty] : state
+                    },
+                    movePinnedProperty: (state, { fromIndex, toIndex }) => {
+                        if (fromIndex === toIndex || !state[fromIndex] || toIndex < 0 || toIndex >= state.length) {
+                            return state
+                        }
+                        const reordered = [...state]
+                        const [moved] = reordered.splice(fromIndex, 1)
+                        reordered.splice(toIndex, 0, moved)
+                        return reordered
+                    },
+                },
+            ],
+        }),
+        selectors({
+            isConfiguring: [
+                (s) => [s.activeConfiguratorKey],
+                (activeConfiguratorKey: string | null): boolean => activeConfiguratorKey !== null,
+            ],
+            pinnedPropertiesSource: [
+                (s) => [s.config],
+                (config: UserCustomerAnalyticsConfigApi | null): PinnedAccountPropertiesSourceApi | null =>
+                    config?.pinned_properties_source ?? null,
+            ],
+            availableDefaultPinnedProperties: [
+                (s) => [s.config, s.availableDefinitions],
+                (
+                    config: UserCustomerAnalyticsConfigApi | null,
+                    definitions: AvailableDefinitions | null
+                ): AccountPropertyDefaultOption[] =>
+                    (config?.available_default_pinned_properties ?? []).map((entry) => {
+                        const resolvedReferences = definitions
+                            ? resolvePinnedProperties(entry.pinned_properties, definitions).resolved.map(
+                                  ({ reference }) => reference
+                              )
+                            : entry.pinned_properties
+                        const role = entry.source.kind === 'role' ? entry.source.role : null
+                        return {
+                            key: role ? `role:${role.id}` : 'project',
+                            label: role ? role.name : 'Project default',
+                            pinnedPropertyKeys: resolvedReferences.map(pinnedPropertyToConfiguratorKey),
+                            followedDefault: role ? { kind: 'role', role_id: role.id } : { kind: 'project' },
+                        }
+                    }),
+            ],
+            pinnedPropertyResolution: [
+                (s) => [s.config, s.availableDefinitions],
+                (
+                    config: UserCustomerAnalyticsConfigApi | null,
+                    definitions: AvailableDefinitions | null
+                ): PinnedPropertyResolution =>
+                    config && definitions
+                        ? resolvePinnedProperties(config.pinned_properties, definitions)
+                        : { resolved: [], stale: [] },
+            ],
+            resolvedPinnedProperties: [
+                (s) => [s.pinnedPropertyResolution],
+                (resolution: PinnedPropertyResolution): ResolvedPinnedAccountProperty[] => resolution.resolved,
+            ],
+            stalePinnedProperties: [
+                (s) => [s.pinnedPropertyResolution],
+                (resolution: PinnedPropertyResolution): PinnedAccountProperty[] => resolution.stale,
+            ],
+            draftPinLimitReached: [
+                (s) => [s.draftPinnedProperties],
+                (draft: PinnedAccountProperty[]): boolean => draft.length >= MAX_PINNED_ACCOUNT_PROPERTIES,
+            ],
+            canSavePinnedProperties: [
+                (s) => [s.isConfiguring, s.config, s.draftPinnedProperties, s.draftFollowedDefault, s.configLoading],
+                (
+                    isConfiguring: boolean,
+                    config: UserCustomerAnalyticsConfigApi | null,
+                    draft: PinnedAccountProperty[],
+                    draftFollowedDefault: FollowedDefaultPinnedProperties | null,
+                    saving: boolean
+                ): boolean =>
+                    isConfiguring &&
+                    config !== null &&
+                    !saving &&
+                    (draftFollowedDefault !== null || !pinnedPropertiesEqual(config.pinned_properties, draft)),
+            ],
+        }),
+        listeners(({ actions, values }) => ({
+            beginConfiguring: () => {
+                actions.setDraftPinnedProperties(values.resolvedPinnedProperties.map(({ reference }) => reference))
+            },
+            cancelConfiguring: () => {
+                actions.setDraftPinnedProperties(values.resolvedPinnedProperties.map(({ reference }) => reference))
+            },
+            savePinnedProperties: () => {
+                if (!values.canSavePinnedProperties) {
+                    return
+                }
+                if (values.draftFollowedDefault) {
+                    actions.persistFollowedDefault({ followedDefault: values.draftFollowedDefault })
+                } else {
+                    actions.persistPinnedProperties({ pinnedProperties: values.draftPinnedProperties })
+                }
+            },
+            persistFollowedDefaultSuccess: ({ config }) => {
+                actions.setDraftPinnedProperties([...config.pinned_properties])
+            },
+            persistPinnedPropertiesSuccess: ({ config }) => {
+                actions.setDraftPinnedProperties([...config.pinned_properties])
+                const countOf = (kind: PinnedAccountProperty['kind']): number =>
+                    config.pinned_properties.filter((reference) => reference.kind === kind).length
+                posthog.capture(AccountsEvents.PinnedPropertiesSaved, {
+                    pinned_count: config.pinned_properties.length,
+                    custom_property_count: countOf('custom_property'),
+                    relationship_count: countOf('relationship'),
+                    account_field_count: countOf('account_field'),
+                })
+            },
+        })),
+        afterMount(({ actions, props }) => {
+            if (props.projectId > 0) {
+                actions.loadConfig()
+                actions.loadAvailableDefinitions()
+            }
+        }),
+    ])

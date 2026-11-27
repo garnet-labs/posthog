@@ -1,0 +1,529 @@
+import { describe, expect, it } from "vitest";
+import {
+  type GatewayProduct,
+  getAiGatewayUrl,
+  resolveAiProduct,
+  resolveGatewayTarget,
+  resolveLlmGatewayUrl,
+} from "./gateway";
+import routingCases from "./gateway-routing-cases.json";
+
+const PY = "http://llm-gateway.internal:8080";
+
+describe("resolveLlmGatewayUrl", () => {
+  it("appends the product slug to an env-provided base URL", () => {
+    expect(
+      resolveLlmGatewayUrl(PY, "https://app.dev.posthog.dev", "slack_app"),
+    ).toBe(`${PY}/slack_app`);
+  });
+
+  it("appends the product slug after a trailing slash on the env URL", () => {
+    expect(
+      resolveLlmGatewayUrl(
+        `${PY}/`,
+        "https://app.dev.posthog.dev",
+        "posthog_code",
+      ),
+    ).toBe(`${PY}/posthog_code`);
+  });
+
+  it.each([undefined, ""])(
+    "refuses the Python gateway when the env URL is %j",
+    (envUrl) => {
+      expect(() =>
+        resolveLlmGatewayUrl(
+          envUrl,
+          "https://us.posthog.com",
+          "background_agents",
+        ),
+      ).toThrow("LLM_GATEWAY_URL is unset");
+    },
+  );
+});
+
+describe("getAiGatewayUrl", () => {
+  it.each([
+    {
+      posthogHost: "https://us.posthog.com",
+      expected: "https://ai-gateway.us.posthog.com",
+    },
+    {
+      posthogHost: "https://eu.posthog.com",
+      expected: "https://ai-gateway.eu.posthog.com",
+    },
+    {
+      posthogHost: "https://app.dev.posthog.dev",
+      expected: "https://ai-gateway.dev.posthog.dev",
+    },
+    {
+      posthogHost: "http://localhost:8000",
+      expected: "http://localhost:8080",
+    },
+  ] as const)("$posthogHost -> $expected", ({ posthogHost, expected }) => {
+    expect(getAiGatewayUrl(posthogHost)).toBe(expected);
+  });
+});
+
+describe("resolveLlmGatewayUrl (slugless)", () => {
+  const GO = "https://ai-gateway.us.posthog.com";
+
+  it("does not append the product slug", () => {
+    expect(
+      resolveLlmGatewayUrl(GO, "https://us.posthog.com", "signals", {
+        slugless: true,
+      }),
+    ).toBe(GO);
+  });
+
+  it("strips a trailing /v1 so callers can re-append their own path", () => {
+    expect(
+      resolveLlmGatewayUrl(`${GO}/v1`, "https://us.posthog.com", "signals", {
+        slugless: true,
+      }),
+    ).toBe(GO);
+  });
+
+  it("strips trailing slashes", () => {
+    expect(
+      resolveLlmGatewayUrl(`${GO}/v1//`, "https://us.posthog.com", "signals", {
+        slugless: true,
+      }),
+    ).toBe(GO);
+  });
+
+  it("falls back to the region-aware host when no override is set", () => {
+    expect(
+      resolveLlmGatewayUrl(undefined, "https://eu.posthog.com", "signals", {
+        slugless: true,
+      }),
+    ).toBe("https://ai-gateway.eu.posthog.com");
+  });
+});
+
+describe("resolveGatewayTarget", () => {
+  const GO = "https://ai-gateway.us.posthog.com";
+  const PY_HOST = "https://us.posthog.com";
+  const SIGNALS_ENV = {
+    LLM_GATEWAY_URL: PY,
+    AI_GATEWAY_URL: GO,
+    AI_GATEWAY_PRODUCTS: "signals_scout,signals_research",
+  };
+
+  it("routes a listed product to the Go gateway with no slug", () => {
+    expect(
+      resolveGatewayTarget({
+        product: "signals",
+        aiStage: "scout",
+        posthogHost: PY_HOST,
+        env: SIGNALS_ENV,
+      }),
+    ).toEqual({
+      baseUrl: GO,
+      isAiGateway: true,
+      aiProduct: "signals_scout",
+      aiStage: "scout",
+    });
+  });
+
+  it("leaves an unlisted signals stage on the Python gateway", () => {
+    expect(
+      resolveGatewayTarget({
+        product: "signals",
+        aiStage: "implementation",
+        posthogHost: PY_HOST,
+        env: SIGNALS_ENV,
+      }),
+    ).toEqual({
+      baseUrl: `${PY}/signals`,
+      isAiGateway: false,
+      aiProduct: "signals_implementation",
+      aiStage: "implementation",
+    });
+  });
+
+  it.each(["posthog_code", "background_agents", "slack_app"] as const)(
+    "leaves %s on the Python gateway while signals migrates",
+    (product) => {
+      const target = resolveGatewayTarget({
+        product,
+        posthogHost: PY_HOST,
+        env: SIGNALS_ENV,
+      });
+      expect(target.isAiGateway).toBe(false);
+      expect(target.baseUrl).toBe(`${PY}/${product}`);
+    },
+  );
+
+  it("stays on the Python gateway when no Go URL is set", () => {
+    expect(
+      resolveGatewayTarget({
+        product: "signals",
+        aiStage: "scout",
+        posthogHost: PY_HOST,
+        env: { LLM_GATEWAY_URL: PY, AI_GATEWAY_PRODUCTS: "signals_scout" },
+      }).isAiGateway,
+    ).toBe(false);
+  });
+
+  it("stays on the Python gateway when the allowlist is empty", () => {
+    expect(
+      resolveGatewayTarget({
+        product: "signals",
+        aiStage: "scout",
+        posthogHost: PY_HOST,
+        env: { LLM_GATEWAY_URL: PY, AI_GATEWAY_URL: GO },
+      }).isAiGateway,
+    ).toBe(false);
+  });
+
+  it("tolerates whitespace and blanks in the allowlist", () => {
+    expect(
+      resolveGatewayTarget({
+        product: "signals",
+        aiStage: "scout",
+        posthogHost: PY_HOST,
+        env: { AI_GATEWAY_URL: GO, AI_GATEWAY_PRODUCTS: " , signals_scout , " },
+      }).isAiGateway,
+    ).toBe(true);
+  });
+
+  it("routes a skill-qualified scout stage via the plain product entry", () => {
+    expect(
+      resolveGatewayTarget({
+        product: "signals",
+        aiStage: "scout:web-analytics",
+        posthogHost: PY_HOST,
+        env: SIGNALS_ENV,
+      }),
+    ).toEqual({
+      baseUrl: GO,
+      isAiGateway: true,
+      aiProduct: "signals_scout",
+      aiStage: "scout:web-analytics",
+    });
+  });
+
+  it("routes only the listed skill via a skill-qualified entry", () => {
+    const env = {
+      LLM_GATEWAY_URL: PY,
+      AI_GATEWAY_URL: GO,
+      AI_GATEWAY_PRODUCTS: "signals_scout:web-analytics",
+    };
+    expect(
+      resolveGatewayTarget({
+        product: "signals",
+        aiStage: "scout:web-analytics",
+        posthogHost: PY_HOST,
+        env,
+      }),
+    ).toEqual({
+      baseUrl: GO,
+      isAiGateway: true,
+      aiProduct: "signals_scout",
+      aiStage: "scout:web-analytics",
+    });
+    expect(
+      resolveGatewayTarget({
+        product: "signals",
+        aiStage: "scout:logs",
+        posthogHost: PY_HOST,
+        env,
+      }),
+    ).toEqual({
+      baseUrl: `${PY}/signals`,
+      isAiGateway: false,
+      aiProduct: "signals_scout",
+      aiStage: "scout:logs",
+    });
+  });
+
+  it("does not let a skill-qualified entry route the bare scout stage", () => {
+    expect(
+      resolveGatewayTarget({
+        product: "signals",
+        aiStage: "scout",
+        posthogHost: PY_HOST,
+        env: {
+          LLM_GATEWAY_URL: PY,
+          AI_GATEWAY_URL: GO,
+          AI_GATEWAY_PRODUCTS: "signals_scout:web-analytics",
+        },
+      }).isAiGateway,
+    ).toBe(false);
+  });
+
+  it("routes the custom_agent stage when signals_custom_agent is listed", () => {
+    expect(
+      resolveGatewayTarget({
+        product: "signals",
+        aiStage: "custom_agent",
+        posthogHost: PY_HOST,
+        env: {
+          AI_GATEWAY_URL: GO,
+          AI_GATEWAY_PRODUCTS: "signals_custom_agent",
+        },
+      }),
+    ).toEqual({
+      baseUrl: GO,
+      isAiGateway: true,
+      aiProduct: "signals_custom_agent",
+      aiStage: "custom_agent",
+    });
+  });
+
+  it("prefers the worker's product and stage over the local derivation", () => {
+    expect(
+      resolveGatewayTarget({
+        product: "signals",
+        aiStage: null,
+        posthogHost: PY_HOST,
+        env: {
+          ...SIGNALS_ENV,
+          AI_GATEWAY_PRODUCT: "signals_scout",
+          AI_GATEWAY_AI_STAGE: "scout:web-analytics",
+        },
+      }),
+    ).toEqual({
+      baseUrl: GO,
+      isAiGateway: true,
+      aiProduct: "signals_scout",
+      aiStage: "scout:web-analytics",
+    });
+  });
+
+  // Without a disagreeing case the preference can be deleted with the suite green.
+  it("uses the worker's product when the local derivation would pick another", () => {
+    expect(
+      resolveGatewayTarget({
+        product: "signals",
+        aiStage: "scout",
+        posthogHost: PY_HOST,
+        env: { ...SIGNALS_ENV, AI_GATEWAY_PRODUCT: "signals_research" },
+      }).aiProduct,
+    ).toBe("signals_research");
+  });
+
+  it("uses the worker's stage when the caller fetched a different one", () => {
+    // The stage decides the skill-qualified allowlist key and the blob's stage.
+    expect(
+      resolveGatewayTarget({
+        product: "signals",
+        aiStage: "scout:logs",
+        posthogHost: PY_HOST,
+        env: {
+          AI_GATEWAY_URL: GO,
+          AI_GATEWAY_PRODUCTS: "signals_scout:web-analytics",
+          AI_GATEWAY_AI_STAGE: "scout:web-analytics",
+        },
+      }),
+    ).toEqual({
+      baseUrl: GO,
+      isAiGateway: true,
+      aiProduct: "signals_scout",
+      aiStage: "scout:web-analytics",
+    });
+  });
+
+  it("matches a skill-qualified allowlist entry via the worker's stage", () => {
+    expect(
+      resolveGatewayTarget({
+        product: "signals",
+        aiStage: null,
+        posthogHost: PY_HOST,
+        env: {
+          AI_GATEWAY_URL: GO,
+          AI_GATEWAY_PRODUCTS: "signals_scout:web-analytics",
+          AI_GATEWAY_PRODUCT: "signals_scout",
+          AI_GATEWAY_AI_STAGE: "scout:web-analytics",
+        },
+      }).isAiGateway,
+    ).toBe(true);
+  });
+
+  it("keeps the allowlist gate for a worker-provided product", () => {
+    expect(
+      resolveGatewayTarget({
+        product: "signals",
+        aiStage: "summarization",
+        posthogHost: PY_HOST,
+        env: { ...SIGNALS_ENV, AI_GATEWAY_PRODUCT: "signals_emission" },
+      }),
+    ).toEqual({
+      baseUrl: `${PY}/signals`,
+      isAiGateway: false,
+      aiProduct: "signals_emission",
+      aiStage: "summarization",
+    });
+  });
+
+  it("ignores blank worker product and stage values", () => {
+    expect(
+      resolveGatewayTarget({
+        product: "signals",
+        aiStage: "scout",
+        posthogHost: PY_HOST,
+        env: {
+          ...SIGNALS_ENV,
+          AI_GATEWAY_PRODUCT: "  ",
+          AI_GATEWAY_AI_STAGE: "",
+        },
+      }),
+    ).toEqual({
+      baseUrl: GO,
+      isAiGateway: true,
+      aiProduct: "signals_scout",
+      aiStage: "scout",
+    });
+  });
+
+  it.each(["review_hog", "account_audit", "autoresearch"] as const)(
+    "keeps the %s legacy leg on the background_agents slug",
+    (product) => {
+      expect(
+        resolveGatewayTarget({
+          product,
+          aiStage: "validation-c1",
+          posthogHost: PY_HOST,
+          env: { LLM_GATEWAY_URL: PY },
+        }),
+      ).toEqual({
+        baseUrl: `${PY}/background_agents`,
+        isAiGateway: false,
+        aiProduct: product,
+        aiStage: "validation-c1",
+      });
+    },
+  );
+
+  it.each(["review_hog", "account_audit", "autoresearch"] as const)(
+    "keeps the %s legacy override on an LLM_GATEWAY_URL base too",
+    (product) => {
+      expect(
+        resolveGatewayTarget({
+          product,
+          posthogHost: PY_HOST,
+          env: { LLM_GATEWAY_URL: `${PY}/` },
+        }).baseUrl,
+      ).toBe(`${PY}/background_agents`);
+    },
+  );
+
+  it.each(["review_hog", "account_audit", "autoresearch"] as const)(
+    "routes %s to the Go gateway slugless once listed",
+    (product) => {
+      expect(
+        resolveGatewayTarget({
+          product,
+          aiStage: "validation-c1",
+          posthogHost: PY_HOST,
+          env: { AI_GATEWAY_URL: GO, AI_GATEWAY_PRODUCTS: product },
+        }),
+      ).toEqual({
+        baseUrl: GO,
+        isAiGateway: true,
+        aiProduct: product,
+        aiStage: "validation-c1",
+      });
+    },
+  );
+
+  it("honours an LLM_GATEWAY_URL override on the unrouted path", () => {
+    expect(
+      resolveGatewayTarget({
+        product: "posthog_code",
+        posthogHost: PY_HOST,
+        env: {
+          ...SIGNALS_ENV,
+          LLM_GATEWAY_URL: `${PY}/`,
+        },
+      }).baseUrl,
+    ).toBe(`${PY}/posthog_code`);
+  });
+});
+
+describe("resolveAiProduct", () => {
+  it.each([
+    ["scout", "signals_scout"],
+    ["research", "signals_research"],
+    ["implementation", "signals_implementation"],
+    ["repo_selection", "signals_repo_selection"],
+    ["custom_agent", "signals_custom_agent"],
+    ["inbox", "signals_inbox"],
+    ["chat", "signals_chat"],
+    ["scout_suggestions", "signals_scout_suggestions"],
+  ])("maps the signals %s stage to %s", (aiStage, expected) => {
+    expect(resolveAiProduct({ product: "signals", aiStage })).toBe(expected);
+  });
+
+  it.each([
+    ["scout:web-analytics", "signals_scout"],
+    ["scout:customer-analytics-billing-and-usage", "signals_scout"],
+  ])("maps the skill-qualified %s stage to %s", (aiStage, expected) => {
+    expect(resolveAiProduct({ product: "signals", aiStage })).toBe(expected);
+  });
+
+  it("leaves signals unsplit for an unrecognized stage", () => {
+    expect(resolveAiProduct({ product: "signals", aiStage: "match" })).toBe(
+      "signals",
+    );
+  });
+
+  it("leaves signals unsplit when no stage is set", () => {
+    expect(resolveAiProduct({ product: "signals", aiStage: null })).toBe(
+      "signals",
+    );
+  });
+
+  it("does not split a non-signals product that shares a stage name", () => {
+    expect(
+      resolveAiProduct({ product: "posthog_code", aiStage: "implementation" }),
+    ).toBe("posthog_code");
+    expect(
+      resolveAiProduct({ product: "review_hog", aiStage: "resolution" }),
+    ).toBe("review_hog");
+  });
+
+  it.each([
+    "posthog_code",
+    "background_agents",
+    "slack_app",
+    "posthog_ai",
+    "conversations",
+    "review_hog",
+  ] as const)("keeps %s unchanged", (product) => {
+    expect(resolveAiProduct({ product })).toBe(product);
+  });
+});
+
+// Shared contract with the Python mirror (test_ai_gateway_token.py) — both suites
+// consume gateway-routing-cases.json so the resolvers cannot drift independently.
+describe("shared routing contract", () => {
+  it.each(routingCases.resolve_ai_product)(
+    "resolves $product/$ai_stage -> $expected",
+    ({ product, ai_stage, expected }) => {
+      expect(
+        resolveAiProduct({
+          product: product as GatewayProduct,
+          aiStage: ai_stage,
+        }),
+      ).toBe(expected);
+    },
+  );
+
+  it.each(routingCases.routed)(
+    "routes $product/$ai_stage under [$allowlist] -> $expected",
+    ({ product, ai_stage, allowlist, expected }) => {
+      const target = resolveGatewayTarget({
+        product: product as GatewayProduct,
+        aiStage: ai_stage,
+        posthogHost: "https://us.posthog.com",
+        env: {
+          LLM_GATEWAY_URL: PY,
+          AI_GATEWAY_URL: "https://ai-gateway.us.posthog.com",
+          AI_GATEWAY_PRODUCTS: allowlist,
+        },
+      });
+      expect(target.isAiGateway).toBe(expected);
+    },
+  );
+});

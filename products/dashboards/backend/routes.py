@@ -1,0 +1,32 @@
+from posthog.api import sharing
+from posthog.api.routing import RouterRegistry
+
+from products.dashboards.backend.presentation.views import dashboard, dashboard_templates, dashboard_v2
+
+
+def register_routes(routers: RouterRegistry) -> None:
+    # Legacy flat endpoints — should be unused, but kept until callers are confirmed dead.
+    routers.root.register(r"dashboard", dashboard.LegacyDashboardsViewSet, "legacy_dashboards")
+    routers.root.register(r"dashboard_item", dashboard.LegacyInsightViewSet, "legacy_insights")
+
+    routers.projects.register(
+        r"dashboard_templates",
+        dashboard_templates.DashboardTemplateViewSet,
+        "project_dashboard_templates",
+        ["project_id"],
+    )
+
+    routers.projects.register(r"dashboard_v2", dashboard_v2.DashboardV2ViewSet, "project_dashboard_v2", ["team_id"])
+
+    dashboards_router = routers.projects.register(
+        r"dashboards", dashboard.DashboardsViewSet, "project_dashboards", ["team_id"]
+    )
+
+    # SharingConfigurationViewSet is shared (core), but the route lives under
+    # dashboards/<id>/sharing — the dashboards product owns the sub-route.
+    dashboards_router.register(
+        r"sharing",
+        sharing.SharingConfigurationViewSet,
+        "project_dashboard_sharing",
+        ["team_id", "dashboard_id"],
+    )

@@ -1,0 +1,52 @@
+"""The metric vocabulary the self-optimising loop reads.
+
+Kept in one place because the two sides of a suggestion have to agree: whatever writes the evidence
+- a Scout, over the API - and the outcome endpoint that reports what the change did. If they name
+different metrics, a proposal's "before" and "after" stop being comparable.
+"""
+
+from datetime import UTC, datetime
+
+# Every hog flow metric is mirrored under this app source with the version appended to the flow id,
+# which is what makes a per-version read possible at all. See "Metrics and version attribution" in
+# products/workflows/CONTRIBUTING.md.
+HOG_FLOW_VERSION_APP_SOURCE = "hog_flow_version"
+
+TARGET_SEND_METRIC = "email_sent"
+TARGET_OPEN_METRIC = "email_opened"
+# Both rates count what the window recorded, not what a cohort went on to do.
+# Clicks read against the same denominator as opens; the two move for different reasons.
+TARGET_CLICK_METRIC = "email_link_clicked"
+
+# Sends with tracking off can never record an open, so the open rate reads against
+# (email_sent - email_untracked); guardrail rates keep the raw send count.
+TARGET_UNTRACKED_METRIC = "email_untracked"
+
+# Counter-metrics read over the same window, step and version as the target.
+GUARDRAIL_METRICS = ("email_blocked", "email_bounced")
+GUARDRAIL_LABELS = {"email_blocked": "complaint rate", "email_bounced": "bounce rate"}
+
+TARGET_CONVERSION_METRIC = "conversion_by_start"
+RUN_STARTED_METRIC = "triggered"
+# Older runs have no `conversion_by_start` row even when they converted, so counting them would dilute the rate.
+CONVERSION_BY_START_RECORDED_SINCE = datetime(2026, 11, 13, tzinfo=UTC)
+# Older runs of these triggers have a versioned conversion but no versioned start, so counting them would inflate the rate.
+REQUEST_STARTED_TRIGGERS = frozenset({"webhook", "tracking_pixel", "manual"})
+REQUEST_STARTS_VERSIONED_SINCE = datetime(2026, 11, 28, tzinfo=UTC)
+
+# What a suggestion can aim at: the metric counted, what it divides by, and the name a person reads.
+# An untracked send can record neither an open nor a click. Anything else is measured on opens.
+TARGET_METRICS: dict[str, tuple[str, str, str]] = {
+    TARGET_OPEN_METRIC: (TARGET_OPEN_METRIC, "tracked_sends", "email open rate"),
+    TARGET_CLICK_METRIC: (TARGET_CLICK_METRIC, "tracked_sends", "click rate"),
+    "email_bounced": ("email_bounced", "sends", "bounce rate"),
+    "email_blocked": ("email_blocked", "sends", "complaint rate"),
+    TARGET_CONVERSION_METRIC: (TARGET_CONVERSION_METRIC, "runs", "conversion rate"),
+}
+
+# `email_unsubscribed` exists only as a name in the worker's metric union with no producer. Named so
+# the surfaces can say the number is missing rather than imply a zero.
+UNAVAILABLE_GUARDRAILS = ("unsubscribe rate",)
+
+# Below this many observations a rate is noise.
+MIN_EVIDENCE_SAMPLE = 20

@@ -1,0 +1,6 @@
+@import 'tailwindcss';
+
+/* if this shows a warning, change the type of file in vscode to 'tailwind CSS' */
+@config "./tailwind.config.js";
+
+@import './theme.css';

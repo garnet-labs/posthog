@@ -1,0 +1,227 @@
+import { useActions, useValues } from 'kea'
+
+import { LemonCard, LemonCheckbox, LemonSelect, LemonSwitch, Link } from '@posthog/lemon-ui'
+
+import { useFeatureFlag } from 'lib/hooks/useFeatureFlag'
+import { urls } from 'scenes/urls'
+
+import { SceneSection } from '~/layout/scenes/components/SceneSection'
+
+import { AIContextAccountPropertiesSection } from '../../components/AIContextAccountPropertiesSection/AIContextAccountPropertiesSection'
+import { QuillAISection } from '../../components/QuillAISection/QuillAISection'
+import { SupportPlaybookSection } from '../../components/SupportPlaybookSection/SupportPlaybookSection'
+import { aiTriageTicketTypeLabel, TicketChannel } from '../../types'
+import { CHANNEL_LABELS, PUBLISHABLE_TICKET_TYPES, REPLY_MODE_OPTIONS, TICKET_TYPES } from './aiAgentSettingsOptions'
+import { type ChannelTabKey, openChannelSettings } from './openChannelSettings'
+import { supportSettingsLogic } from './supportSettingsLogic'
+
+const CHANNEL_SETTINGS_TABS: Record<TicketChannel, ChannelTabKey> = {
+    widget: 'widget',
+    slack: 'slack',
+    email: 'email',
+    teams: 'teams',
+    github: 'github',
+}
+
+export function AISection(): JSX.Element {
+    const {
+        aiSuggestionsEnabled,
+        aiSuggestionsLoading,
+        aiDiagnosticsEnabled,
+        aiDiagnosticsLoading,
+        aiEnabledChannels,
+        aiAllChannels,
+        aiResolutionChannels,
+        aiReplyModes,
+    } = useValues(supportSettingsLogic)
+    const { setAiSuggestionsEnabled, setAiDiagnosticsEnabled, setAiResolutionChannels, setAiReplyMode } =
+        useActions(supportSettingsLogic)
+    const todayRailNav = useFeatureFlag('TODAY_RAIL_NAV')
+
+    const isChannelActive = (channel: TicketChannel): boolean => aiEnabledChannels.includes(channel)
+
+    const toggleResolutionChannel = (channel: TicketChannel, checked: boolean): void => {
+        const next = checked ? [...aiResolutionChannels, channel] : aiResolutionChannels.filter((c) => c !== channel)
+        setAiResolutionChannels(next)
+    }
+
+    if (todayRailNav) {
+        return (
+            <QuillAISection
+                aiSuggestionsEnabled={aiSuggestionsEnabled}
+                aiSuggestionsLoading={aiSuggestionsLoading}
+                aiDiagnosticsEnabled={aiDiagnosticsEnabled}
+                aiDiagnosticsLoading={aiDiagnosticsLoading}
+                aiAllChannels={aiAllChannels}
+                aiResolutionChannels={aiResolutionChannels}
+                aiReplyModes={aiReplyModes}
+                isChannelActive={isChannelActive}
+                onAiSuggestionsEnabledChange={setAiSuggestionsEnabled}
+                onAiDiagnosticsEnabledChange={setAiDiagnosticsEnabled}
+                onResolutionChannelToggle={toggleResolutionChannel}
+                onReplyModeChange={setAiReplyMode}
+                onOpenChannelSettings={(channel) => openChannelSettings(CHANNEL_SETTINGS_TABS[channel])}
+            />
+        )
+    }
+
+    return (
+        <>
+            <SceneSection
+                title="AI agent"
+                className="my-8"
+                description="When enabled, the AI agent automatically generates reply suggestions as private notes when new tickets arrive. Replies are grounded in your business knowledge sources."
+            >
+                <LemonCard hoverEffect={false} className="flex flex-col gap-y-3 max-w-[800px] px-4 py-3">
+                    <div className="flex items-center gap-4 justify-between">
+                        <div>
+                            <label className="font-medium">Enable AI agent</label>
+                            <p className="text-xs text-muted-alt mb-0">
+                                Requires AI data processing consent at the organization level and at least one ready
+                                business knowledge source.
+                            </p>
+                        </div>
+                        <LemonSwitch
+                            checked={aiSuggestionsEnabled}
+                            onChange={(checked) => setAiSuggestionsEnabled(checked)}
+                            loading={aiSuggestionsLoading}
+                        />
+                    </div>
+                </LemonCard>
+            </SceneSection>
+
+            {aiSuggestionsEnabled && (
+                <SceneSection
+                    title="Investigate ticket data"
+                    titleSize="sm"
+                    className="my-8"
+                    description="When enabled, tickets that report something broken let the agent query your project's data — events, error tracking, session recordings, and logs — to investigate the issue instead of relying on documentation alone. The agent has read-only access scoped to your project."
+                >
+                    <LemonCard hoverEffect={false} className="flex flex-col gap-y-3 max-w-[800px] px-4 py-3">
+                        <div className="flex items-center gap-4 justify-between">
+                            <div>
+                                <label className="font-medium">Allow the agent to investigate ticket data</label>
+                                <p className="text-xs text-muted-alt mb-0">
+                                    Leave this off to keep the agent grounded only in documentation and your business
+                                    knowledge.
+                                </p>
+                            </div>
+                            <LemonSwitch
+                                checked={aiDiagnosticsEnabled}
+                                onChange={(checked) => setAiDiagnosticsEnabled(checked)}
+                                loading={aiDiagnosticsLoading}
+                            />
+                        </div>
+                    </LemonCard>
+                </SceneSection>
+            )}
+
+            {aiSuggestionsEnabled && <SupportPlaybookSection />}
+            {aiSuggestionsEnabled && <AIContextAccountPropertiesSection />}
+
+            {aiSuggestionsEnabled && (
+                <SceneSection
+                    title="Allowed channels"
+                    titleSize="sm"
+                    className="my-8"
+                    description="Choose which channels the AI agent runs on. Inactive channels must be enabled under Channels first."
+                >
+                    <LemonCard hoverEffect={false} className="flex flex-col gap-y-2 max-w-[800px] px-4 py-3">
+                        {aiAllChannels.map((channel) => {
+                            const active = isChannelActive(channel)
+                            return (
+                                <LemonCheckbox
+                                    key={channel}
+                                    checked={active && aiResolutionChannels.includes(channel)}
+                                    disabledReason={
+                                        active ? undefined : 'Enable this channel in Channels settings first'
+                                    }
+                                    onChange={(checked) => toggleResolutionChannel(channel, checked)}
+                                    label={
+                                        <span className="inline-flex flex-wrap items-center gap-x-1">
+                                            {CHANNEL_LABELS[channel]}
+                                            {!active && (
+                                                <>
+                                                    <span className="text-muted-alt">·</span>
+                                                    <Link
+                                                        onClick={(e) => {
+                                                            e.preventDefault()
+                                                            openChannelSettings(CHANNEL_SETTINGS_TABS[channel])
+                                                        }}
+                                                        to={urls.supportSettings()}
+                                                    >
+                                                        Enable in Channels first
+                                                    </Link>
+                                                </>
+                                            )}
+                                        </span>
+                                    }
+                                />
+                            )
+                        })}
+                    </LemonCard>
+                </SceneSection>
+            )}
+
+            {aiSuggestionsEnabled && aiResolutionChannels.length > 0 && (
+                <SceneSection
+                    title="Reply behavior"
+                    titleSize="sm"
+                    className="my-8"
+                    description={
+                        <>
+                            For each channel and ticket type, choose whether the AI agent posts a private note (visible
+                            only to your team) or sends a safety-reviewed reply directly to the customer. On channels
+                            set to AI reply, the agent may also ask the customer one clarifying question.{' '}
+                            <strong>Diagnostic</strong> and <strong>Account/Billing</strong> replies may include data
+                            from your project, so they're always kept as private notes and can't be sent directly to the
+                            customer.
+                        </>
+                    }
+                >
+                    <LemonCard hoverEffect={false} className="max-w-[800px] px-4 py-3">
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-xs">
+                                <thead>
+                                    <tr>
+                                        <th className="text-left py-1 pr-3 font-medium text-muted-alt">Channel</th>
+                                        {TICKET_TYPES.map((tt) => (
+                                            <th key={tt} className="text-left py-1 px-2 font-medium text-muted-alt">
+                                                {aiTriageTicketTypeLabel[tt]}
+                                            </th>
+                                        ))}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {aiResolutionChannels.map((channel) => (
+                                        <tr key={channel} className="border-t border-border">
+                                            <td className="py-2 pr-3 font-medium">
+                                                {CHANNEL_LABELS[channel] ?? channel}
+                                            </td>
+                                            {TICKET_TYPES.map((tt) =>
+                                                PUBLISHABLE_TICKET_TYPES.has(tt) ? (
+                                                    <td key={tt} className="py-2 px-2">
+                                                        <LemonSelect
+                                                            size="xsmall"
+                                                            options={REPLY_MODE_OPTIONS}
+                                                            value={aiReplyModes[channel]?.[tt] ?? 'private_note'}
+                                                            onChange={(value) => setAiReplyMode(channel, tt, value)}
+                                                        />
+                                                    </td>
+                                                ) : (
+                                                    <td key={tt} className="py-2 px-2 text-muted-alt">
+                                                        Private note
+                                                    </td>
+                                                )
+                                            )}
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </LemonCard>
+                </SceneSection>
+            )}
+        </>
+    )
+}
