@@ -1,0 +1,432 @@
+from collections import defaultdict
+from collections.abc import Mapping, Sequence
+from datetime import UTC, date, datetime, time, timedelta
+from math import isfinite
+from typing import Any
+from uuid import UUID
+
+from django.conf import settings
+
+from posthog.clickhouse.client import sync_execute
+from posthog.clickhouse.client.execute import (
+    KillSwitchLevel,
+    get_team_kill_switch_level,
+    kill_switch_overrides,
+    resolve_kill_switch_level,
+)
+from posthog.clickhouse.query_tagging import Feature, Product, tag_queries
+from posthog.clickhouse.warehouse_object_reads import WAREHOUSE_OBJECT_READS_DAILY_TABLE, ReadKind
+from posthog.dataclasses import frozen
+
+from ..facade.enums import WarehouseSuggestionSubjectKind
+from .rules import Rules, Surface, SurfaceRules, TrafficRules
+
+READS_QUERY_SETTINGS = {"max_execution_time": 30, "max_threads": 2}
+READS_QUERY_NAME = "warehouse_suggestions_reads"
+FIRST_QUANTILE = 1
+SECOND_QUANTILE = 2
+MEASUREMENT_FEATURE = Feature.WAREHOUSE_SUGGESTIONS
+UNIX_EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
+NO_TEAM_TOTALS = (0, 0, 0)
+
+DAYS_FILTER = """day >= %(window_start)s
+        AND day < %(window_end)s"""
+
+WINDOW_FILTER = f"""team_id IN %(team_ids)s
+        AND {DAYS_FILTER}"""
+
+
+@frozen
+class Subject:
+    kind: WarehouseSuggestionSubjectKind
+    id: UUID
+
+
+@frozen
+class ReadWindow:
+    start: date
+    end: date
+    recent_start: date
+
+    @classmethod
+    def ending(cls, today: date, rules: Rules) -> "ReadWindow":
+        return cls(
+            start=today - timedelta(days=rules.window_days),
+            end=today,
+            recent_start=today - timedelta(days=rules.lifecycle.expire_after_days),
+        )
+
+    @property
+    def starts_at(self) -> datetime:
+        return datetime.combine(self.start, time.min, tzinfo=UTC)
+
+    @property
+    def ends_at(self) -> datetime:
+        return datetime.combine(self.end, time.min, tzinfo=UTC)
+
+
+@frozen
+class RollupDays:
+    days_with_data: int
+    recent_days_with_data: int
+
+
+@frozen
+class SubjectReads:
+    human_requests: int
+    human_users: int
+    human_days: int
+    background_requests: int
+    background_reads: int
+    background_duration_ms: int
+    background_read_bytes: int
+    human_reads: int
+    human_duration_ms: int
+    human_read_bytes: int
+    alone_reads: int
+    alone_duration_ms_median: float
+    alone_read_bytes_median: float
+    alone_duration_ms_p90: float
+    alone_read_bytes_p90: float
+    last_read_at: datetime
+    requests_by_surface: Mapping[Surface, int]
+    measured_reads: int = 0
+    measured_duration_ms: float = 0.0
+    measured_read_bytes: float = 0.0
+    last_measured_at: datetime | None = None
+
+    @property
+    def surfaces(self) -> frozenset[Surface]:
+        return frozenset(surface for surface in self.requests_by_surface if surface != Surface.UNKNOWN)
+
+
+@frozen
+class SubjectRefreshes:
+    runs: int
+    duration_ms: int
+    read_bytes: int
+
+
+@frozen
+class RefreshRun:
+    workflow_id: str
+    duration_ms: int
+    read_bytes: int
+
+
+@frozen
+class TeamReads:
+    window: ReadWindow
+    days_with_data: int
+    recent_days_with_data: int
+    readers: int
+    view_readers: int
+    view_reads: int
+    subjects: Mapping[Subject, SubjectReads]
+    refreshes: Mapping[UUID, SubjectRefreshes]
+    refresh_runs: Mapping[UUID, tuple[RefreshRun, ...]]
+
+    def reads_of(self, subject: Subject) -> SubjectReads | None:
+        return self.subjects.get(subject)
+
+
+def read_rollup_days(window: ReadWindow) -> RollupDays:
+    tag_queries(
+        product=Product.DATA_MODELING, feature=Feature.WAREHOUSE_SUGGESTIONS, name="warehouse_suggestions_rollup_days"
+    )
+    days_with_data, recent_days_with_data = sync_execute(
+        ROLLUP_DAYS_SQL,
+        {"window_start": window.start, "window_end": window.end, "recent_start": window.recent_start},
+        settings=READS_QUERY_SETTINGS,
+    )[0]
+    return RollupDays(days_with_data=days_with_data, recent_days_with_data=recent_days_with_data)
+
+
+def read_team_reads(team_id: int, window: ReadWindow, rules: Rules, rollup_days: RollupDays) -> TeamReads:
+    return read_teams_reads([team_id], window, rules, rollup_days)[team_id]
+
+
+def has_team_query_limits(team_id: int) -> bool:
+    return (
+        get_team_kill_switch_level(team_id) != KillSwitchLevel.OFF
+        or str(team_id) in settings.CLICKHOUSE_PER_TEAM_QUERY_SETTINGS
+    )
+
+
+def read_teams_reads(
+    team_ids: Sequence[int], window: ReadWindow, rules: Rules, rollup_days: RollupDays
+) -> dict[int, TeamReads]:
+    sole_team_id = team_ids[0] if len(team_ids) == 1 else None
+    tag_queries(
+        product=Product.DATA_MODELING,
+        feature=Feature.WAREHOUSE_SUGGESTIONS,
+        team_id=sole_team_id,
+        name=READS_QUERY_NAME,
+        query_type=READS_QUERY_NAME,
+        kill_switch=_kill_switch_tag(sole_team_id),
+    )
+    params: dict[str, Any] = {
+        "team_ids": tuple(team_ids),
+        "window_start": window.start,
+        "window_end": window.end,
+        "recent_start": window.recent_start,
+        "read": ReadKind.READ.value,
+        "refresh": ReadKind.REFRESH.value,
+        "saved_query": WarehouseSuggestionSubjectKind.SAVED_QUERY.value,
+        "measurement_feature": MEASUREMENT_FEATURE.value,
+    }
+    human_sql, human_params = human_condition(rules.traffic)
+    surface_sql, surface_params = surface_expression(rules.surfaces)
+    params.update(human_params)
+    params.update(surface_params)
+    totals = {
+        team_id: (readers, view_readers, view_reads)
+        for team_id, readers, view_readers, view_reads in _execute(
+            TEAM_SQL.format(human=human_sql), params, sole_team_id
+        )
+    }
+    surface_counts = _surface_counts(SURFACES_SQL.format(human=human_sql, surface=surface_sql), params, sole_team_id)
+    subjects = _subject_reads(SUBJECTS_SQL.format(human=human_sql), params, sole_team_id, surface_counts)
+    refreshes = _refreshes(params, sole_team_id)
+    refresh_runs = _refresh_runs(params, sole_team_id)
+    reads: dict[int, TeamReads] = {}
+    for team_id in team_ids:
+        readers, view_readers, view_reads = totals.get(team_id, NO_TEAM_TOTALS)
+        reads[team_id] = TeamReads(
+            window=window,
+            days_with_data=rollup_days.days_with_data,
+            recent_days_with_data=rollup_days.recent_days_with_data,
+            readers=readers,
+            view_readers=view_readers,
+            view_reads=view_reads,
+            subjects=subjects.get(team_id, {}),
+            refreshes=refreshes.get(team_id, {}),
+            refresh_runs=refresh_runs.get(team_id, {}),
+        )
+    return reads
+
+
+def human_condition(traffic: TrafficRules) -> tuple[str, dict[str, Any]]:
+    conditions = []
+    params: dict[str, Any] = {}
+    if traffic.requires_user_id:
+        conditions.append("has_user_id")
+    if traffic.background_features:
+        conditions.append("lc_feature NOT IN %(background_features)s")
+        params["background_features"] = tuple(sorted(traffic.background_features))
+    if traffic.background_kinds:
+        conditions.append("lc_kind NOT IN %(background_kinds)s")
+        params["background_kinds"] = tuple(sorted(traffic.background_kinds))
+    return f"({' AND '.join(conditions) or 'true'})", params
+
+
+def surface_expression(surfaces: SurfaceRules) -> tuple[str, dict[str, Any]]:
+    branches = []
+    params: dict[str, Any] = {}
+    for position, rule in enumerate(surfaces.rules):
+        surface_param = f"surface_{position}"
+        params[surface_param] = rule.surface.value
+        if rule.values is None:
+            condition = f"{rule.field.value} != ''"
+        elif rule.values:
+            values_param = f"surface_values_{position}"
+            params[values_param] = tuple(sorted(rule.values))
+            condition = f"{rule.field.value} IN %({values_param})s"
+        else:
+            continue
+        branches.append(f"{condition}, %({surface_param})s")
+    params["surface_unknown"] = Surface.UNKNOWN.value
+    if not branches:
+        return "%(surface_unknown)s", params
+    return f"multiIf({', '.join(branches)}, %(surface_unknown)s)", params
+
+
+ROLLUP_DAYS_SQL = f"""
+SELECT uniq(day), uniqIf(day, day >= %(recent_start)s)
+FROM {WAREHOUSE_OBJECT_READS_DAILY_TABLE}
+WHERE {DAYS_FILTER}
+"""
+
+TEAM_SQL = f"""
+SELECT
+    team_id,
+    uniqMergeIf(users, is_human_read),
+    uniqMergeIf(users, is_human_read AND subject_kind = %(saved_query)s),
+    uniqMergeIf(requests, is_human_read AND subject_kind = %(saved_query)s)
+FROM (
+    SELECT *, read_kind = %(read)s AND {{human}} AS is_human_read
+    FROM {WAREHOUSE_OBJECT_READS_DAILY_TABLE}
+    WHERE {WINDOW_FILTER}
+)
+GROUP BY team_id
+"""
+
+SUBJECTS_SQL = f"""
+SELECT
+    team_id,
+    subject_kind,
+    subject_id,
+    uniqMergeIf(requests, is_human),
+    uniqMergeIf(users, is_human),
+    uniqIf(day, is_human),
+    uniqMergeIf(requests, NOT is_human),
+    sumIf(read_count, NOT is_human),
+    sumIf(duration_ms_sum, NOT is_human),
+    sumIf(read_bytes_sum, NOT is_human),
+    sumIf(read_count, is_human),
+    sumIf(duration_ms_sum, is_human),
+    sumIf(read_bytes_sum, is_human),
+    sumIf(read_count, read_alone AND NOT is_measurement),
+    quantilesMergeIf(0.5, 0.9)(duration_ms_quantiles, read_alone AND NOT is_measurement)[{FIRST_QUANTILE}],
+    quantilesMergeIf(0.5, 0.9)(read_bytes_quantiles, read_alone AND NOT is_measurement)[{FIRST_QUANTILE}],
+    quantilesMergeIf(0.5, 0.9)(duration_ms_quantiles, read_alone AND NOT is_measurement)[{SECOND_QUANTILE}],
+    quantilesMergeIf(0.5, 0.9)(read_bytes_quantiles, read_alone AND NOT is_measurement)[{SECOND_QUANTILE}],
+    toTimeZone(max(max_event_time), 'UTC'),
+    sumIf(read_count, is_measurement),
+    argMaxIf(duration_ms_sum / read_count, max_event_time, is_measurement),
+    argMaxIf(read_bytes_sum / read_count, max_event_time, is_measurement),
+    toTimeZone(maxIf(max_event_time, is_measurement), 'UTC')
+FROM (
+    SELECT
+        *,
+        {{human}} AS is_human,
+        lc_feature = %(measurement_feature)s AND read_alone AS is_measurement
+    FROM {WAREHOUSE_OBJECT_READS_DAILY_TABLE}
+    WHERE {WINDOW_FILTER}
+        AND read_kind = %(read)s
+)
+GROUP BY team_id, subject_kind, subject_id
+"""
+
+SURFACES_SQL = f"""
+SELECT team_id, subject_kind, subject_id, {{surface}} AS surface, uniqMerge(requests)
+FROM {WAREHOUSE_OBJECT_READS_DAILY_TABLE}
+WHERE {WINDOW_FILTER}
+    AND read_kind = %(read)s
+    AND {{human}}
+GROUP BY team_id, subject_kind, subject_id, surface
+"""
+
+REFRESHES_SQL = f"""
+SELECT team_id, subject_id, uniq(workflow_id), sum(duration_ms_sum), sum(read_bytes_sum)
+FROM {WAREHOUSE_OBJECT_READS_DAILY_TABLE}
+WHERE {WINDOW_FILTER}
+    AND read_kind = %(refresh)s
+GROUP BY team_id, subject_id
+"""
+
+REFRESH_RUNS_SQL = f"""
+SELECT team_id, subject_id, workflow_id, sum(duration_ms_sum), sum(read_bytes_sum)
+FROM {WAREHOUSE_OBJECT_READS_DAILY_TABLE}
+WHERE {WINDOW_FILTER}
+    AND read_kind = %(refresh)s
+    AND (team_id, subject_id) IN (
+        SELECT team_id, subject_id
+        FROM {WAREHOUSE_OBJECT_READS_DAILY_TABLE}
+        WHERE {WINDOW_FILTER}
+            AND read_kind = %(read)s
+            AND subject_kind = %(saved_query)s
+    )
+GROUP BY team_id, subject_id, workflow_id
+"""
+
+
+def _execute(sql: str, params: Mapping[str, Any], sole_team_id: int | None) -> list[tuple[Any, ...]]:
+    return sync_execute(sql, params, settings=_query_settings(sole_team_id))
+
+
+def _kill_switch_tag(sole_team_id: int | None) -> str | None:
+    if sole_team_id is None or not kill_switch_overrides(sole_team_id):
+        return None
+    return resolve_kill_switch_level(sole_team_id).value
+
+
+def _query_settings(sole_team_id: int | None) -> dict[str, Any]:
+    if sole_team_id is None:
+        return READS_QUERY_SETTINGS
+    query_settings = {**settings.CLICKHOUSE_PER_TEAM_QUERY_SETTINGS.get(str(sole_team_id), {}), **READS_QUERY_SETTINGS}
+    for name, ceiling in kill_switch_overrides(sole_team_id).items():
+        query_settings[name] = min(query_settings.get(name, ceiling), ceiling)
+    return query_settings
+
+
+def _subject(subject_kind: str, subject_id: str) -> Subject | None:
+    try:
+        return Subject(kind=WarehouseSuggestionSubjectKind(subject_kind), id=UUID(subject_id))
+    except ValueError:
+        return None
+
+
+def _surface_counts(
+    sql: str, params: Mapping[str, Any], sole_team_id: int | None
+) -> dict[tuple[int, Subject], dict[Surface, int]]:
+    counts: defaultdict[tuple[int, Subject], dict[Surface, int]] = defaultdict(dict)
+    for team_id, subject_kind, subject_id, surface, requests in _execute(sql, params, sole_team_id):
+        subject = _subject(subject_kind, subject_id)
+        if subject is not None:
+            counts[team_id, subject][Surface(surface)] = requests
+    return counts
+
+
+def _subject_reads(
+    sql: str,
+    params: Mapping[str, Any],
+    sole_team_id: int | None,
+    surface_counts: Mapping[tuple[int, Subject], dict[Surface, int]],
+) -> dict[int, dict[Subject, SubjectReads]]:
+    reads: defaultdict[int, dict[Subject, SubjectReads]] = defaultdict(dict)
+    for team_id, *row in _execute(sql, params, sole_team_id):
+        subject = _subject(row[0], row[1])
+        if subject is None:
+            continue
+        reads[team_id][subject] = SubjectReads(
+            human_requests=row[2],
+            human_users=row[3],
+            human_days=row[4],
+            background_requests=row[5],
+            background_reads=row[6],
+            background_duration_ms=row[7],
+            background_read_bytes=row[8],
+            human_reads=row[9],
+            human_duration_ms=row[10],
+            human_read_bytes=row[11],
+            alone_reads=row[12],
+            alone_duration_ms_median=float(row[13]),
+            alone_read_bytes_median=float(row[14]),
+            alone_duration_ms_p90=float(row[15]),
+            alone_read_bytes_p90=float(row[16]),
+            last_read_at=row[17],
+            requests_by_surface=surface_counts.get((team_id, subject), {}),
+            measured_reads=row[18],
+            measured_duration_ms=_finite(row[19]),
+            measured_read_bytes=_finite(row[20]),
+            last_measured_at=row[21] if row[21] > UNIX_EPOCH else None,
+        )
+    return reads
+
+
+def _finite(value: float) -> float:
+    return float(value) if isfinite(value) else 0.0
+
+
+def _refreshes(params: Mapping[str, Any], sole_team_id: int | None) -> dict[int, dict[UUID, SubjectRefreshes]]:
+    refreshes: defaultdict[int, dict[UUID, SubjectRefreshes]] = defaultdict(dict)
+    for team_id, subject_id, runs, duration_ms, read_bytes in _execute(REFRESHES_SQL, params, sole_team_id):
+        subject = _subject(WarehouseSuggestionSubjectKind.SAVED_QUERY, subject_id)
+        if subject is not None:
+            refreshes[team_id][subject.id] = SubjectRefreshes(runs=runs, duration_ms=duration_ms, read_bytes=read_bytes)
+    return refreshes
+
+
+def _refresh_runs(params: Mapping[str, Any], sole_team_id: int | None) -> dict[int, dict[UUID, tuple[RefreshRun, ...]]]:
+    runs: defaultdict[int, defaultdict[UUID, list[RefreshRun]]] = defaultdict(lambda: defaultdict(list))
+    for team_id, subject_id, workflow_id, duration_ms, read_bytes in _execute(REFRESH_RUNS_SQL, params, sole_team_id):
+        subject = _subject(WarehouseSuggestionSubjectKind.SAVED_QUERY, subject_id)
+        if subject is not None:
+            runs[team_id][subject.id].append(
+                RefreshRun(workflow_id=workflow_id, duration_ms=duration_ms, read_bytes=read_bytes)
+            )
+    return {
+        team_id: {subject_id: tuple(subject_runs) for subject_id, subject_runs in team_runs.items()}
+        for team_id, team_runs in runs.items()
+    }

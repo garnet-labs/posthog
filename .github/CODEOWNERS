@@ -1,0 +1,94 @@
+# If a file is set here, then PRs will require that team's approval to get that code merged.
+
+# WE DO NOT USE CODEOWNERS FOR MANAGING ORDINARY RISK.
+
+# Risk of outages, incidents, and operational difficulty
+# are not sufficient reason to add a region of the codebase
+# to the CODEOWNERS file. Handle these by de-risking your
+# code, or by modifying CI to suit your products needs.
+
+# Adding entries to the codeowners file is an anti-social
+# and anti-posthog-values thing to do. It must have extraordinary
+# justification. If you are not _certain_ there is _no other way_
+# to manage the risk you're thinking about, do not add an entry.
+
+# team-security's required reviews are not in this file. The `master` branch ruleset requires
+# them (Settings > Rules > Rulesets > master), so an edit to this file cannot remove them. They
+# cover the CI security scans, the pull_request_target workflows, the
+# authentication code, the Content Security Policy and the dev sandbox.
+
+/.github/CODEOWNERS @PostHog/team-devex
+
+# ClickHouse team owns Clickhouse migrations
+posthog/clickhouse/migrations/** @PostHog/clickhouse
+
+# HogQL team owns HogQL changes
+posthog/hogql/** @PostHog/hogql
+# ...except per-table schema definitions, which product teams add and maintain for their own features
+posthog/hogql/database/schema/**
+# ...and the generated schema snapshot, which changes when those definitions are regenerated
+posthog/hogql/database/test/__snapshots__/test_database.ambr
+# ...and documentation, which does not change HogQL behavior
+posthog/hogql/**/*.md
+
+# The distributed-ownership resolver that the auto-assign-reviewers workflow executes on its
+# pull_request_target event (via `python -m owners_yaml`), with packages/owners-yaml
+# as the privileged sys.path root. Anything importable placed in that tree can
+# shadow stdlib/pyyaml for the privileged process — top-level modules (yaml.py),
+# shadow packages (yaml/__init__.py), and extension modules (yaml.so, *.pyd)
+# alike — so the whole directory is gated rather than enumerating suffixes.
+# DevEx maintains the resolver and reviews it with that risk in mind.
+packages/owners-yaml/** @PostHog/team-devex
+
+# Migration safety exceptions disable blocking checks and need independent DevEx approval.
+/posthog/management/migration_analysis/hot_table_acknowledged_migrations.txt @PostHog/team-devex
+/posthog/management/migration_analysis/atomic_false_acknowledged_migrations.txt @PostHog/team-devex
+/.github/scripts/migration-deletion-allowlist.txt @PostHog/team-devex
+
+# The scripts that the auto-assign-reviewers and auto-assign-labels workflows run on their
+# pull_request_target events, with a token that can write to the PR. They read data that a
+# fork PR controls, such as the title and the changed paths. DevEx maintains them and reviews
+# them with that risk in mind.
+.github/scripts/assign-reviewers.js @PostHog/team-devex
+.github/scripts/codeowners.js @PostHog/team-devex
+.github/scripts/label-pr-from-title.js @PostHog/team-devex
+
+# Ingestion team owns persons migrations
+rust/persons_migrations/** @PostHog/team-ingestion
+
+# The MCP store catalog is a fleet-wide trust decision, not ordinary code: a merged entry
+# becomes (probe permitting) an active server template in every environment on the next
+# deploy — installable by all tenants and feeding tool results into their LLM agents. The
+# probe only verifies liveness, so PR review is the vendor-identity gate.
+products/mcp_store/backend/catalog.py @PostHog/team-context-and-mcp
+
+# Adding a line here exempts a product from isolation, so the full Django backend suite
+# keeps running on every change it makes — a cost paid by everyone, not just its team.
+# `hogli product:bootstrap` scaffolds a sealed product, so a new one should never need an
+# entry. Removals are the mechanical result of a product sealing and are a rubber stamp.
+products/isolation_baseline.txt @PostHog/team-devex
+
+# Agent instructions and the PR description format apply to every PR in the repo. They have
+# changed back and forth many times, and each change undid an earlier lesson that the author
+# could not see, so DevEx reviews them with that history in mind. Nested AGENTS.md files stay
+# with the teams that own their directories.
+/AGENTS.md @PostHog/team-devex
+/CLAUDE.md @PostHog/team-devex
+/.agents/agent-automation.md @PostHog/team-devex
+/.agents/architecture.md @PostHog/team-devex
+/.agents/ci.md @PostHog/team-devex
+/.agents/code-style.md @PostHog/team-devex
+/.agents/feature-usage-tracking.md @PostHog/team-devex
+.github/pull_request_template.md @PostHog/team-devex
+.agents/skills/writing-pr-descriptions/ @PostHog/team-devex
+docs/internal/ci-things-already-tried.md @PostHog/team-devex
+
+# A changed commit in the lockfile means a workflow now runs different third-party code.
+.github/workflows/actions.lock @PostHog/team-devex
+
+# DevEx owns the CI acknowledgement because it gates merges for native build changes.
+.github/workflows/pr-housekeeping.yml @PostHog/team-devex
+.github/workflows/pr-native-rebuild.yml @PostHog/team-devex
+.github/workflows/pr-rebuild-notify.yml @PostHog/team-devex
+.github/scripts/mobile-rebuild.mjs @PostHog/team-devex
+.github/scripts/mobile-rebuild.test.mjs @PostHog/team-devex

@@ -1,0 +1,37 @@
+import { isSendingStopped } from 'scenes/hog-functions/email-templater/emailSenderFields'
+
+export type DefaultEmailSenderReason = 'project_default' | 'only_verified_sender'
+
+export interface DefaultEmailSender {
+    integrationId: number
+    reason: DefaultEmailSenderReason
+}
+
+export interface EmailSenderCandidate {
+    id: number
+    kind: string
+    config?: unknown
+}
+
+export function isVerifiedEmailSender(integration: EmailSenderCandidate): boolean {
+    return integration.kind === 'email' && (integration.config as { verified?: unknown } | undefined)?.verified === true
+}
+
+export function isDeliverableEmailSender(integration: EmailSenderCandidate): boolean {
+    return isVerifiedEmailSender(integration) && !isSendingStopped(integration)
+}
+
+export function resolveDefaultEmailSender(
+    integrations: EmailSenderCandidate[] | null | undefined,
+    defaultIntegrationId: number | null | undefined
+): DefaultEmailSender | null {
+    const deliverable = (integrations ?? []).filter(isDeliverableEmailSender)
+    const projectDefault = deliverable.find((integration) => integration.id === defaultIntegrationId)
+    if (projectDefault) {
+        return { integrationId: projectDefault.id, reason: 'project_default' }
+    }
+    if (deliverable.length === 1) {
+        return { integrationId: deliverable[0].id, reason: 'only_verified_sender' }
+    }
+    return null
+}

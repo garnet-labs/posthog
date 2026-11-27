@@ -1,0 +1,95 @@
+@layer components {
+    .quill-tooltip__content {
+        z-index: var(--quill-z-tooltip, 50);
+        width: fit-content;
+        max-width: 20rem;
+        padding-block: 0.375rem;
+        padding-inline: 0.75rem;
+        font-size: var(--text-ui, 0.8125rem);
+        color: var(--background);
+        background-color: var(--foreground);
+        border-radius: var(--radius-sm);
+
+        /*
+         * Enter/exit animation. Tooltips appear and disappear — `ease-out` is
+         * the right curve for user-initiated entrance/exit. 150ms keeps the
+         * interaction feeling responsive (tooltips are seen frequently); any
+         * slower and the delay before readability becomes annoying.
+         * `scale(0.95)` start — never `scale(0)` — so the element always has
+         * perceptible size. `transform-origin` is set to Base UI's
+         * `--transform-origin`, which anchors the scale at the trigger edge
+         * so it reads as "growing out of" the trigger rather than from center.
+         */
+        transition:
+            opacity 150ms cubic-bezier(0.215, 0.61, 0.355, 1),
+            transform 150ms cubic-bezier(0.215, 0.61, 0.355, 1);
+        transform-origin: var(--transform-origin);
+    }
+
+    /* A shared tooltip slides to its next trigger. Base UI writes the position to these properties. */
+    .quill-tooltip__positioner[data-glide] {
+        transition-timing-function: cubic-bezier(0.645, 0.045, 0.355, 1);
+        transition-duration: 180ms;
+        transition-property: top, left, right, bottom, transform;
+    }
+
+    .quill-tooltip__content[data-starting-style],
+    .quill-tooltip__content[data-ending-style] {
+        opacity: 0;
+        transform: scale(0.95);
+    }
+
+    /* Base UI sets data-instant when reusing the tooltip across rapid triggers
+       (provider debounce) — skip animation to avoid stutter. */
+    .quill-tooltip__content[data-instant] {
+        transition: none;
+    }
+
+    .quill-tooltip__content:has([data-slot='kbd']) {
+        padding-inline-end: 0.375rem;
+    }
+
+    .quill-tooltip__content [data-slot='kbd'] {
+        position: relative;
+        z-index: 50;
+        isolation: isolate;
+        border-radius: var(--radius-sm);
+    }
+
+    .quill-tooltip__arrow {
+        --quill-tooltip-arrow-size: 0.625rem;
+
+        z-index: 50;
+        width: var(--quill-tooltip-arrow-size);
+        height: var(--quill-tooltip-arrow-size);
+        background-color: var(--foreground);
+        border-radius: 1px;
+        fill: var(--foreground);
+        rotate: 45deg;
+        translate: 0 calc(-50% - 2px);
+    }
+
+    /*
+     * A start-aligned tooltip, such as a disabled reason, points from its start edge rather than the
+     * anchor's middle: 1rem in, or the middle of an anchor narrower than 2rem. Floating UI sets the
+     * arrow's position inline, so this needs !important.
+     */
+    .quill-tooltip__arrow[data-align='start']:is([data-side='top'], [data-side='bottom']) {
+        inset-inline-start: calc(
+            min(var(--anchor-width, 2rem) / 2, 1rem) - var(--quill-tooltip-arrow-size) / 2
+        ) !important;
+        right: auto !important;
+        left: auto !important;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .quill-tooltip__positioner[data-glide],
+        .quill-tooltip__content,
+        .quill-tooltip__content[data-starting-style],
+        .quill-tooltip__content[data-ending-style] {
+            opacity: 1;
+            transition: none;
+            transform: none;
+        }
+    }
+}
