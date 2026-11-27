@@ -1,11 +1,23 @@
 import unittest
 import base64
 from copy import deepcopy
+from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
+from urllib.error import HTTPError
 
-from mirror import FORK, SOURCE, WORKFLOW, BaselineUnavailable, Mirror, dependency_file, path_matches, recorder_installs, scrub_title, version_transitions, workflow_paths
+from mirror import FORK, SOURCE, WORKFLOW, API, BaselineUnavailable, Mirror, dependency_file, path_matches, recorder_installs, scrub_title, version_transitions, workflow_paths
+
+
+class APITest(unittest.TestCase):
+    def test_forbidden_fork_write_reports_token_permissions(self) -> None:
+        with patch.dict('mirror.os.environ', {'SHADOW_MIRROR_TOKEN': 'fixture'}):
+            api = API()
+        error = HTTPError(f'https://api.github.com/repos/{FORK}/git/trees', 403, 'Forbidden', None, BytesIO(b'Forbidden'))
+        with patch('mirror.urllib.request.urlopen', side_effect=error):
+            with self.assertRaisesRegex(RuntimeError, 'POST git/trees: HTTP 403: Forbidden.*SHADOW_MIRROR_TOKEN'):
+                api.write('git/trees', {})
 
 
 class PathsTest(unittest.TestCase):

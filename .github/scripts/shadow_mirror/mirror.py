@@ -170,7 +170,11 @@ class API:
                 raw = response.read()
                 return json.loads(raw) if raw else None
         except urllib.error.HTTPError as error:
-            raise RuntimeError(f'{method} {path}: HTTP {error.code}: {error.read().decode()}') from error
+            message = f'{method} {path}: HTTP {error.code}: {error.read().decode()}'
+            if error.code == 403 and method != 'GET':
+                message += (f' — GitHub denied a write to {repo}. Check that SHADOW_MIRROR_TOKEN has '
+                            'write access to Contents, Pull requests, Actions, and Workflows.')
+            raise RuntimeError(message) from error
 
     def pages(self, repo, path):
         result = []
