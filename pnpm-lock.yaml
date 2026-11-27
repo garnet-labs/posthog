@@ -6068,8 +6068,8 @@ importers:
   services/agent-proxy:
     dependencies:
       '@hono/node-server':
-        specifier: ^2.0.2
-        version: 2.0.2(hono@4.12.24)
+        specifier: ^2.1.6
+        version: 2.1.6(hono@4.12.24)
       esbuild:
         specifier: ^0.25.11
         version: 0.25.12
@@ -6117,8 +6117,8 @@ importers:
   services/credentials-service:
     dependencies:
       '@hono/node-server':
-        specifier: ^2.0.2
-        version: 2.0.2(hono@4.12.24)
+        specifier: ^2.1.6
+        version: 2.1.6(hono@4.12.24)
       hono:
         specifier: ^4.12.18
         version: 4.12.24
@@ -6163,8 +6163,8 @@ importers:
   services/mcp:
     dependencies:
       '@hono/node-server':
-        specifier: ^2.0.2
-        version: 2.0.2(hono@4.12.24)
+        specifier: ^2.1.6
+        version: 2.1.6(hono@4.12.24)
       '@modelcontextprotocol/ext-apps':
         specifier: ^1.5.0
         version: 1.6.0(@modelcontextprotocol/sdk@1.29.0(@cfworker/json-schema@4.1.1)(supports-color@10.2.2)(zod@4.3.6))(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(zod@4.3.6)
@@ -8938,11 +8938,11 @@ packages:
     peerDependencies:
       hono: ^4
 
-  '@hono/node-server@2.0.2':
-    resolution: {integrity: sha512-tXlTi1h/4V7sDe7i97IVP+9re9ZU7wXZZggnR5ucCRclf1+AX6YhGStrR5w8bLj+3Mlyl0pKfBh9gqTqqnGKfQ==}
+  '@hono/node-server@2.1.6':
+    resolution: {integrity: sha512-p/KH9MnfNcsm3sR6x4lNgm5j+QN4Et8srKredl9DZfXiyZ1UQ3aQ2YVpFLbqktYN5JI+DB+VZFKM2PqE5hLKjQ==}
     engines: {node: '>=20'}
     peerDependencies:
-      hono: ^4
+      hono: ^4 || ^5.0.0-0
 
   '@humanwhocodes/config-array@0.11.14':
     resolution: {integrity: sha512-3T8LkOmg45BV5FICb15QQMsyUSWrQ8AygVfC7ZG32zOalnqrilm018ZVCw0eapXux8FtA33q8PSRSstjee3jSg==}
@@ -23616,8 +23616,8 @@ packages:
     resolution: {integrity: sha512-gptHNQghINnc/vTGIk0SOFGFNXw7JVrlRUtConJRlvaw6DuX0wO5Jeko9sWrMBhh+PsYAZ7oXAiOnf/UKogyiw==}
     engines: {node: '>= 10.0.0'}
 
-  unlayer-types@1.532.0:
-    resolution: {integrity: sha512-P17NO2e+ieutWsoush94w7eXURH7myHJsyLP3M76uMTbCV22UOsYqs6C46mqWTMtUyjiPV5rf/RecktVOcg0mA==}
+  unlayer-types@1.537.0:
+    resolution: {integrity: sha512-50B9H7Pk0O9HZPyv8PsYxU+1dyNMJ5sWq271zAgUlRQ5ND+j4E6WytseO2EeXqJdEhSCwVTEX7OTDoCMQjakfw==}
 
   unpipe@1.0.0:
     resolution: {integrity: sha512-pjy2bYhSsufwWlKwPc+l3cN7+wuJlK6uz0YdJEOlQDbl6jo/YlPi4mb8agUkVC8BF7V8NuzeyPNqRksA3hztKQ==}
@@ -27802,7 +27802,7 @@ snapshots:
     dependencies:
       hono: 4.12.24
 
-  '@hono/node-server@2.0.2(hono@4.12.24)':
+  '@hono/node-server@2.1.6(hono@4.12.24)':
     dependencies:
       hono: 4.12.24
 
@@ -43819,7 +43819,7 @@ snapshots:
   react-email-editor@1.7.11(react@18.3.1):
     dependencies:
       react: 18.3.1
-      unlayer-types: 1.532.0
+      unlayer-types: 1.537.0
 
   react-grid-layout@2.3.0(react-dom@18.3.1(react@18.3.1))(react@18.3.1):
     dependencies:
@@ -46118,7 +46118,7 @@ snapshots:
 
   universalify@2.0.1: {}
 
-  unlayer-types@1.532.0: {}
+  unlayer-types@1.537.0: {}
 
   unpipe@1.0.0: {}
 
